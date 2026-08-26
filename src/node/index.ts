@@ -40,20 +40,44 @@ function astroix(): AstroIntegration {
 
         // The resolved config turns dir strings into URLs — the plugin wants paths.
         const plugins: VitePlugin[] = [astroixVitePlugin({ srcDir: fileURLToPath(config.srcDir) })];
+        // The chrome sources live outside the host root and are served via
+        // /@fs, which has two consequences fixed below: (a) deps discovered
+        // from /@fs files resolve against the importer's location, so `react`
+        // can enter the optimizer from two paths and mount twice (Invalid
+        // hook call) — dedupe pins every resolution to the host root's React,
+        // which in the dev checkout is our own 19; (b) HMR re-fetches carry a
+        // `?t=` timestamp that misses the import-chain fs exemption — the
+        // checkout root joins the allow list so chrome modules always serve.
+        let vitePatch: {
+          plugins: VitePlugin[];
+          resolve?: { dedupe: string[] };
+          server?: { fs: { allow: string[] } };
+        } = { plugins };
 
         if (isSourceMode()) {
           // ADR-0001 source mode: chrome from this checkout's source, with
           // fast-refresh scoped to chrome files only (host code untouched).
           const clientDir = dirname(clientEntryPath ?? '');
-          plugins.push(...react({ include: new RegExp(`^${escapeRegExp(clientDir)}/.*\\.tsx?$`) }));
+          // compiler: true = React Compiler via oxc (stack #4: no manual memoization).
+          plugins.push(
+            ...react({
+              include: new RegExp(`^${escapeRegExp(clientDir)}/.*\\.tsx?$`),
+              compiler: true,
+            }),
+          );
           if (hostRegistersTailwind(config.vite)) {
             logger.info('host already registers @tailwindcss/vite — reusing it for the chrome');
           } else {
             plugins.push(...tailwindcss());
           }
+          vitePatch = {
+            plugins,
+            resolve: { dedupe: ['react', 'react-dom'] },
+            server: { fs: { allow: [dirname(dirname(clientDir))] } },
+          };
         }
 
-        updateConfig({ vite: { plugins } });
+        updateConfig({ vite: vitePatch });
         injectScript('page', CANVAS_SCRIPT);
       },
     },

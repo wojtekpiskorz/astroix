@@ -3,17 +3,37 @@ import { readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
 
-// Serial: the HMR test edits chrome source on disk; the build test mutates
-// fixture build output. Neither may race the plain rendering assertions.
+// Serial: several tests edit chrome sources on disk (restoring in finally);
+// the build test mutates fixture build output.
 test.describe.configure({ mode: 'serial' });
 
-test('builder chrome wraps the page by default', async ({ page }) => {
+test('builder chrome renders the shell and wraps the page by default', async ({ page }) => {
   await page.goto('/');
   await expect(page.locator('#astroix-root')).toBeVisible();
   await expect(page.locator('#astroix-canvas')).toBeVisible();
 
+  // shell inside the shadow tree: header + sidebar + canvas area
+  await expect(page.getByText('Select: off')).toBeVisible();
+  await expect(page.locator('[data-astroix-index="ready"]')).toBeVisible();
+
   const canvas = page.frameLocator('#astroix-canvas');
   await expect(canvas.locator('.hero-title')).toHaveText('Astroix fixture');
+});
+
+test('Tailwind styles work inside the shadow tree (dual adoption)', async ({ page }) => {
+  await page.goto('/');
+  const header = page.locator('[data-astroix-header]');
+  await expect(header).toBeVisible();
+  // a plain utility: header has a real slate background, not the UA default
+  const background = await header.evaluate((el) => getComputedStyle(el).backgroundColor);
+  expect(background).not.toBe('rgba(0, 0, 0, 0)');
+  // an @property-dependent utility: translate-x-2 compiles to
+  // `translate: var(--tw-translate-x)` — the custom property only resolves
+  // when @property registrations survive (shadow-only adoption kills them)
+  const transform = await page
+    .locator('[data-astroix-header] strong')
+    .evaluate((el) => getComputedStyle(el).translate);
+  expect(transform).not.toBe('none');
 });
 
 test('escape hatch: ?builder=0 returns the untouched page', async ({ request }) => {
@@ -31,19 +51,48 @@ test('dev toolbar is hidden inside the canvas iframe', async ({ page }) => {
   await expect(canvas.locator('astro-dev-toolbar')).toBeHidden();
 });
 
-test('chrome mounts from source and hot-swaps React components without a reload', async ({
+test('select mode is off by default — canvas interaction passes through untouched', async ({
   page,
 }) => {
   await page.goto('/');
-  const badge = page.locator('#astroix-root strong');
-  await expect(badge).toHaveText('astroix');
+  const canvas = page.frameLocator('#astroix-canvas');
+  await expect(page.getByText('Select: off')).toBeVisible();
+  await expect(page.locator('[data-astroix-selection]')).toHaveText('no selection');
 
-  // Marker that survives only if the document never reloads.
+  await canvas.locator('.hero-title').click();
+  await expect(page.locator('[data-astroix-selection]')).toHaveText('no selection');
+  expect(await canvas.locator('.astroix-selected').count()).toBe(0);
+});
+
+test('select mode on: hover outline, click selects and highlights', async ({ page }) => {
+  await page.goto('/');
+  await page.getByText('Select: off').click();
+  await expect(page.getByText('Select: on')).toBeVisible();
+
+  const canvas = page.frameLocator('#astroix-canvas');
+  await canvas.locator('.hero-title').hover();
+  await expect(canvas.locator('.hero-title')).toHaveClass(/astroix-hover/);
+
+  await canvas.locator('.hero-title').click();
+  await expect(page.locator('[data-astroix-selection]')).toContainText('hero-title');
+  await expect(canvas.locator('.hero-title')).toHaveClass(/astroix-selected/);
+
+  // toggling off removes the hover/selection machinery from the canvas
+  await page.getByText('Select: on').click();
+  await expect(page.getByText('Select: off')).toBeVisible();
+  expect(await canvas.locator('.astroix-selected').count()).toBe(0);
+});
+
+test('chrome components hot-swap without a document reload', async ({ page }) => {
+  await page.goto('/');
+  const badge = page.locator('[data-astroix-header] strong');
+  // the badge is uppercased by CSS; textContent stays lowercase
+  await expect(badge).toHaveText('astroix');
   await page.evaluate(() => {
     (window as { __astroixLoadedAt?: number }).__astroixLoadedAt = performance.now();
   });
 
-  const sourcePath = join('src', 'client', 'placeholder.tsx');
+  const sourcePath = join('src', 'client', 'app.tsx');
   const original = readFileSync(sourcePath, 'utf8');
   try {
     writeFileSync(sourcePath, original.replace('astroix</strong>', 'astroix-hmr</strong>'));
@@ -55,6 +104,42 @@ test('chrome mounts from source and hot-swaps React components without a reload'
     expect(marker).toBeDefined();
   } finally {
     writeFileSync(sourcePath, original);
+  }
+});
+
+test('chrome css hot-swaps in both adoption contexts without a canvas reload', async ({ page }) => {
+  await page.goto('/');
+  await page.evaluate(() => {
+    (window as { __astroixLoadedAt?: number }).__astroixLoadedAt = performance.now();
+  });
+  const canvasTitle = page.frameLocator('#astroix-canvas').locator('.hero-title');
+  await canvasTitle.evaluate((el) => {
+    const win = el.ownerDocument.defaultView as { __astroixCanvasLoadedAt?: number };
+    win.__astroixCanvasLoadedAt = performance.now();
+  });
+
+  const cssPath = join('src', 'client', 'chrome.css');
+  const original = readFileSync(cssPath, 'utf8');
+  const strong = page.locator('[data-astroix-header] strong');
+  try {
+    writeFileSync(
+      cssPath,
+      `${original}\n[data-astroix-header] strong { text-transform: lowercase; }\n`,
+    );
+    await expect(strong).toHaveCSS('text-transform', 'lowercase', { timeout: 15_000 });
+
+    const topMarker = await page.evaluate(
+      () => (window as { __astroixLoadedAt?: number }).__astroixLoadedAt,
+    );
+    const canvasMarker = await canvasTitle.evaluate(
+      (el) =>
+        (el.ownerDocument.defaultView as { __astroixCanvasLoadedAt?: number })
+          .__astroixCanvasLoadedAt,
+    );
+    expect(topMarker).toBeDefined();
+    expect(canvasMarker).toBeDefined();
+  } finally {
+    writeFileSync(cssPath, original);
   }
 });
 

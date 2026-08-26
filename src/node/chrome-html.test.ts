@@ -1,31 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { canvasUrl, chromeHtml } from './chrome-html';
-
-describe('canvasUrl', () => {
-  it('adds builder=0 to a bare path', () => {
-    expect(canvasUrl('/')).toBe('/?builder=0');
-  });
-
-  it('preserves existing query params and order', () => {
-    expect(canvasUrl('/about?tab=styles&x=1')).toBe('/about?tab=styles&x=1&builder=0');
-  });
-
-  it('overrides any existing builder value', () => {
-    expect(canvasUrl('/?builder=1')).toBe('/?builder=0');
-  });
-});
+import { chromeHtml } from './chrome-html';
 
 describe('chromeHtml', () => {
-  it('references the canvas iframe, mount point and virtual chrome module', () => {
-    const html = chromeHtml({ iframeSrc: '/?builder=0' });
+  it('references the mount point and the virtual chrome module', () => {
+    const html = chromeHtml();
     expect(html).toContain('<div id="astroix-root"></div>');
-    expect(html).toContain('<iframe id="astroix-canvas" src="/?builder=0"');
     expect(html).toContain('<script type="module" src="/virtual:astroix/chrome"></script>');
   });
 
-  it('escapes the iframe src', () => {
-    const html = chromeHtml({ iframeSrc: '/?q=<script>"&x=1' });
-    expect(html).toContain('src="/?q=&lt;script&gt;&quot;&amp;x=1"');
-    expect(html).not.toContain('<script>&');
+  it('resets document geometry so the shadow host fills the viewport', () => {
+    const html = chromeHtml();
+    expect(html).toContain('html, body { margin: 0; height: 100%; }');
+    expect(html).toContain('#astroix-root { display: block; height: 100vh; }');
   });
 });
