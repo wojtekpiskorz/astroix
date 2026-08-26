@@ -24,7 +24,7 @@ Pochodzenie: grilling stackowy 2026-08-26. Każda decyzja poparta faktem z resea
 | Unit testy | **vitest + happy-dom** |
 | E2E | **@playwright/test** (CI, źródło prawdy) + **Playwright MCP** (lokalnie) |
 | Lint/format | **Biome** |
-| Build artefaktów | node: tsup-class (ESM, peers external) · **chrome: serwowany z source przez wirtualny moduł + pełny HMR — bez buildu klienta** |
+| Build artefaktów | node: tsup-class (ESM, peers external) · **chrome: hybryda — prebuilt ESM w paczce, source + HMR z dev-checkoutu (ADR-0001)** |
 | Publikowanie | **GitHub + Actions, changesets od startu**, nazwa `astroix` zajęta wcześnie, dogfood przez `bun link` |
 | Effect | **odrzucony** (uzasadnienie niżej) |
 
@@ -48,7 +48,7 @@ Pochodzenie: grilling stackowy 2026-08-26. Każda decyzja poparta faktem z resea
 
 9. **Biome.** React (brak `.svelte`) odblokowuje Biome: jedno narzędzie, formatter+lint, TS-first, błyskawiczne — co przy workflow agentycznym (iteracje po każdej edycji) jest featą samą w sobie.
 
-10. **Chrome z source przez Vite (aktualizacja po researchcie core-reuse).** Plan "prebuild + watch" dla klienta jest martwy: middleware zwraca HTML przez `server.transformIndexHtml` z referencją do wirtualnego modułu chroma (`resolveId`/`load`) — Vite serwuje React chroma z pełnym HMR bez żadnego buildu, za darmo działa fast-refresh (`@vitejs/plugin-react` przez `updateConfig`, scope `include` do plików chroma gdy host bez Reacta). Budowa zostaje tylko dla strony node (publikowany pakiet: ESM, peers external `astro`/`vite`). Dawne "vite-in-vite jako faza 2" stało się defaultem — oficjalnie wspieranym wzorcem.
+10. **Chrome: hybryda prebuilt/source (ADR-0001).** Publikowana paczka shipuje **prebuilt bundel chroma** (pojedynczy ESM: react, Tailwind, CodeMirror w środku) ładowany przez wirtualny moduł — obcy host nigdy nie widzi source'u chroma i nigdy nie rozwiązuje naszego `react` (research T3: source-serving Reacta przez obcy Vite jest niebezpieczny — optymalizator kluczuje po gołym specyfikatorze, host podmienia kopię — i niepraktykowany przez żadne badane narzędzie). Nasz **dev-checkout** (dogfood przez `file:`) serwuje source chroma z wstrzykniętymi `@vitejs/plugin-react` (fast-refresh, `include`-scoped) i `@tailwindcss/vite` (mechanika T1) — kontrolowany host, goły `react` rozwiązuje się do naszego Reacta 19. React/react-dom jako **devDependencies** (bundlowane przy publikacji; konsument nigdy ich nie rozwiązuje). Budowa strony node bez zmian (tsup, ESM, peers external `astro`/`vite`). *(Zmiana 2026-08-26, wayfinder T4 — pierwotnie „chrome z source bez buildu".)*
 
 11. **Effect: NIE.** Dwa niezależne powody: (a) v4 w RC (17 modułów "unstable", team: produkcja → v3, a v3 feature-frozen); (b) ważniejsze — kształt projektu jest zły dla Effect: ~90% kodu to czyste funkcje synchroniczne i UI; jedyny kandydat (orkiestracja watch→reindex→serve) to ~10% bazy w skali, gdzie zwykły async wystarcza. Trzeci, zgodny z kryterium agentic-friendly: modele piszą znakomity plain async/TS, idiomatyczny Effect — loteryjnie. Revisit tylko jeśli Astroix urośnie w pipeline-serwer. Typowane błędy w core: mały własny `Result`.
 
