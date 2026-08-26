@@ -30,12 +30,16 @@ bun install                        # also in e2e/fixture/
 bun run check && bun run typecheck # Biome + tsc
 bun run test                       # vitest (unit)
 bun run test:e2e                   # Playwright (boots e2e/fixture on :4312)
-bun run build                      # tsup → dist
+bun run build                      # tsup (node) + vite (chrome bundle) → dist
 ```
 
 ### Dogfood loop
 
 The e2e fixture consumes the local package via `file:../..` and registers `astroix()` in its `astro.config.mjs`. With both packages installed, run `bun run dev` (tsup watch) at the root in one terminal and `bun run dev` in `e2e/fixture/` in the other — the fixture dev server on `http://localhost:4312` runs the integration straight from your checkout.
+
+### Definition of done (POC)
+
+The executable DoD is `e2e/loop.spec.ts` (the full CSS editing loop: chrome → select → rule list → CodeMirror edit → bytes on disk + canvas reflection), green in CI. The human half — the owner's manual smoke through the real chrome — is [`docs/manual-smoke.md`](docs/manual-smoke.md).
 
 ## License
 
