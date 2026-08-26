@@ -69,6 +69,20 @@ async function handleApiRequest(
       return;
     }
 
+    // File content for the editor pane — a dedicated endpoint (not payload
+    // fields) so contents are fresh exactly when a rule is opened and the
+    // payload stays small. Same root confinement as the edit endpoint.
+    if (req.method === 'GET' && url.pathname === '/file') {
+      const file = url.searchParams.get('file');
+      const absPath = file === null ? null : safeResolve(options.root, file);
+      if (file === null || absPath === null || !existsSync(absPath)) {
+        json(res, 400, { error: `file is missing or outside the project root: ${file ?? ''}` });
+        return;
+      }
+      json(res, 200, { file, contents: readFileSync(absPath, 'utf8') });
+      return;
+    }
+
     if (req.method === 'POST' && url.pathname === '/edit') {
       const body = await readJsonBody(req);
       const { file, range, replacement } = parseEditBody(body);
