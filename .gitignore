@@ -1,0 +1,22 @@
+# deps
+node_modules/
+
+# build
+dist/
+*.tsbuildinfo
+
+# env & secrets
+.env
+.env.*
+
+# astro dev artifacts (when dogfooding inside this repo)
+.astro/
+
+# tests
+coverage/
+playwright-report/
+test-results/
+
+# os / editor
+.DS_Store
+*.log
