@@ -5,6 +5,8 @@
     "": {
       "name": "astroix",
       "dependencies": {
+        "@astrojs/compiler-binding": "^0.4.0",
+        "postcss": "^8.5.26",
         "react": "^19.2.8",
         "react-dom": "^19.2.8",
       },
