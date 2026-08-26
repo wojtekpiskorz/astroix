@@ -15,8 +15,6 @@
         "@vitejs/plugin-react": "^6.1.0",
         "codemirror": "^6.0.2",
         "postcss": "^8.5.26",
-        "react": "^19.2.8",
-        "react-dom": "^19.2.8",
         "zustand": "^5.0.15",
       },
       "devDependencies": {
@@ -28,6 +26,8 @@
         "astro": "^7.2.7",
         "happy-dom": "^20.11.6",
         "oxc-transform-react": "^0.147.0",
+        "react": "^19.2.8",
+        "react-dom": "^19.2.8",
         "tsup": "^8.5.1",
         "typescript": "~5.9.3",
         "vite": "^8.2.2",
