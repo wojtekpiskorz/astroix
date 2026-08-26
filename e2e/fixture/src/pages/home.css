@@ -11,6 +11,19 @@
   letter-spacing: -0.02em;
 }
 
+/* second place styling the same element in the same file — the multi-range
+   case for the rule list */
+.hero-title {
+  font-weight: 800;
+}
+
+/* badge case: @media rules are surfaced, not evaluated */
+@media (max-width: 640px) {
+  .hero-title {
+    font-size: 2rem;
+  }
+}
+
 .hero-lead {
   margin: 0;
   font-size: 1.25rem;
