@@ -1,5 +1,5 @@
 {
-  "name": "astroix",
+  "name": "@wojciechpiskorz/astroix",
   "version": "0.0.1",
   "description": "Dev-only Astro 7 integration — a visual builder for Content Collections content and repo-mapped CSS",
   "type": "module",
@@ -28,6 +28,9 @@
   "files": [
     "dist"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "sideEffects": false,
   "scripts": {
     "build": "tsup",

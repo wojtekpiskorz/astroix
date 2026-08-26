@@ -56,7 +56,7 @@ Pochodzenie: grilling stackowy 2026-08-26. Każda decyzja poparta faktem z resea
 
 13. **`yaml` Document API** do frontmattera: edycja kluczy z zachowaniem komentarzy/kolejności/cytowania — spójne z filozofią splicera (diff = jedna linia, nie rozbity blok).
 
-14. **GitHub + Actions + changesets + wczesne zajęcie nazwy.** Push: `biome check` → `tsc --noEmit` → `vitest run`. PR: + e2e (Playwright, Node 24). `astroix` wolna na npm (stanie na 2026-08-26) — zajmujemy jak najszybciej; dogfood przez `bun link` do v0.1, potem publiczne alphasy. Changesets od startu.
+14. **GitHub + Actions + changesets + wczesne zajęcie nazwy.** Push: `biome check` → `tsc --noEmit` → `vitest run`. PR: + e2e (Playwright, Node 24). Zajęcie nazwy wykonane 2026-08-26 jako `@wojciechpiskorz/astroix@0.0.1`: unscoped `astroix` okazał się nie-rejestrowalny (npm name-similarity rule vs `astro`; "wolna nazwa" ≠ "rejestrowalna"); z dostępnych opcji (org `@astroix` vs scope osobisty) wybrano scope osobisty. Dogfood przez `bun link` do v0.1, potem publiczne alphasy. Changesets od startu.
 
 15. **AI PR review — TODO po v1, nie warunek POC.** Zaplanowane: `claude-code-action@v1` → endpoint Z.AI (`ANTHROPIC_BASE_URL=https://api.z.ai/api/anthropic`, klucz z GLM coding plan), advisory-only; fallback: PR-Agent (MIT, self-hosted) z `zai/glm-5.2`. Zasada z dużych repo 2026: AI nigdy nie blokuje merge'a — blokują gate'y deterministyczne.
 
