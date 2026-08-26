@@ -1,15 +1,7 @@
-import { StrictMode } from 'react';
-import { createRoot } from 'react-dom/client';
+import { mountChrome } from './entry';
 
-/**
- * Mounts the builder chrome into a shadow DOM attached to `host` (scaffold
- * stage — placeholder tree; the Content/CSS tabs land with the chrome tasks).
- */
-export function mountChrome(host: HTMLElement): void {
-  const shadow = host.attachShadow({ mode: 'open' });
-  createRoot(shadow).render(
-    <StrictMode>
-      <div data-astroix-chrome>Astroix chrome</div>
-    </StrictMode>,
-  );
-}
+// Prebuilt-bundle entry (ADR-0001): the shipped chrome is one self-contained
+// ESM — react/react-dom, the Tailwind-compiled CSS and CodeMirror bundled in,
+// zero bare imports for the consumer's Vite to resolve. Source mode uses
+// entry.tsx directly instead.
+mountChrome();

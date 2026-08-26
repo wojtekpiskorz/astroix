@@ -1,9 +1,10 @@
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Plugin, ViteDevServer } from 'vite';
 import { chromeHtml } from './chrome-html';
 import { isDocumentRequest } from './document-request';
 import { registerRestEndpoints } from './rest';
-import { clientEntryPath } from './source-mode';
+import { chromeArtifactPath, clientEntryPath } from './source-mode';
 
 export const VIRTUAL_CHROME_ID = 'virtual:astroix/chrome';
 
@@ -63,11 +64,16 @@ export function astroixVitePlugin(options: AstroixPluginOptions = {}): Plugin {
         // so the host dev server transforms it (fast-refresh, Tailwind).
         return `import { mountChrome } from '/@fs${clientEntryPath}';\nmountChrome();\n`;
       }
-      // Prebuilt mode ships with the chrome bundle slice; failing loudly here
-      // keeps an installed package from silently serving nothing (ADR-0001).
-      throw new Error(
-        'astroix: prebuilt chrome bundle is not shipped yet — running outside the dev checkout is unsupported at this stage',
-      );
+      // ADR-0001 prebuilt mode: serve the shipped bundle — a self-contained
+      // ESM with react, the compiled CSS and CodeMirror inside, so foreign
+      // hosts resolve none of our chrome dependencies. Missing artifact =
+      // broken package build; fail loudly, never silently (ADR-0001).
+      if (!existsSync(chromeArtifactPath)) {
+        throw new Error(
+          'astroix: prebuilt chrome bundle is missing from the package build (expected dist/chrome.js)',
+        );
+      }
+      return readFileSync(chromeArtifactPath, 'utf8');
     },
   };
 }

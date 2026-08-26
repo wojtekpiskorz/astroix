@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   check:
-    name: check (biome · tsc · vitest)
+    name: check (biome · tsc · vitest · artifact)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -24,6 +24,9 @@ jobs:
       - run: bun run check
       - run: bun run typecheck
       - run: bun run test
+      # build both outputs and gate the prebuilt chrome shape (ADR-0001)
+      - run: bun run build
+      - run: bun run check:artifact
 
   e2e:
     name: e2e (playwright)

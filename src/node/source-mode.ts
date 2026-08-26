@@ -17,6 +17,15 @@ const candidates = [
 
 export const clientEntryPath: string | null = candidates.find((path) => existsSync(path)) ?? null;
 
+/**
+ * The prebuilt chrome bundle (ADR-0001): a self-contained ESM shipped inside
+ * `dist/`. Served by the virtual chrome module when the dev-checkout sources
+ * are absent — the consumer-facing delivery mode.
+ */
+export const chromeArtifactPath: string = fileURLToPath(
+  new NodeURL('./chrome.js', import.meta.url),
+);
+
 export function isSourceMode(): boolean {
   return clientEntryPath !== null;
 }
