@@ -7,5 +7,5 @@ export default defineConfig({
   sourcemap: true,
   clean: true,
   target: 'node22',
-  external: ['astro', 'vite'],
+  external: ['astro', 'vite', '@vitejs/plugin-react', '@tailwindcss/vite'],
 });
