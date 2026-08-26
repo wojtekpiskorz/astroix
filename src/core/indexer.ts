@@ -17,6 +17,11 @@ export interface CssRuleRecord {
   selector: string;
   file: string;
   range: { start: number; end: number };
+  /**
+   * One-based line of the rule's selector in `file`, derived from the range
+   * at index time (the indexer holds the contents) — the rule list shows it.
+   */
+  line: number;
   /** Condition of the nearest `@media` ancestor, or null at the top level. */
   media: string | null;
   /** True for rules from a scoped `<style>` block (the compiler applies the cid). */
@@ -46,23 +51,39 @@ const STYLE_TAG = /<style\b[^>]*>([\s\S]*?)<\/style>/g;
 export function buildCssIndex(sources: SourceFile[]): CssRuleRecord[] {
   const records: CssRuleRecord[] = [];
   for (const source of sources) {
-    if (source.file.endsWith('.css')) {
-      records.push(
-        ...indexStylesheet(source.file, source.contents, {
+    const fileRecords = source.file.endsWith('.css')
+      ? indexStylesheet(source.file, source.contents, {
           scoped: false,
           styleBlockIndex: null,
           baseOffset: 0,
-        }),
-      );
-    } else if (source.file.endsWith('.astro')) {
-      records.push(...indexAstroStyles(source.file, source.contents));
+        })
+      : source.file.endsWith('.astro')
+        ? indexAstroStyles(source.file, source.contents)
+        : [];
+    // Lines derive from absolute offsets against the whole file — the .astro
+    // blocks were parsed as substrings but carry absolute ranges.
+    for (const record of fileRecords) {
+      records.push({ ...record, line: lineAt(source.contents, record.range.start) });
     }
   }
   return records;
 }
 
-function indexStylesheet(file: string, css: string, meta: BlockMeta): CssRuleRecord[] {
-  const records: CssRuleRecord[] = [];
+/** One-based line number of a character offset. */
+function lineAt(contents: string, offset: number): number {
+  let line = 1;
+  for (let i = 0; i < offset && i < contents.length; i++) {
+    if (contents[i] === '\n') line += 1;
+  }
+  return line;
+}
+
+function indexStylesheet(
+  file: string,
+  css: string,
+  meta: BlockMeta,
+): Omit<CssRuleRecord, 'line'>[] {
+  const records: Omit<CssRuleRecord, 'line'>[] = [];
   postcss.parse(css).walkRules((rule) => {
     const start = rule.source?.start;
     const end = rule.source?.end;
@@ -79,8 +100,8 @@ function indexStylesheet(file: string, css: string, meta: BlockMeta): CssRuleRec
   return records;
 }
 
-function indexAstroStyles(file: string, source: string): CssRuleRecord[] {
-  const records: CssRuleRecord[] = [];
+function indexAstroStyles(file: string, source: string): Omit<CssRuleRecord, 'line'>[] {
+  const records: Omit<CssRuleRecord, 'line'>[] = [];
   // extractStylesSync returns only blocks the compiler would process —
   // `is:inline` (and expression-attribute blocks) never make it there, so the
   // raw tag scan is the edit-truth pass and the compiler blocks supply the
