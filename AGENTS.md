@@ -44,7 +44,7 @@ Package manager is **bun**. Run bun; never npm/pnpm/yarn.
 ## Testing doctrine
 
 - **Unit (vitest + happy-dom)**: pure modules only. The CSS indexer/matcher and splice-writer are pure functions over fixtures — test behavior (matched rules, output bytes), never index internals.
-- **E2E (Playwright)**: the only source of truth for selector-engine behavior (`:where([data-astro-cid-*])`, quoting edge cases) and full builder loops.
+- **E2E (Playwright)**: the only source of truth for selector-engine behavior (`[data-astro-cid-*]` under the default `attribute` scopedStyleStrategy — `:where(...)` only when configured; verified vs locked astro@7.2.7, wayfinder T2) and full builder loops.
 - Author specs by exploring with Playwright MCP locally, then commit deterministic specs for CI.
 
 ## PR & release
