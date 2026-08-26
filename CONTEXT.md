@@ -10,6 +10,8 @@ The ubiquitous language of this project. Use these terms (and these exact spelli
 | **repo-mapping** | The core principle: the builder reads/writes the same repo files an agent would — never a parallel world. |
 | **indexer** | The pure module that scans project CSS sources into the index: selector → (file, source range, media condition). The edit-truth. |
 | **matcher** | The pure module that, given the index and a clicked element, returns matching rules (via `el.matches()`), sorted by specificity. |
+| **effective selector** | The compiled form of a selector as it actually matches in the canvas DOM — for scoped rules, carrying the `data-astro-cid-*` attribute; distinct from the source-space selector the indexer reads. |
+| **index payload** | The join of the static index (edit-truth) with effective selectors from the module graph, served to the chrome for matching. |
 | **splice-writer** | The pure module applying rule edits as text-splices into source files, preserving formatting. |
 | **rule** | One CSS rule from the repo, with its source location. |
 | **nearest home** | Destination heuristic for a NEW rule: the file that styles the closest styled ancestor/sibling. |
