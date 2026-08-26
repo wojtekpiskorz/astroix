@@ -1,0 +1,12 @@
+{
+  "name": "astroix-pack-fixture",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "astro dev --port 4313"
+  },
+  "dependencies": {
+    "@wojciechpiskorz/astroix": "file:./astroix-pack.tgz",
+    "astro": "^7.2.7"
+  }
+}

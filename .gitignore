@@ -20,3 +20,6 @@ test-results/
 # os / editor
 .DS_Store
 *.log
+
+# npm pack smoke lane artifact
+*.tgz
