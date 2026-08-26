@@ -1,9 +1,16 @@
+import { join } from 'node:path';
 import type { Plugin, ViteDevServer } from 'vite';
 import { canvasUrl, chromeHtml } from './chrome-html';
 import { isDocumentRequest } from './document-request';
+import { registerRestEndpoints } from './rest';
 import { clientEntryPath } from './source-mode';
 
 export const VIRTUAL_CHROME_ID = 'virtual:astroix/chrome';
+
+export interface AstroixPluginOptions {
+  /** Absolute Astro src dir with the sources to index; defaults to `<root>/src`. */
+  srcDir?: string;
+}
 
 /**
  * The astroix Vite plugin: default-on chrome over every top-level dev URL.
@@ -14,7 +21,7 @@ export const VIRTUAL_CHROME_ID = 'virtual:astroix/chrome';
  * never fires for Astro pages, the server API does) which injects the Vite
  * client and the plugin-react preamble.
  */
-export function astroixVitePlugin(): Plugin {
+export function astroixVitePlugin(options: AstroixPluginOptions = {}): Plugin {
   return {
     name: 'astroix',
     configureServer(server: ViteDevServer) {
@@ -39,6 +46,10 @@ export function astroixVitePlugin(): Plugin {
             next(error instanceof Error ? error : new Error(String(error)));
           }
         })();
+      });
+      registerRestEndpoints(server, {
+        root: server.config.root,
+        srcDir: options.srcDir ?? join(server.config.root, 'src'),
       });
     },
     resolveId(id) {

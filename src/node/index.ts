@@ -1,4 +1,5 @@
 import { dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import type { AstroIntegration } from 'astro';
@@ -37,7 +38,8 @@ function astroix(): AstroIntegration {
       'astro:config:setup': ({ config, command, updateConfig, injectScript, logger }) => {
         if (command !== 'dev') return;
 
-        const plugins: VitePlugin[] = [astroixVitePlugin()];
+        // The resolved config turns dir strings into URLs — the plugin wants paths.
+        const plugins: VitePlugin[] = [astroixVitePlugin({ srcDir: fileURLToPath(config.srcDir) })];
 
         if (isSourceMode()) {
           // ADR-0001 source mode: chrome from this checkout's source, with
