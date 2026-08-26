@@ -1,7 +1,12 @@
 import { expect, test } from '@playwright/test';
 
+// The builder chrome wraps every top-level URL by default (integration slice);
+// these specs are about the page itself, so they load it through the escape
+// hatch. The chrome side is covered by builder.spec.ts.
+const CANVAS_URL = '/?builder=0';
+
 test('fixture dev server renders the hero from the content collection', async ({ page }) => {
-  await page.goto('/');
+  await page.goto(CANVAS_URL);
   await expect(page.locator('.hero-title')).toHaveText('Astroix fixture');
   await expect(page.locator('.hero-lead')).toBeVisible();
 });
@@ -9,13 +14,13 @@ test('fixture dev server renders the hero from the content collection', async ({
 test('dev server boots clean with the astroix integration registered', async ({ page }) => {
   // astro.config.mjs imports the local package via file:../.. and registers
   // astroix(); a broken link or a failing integration would kill boot before
-  // the webServer became ready. Serving the chrome itself lands with #12.
-  const response = await page.goto('/');
+  // the webServer became ready. The chrome assertions live in builder.spec.ts.
+  const response = await page.goto(CANVAS_URL);
   expect(response?.status()).toBe(200);
 });
 
 test('hero-title carries the CSS surface the POC loop edits', async ({ page }) => {
-  await page.goto('/');
+  await page.goto(CANVAS_URL);
   const title = page.locator('.hero-title');
 
   // scoped block in index.astro → bare [data-astro-cid-*] under the default
