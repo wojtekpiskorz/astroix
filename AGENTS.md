@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Astroix is a dev-only Astro 7 integration — a visual builder with a chrome over a same-origin iframe canvas for editing Content Collections content and repo-mapped CSS. **Pre-implementation:** `docs/` is the source of truth; no production code exists yet.
+Astroix is a dev-only Astro 7 integration — a visual builder with a chrome over a same-origin iframe canvas for editing Content Collections content and repo-mapped CSS. **Scaffold stage:** toolchain, CI and the e2e fixture are in place; `docs/` remains the source of truth for behavior.
 
 ## Read the docs first
 
@@ -12,12 +12,22 @@ When your work touches an architectural decision, these files win over your prio
 
 ## Commands
 
-- No build/test commands exist yet — the package scaffold is pending. This section gets its canonical commands with it.
-- Package manager is **bun**. Run bun; never npm/pnpm/yarn.
-- Expected future commands (do not run until they exist): `bun run check`, `bun run test`, `bun run test:e2e`, `bun run build`.
+- `bun install` — install dependencies (also in `e2e/fixture/`, which is its own package).
+- `bun run check` — Biome lint + format check; `bun run check:write` autofixes.
+- `bun run typecheck` — `tsc --noEmit`.
+- `bun run test` — unit tests (vitest + happy-dom); `bun run test:watch` for watch mode.
+- `bun run test:e2e` — Playwright e2e; boots the fixture dev server on `http://localhost:4312`.
+- `bun run build` — tsup → `dist/` (node side only; the chrome client is never built — it is served from source through a virtual module, see `docs/core-reuse.md` §1).
+
+Package manager is **bun**. Run bun; never npm/pnpm/yarn.
 
 ## Repo layout
 
+- `src/core/` — pure modules (indexer, matcher, splice-writer); no IO, unit-tested over fixtures
+- `src/node/` — the integration: Vite plugin, middleware, watcher, REST endpoints (built by tsup → `dist/`)
+- `src/client/` — the chrome (React 19, shadow DOM); never built — served from source via the virtual module
+- `e2e/fixture/` — synthetic Astro 7 project (hero collection + co-located CSS) driven by Playwright; its own package
+- `.changeset/` — changesets config; every code PR adds one
 - `docs/` — spec, stack, core-reuse: the decision record
 - `docs/agents/` — agent-workflow config (issue tracker, triage labels, domain docs)
 - `docs/adr/` — architecture decision records; read those touching your area before proposing changes

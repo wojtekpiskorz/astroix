@@ -2,7 +2,7 @@
 
 A visual builder for Astro projects — a dev-only integration where an AI agent does ~90% of the work, and you finish the last 10% (content tweaks, CSS polish) in a GUI instead of hunting through an unfamiliar codebase.
 
-**Status: pre-development.** The architecture is fully specified; implementation hasn't started.
+**Status: scaffold.** The package structure, toolchain, CI, and the e2e fixture are in place; feature implementation is starting. Docs remain the source of truth.
 
 ## What it will do
 
@@ -20,6 +20,18 @@ Core principle: **repo-mapping, not a parallel world** — the builder reads and
 ## Scope
 
 Targets the latest Astro major only (`astro ^7`, Vite 8, zod 4) — built for new projects and their maintenance, not for legacy support.
+
+## Development
+
+Requires [bun](https://bun.sh) and Node >= 22.12.
+
+```sh
+bun install                        # also in e2e/fixture/
+bun run check && bun run typecheck # Biome + tsc
+bun run test                       # vitest (unit)
+bun run test:e2e                   # Playwright (boots e2e/fixture on :4312)
+bun run build                      # tsup → dist
+```
 
 ## License
 

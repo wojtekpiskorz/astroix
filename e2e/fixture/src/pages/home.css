@@ -1,0 +1,27 @@
+.hero {
+  display: grid;
+  gap: 1rem;
+  padding: 4rem 2rem;
+  font-family: system-ui, sans-serif;
+}
+
+.hero-title {
+  margin: 0;
+  font-size: 3rem;
+  letter-spacing: -0.02em;
+}
+
+.hero-lead {
+  margin: 0;
+  font-size: 1.25rem;
+  color: #475569;
+}
+
+.hero-cta {
+  justify-self: start;
+  padding: 0.5rem 1rem;
+  border-radius: 0.5rem;
+  background: #0f172a;
+  color: #fff;
+  text-decoration: none;
+}
