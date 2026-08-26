@@ -38,6 +38,7 @@ jobs:
         with:
           node-version: 24
       - run: bun install --frozen-lockfile
+      - run: bun run build
       - run: bun install --cwd=e2e/fixture --frozen-lockfile
       - run: bunx playwright install --with-deps chromium
       - run: bun run test:e2e
