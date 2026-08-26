@@ -6,7 +6,14 @@
     "useIgnoreFile": true
   },
   "files": {
-    "includes": ["**", "!e2e/fixture", "!dist", "!playwright-report", "!test-results"]
+    "includes": [
+      "**",
+      "!e2e/fixture",
+      "!dist",
+      "!playwright-report",
+      "!test-results",
+      "!src/client/chrome.css"
+    ]
   },
   "formatter": {
     "enabled": true,

@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 import type { Plugin, ViteDevServer } from 'vite';
-import { canvasUrl, chromeHtml } from './chrome-html';
+import { chromeHtml } from './chrome-html';
 import { isDocumentRequest } from './document-request';
 import { registerRestEndpoints } from './rest';
 import { clientEntryPath } from './source-mode';
@@ -35,10 +35,7 @@ export function astroixVitePlugin(options: AstroixPluginOptions = {}): Plugin {
               next();
               return;
             }
-            const html = await server.transformIndexHtml(
-              url,
-              chromeHtml({ iframeSrc: canvasUrl(url) }),
-            );
+            const html = await server.transformIndexHtml(url, chromeHtml());
             res.statusCode = 200;
             res.setHeader('content-type', 'text/html; charset=utf-8');
             res.end(html);
