@@ -22,11 +22,23 @@ export default defineConfig({
       use: { ...devices['Desktop Chrome'] },
     },
   ],
-  webServer: {
-    command: 'bun run dev',
-    cwd: 'e2e/fixture',
-    url: `http://localhost:${PORT}`,
-    reuseExistingServer: !process.env.CI,
-    timeout: 60_000,
-  },
+  webServer: [
+    {
+      command: 'bun run dev',
+      cwd: 'e2e/fixture',
+      url: `http://localhost:${PORT}`,
+      reuseExistingServer: !process.env.CI,
+      timeout: 60_000,
+    },
+    {
+      // npm-pack smoke lane (ADR-0001): build + pack the repo, install the
+      // tarball into the pack fixture, boot it. Managed as a webServer so
+      // playwright owns the lifecycle and the generous cold-install timeout.
+      command: 'node ../../scripts/prepare-pack-fixture.mjs && bun run dev',
+      cwd: 'e2e/pack-fixture',
+      url: 'http://localhost:4313',
+      reuseExistingServer: !process.env.CI,
+      timeout: 240_000,
+    },
+  ],
 });
