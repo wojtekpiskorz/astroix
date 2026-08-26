@@ -20,6 +20,7 @@ function payload(overrides: Partial<IndexPayloadRecord>): IndexPayloadRecord {
     selector: '.hero-title',
     file: 'src/pages/home.css',
     range: { start: 0, end: 10 },
+    line: 1,
     media: null,
     scoped: false,
     styleBlockIndex: null,

@@ -1,11 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useRef } from 'react';
-import { useChromeStore } from './store';
-
-interface PayloadRecord {
-  selector: string;
-  file: string;
-}
+import { type IndexPayloadRecord, matchRules } from '../core/matcher';
+import { type Selection, useChromeStore } from './store';
 
 const SELECTION_STYLE_ID = 'astroix-selection-style';
 const HOVER_CLASS = 'astroix-hover';
@@ -58,18 +54,25 @@ function ChromeHeader() {
 }
 
 function Sidebar() {
-  const { data } = useQuery({
+  const selection = useChromeStore((state) => state.selection);
+  const { data, refetch } = useQuery({
     queryKey: ['astroix', 'index-payload'],
-    queryFn: async (): Promise<PayloadRecord[]> => {
+    queryFn: async (): Promise<IndexPayloadRecord[]> => {
       const response = await fetch('/__astroix/index');
       if (!response.ok) return [];
-      return (await response.json()) as PayloadRecord[];
+      return (await response.json()) as IndexPayloadRecord[];
     },
   });
+  // The module-graph join is only complete once the canvas page's style
+  // modules are loaded — the initial fetch can race that. Refetch on
+  // selection (the charter's "refetch on demand" line).
+  useEffect(() => {
+    if (selection !== null) void refetch();
+  }, [selection, refetch]);
   const count = data?.length ?? null;
 
   return (
-    <aside className="flex w-72 shrink-0 flex-col gap-3 border-r border-slate-800 p-4 text-sm">
+    <aside className="flex w-72 shrink-0 flex-col gap-3 overflow-y-auto border-r border-slate-800 p-4 text-sm">
       <section className="text-slate-400">
         <h2 className="mb-1 text-xs font-semibold tracking-widest text-slate-500 uppercase">
           Index
@@ -82,10 +85,112 @@ function Sidebar() {
           <p data-astroix-index="ready">{count} rules indexed</p>
         )}
       </section>
-      <p className="mt-auto text-xs text-slate-600">
-        Panels (rule list, editor) mount here in later slices.
-      </p>
+      <RuleList payload={data} selection={selection} />
+      <p className="mt-auto text-xs text-slate-600">The rule editor mounts below the list next.</p>
     </aside>
+  );
+}
+
+/**
+ * The rule list: on selection, the matcher runs over the index payload
+ * against the canvas element (its own document context). Presentation shows
+ * source-space selectors — the cid hash lives only in effective selectors
+ * and is never displayed.
+ */
+function RuleList({
+  payload,
+  selection,
+}: {
+  payload: IndexPayloadRecord[] | undefined;
+  selection: Selection | null;
+}) {
+  if (selection === null) {
+    return (
+      <section data-astroix-rules="no-selection" className="text-slate-500">
+        <h2 className="mb-1 text-xs font-semibold tracking-widest text-slate-500 uppercase">
+          Rules
+        </h2>
+        <p>Select an element to see its rules.</p>
+      </section>
+    );
+  }
+  if (payload === undefined) {
+    return (
+      <section data-astroix-rules="loading" className="text-slate-500">
+        <h2 className="mb-1 text-xs font-semibold tracking-widest text-slate-500 uppercase">
+          Rules
+        </h2>
+        <p>loading…</p>
+      </section>
+    );
+  }
+
+  const matches = matchRules(payload, selection.element);
+  if (matches.length === 0) {
+    return (
+      <section data-astroix-rules="empty" className="text-slate-500">
+        <h2 className="mb-1 text-xs font-semibold tracking-widest text-slate-500 uppercase">
+          Rules
+        </h2>
+        <p>No matching rules for this element.</p>
+      </section>
+    );
+  }
+
+  const placesPerFile = new Map<string, number>();
+  for (const match of matches) {
+    placesPerFile.set(match.record.file, (placesPerFile.get(match.record.file) ?? 0) + 1);
+  }
+
+  return (
+    <section data-astroix-rules="list">
+      <h2 className="mb-1 text-xs font-semibold tracking-widest text-slate-500 uppercase">Rules</h2>
+      <ul className="flex flex-col gap-1.5">
+        {matches.map((match) => {
+          const multiPlace = (placesPerFile.get(match.record.file) ?? 0) > 1;
+          return (
+            <li
+              key={`${match.record.file}:${match.record.range.start}`}
+              data-astroix-rule=""
+              data-astroix-winner={match.winner ? 'true' : undefined}
+              className={
+                match.winner
+                  ? 'rounded border border-amber-500/60 bg-amber-500/10 px-2 py-1'
+                  : 'rounded border border-slate-800 px-2 py-1'
+              }
+            >
+              <div className="flex flex-wrap items-baseline gap-x-2">
+                {match.winner && (
+                  <span role="img" aria-label="cascade winner" title="cascade winner">
+                    ★
+                  </span>
+                )}
+                <code className="text-xs text-sky-300">{match.record.selector}</code>
+                {match.record.media !== null && (
+                  <span
+                    data-astroix-media={match.record.media}
+                    className="rounded bg-slate-800 px-1 text-[10px] text-slate-400"
+                  >
+                    {match.record.media}
+                  </span>
+                )}
+                {multiPlace && (
+                  <span
+                    data-astroix-multi=""
+                    className="rounded bg-slate-800 px-1 text-[10px] text-slate-400"
+                  >
+                    multi-place
+                  </span>
+                )}
+              </div>
+              <div className="text-[11px] text-slate-500">
+                {match.record.file}:{match.record.line}
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
   );
 }
 

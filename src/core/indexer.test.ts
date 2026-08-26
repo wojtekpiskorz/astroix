@@ -46,6 +46,8 @@ describe('buildCssIndex — global css files', () => {
     expect(index.every((r) => r.file === 'src/pages/home.css')).toBe(true);
     expect(index.map((r) => r.media)).toEqual([null, null, '(max-width: 640px)']);
     expect(index.every((r) => r.scoped === false && r.styleBlockIndex === null)).toBe(true);
+    // lines are one-based and point at each rule's selector line
+    expect(index.map((r) => r.line)).toEqual([1, 6, 12]);
   });
 
   it('ranges slice the exact rule text out of the source file', () => {
@@ -76,6 +78,7 @@ describe('buildCssIndex — .astro style blocks', () => {
 
     expect(scoped).toHaveLength(2);
     expect(scoped.every((r) => r.scoped)).toBe(true);
+    expect(scoped.map((r) => r.line)).toEqual([6, 17]);
     for (const rule of scoped) {
       const text = pageAstro.slice(rule.range.start, rule.range.end);
       expect(text.startsWith('.hero-title')).toBe(true);
