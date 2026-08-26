@@ -33,6 +33,10 @@ bun run test:e2e                   # Playwright (boots e2e/fixture on :4312)
 bun run build                      # tsup → dist
 ```
 
+### Dogfood loop
+
+The e2e fixture consumes the local package via `file:../..` and registers `astroix()` in its `astro.config.mjs`. With both packages installed, run `bun run dev` (tsup watch) at the root in one terminal and `bun run dev` in `e2e/fixture/` in the other — the fixture dev server on `http://localhost:4312` runs the integration straight from your checkout.
+
 ## License
 
 [MIT](LICENSE)

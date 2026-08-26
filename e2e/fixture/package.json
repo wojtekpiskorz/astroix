@@ -8,6 +8,7 @@
     "preview": "astro preview --port 4312"
   },
   "dependencies": {
+    "@wojciechpiskorz/astroix": "file:../..",
     "astro": "^7.2.7"
   }
 }
