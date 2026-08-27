@@ -8,6 +8,23 @@ import { type EditorSpec, useChromeStore } from './store';
 
 const WRITE_DEBOUNCE_MS = 300;
 
+/** Browser-side sha256 hex of the editor's believed-on-disk content. */
+async function sha256Hex(text: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+/** Replace the whole document, keeping the cursor where it was (clamped). */
+function replaceDoc(view: EditorView, contents: string): void {
+  const text = view.state.doc.toString();
+  if (contents === text) return;
+  const anchor = Math.min(view.state.selection.main.head, contents.length);
+  view.dispatch({
+    changes: { from: 0, to: text.length, insert: contents },
+    selection: { anchor },
+  });
+}
+
 const setActiveRange = StateEffect.define<{ start: number; end: number } | null>();
 
 const activeRangeField = StateField.define<{
@@ -71,9 +88,9 @@ export function EditorPane() {
 function RuleEditor({ spec }: { spec: EditorSpec }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const baselineRef = useRef<string>('');
-  const [status, setStatus] = useState<'loading' | 'idle' | 'pending' | 'saved' | 'error'>(
-    'loading',
-  );
+  const [status, setStatus] = useState<
+    'loading' | 'idle' | 'pending' | 'saved' | 'stale' | 'error'
+  >('loading');
   const [activeIndex, setActiveIndex] = useState(spec.activeIndex);
   const queryClient = useQueryClient();
   const closeEditor = useChromeStore((state) => state.closeEditor);
@@ -83,6 +100,15 @@ function RuleEditor({ spec }: { spec: EditorSpec }) {
     let view: EditorView | null = null;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const range = spec.ranges[spec.activeIndex];
+
+    /** External content won: reload it into the doc and rebase. */
+    const acceptExternal = (contents: string): void => {
+      if (view === null) return;
+      replaceDoc(view, contents);
+      baselineRef.current = contents;
+      setStatus('stale');
+      void queryClient.invalidateQueries({ queryKey: ['astroix', 'index-payload'] });
+    };
 
     const write = async (text: string): Promise<void> => {
       const baseline = baselineRef.current;
@@ -112,8 +138,20 @@ function RuleEditor({ spec }: { spec: EditorSpec }) {
           file: spec.file,
           range: { start, end: endBaseline },
           replacement: text.slice(start, endText),
+          // optimistic write: what we believe is on disk — a mismatch means
+          // the file changed under us (IDE edit racing the debounce)
+          expected: await sha256Hex(baseline),
         }),
       });
+      if (response.status === 409) {
+        // the disk moved first: reload its content instead of splicing stale
+        // offsets into a shifted file (the typed edit is dropped — the diff
+        // UI is v1)
+        const body = (await response.json()) as { contents?: string };
+        if (typeof body.contents === 'string') acceptExternal(body.contents);
+        else setStatus('error');
+        return;
+      }
       if (response.ok) {
         baselineRef.current = text;
         setStatus('saved');
@@ -169,9 +207,34 @@ function RuleEditor({ spec }: { spec: EditorSpec }) {
       setStatus('idle');
     })();
 
+    // file→chrome sync (spec #13): the node watcher pushes
+    // `astroix:file-changed` over the Vite WS. Our own writes echo back as
+    // no-ops (content compare); a genuinely external change replaces the doc
+    // when it is clean — while dirty, the pending write reconciles (and the
+    // expected-hash guard turns a race into a reload, never a corruption).
+    const onFileSync = (payload: { file: string }): void => {
+      if (payload.file !== spec.file || view === null || cancelled) return;
+      void (async () => {
+        const response = await fetch(`/__astroix/file?file=${encodeURIComponent(spec.file)}`);
+        if (!response.ok || cancelled) return;
+        const { contents } = (await response.json()) as { contents: string };
+        const doc = view?.state.doc.toString() ?? '';
+        if (contents === doc) return; // echo of our own write
+        if (doc === baselineRef.current) {
+          replaceDoc(view as EditorView, contents);
+          baselineRef.current = contents;
+        }
+        // dirty doc: the debounce will write (hash-guarded) — never clobber
+      })();
+    };
+    if (import.meta.hot) {
+      import.meta.hot.on('astroix:file-changed', onFileSync);
+    }
+
     return () => {
       cancelled = true;
       if (timer !== undefined) clearTimeout(timer);
+      if (import.meta.hot) import.meta.hot.off('astroix:file-changed', onFileSync);
       view?.destroy();
     };
     // mounts once per file (keyed); spec identity is stable while open
@@ -207,12 +270,20 @@ function RuleEditor({ spec }: { spec: EditorSpec }) {
               ? 'text-emerald-400'
               : status === 'pending'
                 ? 'text-amber-400'
-                : status === 'error'
-                  ? 'text-red-400'
-                  : 'text-slate-500'
+                : status === 'stale'
+                  ? 'text-amber-400'
+                  : status === 'error'
+                    ? 'text-red-400'
+                    : 'text-slate-500'
           }
         >
-          {status === 'saved' ? 'written' : status === 'pending' ? 'writing…' : status}
+          {status === 'saved'
+            ? 'written'
+            : status === 'pending'
+              ? 'writing…'
+              : status === 'stale'
+                ? 'changed on disk — reloaded'
+                : status}
         </span>
         <button
           type="button"

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { join, relative, resolve, sep } from 'node:path';
@@ -85,7 +86,7 @@ async function handleApiRequest(
 
     if (req.method === 'POST' && url.pathname === '/edit') {
       const body = await readJsonBody(req);
-      const { file, range, replacement } = parseEditBody(body);
+      const { file, range, replacement, expected } = parseEditBody(body);
       if (file === null || range === null || replacement === null) {
         json(res, 400, { error: 'expected { file, range: { start, end }, replacement }' });
         return;
@@ -96,6 +97,15 @@ async function handleApiRequest(
         return;
       }
       const contents = readFileSync(absPath, 'utf8');
+      // Optimistic write check: the chrome sends the hash of the content it
+      // based its edit on. A mismatch means the file changed on disk under us
+      // (IDE edit racing the debounce) — refuse instead of splicing stale
+      // offsets into a shifted file, and hand back the current contents so
+      // the editor can reload in one roundtrip.
+      if (expected !== null && sha256(contents) !== expected) {
+        json(res, 409, { error: 'file changed on disk', contents });
+        return;
+      }
       try {
         writeFileSync(
           absPath,
@@ -218,7 +228,8 @@ export function collectSources(srcDir: string): SourceFile[] {
   return sources;
 }
 
-function toRelative(root: string, file: string): string {
+/** Project-relative posix path — also the file id used by the sync events. */
+export function toRelative(root: string, file: string): string {
   return relative(root, file).split(sep).join('/');
 }
 
@@ -232,11 +243,12 @@ function parseEditBody(body: unknown): {
   file: string | null;
   range: [number, number] | null;
   replacement: string | null;
+  expected: string | null;
 } {
   if (body === null || typeof body !== 'object') {
-    return { file: null, range: null, replacement: null };
+    return { file: null, range: null, replacement: null, expected: null };
   }
-  const { file, range, replacement } = body as Record<string, unknown>;
+  const { file, range, replacement, expected } = body as Record<string, unknown>;
   const validRange =
     typeof range === 'object' &&
     range !== null &&
@@ -251,7 +263,12 @@ function parseEditBody(body: unknown): {
     file: typeof file === 'string' ? file : null,
     range: validRange,
     replacement: typeof replacement === 'string' ? replacement : null,
+    expected: typeof expected === 'string' ? expected : null,
   };
+}
+
+function sha256(text: string): string {
+  return createHash('sha256').update(text).digest('hex');
 }
 
 function readJsonBody(req: IncomingMessage): Promise<unknown> {

@@ -5,6 +5,7 @@ import { chromeHtml } from './chrome-html';
 import { isDocumentRequest } from './document-request';
 import { registerRestEndpoints } from './rest';
 import { chromeArtifactPath, clientEntryPath } from './source-mode';
+import { registerFileSync } from './watch-sync';
 
 export const VIRTUAL_CHROME_ID = 'virtual:astroix/chrome';
 
@@ -46,6 +47,10 @@ export function astroixVitePlugin(options: AstroixPluginOptions = {}): Plugin {
         })();
       });
       registerRestEndpoints(server, {
+        root: server.config.root,
+        srcDir: options.srcDir ?? join(server.config.root, 'src'),
+      });
+      registerFileSync(server, {
         root: server.config.root,
         srcDir: options.srcDir ?? join(server.config.root, 'src'),
       });
