@@ -9,7 +9,6 @@ on:
 permissions:
   contents: read
   pull-requests: write
-  id-token: write # upstream recipe default; unused with static API key auth
 
 # rapid pushes supersede their review runs; cancel so quota follows the latest sha
 concurrency:
@@ -37,6 +36,11 @@ jobs:
           # the input satisfies the action's env validation; the env pair above
           # is what actually routes the CLI to Z.AI with Bearer auth
           anthropic_api_key: ${{ secrets.ZAI_API_KEY }}
+          # the workflow's own token: skips the official Claude GitHub App
+          # exchange (401 when that app isn't installed, and its default-branch
+          # workflow check would skip the first run on PRs touching workflows);
+          # comments post as github-actions[bot]
+          github_token: ${{ github.token }}
           # advisory only: fixes happen in the local review loop, never from CI
           include_fix_links: false
           use_sticky_comment: true
