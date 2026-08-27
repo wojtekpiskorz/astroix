@@ -81,6 +81,10 @@ Never:
 
 ## Agent skills
 
+### Review skills
+
+Vendored in `.agents/skills/` (`thermo-nuclear-code-quality-review`, `unslop`): byte-identical upstream copies with provenance and refresh instructions in `.agents/skills/README.md`. Review flows invoke these; the SKILL.md files are never edited in place.
+
 ### Issue tracker
 
 Issues live in GitHub Issues; use the `gh` CLI. See `docs/agents/issue-tracker.md`.
