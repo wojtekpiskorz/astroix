@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef } from 'react';
 import { type IndexPayloadRecord, matchRules } from '../core/matcher';
+import { Button } from './components/ui/button';
 import { EditorPane } from './editor';
 import { type Selection, useChromeStore } from './store';
 
@@ -30,7 +31,9 @@ export function App() {
   }, [queryClient]);
 
   return (
-    <div className="flex h-full w-full flex-col bg-slate-950 text-slate-100">
+    // `dark`: the shadcn theme block (.dark in chrome.css) — the foundation
+    // components style themselves from these tokens (issue #44)
+    <div className="dark flex h-full w-full flex-col bg-slate-950 text-slate-100">
       <ChromeHeader />
       <div className="flex min-h-0 flex-1">
         <Sidebar />
@@ -49,18 +52,15 @@ function ChromeHeader() {
       className="flex items-center gap-4 border-b border-slate-800 bg-slate-900 px-4 py-2 text-sm"
     >
       <strong className="translate-x-2 text-xs tracking-widest uppercase">astroix</strong>
-      <button
+      <Button
         type="button"
+        variant={selectMode ? 'default' : 'secondary'}
+        size="sm"
         onClick={toggleSelectMode}
         aria-pressed={selectMode}
-        className={
-          selectMode
-            ? 'rounded bg-sky-500 px-2 py-0.5 font-medium text-slate-950'
-            : 'rounded bg-slate-700 px-2 py-0.5 text-slate-300'
-        }
       >
         Select: {selectMode ? 'on' : 'off'}
-      </button>
+      </Button>
       <span data-astroix-selection className="truncate text-slate-400">
         {selection === null ? 'no selection' : selection.descriptor}
       </span>

@@ -16,8 +16,8 @@ When your work touches an architectural decision, these files win over your prio
 - `bun run check` — Biome lint + format check; `bun run check:write` autofixes.
 - `bun run typecheck` — `tsc --noEmit`.
 - `bun run test` — unit tests (vitest + happy-dom); `bun run test:watch` for watch mode.
-- `bun run test:e2e` — Playwright e2e; boots the fixture dev server on `http://localhost:4312`.
-- `bun run build` — tsup → `dist/` (node side only; the chrome client is never built — it is served from source through a virtual module, see `docs/core-reuse.md` §1).
+- `bun run test:e2e` — Playwright e2e; boots the fixture dev server on `http://localhost:4314` (npm-pack lane on :4313; the owner's manual smoke owns :4312 — lanes never share servers).
+- `bun run build` — tsup (node side) + vite build (the prebuilt chrome bundle `dist/chrome.js`) — chrome delivery is hybrid per `docs/adr/0001` (source-served in our dev checkout, prebuilt for consumers).
 
 Package manager is **bun**. Run bun; never npm/pnpm/yarn.
 
@@ -25,7 +25,7 @@ Package manager is **bun**. Run bun; never npm/pnpm/yarn.
 
 - `src/core/` — pure modules (indexer, matcher, splice-writer); no IO, unit-tested over fixtures
 - `src/node/` — the integration: Vite plugin, middleware, watcher, REST endpoints (built by tsup → `dist/`)
-- `src/client/` — the chrome (React 19, shadow DOM); never built — served from source via the virtual module
+- `src/client/` — the chrome (React 19, shadow DOM); hybrid delivery per ADR-0001. UI foundation is shadcn on Base UI (`base-nova`): components under `src/client/components/ui/`, imported through `package.json#imports` (`#components/*`, `#lib/*`, `#hooks/*`); theme tokens live in `src/client/chrome.css` — new components come from `bunx shadcn@latest add <name>`.
 - `e2e/fixture/` — synthetic Astro 7 project (hero collection + co-located CSS) driven by Playwright; its own package
 - `.changeset/` — changesets config; every code PR adds one
 - `docs/` — spec, stack, core-reuse: the decision record
