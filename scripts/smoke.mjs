@@ -1,6 +1,6 @@
 import { execSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { createConnection } from 'node:net';
 import { join } from 'node:path';
 
@@ -69,6 +69,13 @@ if (fixtureReady) {
   console.log('→ refreshing the e2e fixture dependency (bun recopies the whole checkout;');
   console.log('   this step is silent and can take a minute or two the first time)');
   run('bun install', { cwd: 'e2e/fixture' });
+  // the copy embeds the repo's e2e/fixture/node_modules — dead weight that
+  // compounds a nesting level per refresh (and any .old-* bun leaves behind
+  // inherits it). Prune it so the chain never grows.
+  rmSync('e2e/fixture/node_modules/@wojciechpiskorz/astroix/e2e', {
+    recursive: true,
+    force: true,
+  });
 }
 
 console.log();
