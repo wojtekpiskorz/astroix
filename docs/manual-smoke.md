@@ -17,4 +17,7 @@ green in CI). Canonical text from the wayfinder map (T5 grilling, Q4).
    highlighted; the multi-place ranges reachable as annotations.
 6. Change `color` in raw text — ~300 ms later the file on disk changed
    (`git diff` = one line), the canvas shows the new color via HMR.
+6b. With the editor still open, edit the same file in your IDE and save —
+   the chrome editor updates live (and a racing chrome write is refused,
+   not spliced: status reads "changed on disk — reloaded").
 7. `?builder=0` on the top-level URL — clean page, no chrome.

@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef } from 'react';
 import { type IndexPayloadRecord, matchRules } from '../core/matcher';
 import { EditorPane } from './editor';
@@ -16,6 +16,19 @@ function canvasSrc(): string {
 }
 
 export function App() {
+  // file→chrome sync (spec #13): any pushed source change makes the payload
+  // stale (ranges/lines moved) — refetch on every event, editor or not
+  const queryClient = useQueryClient();
+  useEffect(() => {
+    const hot = import.meta.hot;
+    if (!hot) return;
+    const handler = (): void => {
+      void queryClient.invalidateQueries({ queryKey: ['astroix', 'index-payload'] });
+    };
+    hot.on('astroix:file-changed', handler);
+    return () => hot.off('astroix:file-changed', handler);
+  }, [queryClient]);
+
   return (
     <div className="flex h-full w-full flex-col bg-slate-950 text-slate-100">
       <ChromeHeader />

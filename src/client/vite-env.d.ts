@@ -4,3 +4,9 @@ declare module '*.css?inline' {
   const css: string;
   export default css;
 }
+
+declare module 'vite/types/customEvent' {
+  interface CustomEventMap {
+    'astroix:file-changed': { file: string };
+  }
+}

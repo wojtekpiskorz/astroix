@@ -38,7 +38,8 @@ function astroix(): AstroIntegration {
       'astro:config:setup': ({ config, command, updateConfig, injectScript, logger }) => {
         if (command !== 'dev') return;
 
-        // The resolved config turns dir strings into URLs — the plugin wants paths.
+        // The resolved config turns dir strings into URLs (trailing slash included) —
+        // the plugin wants clean paths.
         const plugins: VitePlugin[] = [astroixVitePlugin({ srcDir: fileURLToPath(config.srcDir) })];
         // The chrome sources live outside the host root and are served via
         // /@fs, which has two consequences fixed below: (a) deps discovered
