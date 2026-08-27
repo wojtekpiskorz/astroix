@@ -3,7 +3,9 @@
 The human half of the POC DoD (the executable half is `e2e/loop.spec.ts`,
 green in CI). Canonical text from the wayfinder map (T5 grilling, Q4).
 
-1. `bun install` (root + `e2e/fixture/`), `bun run build` (root), start the
+1. One command prepares and boots everything: `bun run smoke` (installs root
+   + fixture, builds, boots the dev server on `:4312`). Manual equivalent:
+   `bun install` (root + `e2e/fixture/`), `bun run build` (root), start the
    fixture dev server (`bun run dev` inside `e2e/fixture/`).
 2. Open `http://localhost:4312/` — the chrome appears (default-on), the
    canvas shows the live page.
