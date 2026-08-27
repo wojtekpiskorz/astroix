@@ -36,6 +36,25 @@ test('Tailwind styles work inside the shadow tree (dual adoption)', async ({ pag
   expect(transform).not.toBe('none');
 });
 
+test('shadcn theme tokens resolve inside the shadow tree (select toggle is themed)', async ({
+  page,
+}) => {
+  await page.goto('/');
+  const toggle = page.getByText('Select: off');
+  await expect(toggle).toBeVisible();
+  // the toggle is a shadcn Button (data-slot marks the component), off state
+  // styled by variant=secondary → var(--secondary)
+  expect(await toggle.getAttribute('data-slot')).toBe('button');
+  const background = await toggle.evaluate((el) => getComputedStyle(el).backgroundColor);
+  expect(background).not.toBe('rgba(0, 0, 0, 0)');
+  // dark-scoped --secondary is oklch(0.269 0 0) ≈ rgb(43 43 43); the light
+  // value (0.97) would mean the `.dark` block is not applying in the shadow
+  // tree — i.e. the theming plumbing is broken, not just a shade off
+  const channels = background.match(/[\d.]+/g)?.map(Number) ?? [];
+  expect(channels.length).toBeGreaterThanOrEqual(3);
+  expect(channels[0]).toBeLessThan(100);
+});
+
 test('escape hatch: ?builder=0 returns the untouched page', async ({ request }) => {
   const response = await request.get('/?builder=0');
   expect(response.status()).toBe(200);
