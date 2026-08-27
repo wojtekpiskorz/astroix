@@ -32,6 +32,10 @@ jobs:
       ANTHROPIC_DEFAULT_SONNET_MODEL: glm-5.3
       ANTHROPIC_DEFAULT_HAIKU_MODEL: glm-5.3-flash
       API_TIMEOUT_MS: "3000000" # Z.AI-recommended long-turn timeout; the job clock is the real bound
+      # reasoning pinned to max (low/high/max on GLM; the endpoint defaults to
+      # max, but the CLI may send its own explicit lower effort, which wins —
+      # this env overrides /effort and pins it)
+      CLAUDE_CODE_EFFORT_LEVEL: max
     steps:
       - uses: actions/checkout@v4
       - uses: anthropics/claude-code-action@v1
