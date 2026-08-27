@@ -19,8 +19,10 @@ jobs:
   review:
     name: advisory review (GLM · thermo-nuclear + unslop)
     # drafts fire opened/synchronize too; skip them so WIP pushes don't burn
-    # coding-plan quota (ready_for_review re-triggers once the PR goes live)
-    if: ${{ !github.event.pull_request.draft }}
+    # coding-plan quota (ready_for_review re-triggers once the PR goes live).
+    # Fork PRs skip too: GitHub withholds secrets and write perms from them,
+    # so a run there can only fail red and read like a broken gate.
+    if: ${{ !github.event.pull_request.draft && github.event.pull_request.head.repo.fork == false }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -32,13 +34,14 @@ jobs:
       ANTHROPIC_DEFAULT_SONNET_MODEL: glm-5.3
       ANTHROPIC_DEFAULT_HAIKU_MODEL: glm-5.3-flash
       API_TIMEOUT_MS: "3000000" # Z.AI-recommended long-turn timeout; the job clock is the real bound
-      # reasoning pinned to max (low/high/max on GLM; the endpoint defaults to
-      # max, but the CLI may send its own explicit lower effort, which wins.
-      # This env overrides /effort and pins it)
+      # reasoning at max (GLM levels low/high/max). The endpoint defaults to
+      # max; this env overrides any lower effort the CLI sends explicitly.
       CLAUDE_CODE_EFFORT_LEVEL: max
     steps:
       - uses: actions/checkout@v4
-      - uses: anthropics/claude-code-action@v1
+      # SHA-pinned v1: the one action here that holds a PR-write token and a
+      # paid API key, so tag movement must not swap code under it silently
+      - uses: anthropics/claude-code-action@62529b7c89dbb8cfaa838f2c87f2f8459b46fe68 # v1
         with:
           # the input satisfies the action's env validation; the env pair above
           # is what actually routes the CLI to Z.AI with Bearer auth
