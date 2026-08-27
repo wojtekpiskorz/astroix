@@ -1,6 +1,10 @@
 import { defineConfig, devices } from '@playwright/test';
 
-const PORT = 4312;
+// The e2e lanes own their ports: main :4314, npm-pack :4313. The owner's
+// manual smoke lives on :4312 — structural separation, never shared servers
+// (PR #36 debugged a "broken" suite that was actually playwright adopting
+// the owner's orphaned smoke server with a stale dist).
+const PORT = 4314;
 
 export default defineConfig({
   testDir: 'e2e',
@@ -24,10 +28,11 @@ export default defineConfig({
   ],
   webServer: [
     {
-      command: 'bun run dev',
+      command: `ASTROIX_E2E_PORT=${PORT} bun run dev`,
       cwd: 'e2e/fixture',
       url: `http://localhost:${PORT}`,
-      reuseExistingServer: !process.env.CI,
+      // CI parity — no zombie adoption, ever; the boot cost is seconds
+      reuseExistingServer: false,
       timeout: 60_000,
     },
     {
@@ -37,7 +42,7 @@ export default defineConfig({
       command: 'node ../../scripts/prepare-pack-fixture.mjs && bun run dev',
       cwd: 'e2e/pack-fixture',
       url: 'http://localhost:4313',
-      reuseExistingServer: !process.env.CI,
+      reuseExistingServer: false,
       timeout: 240_000,
     },
   ],

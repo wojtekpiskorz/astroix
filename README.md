@@ -37,6 +37,10 @@ bun run build                      # tsup (node) + vite (chrome bundle) → dist
 
 The e2e fixture consumes the local package via `file:../..` and registers `astroix()` in its `astro.config.mjs`. With both packages installed, run `bun run dev` (tsup watch) at the root in one terminal and `bun run dev` in `e2e/fixture/` in the other — the fixture dev server on `http://localhost:4312` runs the integration straight from your checkout.
 
+### Ports
+
+The owner's manual smoke owns `:4312` (`bun run smoke`); the e2e lanes never touch it — Playwright boots the main lane on `:4314` (`ASTROIX_E2E_PORT` in the fixture's dev script) and the npm-pack lane on `:4313`. Both lanes always boot their own servers (`reuseExistingServer: false`), and the fixture dev script runs astro with `--ignore-lock` — astro's per-project single-server guard would otherwise refuse the e2e instance while the owner's smoke server runs; both paths own their lifecycle externally (the smoke script pre-checks its port, Playwright kills its own servers).
+
 ### Definition of done (POC)
 
 The executable DoD is `e2e/loop.spec.ts` (the full CSS editing loop: chrome → select → rule list → CodeMirror edit → bytes on disk + canvas reflection), green in CI. The human half — the owner's manual smoke through the real chrome — is [`docs/manual-smoke.md`](docs/manual-smoke.md); `bun run smoke` prepares and boots the environment in one command.
