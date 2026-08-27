@@ -25,10 +25,11 @@
 }
 
 .hero-lead {
-  margin: 0;
+  margin: 10px;
   font-size: 1.25rem;
-  color: #475569;
+  color: red;
 }
+
 
 .hero-cta {
   justify-self: start;

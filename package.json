@@ -39,6 +39,7 @@
     "check": "biome check .",
     "check:write": "biome check --write .",
     "check:artifact": "node scripts/check-chrome-artifact.mjs",
+    "smoke": "node scripts/smoke.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
