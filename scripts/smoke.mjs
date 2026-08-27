@@ -1,7 +1,25 @@
 import { execSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { createConnection } from 'node:net';
 import { join } from 'node:path';
+
+const SMOKE_PORT = 4312;
+
+/** True when something is already listening on the port. */
+const isPortOpen = (port) =>
+  new Promise((resolve) => {
+    const socket = createConnection({ port, host: '127.0.0.1' });
+    socket.once('connect', () => {
+      socket.destroy();
+      resolve(true);
+    });
+    socket.once('error', () => resolve(false));
+    socket.setTimeout(1_000, () => {
+      socket.destroy();
+      resolve(false);
+    });
+  });
 
 /**
  * One-command manual-smoke environment: install everything, build the package
@@ -14,6 +32,16 @@ import { join } from 'node:path';
  * repeat runs boot in seconds.
  */
 const run = (command, options = {}) => execSync(command, { stdio: 'inherit', ...options });
+
+if (await isPortOpen(SMOKE_PORT)) {
+  console.error(`astroix smoke: port ${SMOKE_PORT} is already occupied — a dev server is there.`);
+  console.error('  kill it:   lsof -ti :4312 | xargs kill');
+  console.error(
+    '  tracked servers can also be stopped with: cd e2e/fixture && bunx astro dev stop',
+  );
+  console.error('  or simply keep using the running server.');
+  process.exit(1);
+}
 
 const distHash = (dir) => {
   if (!existsSync(dir)) return null;
