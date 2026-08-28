@@ -103,15 +103,22 @@ test('sidebar collapses offcanvas and expands with state preserved', async ({ pa
   const sidebar = page.locator('[data-slot="sidebar"]');
   await expect(sidebar).toHaveAttribute('data-state', 'expanded');
 
-  // make the vertical state meaningful, then collapse via the rail (fully
-  // reachable while expanded)
+  // make the vertical state meaningful, then capture the dock's edge before
+  // collapsing via the rail (fully reachable while expanded)
   await page.getByRole('tab', { name: 'Content' }).click();
-  await expect(page.locator('[data-astroix-entries="pending"]')).toBeVisible();
+  const dock = page.locator('[data-astroix-content-form="pending"]');
+  await expect(dock).toBeVisible();
+  const dockXExpanded = (await dock.boundingBox())?.x;
   await page.getByRole('button', { name: 'Toggle Sidebar' }).click();
 
-  // offcanvas collapse: the state flips, and the dock + canvas stay put
+  // offcanvas collapse: the state flips and the column is reclaimed — the
+  // dock's left edge moves in by the sidebar width. The gap div animates
+  // its width (~200ms), so poll for the settled geometry instead of
+  // sampling once; a gap stuck at 18rem would never satisfy the poll
   await expect(sidebar).toHaveAttribute('data-state', 'collapsed');
-  await expect(page.locator('[data-astroix-content-form="pending"]')).toBeVisible();
+  await expect
+    .poll(async () => (await dock.boundingBox())?.x ?? Number.NaN)
+    .toBeLessThan((dockXExpanded ?? 0) - 250);
   await expect(page.frameLocator('#astroix-canvas').locator('.hero-title')).toBeVisible();
 
   // the keyboard shortcut expands; the active vertical survived the roundtrip
