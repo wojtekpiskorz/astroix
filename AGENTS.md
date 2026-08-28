@@ -25,7 +25,7 @@ Package manager is **bun**. Run bun; never npm/pnpm/yarn.
 
 - `src/core/` — pure modules (indexer, matcher, splice-writer); no IO, unit-tested over fixtures
 - `src/node/` — the integration: Vite plugin, middleware, watcher, REST endpoints (built by tsup → `dist/`)
-- `src/client/` — the chrome (React 19, shadow DOM); hybrid delivery per ADR-0001. UI foundation is shadcn on Base UI (`base-nova`): components under `src/client/components/ui/`, imported through `package.json#imports` (`#components/*`, `#lib/*`, `#hooks/*`); theme tokens live in `src/client/chrome.css` — new components come from `bunx shadcn@latest add <name>`.
+- `src/client/` — the chrome (React 19, shadow DOM); hybrid delivery per ADR-0001. UI foundation is shadcn on Base UI (`base-nova`): components under `src/client/components/ui/`, imported through `package.json#imports` (`#components/*`, `#lib/*`, `#hooks/*`); theme tokens live in `src/client/chrome.css` — new components come from `bunx shadcn@latest add <name>`. Target module layout: ADR-0002, enforced by the Chrome architecture checklist below.
 - `e2e/fixture/` — synthetic Astro 7 project (hero collection + co-located CSS) driven by Playwright; its own package
 - `.changeset/` — changesets config; every code PR adds one
 - `docs/` — spec, stack, core-reuse: the decision record
@@ -40,6 +40,17 @@ Package manager is **bun**. Run bun; never npm/pnpm/yarn.
 - Biome is canonical for lint + format. Do not introduce eslint/prettier configs.
 - React 19 + React Compiler: no manual memoization. TanStack (Form/Query) where applicable; zustand for client-only UI state.
 - Plain async/TS. No Effect — decision recorded in `docs/stack.md`.
+
+## Chrome architecture (ADR-0002 — living checklist)
+
+Rationale and trade-offs live in `docs/adr/0002-chrome-module-architecture.md`; this checklist is what every PR is held to, maintained as the layout evolves.
+
+- Imports flow strictly downward: app shell (`app.tsx`, `chrome.tsx`, `entry.tsx` + bootstrap helpers like `react-guard.ts`, `styles.ts`) → `features/<vertical>/` → shared modules (`canvas/`, `editor/`) → `components/ui/` → `lib/`; `src/core` is importable from anywhere, and the app store (`src/client/store.ts`) serves every layer except `components/ui/` and `lib/`. No sideways (feature ↔ feature, shared ↔ shared), no upward, no cycles.
+- Vertical UI lands in its feature folder — components + its zustand store + its `api.ts`; a feature never imports another feature.
+- Server/watcher-derived data goes through TanStack Query, colocated in the owning module's `api.ts` (feature or shared — `editor/` owns its own file hooks), query keys `['astroix', <resource>, …]`; chrome-only UI state goes zustand (per-feature store; cross-vertical state like `selection` lives in the small app store at `src/client/store.ts`, importable from anywhere like `src/core`).
+- `components/ui/` is shadcn-generated and domain-deaf — extend by regeneration, never by hand-editing toward domain needs.
+- Code with one consumer stays in the feature that needs it; a shared module beyond ui/lib is born only when 2+ verticals need it (a prospective need counts only if the owner rules it does), and stays as small as its job. `lib/` stays helpers-only.
+- One exported component per file, lowercase-dash name matching the component (`rule-list.tsx` ← `RuleList`); extract on multi-use, ~300 lines, or two distinct concerns in one file — the line count is a signal, not a gate.
 
 ## Testing doctrine
 
