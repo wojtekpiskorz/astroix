@@ -101,12 +101,12 @@ export function touchedFunctions(
 }
 
 /** The layer where per-function unit coverage is real — CRAP's only honest home. */
-export function isCoreFile(relPath: string): boolean {
+function isCoreFile(relPath: string): boolean {
   return relPath.startsWith('src/core/');
 }
 
 /** The shadcn-generated tier: regenerated per ADR-0002, never hand-edited — visible in reports, never gated (owner ruling 2026-08-28, #62). */
-export function isWatchOnlyFile(relPath: string): boolean {
+function isWatchOnlyFile(relPath: string): boolean {
   return relPath.startsWith('src/client/components/ui/');
 }
 
@@ -137,7 +137,7 @@ export function toRiskEntry(
       crap,
       metric: 'crap',
       value: crap,
-      stop: watchOnly ? Number.POSITIVE_INFINITY : GATE_STOPS.coreCrapStop,
+      stop: GATE_STOPS.coreCrapStop, // ui/ is a client prefix — never lands in the core tier
       watchOnly,
       band: bandOf(crap),
     };

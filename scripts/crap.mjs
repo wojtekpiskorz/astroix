@@ -223,7 +223,7 @@ function renderTable(entries) {
 }
 
 function headerLine() {
-  return `stops: CRAP >= ${GATE_STOPS.coreCrapStop} (src/core) · CC >= ${GATE_STOPS.watchlistCcStop} (src/node, src/client) · pre-commit warns CC >= ${PRECOMMIT_CC_WARN}`;
+  return `stops: CRAP >= ${GATE_STOPS.coreCrapStop} (src/core) · CC >= ${GATE_STOPS.watchlistCcStop} (src/node, src/client) · pre-commit warns CC >= ${PRECOMMIT_CC_WARN} · generated ui/ is watch-only`;
 }
 
 // ——— modes ———
@@ -304,8 +304,10 @@ function modePreflight() {
   const dirty =
     (gitOk(['status', '--porcelain', '--', 'src', 'vitest.config.ts']) ?? '').length > 0;
   if (dirty) {
-    // vitest coverage reads the working tree: a pass here could rest on
-    // uncommitted tests — the exact class of pass committedSource closes for CC
+    // this check is the only committed-state guard for BOTH terms now: the
+    // full-src ratchet reads CC from the working tree (buildEntries default)
+    // and coverage from the tree vitest runs over — a pass on a dirty src/
+    // could rest on content that never gets committed
     console.error(
       'preflight: src/ or vitest.config.ts is dirty — the CRAP coverage term would read uncommitted content. Commit or stash (git stash -u covers untracked), then rerun.',
     );
