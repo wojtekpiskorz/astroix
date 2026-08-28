@@ -288,9 +288,6 @@ function modePreflight() {
     console.log('preflight: no src changes vs merge-base — CRAP scope empty');
     return;
   }
-  if ((gitOk(['status', '--porcelain']) ?? '').length > 0)
-    console.log('preflight: evaluating committed state (HEAD); working tree is dirty');
-
   // touched set first: a diff landing between functions never pays the coverage run
   const touched = touchedIn(files, [base, 'HEAD'], committedSource);
   if (touched.length === 0) {
@@ -299,6 +296,14 @@ function modePreflight() {
   }
 
   const needCoverage = files.some((f) => isCoreFile(relative(ROOT, f)));
+  if (needCoverage && (gitOk(['status', '--porcelain']) ?? '').length > 0) {
+    // vitest coverage reads the working tree: a pass here could rest on
+    // uncommitted tests — the exact class of pass committedSource closes for CC
+    console.error(
+      'preflight: working tree is dirty — the CRAP coverage term would read uncommitted tests. Commit or stash, then rerun.',
+    );
+    process.exit(1);
+  }
   const coverage = needCoverage ? runCoverage() : {};
   const entries = touched.map(({ file, fn }) =>
     toRiskEntry(file, fn, coverage === null ? null : coverage?.[join(ROOT, file)]),
