@@ -6,7 +6,7 @@ The chrome grew as a POC flat layout, and that was fine while there was one vert
 
 ## The layers
 
-A module may import only from modules strictly below it — downward only, no sideways, no upward, no cycles. Two escapes are importable from anywhere: `src/core` (pure domain, no IO) and the app-level store at `src/client/store.ts`, which layers 2 and 3 both consume. `components/ui/` imports neither and stays domain-deaf.
+A module may import only from modules strictly below it — downward only, no sideways, no upward, no cycles. Two escapes cross the layers: `src/core` (pure domain, no IO) is importable from anywhere, and the app-level store at `src/client/store.ts` serves every layer except `components/ui/` and `lib/`.
 
 1. **App shell** — `app.tsx`, `chrome.tsx`, `entry.tsx` and its bootstrap helpers (`react-guard.ts`, `styles.ts`): bootstrap, layout, tab composition, the editor dock slot. Thin; composes features, owns no vertical logic.
 2. **`features/<vertical>/`** — one folder per vertical: `features/css/` first, `features/content/` next. Inside: the vertical's components, its zustand store, and its `api.ts`. A feature is self-sufficient: everything it needs travels through its folder or the layers below.
@@ -14,7 +14,7 @@ A module may import only from modules strictly below it — downward only, no si
 4. **`components/ui/`** — shadcn primitives, CLI-generated, domain-deaf: no imports from features, stores, shared modules, or core. Changed by regeneration, never hand-edited toward domain needs.
 5. **`lib/`** — shared pure helpers (`cn` today).
 
-Sideways imports are forbidden at every level: features never import each other; shared modules never import each other (if `canvas` ever needs `editor`, the shared piece drops to `lib/` or a module is promoted). Code with one consumer stays in the feature that needs it; a shared module is born only when 2+ verticals need it, whatever it shares, and stays as small as its job. A prospective need the owner rules on counts: `canvas/` and `editor/` are born at restructure time, sized for the Content tab, while `features/css/` is still the only feature. `lib/` stays helpers-only.
+Sideways imports are forbidden at every level: features never import each other; shared modules never import each other (if `canvas` ever needs `editor`, the shared piece drops to `lib/` or a module is promoted). Code with one consumer stays in the feature that needs it; a shared module is born only when 2+ verticals need it, whatever it shares, and stays as small as its job. A prospective need counts only if the owner rules it does: `canvas/` and `editor/` are born at restructure time, sized for the Content tab, while `features/css/` is still the only feature. `lib/` stays helpers-only.
 
 ## State
 
