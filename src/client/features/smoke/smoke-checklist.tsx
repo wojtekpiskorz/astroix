@@ -73,8 +73,9 @@ function SmokeWizard() {
 }
 
 function isPlainS(event: KeyboardEvent): boolean {
-  // modifier chords (cmd/ctrl/alt+S) stay with the browser
-  if (event.metaKey || event.ctrlKey || event.altKey) return false;
+  // modifier chords (cmd/ctrl/alt+S) stay with the browser; a held key
+  // would strobe the dialog open and closed on every OS repeat
+  if (event.metaKey || event.ctrlKey || event.altKey || event.repeat) return false;
   return event.key.toLowerCase() === 's';
 }
 
