@@ -19,7 +19,7 @@ Problem ma dwie twarze:
 
 Dev-only integration do Astro. Po odpaleniu `astro dev` wejście przez `?builder=1` otwiera chrome buildera (sidebar w shadow DOM), w którym kanwa to same-origin iframe z żywą stroną. Dwie zakładki:
 
-- **Content**: GUI nad Content Collections — formularze generowane automatycznie ze schem zod (custom fields = pola), body w edytorze markdown, jawny Save, walidacja inline nieblokująca zapisu.
+- **Content**: GUI nad Content Collections — formularze generowane automatycznie ze schem zod (custom fields = pola), body w edytorze markdown, auto-write (debounce ~300ms), walidacja inline nieblokująca zapisu.
 - **CSS**: tryb zaznaczania na canwie. Klik w element → lista reguł z repo pasujących do niego, każda z plikiem i linią, z wskazaniem wygrywającej w kaskadzie → edycja inline (wiersze property→value z widgetami: kolor, jednostki, enumy; plus raw mode) → zapis text-splice do oryginalnego pliku źródłowego z auto-write debounce → HMR = live preview.
 
 Kluczowa zasada: **repo-mapping, nie parallel world**. Builder czyta i pisze prawdziwe pliki repo tam, gdzie agent by je położył ("najbliższy dom"), więc repo pozostaje jednorodne, a agent pracuje obok bez świadomości istnienia buildera.
@@ -41,7 +41,7 @@ Synchronizacja dwukierunkowa (wymóg twardy): zapis w IDE → live update canvas
 11. Jako developer, chcę inline walidację zod przy polach, tak aby widzieć błąd przed zapisem.
 12. Jako developer, chcę aby walidacja nie blokowała zapisu, tak aby móc zapisać draft łamiący schemę i zostawić poprawkę agentowi.
 13. Jako developer, chcę edytor markdown z podglądem, tak aby poprawiać body bez otwierania IDE.
-14. Jako developer, chcę jawny Save dla contentu, tak aby niezapisane zmiany nie lądowały na dysku przy każdym znaku.
+14. Jako developer, chcę auto-write dla contentu — debounce ~300ms po pauzie w pisaniu, podglądem żywym kanwa przeładowywana przez sync Astro — tak aby treść pracowała jak style: natychmiastowa pętla edycja→dysk→podgląd, bez przycisku Save. *(Zmiana 2026-08-28, wayfinder #47 → #67: pierwotnie jawny Save, żeby niezapisane zmiany nie lądowały na dysku przy każdym znaku; wygrała wspólna doktryna auto-write z pionu CSS — plik brudny na dysku w trakcie sesji to zaakceptowany koszt, patrz Impl #9.)*
 15. Jako developer, chcę tworzyć nowe entry jako draft (przez flagę we frontmatterze), tak aby szkicować posty z poziomu GUI.
 16. Jako developer, po kliknięciu elementu chcę listę reguł CSS pasujących do niego — każda z plikiem i linią — tak aby wiedzieć, GDZIE w repo żyją jego style.
 17. Jako developer, chcę wskazanie, która reguła wygrywa w kaskadzie, tak aby nie edytować przegranej reguły i dziwić się brakowi efektu.
@@ -73,7 +73,7 @@ Synchronizacja dwukierunkowa (wymóg twardy): zapis w IDE → live update canvas
 6. **Matchowanie**: po kliknięciu, każdy selector z indeksu testowany na klikniętym elemencie przez `matches()` w kontekście dokumentu iframa; wyniki sortowane po specyficzności; wygrana reguła oznaczona; reguły w `@media` dostają badge warunku (warunek nie jest ewaluowany w v1). Selektory scoped (z hashem) rozpoznawane i prezentowane czytelnie.
 7. **Edycja**: zmiany reguł to text-splice po source range z parsera — bez reprintu pliku, formatowanie i konwencje agenta nietknięte. UI reguły: wiersze property→value z inline-widgetami (color picker, stepper jednostek, dropdown enum) + toggle raw mode.
 8. **Nowe reguły**: dom = plik zawierający style najbliższego przodka/rodzeństwa ("najbliższy dom"); dropdown z alternatywami jako escape hatch; fallback `src/styles/builder/[route].css` injectowany na końcu kaskady (wygrywa load orderem, bez `!important`). Nowych reguł nie piszemy do scoped bloków `.astro`; scoped style istniejące: czytane i edytowalne.
-9. **Persistencja**: CSS — auto-write debounce (~300ms), bez przycisku Save, HMR jako podgląd; undo = historia w pamięci sesji. Content — jawny Save. Astroix nigdy nie wykonuje operacji git.
+9. **Persistencja = auto-write w obu pionach** (doktryna urodzona w CSS, PR #36; content dołącza — zmiana 2026-08-28, wayfinder #47 → #67, pierwotnie jawny Save): zapis na pauzę w pisaniu (debounce ~300ms) do prawdziwego pliku w repo, bez przycisku Save. CSS: text-splice po source range, podgląd = HMR; undo = historia w pamięci sesji. Content: serializacja całego pliku (frontmatter przez Document API pakietu `yaml` + raw body), podgląd = sync Astro przeładowujący kanwę; hash guard (pkt 10) obowiązuje tak samo, okno utraty ≈ debounce. Zaakceptowane konsekwencje (#47, Q1.4): przejściowe stany złamane w trakcie pisania w wymaganym polu — ta sama klasa co edycja w IDE obok `astro dev`; plik contentu brudny na dysku w trakcie sesji edycji (jak pliki CSS od zawsze); git pozostaje jedynym "commitem" (US30 nietknięte). Walidacja inline nigdy nie blokuje zapisu (US11/US12 obowiązują jak są) — draft łamiący schemę ląduje na dysku dla agenta, dosłownie ~300ms po pauzie. Astroix nigdy nie wykonuje operacji git.
 10. **Konflikt z agentem**: przed każdym zapisem weryfikacja mtime/hash pliku; przy zmianie pod spodem — przeładowanie i diff zamiast nadpisania.
 11. **Izolacja UI**: chrome buildera renderowany w shadow DOM.
 12. **Format stylów**: czysty CSS. W projektach z Tailwindem overrides po prostu ładują się po utility i wygrywają kaskadą — read-side będzie tam ubogi (spodziewane i OK).
