@@ -35,6 +35,6 @@ jobs:
       - uses: changesets/action@8488615a623b1b9c987934bb89eae8af6a946ac1 # v2.1.1
         with:
           version-script: bunx changeset version
-          publish-script: bun run build && bun run check:artifact && bunx changeset publish
+          publish-script: bun run build && bun run check:artifact && bun run check:publint && bunx changeset publish
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }} # the granular access token
