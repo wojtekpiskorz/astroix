@@ -13,9 +13,10 @@ import { useChromeStore } from './store';
  * The sidebar region on the shadcn Sidebar primitive (issue #81): the
  * vertical tabs pin in the sidebar header, the vertical bodies render in the
  * scrollable content area, and the rail (or cmd/ctrl+b) collapses the whole
- * region offcanvas — the primitive persists that state in its own cookie.
- * Tab composition stays app-shell (ADR-0002); the dock outside the sidebar
- * swaps on the same `activeVertical`.
+ * region offcanvas. The primitive writes its state cookie; the shell reads
+ * it back on boot (`defaultOpen` in app.tsx) — the state survives reloads.
+ * Tab composition stays app-shell (ADR-0002); the editor dock outside the
+ * sidebar swaps on the same `activeVertical`.
  */
 export function Sidebar() {
   const activeVertical = useChromeStore((state) => state.activeVertical);

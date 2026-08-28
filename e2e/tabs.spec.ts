@@ -126,6 +126,17 @@ test('sidebar collapses offcanvas and expands with state preserved', async ({ pa
   await expect(sidebar).toHaveAttribute('data-state', 'expanded');
   await expect(page.locator('[data-astroix-entries="pending"]')).toBeVisible();
   await expect(page.locator('[data-astroix-index]')).toHaveCount(0);
+
+  // the shell seeds the provider from the primitive's cookie: the collapsed
+  // state survives a full reload (memory state like the vertical resets —
+  // the CSS body is back as the default)
+  await page.getByRole('button', { name: 'Toggle Sidebar' }).click();
+  await expect(sidebar).toHaveAttribute('data-state', 'collapsed');
+  await page.reload();
+  await expect(sidebar).toHaveAttribute('data-state', 'collapsed');
+  await page.keyboard.press('Meta+b');
+  await expect(sidebar).toHaveAttribute('data-state', 'expanded');
+  await expect(page.locator('[data-astroix-index="ready"]')).toBeVisible();
 });
 
 test('theme preset b1Z6BvKCW resolves: sidebar token surface + blue primary', async ({ page }) => {

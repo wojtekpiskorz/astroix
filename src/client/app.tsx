@@ -9,6 +9,16 @@ import { EditorPane } from './features/css/editor-pane';
 import { Sidebar } from './sidebar';
 import { useChromeStore } from './store';
 
+/**
+ * Seeds the sidebar's open state from the primitive's persisted cookie —
+ * the generated provider only writes it; the shell is its reader, through
+ * the provider's own `defaultOpen` seam (client-only chrome, no SSR).
+ */
+function initialSidebarOpen(): boolean {
+  const match = document.cookie.match(/(?:^|;\s*)sidebar_state=(true|false)\b/);
+  return match === null ? true : match[1] === 'true';
+}
+
 export function App() {
   // file→chrome sync (spec #13): any pushed source change makes the payload
   // stale (ranges/lines moved) — refetch on every event, editor or not
@@ -36,6 +46,7 @@ export function App() {
           primitive's positioning inside the workbench (below the header). */}
       <SidebarProvider
         className="relative min-h-0 flex-1"
+        defaultOpen={initialSidebarOpen()}
         style={{ '--sidebar-width': '18rem' } as CSSProperties}
       >
         <Sidebar />
