@@ -11,11 +11,12 @@
  * parse — `segments` (`RoutePart[][]`, `{content, dynamic, spread}`) and
  * `params` from `astro:routes:resolved` — so no grammar is re-derived here.
  * Only patterns with exactly one param participate: a single segment param
- * (`/blog/[slug]`, the id must be one segment) or a rest param
+ * (`/blog/[slug]`, the id must be one segment) or a trailing rest param
  * (`/blog/[...slug]`, glob-loader ids are slugified paths, so `2024/post.md`
  * → id `2024/post` matches a catch-all). Patterns with more params cannot
- * isolate the id (and reverse navigation could not build their URL), embedded
- * params (`/pages/v-[id]`, multi-part segments) are not extracted — both stay
+ * isolate the id (and reverse navigation could not build their URL), a
+ * mid-pattern rest (`/pages/[...slug]/edit`) and embedded params
+ * (`/pages/v-[id]`, multi-part segments) are not extracted — all stay
  * silent.
  *
  * Contract: callers pass page routes — the routes payload filters out
@@ -93,9 +94,11 @@ export function resolveActiveEntry(
 
 /**
  * Reverse resolution (entry id → candidate routes): every single-param
- * pattern the id could fill, with the canvas URL it produces. Order follows
- * the routes input; plurality is the caller's ambiguity call (#71 navigates
- * only on a single candidate, then re-verifies by forward match).
+ * pattern the id could fill, with the canvas URL it produces — minus URLs a
+ * static route renders (forward resolution would stay silent there, so the
+ * candidate could not re-verify). Order follows the routes input; plurality
+ * is the caller's ambiguity call (#71 navigates only on a single candidate,
+ * then re-verifies by forward match).
  */
 export function candidateRoutes(
   entryId: string,
@@ -107,6 +110,7 @@ export function candidateRoutes(
     if (flat === null || flat.kind !== 'single-param') continue;
     const url = buildCandidateUrl(flat, entryId);
     if (url === null) continue;
+    if (isStaticPage(routes, toUrlSegments(url))) continue;
     candidates.push({ pattern: route.pattern, url });
   }
   return candidates;
@@ -158,9 +162,12 @@ function collectionsWithEntry(entryId: string, collections: CollectionsIndex): s
 function flattenRoute(route: RouteInfo): FlatRoute | null {
   const segments: FlatSegment[] = [];
   let paramAt = -1;
-  for (const parts of route.segments) {
+  for (const [i, parts] of route.segments.entries()) {
     const segment = flattenSegment(parts);
     if (segment === null) return null;
+    if (segment.kind === 'rest' && i !== route.segments.length - 1) {
+      return null; // a mid-pattern rest captures only its prefix — not a shape we promise to resolve
+    }
     if (segment.kind !== 'static') {
       if (paramAt !== -1) return null; // two params cannot isolate the entry id
       paramAt = segments.length;

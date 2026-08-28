@@ -139,6 +139,19 @@ describe('resolveActiveEntry — forward (canvas URL → entry)', () => {
     expect(hit).toEqual({ collection: 'blog', entryId: 'hello' });
   });
 
+  it('a mid-pattern rest stays silent — its capture would not be the entry id', () => {
+    // src/pages/[...slug]/edit.astro: astro serves /foo/edit with slug = 'foo',
+    // but slicing to the URL end would capture 'foo/edit' — a wrong pick.
+    const midRest: RouteInfo = {
+      pattern: '/[...slug]/edit',
+      segments: [[{ content: 'slug', dynamic: true, spread: true }], [staticPart('edit')]],
+      params: ['...slug'],
+    };
+    expect(resolveActiveEntry([midRest], '/foo/edit', { pages: ['foo/edit'] })).toBeNull();
+    expect(resolveActiveEntry([midRest], '/foo/edit', { pages: ['foo'] })).toBeNull();
+    expect(candidateRoutes('foo/edit', [midRest])).toEqual([]);
+  });
+
   it('percent-decoded segments match unicode entry ids', () => {
     const hit = resolveActiveEntry(routes('/blog/[slug]'), '/blog/caf%C3%A9', {
       blog: ['café'],
@@ -189,6 +202,13 @@ describe('candidateRoutes — reverse (entry → canvas routes)', () => {
       routes('/', '/about', '/[lang]/blog/[slug]', '/blog/[slug]'),
     );
     expect(candidates).toEqual([{ pattern: '/blog/[slug]', url: '/blog/hello' }]);
+  });
+
+  it('drops candidates whose URL a static route renders — forward stays silent there', () => {
+    expect(candidateRoutes('hello', routes('/blog/hello', '/blog/[slug]'))).toEqual([]);
+    expect(candidateRoutes('hello', routes('/blog/[slug]'))).toEqual([
+      { pattern: '/blog/[slug]', url: '/blog/hello' },
+    ]);
   });
 
   it('returns every plausible route in input order — plurality is the caller ambiguity call', () => {
