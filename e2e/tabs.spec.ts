@@ -22,6 +22,15 @@ test('tabs render at the top of the sidebar, CSS active by default', async ({ pa
   const indexBox = await index.boundingBox();
   expect(tablistBox?.y ?? -1).toBeLessThan(indexBox?.y ?? Number.POSITIVE_INFINITY);
 
+  // the absolute-over-fixed override holds: the sidebar column starts below
+  // the header — if a regeneration breaks the merge, the column goes
+  // viewport-fixed over the header and this comparison fails with numbers
+  const headerBox = await page.locator('[data-astroix-header]').boundingBox();
+  const columnBox = await page.locator('[data-sidebar="sidebar"]').boundingBox();
+  expect(columnBox?.y ?? -1).toBeGreaterThanOrEqual(
+    (headerBox?.y ?? 0) + (headerBox?.height ?? 0) - 1,
+  );
+
   await expect(cssTab).toHaveAttribute('aria-selected', 'true');
   await expect(contentTab).toHaveAttribute('aria-selected', 'false');
 

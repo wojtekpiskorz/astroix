@@ -22,6 +22,9 @@ function initialSidebarOpen(): boolean {
   return match === null ? true : match[1] === 'true';
 }
 
+// boot-only: parsed once at module load, before any render
+const SIDEBAR_OPEN_AT_BOOT = initialSidebarOpen();
+
 export function App() {
   // file→chrome sync (spec #13): any pushed source change makes the payload
   // stale (ranges/lines moved) — refetch on every event, editor or not
@@ -49,7 +52,7 @@ export function App() {
           primitive's positioning inside the workbench row (below the header). */}
       <SidebarProvider
         className="relative min-h-0 flex-1"
-        defaultOpen={initialSidebarOpen()}
+        defaultOpen={SIDEBAR_OPEN_AT_BOOT}
         style={{ '--sidebar-width': '18rem' } as CSSProperties}
       >
         <Sidebar />
