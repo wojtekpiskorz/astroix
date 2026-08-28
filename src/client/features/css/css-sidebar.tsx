@@ -16,7 +16,9 @@ export function CssSidebar() {
   const count = data?.length ?? null;
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-3">
+    // the scroller sits on the vertical body, not the aside frame, so the
+    // tab rail stays pinned when the rule list overflows
+    <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto">
       <section className="text-slate-400">
         <h2 className="mb-1 text-xs font-semibold tracking-widest text-slate-500 uppercase">
           Index

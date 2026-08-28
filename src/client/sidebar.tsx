@@ -13,7 +13,7 @@ export function Sidebar() {
   const setActiveVertical = useChromeStore((state) => state.setActiveVertical);
 
   return (
-    <aside className="flex w-72 shrink-0 flex-col gap-3 overflow-y-auto border-r border-slate-800 p-4 text-sm">
+    <aside className="flex w-72 shrink-0 flex-col gap-3 border-r border-slate-800 p-4 text-sm">
       <Tabs
         className="min-h-0 flex-1"
         value={activeVertical}

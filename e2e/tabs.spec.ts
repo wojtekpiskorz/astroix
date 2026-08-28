@@ -12,11 +12,15 @@ test('tabs render at the top of the sidebar, CSS active by default', async ({ pa
   await expect(cssTab).toBeVisible();
   await expect(contentTab).toBeVisible();
 
-  // tablist sits inside the sidebar, above the CSS body (boundingBox is null
-  // on detached elements, so the comparison doubles as the presence check)
-  const tablistBox = await page.getByRole('tablist').boundingBox();
-  const indexBox = await page.locator('[data-astroix-index="ready"]').boundingBox();
-  expect(tablistBox !== null && indexBox !== null && tablistBox.y < indexBox.y).toBe(true);
+  // tablist sits inside the sidebar, above the CSS body — visibility first so
+  // a detached locator fails there, and the box comparison fails with numbers
+  const tablist = page.getByRole('tablist');
+  const index = page.locator('[data-astroix-index="ready"]');
+  await expect(tablist).toBeVisible();
+  await expect(index).toBeVisible();
+  const tablistBox = await tablist.boundingBox();
+  const indexBox = await index.boundingBox();
+  expect(tablistBox?.y ?? -1).toBeLessThan(indexBox?.y ?? Number.POSITIVE_INFINITY);
 
   await expect(cssTab).toHaveAttribute('aria-selected', 'true');
   await expect(contentTab).toHaveAttribute('aria-selected', 'false');
@@ -56,6 +60,7 @@ test('an open rule editor survives a Content roundtrip', async ({ page }) => {
   const editor = page.locator('[data-astroix-editor="view"]');
   await expect(editor).toBeVisible();
   const file = await editor.locator('code').first().textContent();
+  expect(file).toBeTruthy();
 
   // the dock swap unmounts the rule editor; the css store keeps the spec
   await page.getByRole('tab', { name: 'Content' }).click();

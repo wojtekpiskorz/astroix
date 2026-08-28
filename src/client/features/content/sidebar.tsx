@@ -6,7 +6,7 @@ export function ContentSidebar() {
   return (
     <div
       data-astroix-entries="pending"
-      className="flex min-h-0 flex-1 flex-col gap-3 text-slate-500"
+      className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto text-slate-500"
     >
       <p>The collections and entries list lands in the next slice.</p>
     </div>
