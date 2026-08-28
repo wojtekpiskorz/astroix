@@ -38,7 +38,19 @@ jobs:
       # max; this env overrides any lower effort the CLI sends explicitly.
       CLAUDE_CODE_EFFORT_LEVEL: max
     steps:
+      # full history: the crap4ts recompute diffs the PR scope against the base sha
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      # recompute the CRAP table from scratch — CI is the source of truth,
+      # local runs are advisory (wayfinder #55)
+      - run: bun install --frozen-lockfile
+      - run: bun run crap:ci
+        env:
+          GITHUB_BASE_SHA: ${{ github.event.pull_request.base.sha }}
       # SHA-pinned v1: the one action here that holds a PR-write token and a
       # paid API key, so tag movement must not swap code under it silently
       - uses: anthropics/claude-code-action@62529b7c89dbb8cfaa838f2c87f2f8459b46fe68 # v1
@@ -64,6 +76,7 @@ jobs:
             - .agents/skills/unslop/SKILL.md: apply to every piece of prose you read and write, your own comments, and any prose the PR adds (docs, comments, titles).
             - AGENTS.md: house rules the diff must respect, meaning code style, testing doctrine, boundaries (Always / Ask first / Never), gotchas.
             - CONTEXT.md: the glossary; flag drift from its terms.
+            - crap-table.md (workspace root): the crap4ts risk table this CI recomputed for the PR — CC per function (ESLint-classic counting), CRAP where per-function coverage is real (src/core), Uncle-Bob bands, PR-touched functions marked, stop breaches and baseline-grandfathered debt listed. Weigh it when judging the diff: call out PR-touched functions landing high-band or breaching the preflight stops (CRAP >= 30 in src/core, CC >= 15 elsewhere). Grandfathered entries are known calibrated debt — raise them only if the PR makes them worse.
 
             The PR branch is already checked out in the current working directory. Inspect it with `gh pr diff`, `gh pr view`, and by reading files; judge the diff in the context of the surrounding code, not in isolation.
 

@@ -1,0 +1,10 @@
+#!/bin/sh
+# astroix pre-commit: CC warn-only scan of staged TS/TSX (wayfinder #55).
+# It warns, never blocks — the hard stops live in `bun run preflight`.
+# Wired without a hook manager: git config core.hooksPath scripts/hooks
+# (run `bun run hooks` once per clone; see AGENTS.md).
+cd "$(git rev-parse --show-toplevel)" || exit 0
+if command -v bun >/dev/null 2>&1; then
+  bun scripts/crap.mjs --staged || echo "astroix: pre-commit CC scan skipped (engine unavailable)"
+fi
+exit 0
