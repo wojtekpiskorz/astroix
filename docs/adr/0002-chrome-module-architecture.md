@@ -8,7 +8,7 @@ The chrome grew as a POC flat layout, and that was fine while there was one vert
 
 A module may import only from modules strictly below it — downward only, no sideways, no upward, no cycles. Two escapes cross the layers: `src/core` (pure domain, no IO) is importable from anywhere, and the app-level store at `src/client/store.ts` serves every layer except `components/ui/` and `lib/`.
 
-1. **App shell** — `app.tsx`, `chrome.tsx`, `entry.tsx` and its bootstrap helpers (`react-guard.ts`, `styles.ts`): bootstrap, layout, tab composition, the editor dock slot. Thin; composes features, owns no vertical logic.
+1. **App shell** — `app.tsx`, `sidebar.tsx` (vertical tabs + sidebar frame), `chrome.tsx`, `entry.tsx` and its bootstrap helpers (`react-guard.ts`, `styles.ts`): bootstrap, layout, tab composition, the editor dock slot — the dock's column frame included. Thin; composes features, owns no vertical logic.
 2. **`features/<vertical>/`** — one folder per vertical: `features/css/` first, `features/content/` next. Inside: the vertical's components, its zustand store, and its `api.ts`. A feature is self-sufficient: everything it needs travels through its folder or the layers below.
 3. **Shared infrastructure modules** — `canvas/` (iframe, select mode, hover/selection overlay, the re-matching effect after reindex) and `editor/` (CodeMirror infrastructure: view setup, themes, range effects, programmatic doc modeling, spanning primitives up to composed components). Both serve multiple verticals; both are domain-aware but vertical-agnostic.
 4. **`components/ui/`** — shadcn primitives, CLI-generated, domain-deaf: no imports from features, stores, shared modules, or core. Changed by regeneration, never hand-edited toward domain needs.

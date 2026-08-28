@@ -49,7 +49,7 @@ Package manager is **bun**. Run bun; never npm/pnpm/yarn.
 
 Rationale and trade-offs live in `docs/adr/0002-chrome-module-architecture.md`; this checklist is what every PR is held to, maintained as the layout evolves.
 
-- Imports flow strictly downward: app shell (`app.tsx`, `chrome.tsx`, `entry.tsx` + bootstrap helpers like `react-guard.ts`, `styles.ts`) → `features/<vertical>/` → shared modules (`canvas/`, `editor/`) → `components/ui/` → `lib/`; `src/core` is importable from anywhere, and the app store (`src/client/store.ts`) serves every layer except `components/ui/` and `lib/`. No sideways (feature ↔ feature, shared ↔ shared), no upward, no cycles.
+- Imports flow strictly downward: app shell (`app.tsx`, `sidebar.tsx`, `chrome.tsx`, `entry.tsx` + bootstrap helpers like `react-guard.ts`, `styles.ts`) → `features/<vertical>/` → shared modules (`canvas/`, `editor/`) → `components/ui/` → `lib/`; `src/core` is importable from anywhere, and the app store (`src/client/store.ts`) serves every layer except `components/ui/` and `lib/`. No sideways (feature ↔ feature, shared ↔ shared), no upward, no cycles.
 - Vertical UI lands in its feature folder — components + its zustand store + its `api.ts`; a feature never imports another feature.
 - Server/watcher-derived data goes through TanStack Query, colocated in the owning module's `api.ts` (feature or shared — `editor/` owns its own file hooks), query keys `['astroix', <resource>, …]`; chrome-only UI state goes zustand (per-feature store; cross-vertical state like `selection` lives in the small app store at `src/client/store.ts`, importable from anywhere like `src/core`).
 - `components/ui/` is shadcn-generated and domain-deaf — extend by regeneration, never by hand-editing toward domain needs.

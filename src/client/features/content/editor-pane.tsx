@@ -7,7 +7,7 @@ export function ContentEditorPane() {
   return (
     <div
       data-astroix-content-form="pending"
-      className="flex w-[480px] shrink-0 items-center justify-center border-r border-slate-800 bg-slate-950 text-xs text-slate-600"
+      className="flex min-h-0 flex-1 items-center justify-center text-xs text-slate-600"
     >
       The entry form lands in the next slice.
     </div>

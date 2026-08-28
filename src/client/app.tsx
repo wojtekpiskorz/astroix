@@ -33,7 +33,12 @@ export function App() {
       <ChromeHeader />
       <div className="flex min-h-0 flex-1">
         <Sidebar />
-        {activeVertical === 'css' ? <EditorPane /> : <ContentEditorPane />}
+        {/* The dock's column frame — uniform width, border, background — is the
+            slot's, not the pane's (owner ruling on this PR); panes render
+            frameless and choose only their inner layout. */}
+        <div className="flex w-[480px] shrink-0 flex-col border-r border-slate-800 bg-slate-950">
+          {activeVertical === 'css' ? <EditorPane /> : <ContentEditorPane />}
+        </div>
         <Canvas />
       </div>
     </div>
