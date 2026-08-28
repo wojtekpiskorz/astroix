@@ -98,6 +98,11 @@ export function touchedFunctions(
   );
 }
 
+/** The layer where per-function unit coverage is real — CRAP's only honest home. */
+export function isCoreFile(relPath: string): boolean {
+  return relPath.startsWith('src/core/');
+}
+
 /**
  * The single construction point for risk rows: `metric`, `value`, `stop`,
  * `band`, `coverage` and `crap` all derive from the file's layer here and
@@ -124,7 +129,7 @@ export function toRiskEntry(
       band: bandOf(fn.cc),
     };
   }
-  if (file.startsWith('src/core/')) {
+  if (isCoreFile(file)) {
     const coverage = coverageWithin(fn, fileCoverage);
     const crap = crapScore(fn.cc, coverage);
     return {

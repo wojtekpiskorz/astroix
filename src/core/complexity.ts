@@ -47,6 +47,9 @@ type EstreeNode = Record<string, unknown> & { type: string };
 
 const SHORT_CIRCUIT_OPS = new Set(['&&', '||', '??', '||=', '&&=', '??=']);
 
+/** Positional metadata keys that are not AST children — skipped by both walk loops. */
+const NON_AST_KEYS = new Set(['loc', 'range']);
+
 function estreeIdentifierName(node: unknown): string | null {
   if (
     node !== null &&
@@ -111,13 +114,9 @@ const DECISION_TYPES = new Set([
 function isEstreeDecision(node: EstreeNode): boolean {
   if (DECISION_TYPES.has(node.type)) return true;
   if (node.type === 'SwitchCase') return node.test !== null && node.test !== undefined;
-  return (
-    (node.type === 'LogicalExpression' ||
-      node.type === 'BinaryExpression' ||
-      node.type === 'AssignmentExpression') &&
-    typeof node.operator === 'string' &&
-    SHORT_CIRCUIT_OPS.has(node.operator)
-  );
+  // no node-type guard needed: only logical/binary/assignment nodes carry
+  // one of the six short-circuit operator strings
+  return typeof node.operator === 'string' && SHORT_CIRCUIT_OPS.has(node.operator);
 }
 
 /** A container node lends its variable/property/method name to a direct function child. */
@@ -193,6 +192,7 @@ export function analyzeComplexity(source: string, filename: string): FunctionCom
       counters.push(1); // base 1: a function with no decisions has cc 1
       for (const [key, value] of Object.entries(n)) {
         if (key === 'id') continue; // the name identifier holds no decisions
+        if (NON_AST_KEYS.has(key)) continue;
         visit(value, null);
       }
       rec.cc = counters.pop() ?? 0;
@@ -201,7 +201,7 @@ export function analyzeComplexity(source: string, filename: string): FunctionCom
 
     const childHint = estreeChildHint(n);
     for (const [key, value] of Object.entries(n)) {
-      if (key === 'loc' || key === 'range') continue;
+      if (NON_AST_KEYS.has(key)) continue;
       visit(value, childHint);
     }
   };
@@ -217,45 +217,48 @@ function tscScriptKind(filename: string): ts.ScriptKind {
   return ts.ScriptKind.TS;
 }
 
+// Kind-membership mirrors of the estree engine's Sets — the counting rule
+// stays visible as structure, not as a guard chain to squint at.
+const TSC_DECISION_KINDS = new Set<ts.SyntaxKind>([
+  ts.SyntaxKind.IfStatement,
+  ts.SyntaxKind.ForStatement,
+  ts.SyntaxKind.ForInStatement,
+  ts.SyntaxKind.ForOfStatement,
+  ts.SyntaxKind.WhileStatement,
+  ts.SyntaxKind.DoStatement,
+  ts.SyntaxKind.CatchClause,
+  ts.SyntaxKind.ConditionalExpression,
+  ts.SyntaxKind.CaseClause, // DefaultClause is a separate kind and stays free
+]);
+
+const TSC_SHORT_CIRCUIT_KINDS = new Set<ts.SyntaxKind>([
+  ts.SyntaxKind.AmpersandAmpersandToken,
+  ts.SyntaxKind.BarBarToken,
+  ts.SyntaxKind.QuestionQuestionToken,
+  ts.SyntaxKind.AmpersandAmpersandEqualsToken,
+  ts.SyntaxKind.BarBarEqualsToken,
+  ts.SyntaxKind.QuestionQuestionEqualsToken,
+]);
+
+const TSC_FUNCTION_KINDS = new Set<ts.SyntaxKind>([
+  ts.SyntaxKind.FunctionDeclaration,
+  ts.SyntaxKind.FunctionExpression,
+  ts.SyntaxKind.ArrowFunction,
+  ts.SyntaxKind.MethodDeclaration,
+  ts.SyntaxKind.GetAccessor,
+  ts.SyntaxKind.SetAccessor,
+  ts.SyntaxKind.Constructor,
+]);
+
 function isTscDecision(node: ts.Node): boolean {
-  if (
-    ts.isIfStatement(node) ||
-    ts.isForStatement(node) ||
-    ts.isForInStatement(node) ||
-    ts.isForOfStatement(node) ||
-    ts.isWhileStatement(node) ||
-    ts.isDoStatement(node) ||
-    ts.isCatchClause(node) ||
-    ts.isConditionalExpression(node) ||
-    ts.isCaseClause(node) // DefaultClause is a separate kind and stays free
-  )
-    return true;
-  if (ts.isBinaryExpression(node)) {
-    switch (node.operatorToken.kind) {
-      case ts.SyntaxKind.AmpersandAmpersandToken:
-      case ts.SyntaxKind.BarBarToken:
-      case ts.SyntaxKind.QuestionQuestionToken:
-      case ts.SyntaxKind.AmpersandAmpersandEqualsToken:
-      case ts.SyntaxKind.BarBarEqualsToken:
-      case ts.SyntaxKind.QuestionQuestionEqualsToken:
-        return true;
-      default:
-        return false;
-    }
-  }
-  return false;
+  return (
+    TSC_DECISION_KINDS.has(node.kind) ||
+    (ts.isBinaryExpression(node) && TSC_SHORT_CIRCUIT_KINDS.has(node.operatorToken.kind))
+  );
 }
 
 function isTscFunction(node: ts.Node): node is ts.FunctionLikeDeclaration {
-  return (
-    ts.isFunctionDeclaration(node) ||
-    ts.isFunctionExpression(node) ||
-    ts.isArrowFunction(node) ||
-    ts.isMethodDeclaration(node) ||
-    ts.isGetAccessorDeclaration(node) ||
-    ts.isSetAccessorDeclaration(node) ||
-    ts.isConstructorDeclaration(node)
-  );
+  return TSC_FUNCTION_KINDS.has(node.kind);
 }
 
 function tscFunctionName(node: ts.FunctionLikeDeclaration, hint: string | null): string {

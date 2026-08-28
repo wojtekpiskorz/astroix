@@ -31,6 +31,7 @@ import {
   baselineKey,
   evaluateGate,
   GATE_STOPS,
+  isCoreFile,
   mergeBaseline,
   PRECOMMIT_CC_WARN,
   toRiskEntry,
@@ -263,7 +264,7 @@ function modePreflight() {
   if ((gitOk(['status', '--porcelain']) ?? '').length > 0)
     console.log('preflight: evaluating committed state (HEAD); working tree is dirty');
 
-  const needCoverage = files.some((f) => relative(ROOT, f).startsWith('src/core/'));
+  const needCoverage = files.some((f) => isCoreFile(relative(ROOT, f)));
   const coverage = needCoverage ? runCoverage() : {};
 
   const uniqueFiles = [...new Set(files)];
