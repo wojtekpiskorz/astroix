@@ -13,6 +13,9 @@ import { useChromeStore } from './store';
  * Seeds the sidebar's open state from the primitive's persisted cookie —
  * the generated provider only writes it; the shell is its reader, through
  * the provider's own `defaultOpen` seam (client-only chrome, no SSR).
+ * The cookie name is the primitive's SIDEBAR_COOKIE_NAME; the literal here
+ * is deliberate (exporting the const would hand-edit the generated tier) —
+ * the reload leg in tabs.spec.ts fails if a regeneration ever renames it.
  */
 function initialSidebarOpen(): boolean {
   const match = document.cookie.match(/(?:^|;\s*)sidebar_state=(true|false)\b/);
@@ -43,7 +46,7 @@ export function App() {
     <div className="dark flex h-full w-full flex-col bg-background text-foreground">
       <ChromeHeader />
       {/* The provider row `relative` + the sidebar's `absolute` keep the
-          primitive's positioning inside the workbench (below the header). */}
+          primitive's positioning inside the workbench row (below the header). */}
       <SidebarProvider
         className="relative min-h-0 flex-1"
         defaultOpen={initialSidebarOpen()}
