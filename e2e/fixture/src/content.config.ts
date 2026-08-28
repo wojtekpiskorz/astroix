@@ -16,4 +16,13 @@ const homepage = defineCollection({
   }),
 });
 
-export const collections = { homepage };
+const blog = defineCollection({
+  loader: glob({ pattern: '**/*.md', base: './src/content/blog' }),
+  schema: z.object({
+    title: z.string(),
+    date: z.coerce.date(),
+    tags: z.array(z.string()).default([]),
+  }),
+});
+
+export const collections = { homepage, blog };

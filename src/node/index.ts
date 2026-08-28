@@ -4,6 +4,7 @@ import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import type { AstroIntegration } from 'astro';
 import type { Plugin as VitePlugin } from 'vite';
+import { type RoutesState, toRouteInfos } from './content';
 import { clientEntryPath, isSourceMode } from './source-mode';
 import { hostRegistersTailwind } from './tailwind-guard';
 import { astroixVitePlugin } from './vite-plugin';
@@ -32,15 +33,25 @@ const CANVAS_SCRIPT = `if (window.parent !== window && new URLSearchParams(locat
  * Any other command registers nothing — the dev-only guarantee.
  */
 function astroix(): AstroIntegration {
+  // Routes captured from the hook below and served at `GET /__astroix/routes`
+  // (spec Impl #13). Lives on the integration instance so both hooks —
+  // the writer and the plugin that serves the state — share one container
+  // across dev restarts (restarts re-run the routes hook on the same instance).
+  const routesState: RoutesState = { current: [] };
   return {
     name: 'astroix',
     hooks: {
+      'astro:routes:resolved': ({ routes }) => {
+        routesState.current = toRouteInfos(routes);
+      },
       'astro:config:setup': ({ config, command, updateConfig, injectScript, logger }) => {
         if (command !== 'dev') return;
 
         // The resolved config turns dir strings into URLs (trailing slash included) —
         // the plugin wants clean paths.
-        const plugins: VitePlugin[] = [astroixVitePlugin({ srcDir: fileURLToPath(config.srcDir) })];
+        const plugins: VitePlugin[] = [
+          astroixVitePlugin({ srcDir: fileURLToPath(config.srcDir), routes: routesState }),
+        ];
         // The chrome sources live outside the host root and are served via
         // /@fs, which has two consequences fixed below: (a) deps discovered
         // from /@fs files resolve against the importer's location, so `react`
