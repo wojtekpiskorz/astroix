@@ -1,15 +1,19 @@
 #!/bin/sh
-# astroix pre-commit: biome blocks on staged lint/format errors (run
-# `bun run check:write` and re-stage); the crap4ts CC scan warns, never
-# blocks — the hard stops live in `bun run preflight`.
+# astroix pre-commit: biome blocks on staged lint/format errors (fix with
+# `bunx biome check --staged --write`, re-stage); the crap4ts CC scan warns,
+# never blocks — the hard stops live in `bun run preflight`.
 # Wired without a hook manager: git config core.hooksPath scripts/hooks
 # (run `bun run hooks` once per clone; see AGENTS.md).
 cd "$(git rev-parse --show-toplevel)" || exit 0
 if command -v bun >/dev/null 2>&1; then
-  bunx biome check --staged || {
-    echo "astroix: commit blocked by biome — fix with 'bunx biome check --staged --write', then re-stage"
-    exit 1
-  }
+  # biome errors on an empty matched set, so gate on biome-owned extensions:
+  # a docs-only commit must not be blocked for "no files were processed"
+  if git diff --cached --name-only --diff-filter=ACMR | grep -qE '\.(js|jsx|ts|tsx|mts|cts|json|jsonc|css)$'; then
+    bunx biome check --staged || {
+      echo "astroix: commit blocked by biome — fix with 'bunx biome check --staged --write', then re-stage"
+      exit 1
+    }
+  fi
   bun scripts/crap.mjs --staged || echo "astroix: pre-commit CC scan skipped (engine unavailable)"
 fi
 exit 0
