@@ -3,6 +3,8 @@ import { useEffect, useRef } from 'react';
 import { type IndexPayloadRecord, matchRules } from '../core/matcher';
 import { Button } from './components/ui/button';
 import { EditorPane } from './editor';
+// PROTOTYPE (#46): in-chrome smoke checklist — throwaway, gated on ?smoke=1
+import { SmokeChecklistRoot, smokePrototypeEnabled } from './prototype/smoke-checklist';
 import { type Selection, useChromeStore } from './store';
 
 const SELECTION_STYLE_ID = 'astroix-selection-style';
@@ -13,6 +15,10 @@ const SELECTED_CLASS = 'astroix-selected';
 function canvasSrc(): string {
   const url = new URL(window.location.href);
   url.searchParams.set('builder', '0');
+  // PROTOTYPE (#46): the smoke checklist switches variants via top-level
+  // params; strip them here so the iframe src (and the canvas) stays stable.
+  url.searchParams.delete('smoke');
+  url.searchParams.delete('variant');
   return `${url.pathname}${url.search}`;
 }
 
@@ -39,6 +45,8 @@ export function App() {
         <Sidebar />
         <EditorPane />
         <Canvas />
+        {/* PROTOTYPE (#46): mounts only with ?smoke=1 in the top-level URL */}
+        {smokePrototypeEnabled && <SmokeChecklistRoot />}
       </div>
     </div>
   );
