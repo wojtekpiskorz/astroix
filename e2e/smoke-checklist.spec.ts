@@ -14,6 +14,17 @@ const SMOKE_TOTAL = SMOKE_STEPS.length;
 
 test.use({ permissions: ['clipboard-read', 'clipboard-write'] });
 
+test('SMOKE_STEPS mirror the step ids of docs/manual-smoke.md', () => {
+  // The module is a hand-maintained mirror of the doc (its update path) —
+  // this keeps the drift loud on either side. Ids only: the module's titles
+  // are deliberately condensed. Here, not in unit tests: reading the real
+  // doc is an fs read, and the unit doctrine stays pure-modules-over-
+  // fixtures (grilling ruling 2026-08-29).
+  const doc = readFileSync(join('docs', 'manual-smoke.md'), 'utf8');
+  const docIds = [...doc.matchAll(/^\s*(\d+[a-z]?)\./gm)].map((match) => match[1]);
+  expect(docIds).toEqual(SMOKE_STEPS.map((step) => step.id));
+});
+
 test('gate closed: normal builder use renders no checklist DOM', async ({ page }) => {
   await page.goto('/');
   await expect(page.locator('#astroix-root')).toBeVisible();
