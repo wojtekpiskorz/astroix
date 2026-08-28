@@ -3,7 +3,8 @@ import { useChromeStore } from '../../store';
 import { useIndexPayload } from './api';
 import { RuleList } from './rule-list';
 
-export function Sidebar() {
+/** The CSS vertical's sidebar body — the frame and tabs live in the shell. */
+export function CssSidebar() {
   const selection = useChromeStore((state) => state.selection);
   const { data, refetch } = useIndexPayload();
   // The module-graph join is only complete once the canvas page's style
@@ -15,7 +16,9 @@ export function Sidebar() {
   const count = data?.length ?? null;
 
   return (
-    <aside className="flex w-72 shrink-0 flex-col gap-3 overflow-y-auto border-r border-slate-800 p-4 text-sm">
+    // the scroller sits on the vertical body, not the aside frame, so the
+    // tab rail stays pinned when the rule list overflows
+    <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto">
       <section className="text-slate-400">
         <h2 className="mb-1 text-xs font-semibold tracking-widest text-slate-500 uppercase">
           Index
@@ -30,6 +33,6 @@ export function Sidebar() {
       </section>
       <RuleList payload={data} selection={selection} />
       <p className="mt-auto text-xs text-slate-600">The rule editor mounts below the list next.</p>
-    </aside>
+    </div>
   );
 }

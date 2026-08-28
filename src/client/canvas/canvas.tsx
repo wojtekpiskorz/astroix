@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { useChromeStore } from '../store';
+import { useChromeStore, useSelectModeActive } from '../store';
 
 const SELECTION_STYLE_ID = 'astroix-selection-style';
 const HOVER_CLASS = 'astroix-hover';
@@ -14,7 +14,9 @@ function canvasSrc(): string {
 
 export function Canvas() {
   const iframeRef = useRef<HTMLIFrameElement>(null);
-  const selectMode = useChromeStore((state) => state.selectMode);
+  // gated by the active vertical (issue #70): suspended while the Content
+  // tab is active, restored on return — the effect below does both
+  const selectMode = useSelectModeActive();
   const setSelection = useChromeStore((state) => state.setSelection);
 
   useEffect(() => {
