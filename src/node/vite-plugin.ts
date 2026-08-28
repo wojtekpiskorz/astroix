@@ -50,18 +50,10 @@ export function astroixVitePlugin(options: AstroixPluginOptions): Plugin {
           }
         })();
       });
-      registerRestEndpoints(server, {
-        root: server.config.root,
-        srcDir: options.srcDir ?? join(server.config.root, 'src'),
-      });
-      registerContentEndpoints(server, {
-        srcDir: options.srcDir ?? join(server.config.root, 'src'),
-        routes: options.routes,
-      });
-      registerFileSync(server, {
-        root: server.config.root,
-        srcDir: options.srcDir ?? join(server.config.root, 'src'),
-      });
+      const srcDir = options.srcDir ?? join(server.config.root, 'src');
+      registerRestEndpoints(server, { root: server.config.root, srcDir });
+      registerContentEndpoints(server, { srcDir, routes: options.routes });
+      registerFileSync(server, { root: server.config.root, srcDir });
     },
     resolveId(id) {
       // The HTML references `/virtual:astroix/chrome`; imports may use the bare id.
