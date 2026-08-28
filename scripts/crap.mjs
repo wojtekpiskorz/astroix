@@ -6,10 +6,13 @@
  *   bun run crap                full report: CC everywhere, CRAP + Uncle Bob
  *                               bands where coverage is real (src/core)
  *   bun run crap --staged       pre-commit scan: CC warn (>= 10) on functions
- *                               touched by staged changes — warns, never blocks
- *   bun run preflight           hard stop over the PR diff scope (merge-base
- *                               vs main): CRAP >= 30 in src/core, CC >= 15 in
- *                               src/node + src/client, baseline-ratcheted
+ *                               touched by staged changes — warns, never blocks,
+ *                               skips the generated ui/ tier (ruling #62: no
+ *                               un-followable advice on code we regenerate)
+ *   bun run preflight           full-src ratchet: every run evaluates all of
+ *                               src/ against the baseline — CRAP >= 30 in
+ *                               src/core, CC >= 15 in src/node + src/client,
+ *                               any new breach fails (the diff only annotates)
  *   bun run crap:ci             CI recompute: full table to crap-table.md for
  *                               the advisory reviewer prompt; never exits nonzero
  *   bun run crap --calibrate    one-time: pin current violators as the initial
@@ -31,7 +34,7 @@ import {
   baselineKey,
   evaluateGate,
   GATE_STOPS,
-  isCoreFile,
+  isWatchOnlyFile,
   mergeBaseline,
   PRECOMMIT_CC_WARN,
   toRiskEntry,
@@ -93,7 +96,7 @@ function diffScopedFiles(gitArgs) {
 const changedFiles = (base) => diffScopedFiles([base, 'HEAD']);
 const stagedFiles = () => diffScopedFiles(['--cached']);
 
-/** Function content as committed at HEAD — preflight evaluates the committed state, never a dirty tree. */
+/** Function content as committed at HEAD — the CI table's in-PR marks describe the committed diff. */
 const committedSource = (abs) => gitOk(['show', `HEAD:${relative(ROOT, abs)}`]) ?? '';
 
 // ——— analysis ———
@@ -217,13 +220,14 @@ function renderTable(entries) {
         `cov ${pct(e.coverage)}`,
         `crap ${e.crap === null ? '  —' : num(e.crap).padStart(5)}`,
         e.band.padEnd(8),
+        e.watchOnly ? 'gen' : '',
       ].join('  '),
     );
   return rows.join('\n');
 }
 
 function headerLine() {
-  return `stops: CRAP >= ${GATE_STOPS.coreCrapStop} (src/core) · CC >= ${GATE_STOPS.watchlistCcStop} (src/node, src/client) · pre-commit warns CC >= ${PRECOMMIT_CC_WARN}`;
+  return `stops: CRAP >= ${GATE_STOPS.coreCrapStop} (src/core) · CC >= ${GATE_STOPS.watchlistCcStop} (src/node, src/client) · pre-commit warns CC >= ${PRECOMMIT_CC_WARN} · generated ui/ is watch-only`;
 }
 
 // ——— modes ———
@@ -280,6 +284,7 @@ function modeStaged() {
   }
   let warned = 0;
   for (const { file, fn } of touched) {
+    if (isWatchOnlyFile(file)) continue; // generated tier: regenerate, never hand-split
     if (fn.cc >= PRECOMMIT_CC_WARN) {
       console.warn(
         `astroix pre-commit: ${file} ${fn.name}@L${fn.lineStart} cc ${fn.cc} >= ${PRECOMMIT_CC_WARN} — consider splitting before it grows`,
@@ -290,56 +295,58 @@ function modeStaged() {
   if (warned === 0) console.log('astroix pre-commit: staged CC scan clean');
 }
 
+/**
+ * Full-src ratchet (owner ruling 2026-08-28, issue #62): every run evaluates
+ * all of src/ against the baseline, so a coverage regression from a
+ * test-weakening PR fails even though the PR touched no product function —
+ * CC cannot move under untouched code, CRAP can. The diff survives only as
+ * annotations ([PR touches this file]) and the CI table's in-PR marks.
+ */
 function modePreflight() {
   const { base, ref } = mergeBaseSha();
-  const files = changedFiles(base);
-  if (files.length === 0) {
-    console.log('preflight: no src changes vs merge-base — CRAP scope empty');
-    return;
-  }
-  // touched set first: a diff landing between functions never pays the coverage run
-  const touched = touchedIn(files, [base, 'HEAD'], committedSource);
-  if (touched.length === 0) {
-    console.log(`preflight: ${files.length} changed file(s), no function touched — pass`);
-    return;
-  }
-
-  const needCoverage = files.some((f) => isCoreFile(relative(ROOT, f)));
-  // scoped to what the coverage run can actually read: src/ and the vitest
-  // config; untracked files elsewhere cannot color the CRAP term
+  // scoped to what the gate can actually read: src/ and the vitest config;
+  // untracked files elsewhere cannot color either term
   const dirty =
     (gitOk(['status', '--porcelain', '--', 'src', 'vitest.config.ts']) ?? '').length > 0;
-  if (needCoverage && dirty) {
-    // vitest coverage reads the working tree: a pass here could rest on
-    // uncommitted tests — the exact class of pass committedSource closes for CC
+  if (dirty) {
+    // this check is the only committed-state guard for BOTH terms: the
+    // full-src ratchet reads CC from the working tree (buildEntries default)
+    // and coverage from the tree vitest runs over — a pass on a dirty src/
+    // could rest on content that never gets committed
     console.error(
-      'preflight: src/ or vitest.config.ts is dirty — the CRAP coverage term would read uncommitted content. Commit or stash (git stash -u covers untracked), then rerun.',
+      'preflight: src/ or vitest.config.ts is dirty — the gate would read uncommitted content (CC from the tree, coverage from the tree vitest runs over). Commit or stash (git stash -u covers untracked), then rerun.',
     );
     process.exit(1);
   }
-  const coverage = needCoverage ? runCoverage() : {};
-  const entries = touched.map(({ file, fn }) =>
-    toRiskEntry(file, fn, coverage === null ? null : coverage?.[join(ROOT, file)]),
-  );
+
+  const coverage = runCoverage();
+  const entries = buildEntries(walkTs(), coverage);
   const baseline = readBaseline();
   const { violations, grandfathered, improved } = evaluateGate(entries, baseline);
+  const changed = new Set(changedFiles(base).map((abs) => relative(ROOT, abs)));
+  const inPr = (e) => (changed.has(e.file) ? ' [PR touches this file]' : '');
 
-  console.log(`\npreflight — CRAP hard stop over ${entries.length} touched function(s) vs ${ref}`);
+  console.log(`\npreflight — full-src ratchet over ${entries.length} functions vs ${ref}`);
   console.log(headerLine());
-  console.log(`\n${renderTable(entries)}`);
+  console.log('(full banded table: bun run crap)');
   for (const g of grandfathered)
-    console.log(`grandfathered: ${g.file} ${g.name} (${g.metric} ${num(g.value)})`);
+    console.log(`grandfathered: ${g.file} ${g.name} (${g.metric} ${num(g.value)})${inPr(g)}`);
   for (const i of improved)
     console.log(
-      `improved: ${i.file} ${i.name} ${num(i.value)} < pin ${baseline[baselineKey(i.file, i.name, i.lineStart)]} — tighten the baseline`,
+      `improved: ${i.file} ${i.name} ${num(i.value)} < pin ${baseline[baselineKey(i.file, i.name, i.lineStart)]} — tighten the baseline${inPr(i)}`,
     );
 
   if (violations.length > 0) {
     console.error(`\npreflight FAIL — ${violations.length} violation(s):`);
-    for (const v of violations)
+    for (const v of violations) {
+      const hint =
+        v.metric === 'crap'
+          ? ` (cc ${v.cc} at ${Math.round((v.coverage ?? 0) * 100)}% coverage — if this PR weakened tests rather than grew the function, restore them)`
+          : '';
       console.error(
-        `  ${v.file} ${v.name}@L${v.lineStart}: ${v.metric} ${num(v.value)} >= ${v.stop} (refactor, or split the function)`,
+        `  ${v.file} ${v.name}@L${v.lineStart}: ${v.metric} ${num(v.value)} >= ${v.stop}${hint}${inPr(v)}`,
       );
+    }
     process.exit(1);
   }
   console.log('\npreflight pass');
@@ -384,13 +391,11 @@ function modeCi() {
   lines.push('|---|---|---:|---:|---:|---|:-:|');
   for (const e of sorted)
     lines.push(
-      `| ${e.file} | ${e.name}@L${e.lineStart} | ${e.cc} | ${e.coverage === null ? '—' : `${Math.round(e.coverage * 100)}%`} | ${e.crap === null ? '—' : num(e.crap)} | ${e.band} | ${isTouched(e) ? '✓' : ''} |`,
+      `| ${e.file} | ${e.name}@L${e.lineStart} | ${e.cc} | ${e.coverage === null ? '—' : `${Math.round(e.coverage * 100)}%`} | ${e.crap === null ? '—' : num(e.crap)} | ${e.band}${e.watchOnly ? ' ·gen' : ''} | ${isTouched(e) ? '✓' : ''} |`,
     );
   lines.push('');
   if (violations.length > 0) {
-    lines.push(
-      `## Stop breaches (new or regressed — preflight fails these when the PR touches them)`,
-    );
+    lines.push(`## Stop breaches (new or regressed — preflight fails these)`);
     for (const v of violations)
       lines.push(
         `- ${v.file} ${v.name}@L${v.lineStart}: ${v.metric} ${num(v.value)} (stop ${v.stop})`,
@@ -406,7 +411,7 @@ function modeCi() {
     lines.push('');
   }
   lines.push(
-    `Baseline: \`${relative(ROOT, BASELINE_PATH)}\` — entries tighten or drop via \`bun run crap --update-baseline\`, never grow.`,
+    `Baseline: \`${relative(ROOT, BASELINE_PATH)}\` — entries tighten or drop via \`bun run crap --update-baseline\`, never grow. Rows marked ·gen (\`src/client/components/ui/\`, shadcn-generated) are watch-only: visible, never gated.`,
   );
 
   writeFileSync(join(ROOT, 'crap-table.md'), `${lines.join('\n')}\n`);

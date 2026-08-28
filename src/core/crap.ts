@@ -44,6 +44,8 @@ export interface RiskEntry extends FunctionComplexity {
   value: number;
   /** The hard stop this row is gated against, derived with its metric in toRiskEntry. */
   stop: number;
+  /** The generated tier (`src/client/components/ui/`): visible, never gated (stop is Infinity). */
+  watchOnly: boolean;
   coverage: number | null;
   crap: number | null;
 }
@@ -99,8 +101,13 @@ export function touchedFunctions(
 }
 
 /** The layer where per-function unit coverage is real — CRAP's only honest home. */
-export function isCoreFile(relPath: string): boolean {
+function isCoreFile(relPath: string): boolean {
   return relPath.startsWith('src/core/');
+}
+
+/** The shadcn-generated tier: regenerated per ADR-0002, never hand-edited — visible in reports, never gated (owner ruling 2026-08-28, #62). */
+export function isWatchOnlyFile(relPath: string): boolean {
+  return relPath.startsWith('src/client/components/ui/');
 }
 
 /**
@@ -117,6 +124,7 @@ export function toRiskEntry(
   fn: FunctionComplexity,
   fileCoverage: IstanbulFileCoverage | undefined | null,
 ): RiskEntry {
+  const watchOnly = isWatchOnlyFile(file);
   // null (coverage run failed) degrades even core rows to CC; only a real
   // coverage object lets a core row take the CRAP metric
   if (fileCoverage !== null && isCoreFile(file)) {
@@ -129,7 +137,8 @@ export function toRiskEntry(
       crap,
       metric: 'crap',
       value: crap,
-      stop: GATE_STOPS.coreCrapStop,
+      stop: GATE_STOPS.coreCrapStop, // ui/ is a client prefix — never lands in the core tier
+      watchOnly,
       band: bandOf(crap),
     };
   }
@@ -140,7 +149,8 @@ export function toRiskEntry(
     crap: null,
     metric: 'cc',
     value: fn.cc,
-    stop: GATE_STOPS.watchlistCcStop,
+    stop: watchOnly ? Number.POSITIVE_INFINITY : GATE_STOPS.watchlistCcStop,
+    watchOnly,
     band: bandOf(fn.cc),
   };
 }

@@ -18,7 +18,7 @@ When your work touches an architectural decision, these files win over your prio
 - `bun run test` — unit tests (vitest + happy-dom); `bun run test:watch` for watch mode.
 - `bun run test:e2e` — Playwright e2e; boots the fixture dev server on `http://localhost:4314` (npm-pack lane on :4313; the owner's manual smoke owns :4312 — lanes never share servers).
 - `bun run crap` — crap4ts risk report: CC per function, CRAP + Uncle-Bob bands where coverage is real (src/core); `--calibrate` (one-time, already done) / `--update-baseline` manage the ratchet baseline.
-- `bun run preflight` — CRAP hard stop over the PR diff scope; the agent runs it before `gh pr create`.
+- `bun run preflight` — full-src CRAP ratchet (every run evaluates all of src/ against the baseline; owner ruling, issue #62); the agent runs it before `gh pr create`.
 - `bun run hooks` — once per clone: wires `git config core.hooksPath scripts/hooks` (pre-commit CC-warn). Not a postinstall on purpose — this package is published and must not touch consumers' git config.
 - `bun run build` — tsup (node side) + vite build (the prebuilt chrome bundle `dist/chrome.js`) — chrome delivery is hybrid per `docs/adr/0001` (source-served in our dev checkout, prebuilt for consumers).
 
@@ -66,7 +66,7 @@ Rationale and trade-offs live in `docs/adr/0002-chrome-module-architecture.md`; 
 Static and deterministic, upstream of the advisory AI review (wayfinder #55). Engine: `src/core/complexity.ts` (per-function CC, ESLint-classic counting pinned by the probe fixtures; oxc-parser primary, tsc oracle asserted equal in tests). Math: `src/core/crap.ts`. CLI: `scripts/crap.mjs`.
 
 - **Metric honesty**: full CRAP (CC² × (1−cov)³ + CC) only in `src/core`, where per-function unit coverage is real; `src/node` + `src/client` are a CC-only watchlist.
-- **Stops**: preflight hard-stops at CRAP ≥ 30 (src/core) / CC ≥ 15 (src/node + src/client) over functions touched by the PR diff; the pre-commit hook warns at CC ≥ 10 on staged functions and never blocks.
+- **Stops**: preflight is a full-src ratchet — CRAP ≥ 30 (src/core) / CC ≥ 15 (src/node + src/client) evaluated over all of src/ against the baseline on every run, so coverage regressions from test-weakening PRs fail too (#62); the pre-commit hook warns at CC ≥ 10 on staged functions and never blocks. The generated `src/client/components/ui/` tier is watch-only: rows visible, never gated.
 - **Baseline ratchet** (`crap-baseline.json`): calibrated once 2026-08-28; entries only tighten or drop — after refactoring a pinned function, `bun run crap --update-baseline`. New violations fail preflight: refactor them, the baseline never absorbs them.
 - **CI** recomputes the table from scratch (`bun run crap:ci` in `ai-review.yml`) and feeds it to the advisory reviewer prompt; local runs are advisory.
 
@@ -75,7 +75,7 @@ Static and deterministic, upstream of the advisory AI review (wayfinder #55). En
 - Every PR touching code needs a changeset (patch by default).
 - Conventional-commit titles (`feat:`, `fix:`, `docs:`, `chore:`).
 - Keep PRs surgical: every changed line should trace to the task.
-- Run `bun run preflight` before `gh pr create` — the CRAP hard stop gates the PR diff scope (baseline-ratcheted).
+- Run `bun run preflight` before `gh pr create` — the CRAP gate is a full-src baseline ratchet.
 
 ## Boundaries
 
