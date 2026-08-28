@@ -114,13 +114,30 @@ function analyzeFile(abs, source) {
   return { file, fns };
 }
 
-/** CC + (where honest) coverage/CRAP for every function in the given files. */
-function buildEntries(files, coverage, read = (abs) => readFileSync(abs, 'utf8')) {
+/**
+ * CC + (where honest) coverage/CRAP for every function in the given files.
+ * `tolerant` (CI table, local report) skips an unparseable file with a note —
+ * those outputs never gate anything. The gates keep the throw: a committed
+ * file the engine cannot parse must not pass silently.
+ */
+function buildEntries(
+  files,
+  coverage,
+  read = (abs) => readFileSync(abs, 'utf8'),
+  { tolerant = false } = {},
+) {
   const entries = [];
   for (const abs of files) {
-    const { file, fns } = analyzeFile(abs, read(abs));
-    for (const fn of fns)
-      entries.push(toRiskEntry(file, fn, coverage === null ? null : coverage?.[abs]));
+    let analyzed;
+    try {
+      analyzed = analyzeFile(abs, read(abs));
+    } catch (e) {
+      if (!tolerant) throw e;
+      console.error(`crap: skipping unparseable ${relative(ROOT, abs)} (${e.message})`);
+      continue;
+    }
+    for (const fn of analyzed.fns)
+      entries.push(toRiskEntry(analyzed.file, fn, coverage === null ? null : coverage?.[abs]));
   }
   return entries;
 }
@@ -128,25 +145,27 @@ function buildEntries(files, coverage, read = (abs) => readFileSync(abs, 'utf8')
 const touchedId = (file, fn) => `${file}#${fn.name}@L${fn.lineStart}`;
 
 /**
- * The touched pass — one implementation of "which functions did this PR
+ * The touched pass — one implementation of "which functions did this diff
  * touch": analyze each changed file once and select the functions whose line
- * range intersects a diff hunk (the tested touchedFunctions helper). The
- * gate's scope and the CI table's in-PR marks both come from here.
+ * range intersects a hunk (the tested touchedFunctions helper). The gate's
+ * scope, the CI table's in-PR marks and the pre-commit scan all come from
+ * here; `diffSpec` selects the diff (`[base, 'HEAD']` for a PR, `['--cached']`
+ * for staged changes).
  */
-function touchedIn(files, base, read) {
+function touchedIn(files, diffSpec, read) {
   const touched = [];
   for (const abs of files) {
     const file = relative(ROOT, abs);
     const { fns } = analyzeFile(abs, read(abs));
-    const ranges = hunkRanges(gitOk(['diff', '--unified=0', base, 'HEAD', '--', file]) ?? '');
+    const ranges = hunkRanges(gitOk(['diff', '--unified=0', ...diffSpec, '--', file]) ?? '');
     for (const fn of touchedFunctions(fns, ranges)) touched.push({ file, fn });
   }
   return touched;
 }
 
 /** Touched function identities across changed files, as a set of ids. */
-function touchedKeys(files, base, read) {
-  return new Set(touchedIn(files, base, read).map(({ file, fn }) => touchedId(file, fn)));
+function touchedKeys(files, diffSpec, read) {
+  return new Set(touchedIn(files, diffSpec, read).map(({ file, fn }) => touchedId(file, fn)));
 }
 
 /**
@@ -202,7 +221,7 @@ function headerLine() {
 
 function modeReport() {
   const coverage = runCoverage({ hard: false });
-  const entries = buildEntries(walkTs(), coverage);
+  const entries = buildEntries(walkTs(), coverage, undefined, { tolerant: true });
   const baseline = readBaseline();
   const { violations, grandfathered, improved } = evaluateGate(entries, baseline);
 
@@ -238,27 +257,25 @@ function modeReport() {
 }
 
 function modeStaged() {
-  const files = stagedFiles();
+  let touched;
+  try {
+    touched = touchedIn(
+      stagedFiles(),
+      ['--cached'],
+      (abs) => gitOk(['show', `:${relative(ROOT, abs)}`]) ?? '',
+    );
+  } catch (e) {
+    // warn-only by design: a broken staged file is the typecheck's loud problem
+    console.error(`astroix pre-commit: staged CC scan skipped (${e.message})`);
+    return;
+  }
   let warned = 0;
-  for (const abs of files) {
-    const file = relative(ROOT, abs);
-    const stagedSource = gitOk(['show', `:${file}`]);
-    if (stagedSource === null) continue;
-    let fns;
-    try {
-      fns = analyzeComplexity(stagedSource, file);
-    } catch (e) {
-      console.error(`astroix pre-commit: skipping ${file} (${e.message})`);
-      continue;
-    }
-    const ranges = hunkRanges(gitOk(['diff', '--cached', '--unified=0', '--', file]) ?? '');
-    for (const fn of touchedFunctions(fns, ranges)) {
-      if (fn.cc >= PRECOMMIT_CC_WARN) {
-        console.warn(
-          `astroix pre-commit: ${file} ${fn.name}@L${fn.lineStart} cc ${fn.cc} >= ${PRECOMMIT_CC_WARN} — consider splitting before it grows`,
-        );
-        warned += 1;
-      }
+  for (const { file, fn } of touched) {
+    if (fn.cc >= PRECOMMIT_CC_WARN) {
+      console.warn(
+        `astroix pre-commit: ${file} ${fn.name}@L${fn.lineStart} cc ${fn.cc} >= ${PRECOMMIT_CC_WARN} — consider splitting before it grows`,
+      );
+      warned += 1;
     }
   }
   if (warned === 0) console.log('astroix pre-commit: staged CC scan clean');
@@ -275,7 +292,7 @@ function modePreflight() {
     console.log('preflight: evaluating committed state (HEAD); working tree is dirty');
 
   // touched set first: a diff landing between functions never pays the coverage run
-  const touched = touchedIn(files, base, committedSource);
+  const touched = touchedIn(files, [base, 'HEAD'], committedSource);
   if (touched.length === 0) {
     console.log(`preflight: ${files.length} changed file(s), no function touched — pass`);
     return;
@@ -317,10 +334,12 @@ function modeCi() {
   const base =
     envBase === undefined ? undefined : (gitOk(['merge-base', envBase, 'HEAD']) ?? envBase).trim();
   const coverage = runCoverage({ hard: false });
-  const entries = buildEntries(walkTs(), coverage);
+  const entries = buildEntries(walkTs(), coverage, undefined, { tolerant: true });
 
   const touched =
-    base === undefined ? new Set() : touchedKeys(changedFiles(base), base, committedSource);
+    base === undefined
+      ? new Set()
+      : touchedKeys(changedFiles(base), [base, 'HEAD'], committedSource);
   const isTouched = (e) => touched.has(touchedId(e.file, e));
 
   const baseline = readBaseline();
