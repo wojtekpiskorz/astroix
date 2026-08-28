@@ -2,7 +2,7 @@
 
 Status: accepted (2026-08-28, wayfinder #45 · map #39)
 
-The chrome grew as a POC flat layout — `app.tsx` holding five components, `editor.tsx` holding two, one global zustand store — which was fine while there was one vertical. v1 has two (CSS tab + Content tab), and a third tab would double `app.tsx` again. This ADR fixes the target module architecture so every PR moves toward it instead of accumulating accidents. It was decided in a grilling session with the owner after the shadcn wiring (#44) so it describes a layout the codebase can actually reach.
+The chrome grew as a POC flat layout, and that was fine while there was one vertical. `app.tsx` held five components, `editor.tsx` held two, plus one global zustand store. v1 has two (CSS tab + Content tab), and a third tab would double `app.tsx` again. This ADR fixes the target module architecture so every PR moves toward it instead of accumulating accidents. The owner settled this in a grilling session after the shadcn wiring (#44), so the ADR describes a layout the codebase can actually reach.
 
 ## The layers
 
@@ -14,7 +14,7 @@ A module may import only from modules strictly below it — downward only, no si
 4. **`components/ui/`** — shadcn primitives, CLI-generated, domain-deaf: no imports from features, stores, shared modules, or core. Changed by regeneration, never hand-edited toward domain needs.
 5. **`lib/`** — shared pure helpers (`cn` today).
 
-Sideways imports are forbidden at every level: features never import each other; shared modules never import each other (if `canvas` ever needs `editor`, the shared piece drops to `lib/` or a module is promoted). Cross-feature code that is *not* infrastructure — a shared panel, a shared hook — starts in `lib/` or waits until a second feature actually needs it; a shared module is born only when 2+ verticals need it, and stays as small as its job.
+Sideways imports are forbidden at every level: features never import each other; shared modules never import each other (if `canvas` ever needs `editor`, the shared piece drops to `lib/` or a module is promoted). Code with one consumer stays in the feature that needs it; a shared module is born only when 2+ verticals need it — whatever it shares, UI or otherwise — and stays as small as its job. `lib/` stays helpers-only.
 
 ## State
 
@@ -44,4 +44,4 @@ One exported component per file, filename lowercase-dash matching the component 
 - The current layout does **not** yet conform; the ADR describes the target. A mechanical restructure (component moves, store split, import rewiring — no behavior change) lands as its own PR before Content-tab work starts, so the vertical's first code lands in the target shape.
 - The editor dock slot is app-shell; what renders inside it is feature-owned and chosen by the active tab. `EditorSpec` and its actions migrate to the css feature store on restructure.
 - Boundary violations are caught by review (AGENTS.md checklist + advisory AI review), not tooling — recorded above as a conscious gap.
-- Future shared needs default to `lib/`; a new shared module needs the 2+-verticals test stated out loud in review, not assumed.
+- A new shared module needs the 2+-verticals test stated out loud in review, not assumed; `lib/` stays helpers-only.
