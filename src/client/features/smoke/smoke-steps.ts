@@ -68,3 +68,5 @@ export const SMOKE_STEPS = [
 ] as const satisfies readonly SmokeStep[];
 
 export type StepId = (typeof SMOKE_STEPS)[number]['id'];
+/** A step value with its id narrowed to the StepId union. */
+export type SmokeStepItem = (typeof SMOKE_STEPS)[number];
