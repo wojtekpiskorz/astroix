@@ -78,6 +78,13 @@ Static and deterministic, upstream of the advisory AI review (wayfinder #55). En
 - Keep PRs surgical: every changed line should trace to the task.
 - Run `bun run preflight` before `gh pr create` — the CRAP gate is a full-src baseline ratchet.
 
+## Parallel sessions & worktrees
+
+Lanes run concurrently — the owner steers several agent sessions at once — so checkout territory is explicit:
+
+- A session that branches works from its own worktree (`git worktree add ../astroix-<issue-or-pr> <branch>`), never by switching the shared main checkout: two sessions ping-ponging one checkout is how commits land on the wrong branch (the `b1d1ee6` incident, PR #88 thread).
+- At lane close, the worktree is always removed and the branch deleted. Canonical sequence: exit the worktree first (`git worktree remove` refuses the one you are standing in), remove it, then `gh pr merge <n> --delete-branch` — merge, local + remote delete, and prune in one step. The `changeset-release/*` branch is never deleted; it belongs to the release loop.
+
 ## Boundaries
 
 Always:
