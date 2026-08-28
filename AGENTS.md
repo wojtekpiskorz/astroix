@@ -47,7 +47,7 @@ Rationale and trade-offs live in `docs/adr/0002-chrome-module-architecture.md`; 
 
 - Imports flow strictly downward: app shell (`app.tsx`, `chrome.tsx`, `entry.tsx`) → `features/<vertical>/` → shared modules (`canvas/`, `editor/`) → `components/ui/` → `lib/`; `src/core` is importable from anywhere except `components/ui/`, which stays domain-deaf. No sideways (feature ↔ feature, shared ↔ shared), no upward, no cycles.
 - Vertical UI lands in its feature folder — components + its zustand store + its `api.ts`; a feature never imports another feature.
-- Server/watcher-derived data goes through TanStack Query, colocated in the feature's `api.ts`, query keys `['astroix', <resource>, …]`; chrome-only UI state goes zustand (per-feature store; cross-vertical state like `selection` lives in the small app store).
+- Server/watcher-derived data goes through TanStack Query, colocated in the owning module's `api.ts` (feature or shared — `editor/` owns its own file hooks), query keys `['astroix', <resource>, …]`; chrome-only UI state goes zustand (per-feature store; cross-vertical state like `selection` lives in the small app store).
 - `components/ui/` is shadcn-generated and domain-deaf — extend by regeneration, never by hand-editing toward domain needs.
 - Code with one consumer stays in the feature that needs it; a shared module beyond ui/lib is born only when 2+ verticals need it, and stays as small as its job. `lib/` stays helpers-only.
 - One exported component per file, lowercase-dash name matching the component (`rule-list.tsx` ← `RuleList`); extract on multi-use, ~300 lines, or two distinct concerns in one file.

@@ -21,7 +21,7 @@ Sideways imports are forbidden at every level: features never import each other;
 Two state systems with a one-line rule: **server/watcher-derived data is TanStack Query; chrome-only UI state is zustand.**
 
 - **zustand, per concern**: a small app-level store holds cross-vertical state — `selectMode`, `selection`, (the active tab once tabs land). Each feature owns its store (`EditorSpec` and open/close live in the css store; the future content store holds the open entry, dirty form state, …). Selection is zustand, not Query, because it holds a live DOM element, not data — and it sits app-level because canvas, sidebar, and editors consume it in both verticals. The re-matching effect after reindex lives in `canvas/` and writes the new selection into the app store.
-- **TanStack Query, colocated**: query hooks live in the feature's `api.ts` (`features/css/api.ts` will hold `useIndexPayload`, moved out of `app.tsx` by the restructure; `features/content/api.ts` will export `useEntries`, `useSaveEntry`, …). Query keys are namespaced `['astroix', <resource>, ...]` as today. Mutations follow the same colocated pattern.
+- **TanStack Query, colocated in the owning module**: query hooks live in the owning module's `api.ts`, feature or shared — `features/css/api.ts` will hold `useIndexPayload` (moved out of `app.tsx` by the restructure), `features/content/api.ts` will export `useEntries`, `useSaveEntry`, …, and `editor/` owns its file fetch/edit hooks, since both verticals mount the editor. Query keys are namespaced `['astroix', <resource>, ...]` as today. Mutations follow the same colocated pattern.
 
 ## Files
 
@@ -44,4 +44,5 @@ One exported component per file, filename lowercase-dash matching the component 
 - The current layout does **not** yet conform; the ADR describes the target. A mechanical restructure (component moves, store split, import rewiring — no behavior change) lands as its own PR before Content-tab work starts, so the vertical's first code lands in the target shape.
 - The editor dock slot is app-shell; what renders inside it is feature-owned and chosen by the active tab. `EditorSpec` and its actions migrate to the css feature store on restructure.
 - Boundary violations are caught by review (AGENTS.md checklist + advisory AI review), not tooling — recorded above as a conscious gap.
+- `editor.tsx`'s existing direct `fetch` calls (`/__astroix/file`, `/__astroix/edit`) are pre-Query legacy: the restructure moves them into `editor/` as-is, and they migrate to Query hooks in `editor/api.ts` when editor data handling is next touched — deliberately not folded into the mechanical move, where the conversion would break its no-behavior-change gate.
 - A new shared module needs the 2+-verticals test stated out loud in review, not assumed; `lib/` stays helpers-only.
