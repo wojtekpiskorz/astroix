@@ -1,5 +1,6 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { useEffect } from 'react';
+import { type CSSProperties, useEffect } from 'react';
+import { SidebarProvider } from '#components/ui/sidebar.tsx';
 import { Canvas } from './canvas/canvas';
 import { ContentEditorPane } from './features/content/content-editor-pane';
 import { INDEX_PAYLOAD_KEY } from './features/css/api';
@@ -29,18 +30,23 @@ export function App() {
   return (
     // `dark`: the shadcn theme block (.dark in chrome.css) — the foundation
     // components style themselves from these tokens (issue #44)
-    <div className="dark flex h-full w-full flex-col bg-slate-950 text-slate-100">
+    <div className="dark flex h-full w-full flex-col bg-background text-foreground">
       <ChromeHeader />
-      <div className="flex min-h-0 flex-1">
+      {/* The provider row `relative` + the sidebar's `absolute` keep the
+          primitive's positioning inside the workbench (below the header). */}
+      <SidebarProvider
+        className="relative min-h-0 flex-1"
+        style={{ '--sidebar-width': '18rem' } as CSSProperties}
+      >
         <Sidebar />
         {/* The dock's column frame — uniform width, border, background — is the
-            slot's, not the pane's (owner ruling on this PR); panes render
+            slot's, not the pane's (owner ruling on the tabs PR); panes render
             frameless and choose only their inner layout. */}
-        <div className="flex w-[480px] shrink-0 flex-col border-r border-slate-800 bg-slate-950">
+        <div className="flex w-[480px] shrink-0 flex-col border-r border-border bg-background">
           {activeVertical === 'css' ? <EditorPane /> : <ContentEditorPane />}
         </div>
         <Canvas />
-      </div>
+      </SidebarProvider>
     </div>
   );
 }

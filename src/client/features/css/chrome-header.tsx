@@ -6,7 +6,7 @@ export function ChromeHeader() {
   return (
     <header
       data-astroix-header=""
-      className="flex items-center gap-4 border-b border-slate-800 bg-slate-900 px-4 py-2 text-sm"
+      className="flex items-center gap-4 border-b border-border bg-card px-4 py-2 text-sm"
     >
       <strong className="translate-x-2 text-xs tracking-widest uppercase">astroix</strong>
       <Button
