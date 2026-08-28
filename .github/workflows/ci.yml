@@ -27,6 +27,8 @@ jobs:
       # build both outputs and gate the prebuilt chrome shape (ADR-0001)
       - run: bun run build
       - run: bun run check:artifact
+      # the published manifest/exports must be consumer-clean (needs the build)
+      - run: bun run check:publint
 
   e2e:
     name: e2e (playwright)

@@ -1,10 +1,17 @@
 #!/bin/sh
-# astroix pre-commit: CC warn-only scan of staged TS/TSX (wayfinder #55).
-# It warns, never blocks — the hard stops live in `bun run preflight`.
+# astroix pre-commit: biome blocks on staged lint/format errors (fix with
+# `bunx biome check --staged --write`, re-stage); the crap4ts CC scan warns,
+# never blocks — the hard stops live in `bun run preflight`.
 # Wired without a hook manager: git config core.hooksPath scripts/hooks
 # (run `bun run hooks` once per clone; see AGENTS.md).
 cd "$(git rev-parse --show-toplevel)" || exit 0
 if command -v bun >/dev/null 2>&1; then
+  # biome's published recipe for staged hooks: unknown file types ignored,
+  # an empty matched set is not an error (docs-only/fixture-only commits pass)
+  bunx biome check --staged --files-ignore-unknown=true --no-errors-on-unmatched || {
+    echo "astroix: commit blocked by biome — fix with 'bunx biome check --staged --write', then re-stage"
+    exit 1
+  }
   bun scripts/crap.mjs --staged || echo "astroix: pre-commit CC scan skipped (engine unavailable)"
 fi
 exit 0
