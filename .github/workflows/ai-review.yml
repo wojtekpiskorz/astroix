@@ -25,13 +25,13 @@ jobs:
     # Version Packages PRs skip as well: the diff is generated from changesets
     # already reviewed on their source PRs, and cc-action's non-human-actor
     # guard fails the run red anyway, but only after paying for checkout,
-    # install, and crap:ci. Keyed on the fixed changesets branch, not the
+    # install, and crap:ci. Keyed on the changesets branch prefix, not the
     # actor, because a human reopen passes the guard and would burn a full
     # review on generated output.
     if: >-
       ${{ !github.event.pull_request.draft &&
       github.event.pull_request.head.repo.fork == false &&
-      github.event.pull_request.head.ref != 'changeset-release/main' }}
+      !startsWith(github.event.pull_request.head.ref, 'changeset-release/') }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
