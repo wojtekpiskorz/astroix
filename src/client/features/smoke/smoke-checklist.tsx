@@ -25,11 +25,13 @@ function SmokeWizard() {
   const total = SMOKE_STEPS.length;
   const step = index < total ? (SMOKE_STEPS[index] ?? null) : null;
 
-  // `S` summons/dismisses the wizard, but never while typing — plain inputs,
-  // textareas, contenteditable and CodeMirror's hidden textarea all count.
+  // `S` summons/dismisses the wizard, but never while typing — the target
+  // must come from the event's composed path: while CodeMirror holds focus,
+  // document.activeElement is the shadow host (#astroix-root), not the
+  // editor, so a focus-based guard cannot see the chrome's own inputs.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
-      if (!isPlainS(event) || isTyping()) return;
+      if (!isPlainS(event) || isTypingTarget(event.composedPath()[0])) return;
       event.preventDefault();
       setOpen((value) => !value);
     };
@@ -76,10 +78,11 @@ function isPlainS(event: KeyboardEvent): boolean {
   return event.key.toLowerCase() === 's';
 }
 
-function isTyping(): boolean {
-  const element = document.activeElement;
-  if (element === null) return false;
-  const tag = element.tagName;
+function isTypingTarget(target: EventTarget | null | undefined): boolean {
+  // plain inputs, textareas, contenteditable — CodeMirror's hidden textarea
+  // and .cm-content both count, inside or outside the shadow root
+  if (!(target instanceof Element)) return false;
+  const tag = target.tagName;
   if (tag === 'INPUT' || tag === 'TEXTAREA') return true;
-  return element instanceof HTMLElement && element.isContentEditable;
+  return target instanceof HTMLElement && target.isContentEditable;
 }

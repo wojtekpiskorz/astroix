@@ -1,3 +1,5 @@
+import { readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
 
 import { SMOKE_STEPS } from '../src/client/features/smoke/smoke-steps.ts';
@@ -69,4 +71,30 @@ test('a verified step with a note flows into the copy report', async ({ page }) 
   const clipboard = await page.evaluate(() => navigator.clipboard.readText());
   expect(clipboard).toContain('- [x] 3 —');
   expect(clipboard).toContain('- note: checked from e2e');
+});
+
+test('S typed into the shadow-rooted CodeMirror editor does not summon the wizard', async ({
+  page,
+}) => {
+  // regression (advisory round 1): the guard must read the keydown target
+  // from the composed path — document.activeElement is the shadow host
+  // while CodeMirror holds focus, and the wizard would swallow every
+  // plain `s` typed in the raw editor
+  const filePath = join('e2e', 'fixture', 'src', 'pages', 'index.astro');
+  const original = readFileSync(filePath, 'utf8');
+  try {
+    await page.goto(GATED_URL);
+    await page.getByText('Select: off').click();
+    await page.frameLocator('#astroix-canvas').locator('.hero-title').click();
+    await page.locator('[data-astroix-winner="true"]').click();
+    const editor = page.locator('[data-astroix-editor="view"]');
+    await expect(editor.locator('.cm-content')).toBeVisible();
+    await editor.locator('.cm-content').click();
+
+    await page.keyboard.press('s');
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+  } finally {
+    // the keystroke went to the editor and wrote through — restore the file
+    writeFileSync(filePath, original);
+  }
 });

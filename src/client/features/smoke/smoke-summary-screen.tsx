@@ -21,6 +21,7 @@ export function SmokeSummaryScreen({ onBackToSteps }: SmokeSummaryScreenProps) {
   const note = useSmokeStore((state) => state.note);
   const toggle = useSmokeStore((state) => state.toggle);
   const [report, setReport] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
   const total = SMOKE_STEPS.length;
 
   const copy = async (): Promise<void> => {
@@ -29,8 +30,15 @@ export function SmokeSummaryScreen({ onBackToSteps }: SmokeSummaryScreenProps) {
       userAgent: navigator.userAgent,
       isoTimestamp: new Date().toISOString(),
     });
+    // the preview lands regardless; the ✓ flips only when the clipboard
+    // actually took the write (permissions/non-secure contexts can refuse)
     setReport(text);
-    await navigator.clipboard.writeText(text);
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+    } catch {
+      setCopied(false);
+    }
   };
 
   return (
@@ -70,7 +78,7 @@ export function SmokeSummaryScreen({ onBackToSteps }: SmokeSummaryScreenProps) {
           Back to steps
         </Button>
         <Button type="button" size="sm" onClick={() => void copy()}>
-          {report !== null ? 'Copy report ✓' : 'Copy report'}
+          {copied ? 'Copy report ✓' : 'Copy report'}
         </Button>
       </DialogFooter>
     </>

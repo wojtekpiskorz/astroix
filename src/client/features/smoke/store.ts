@@ -7,7 +7,6 @@ interface SmokeState {
   note: Record<string, string>;
   toggle: (id: string) => void;
   setNote: (id: string, value: string) => void;
-  reset: () => void;
 }
 
 export const useSmokeStore = create<SmokeState>()((set) => ({
@@ -15,5 +14,4 @@ export const useSmokeStore = create<SmokeState>()((set) => ({
   note: {},
   toggle: (id) => set((state) => ({ done: { ...state.done, [id]: !state.done[id] } })),
   setNote: (id, value) => set((state) => ({ note: { ...state.note, [id]: value } })),
-  reset: () => set({ done: {}, note: {} }),
 }));
