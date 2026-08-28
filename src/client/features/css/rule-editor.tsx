@@ -4,6 +4,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 import { fetchFileContents, putFileRangeEdit } from '../../editor/api';
 import { createEditorView, replaceDoc, revealRange } from '../../editor/codemirror';
+import { INDEX_PAYLOAD_KEY } from './api';
 import { type EditorSpec, useCssStore } from './store';
 
 const WRITE_DEBOUNCE_MS = 300;
@@ -39,7 +40,7 @@ export function RuleEditor({ spec }: { spec: EditorSpec }) {
       replaceDoc(view, contents);
       baselineRef.current = contents;
       setStatus('stale');
-      void queryClient.invalidateQueries({ queryKey: ['astroix', 'index-payload'] });
+      void queryClient.invalidateQueries({ queryKey: INDEX_PAYLOAD_KEY });
     };
 
     const write = async (text: string): Promise<void> => {
@@ -83,7 +84,7 @@ export function RuleEditor({ spec }: { spec: EditorSpec }) {
         baselineRef.current = text;
         setStatus('saved');
         // the payload's ranges are stale after any write — refetch
-        void queryClient.invalidateQueries({ queryKey: ['astroix', 'index-payload'] });
+        void queryClient.invalidateQueries({ queryKey: INDEX_PAYLOAD_KEY });
       } else {
         setStatus('error');
       }
