@@ -34,7 +34,11 @@ jobs:
       # action in the repo, so ref movement must not swap code under it silently
       - uses: changesets/action@8488615a623b1b9c987934bb89eae8af6a946ac1 # v2.1.1
         with:
+          # the action runs these through @actions/exec WITHOUT a shell: one
+          # command each, no && chains (operators land as argv on the command —
+          # vite dies on "Unused args"); the publish chain lives in
+          # package.json#ci:publish
           version-script: bunx changeset version
-          publish-script: bun run build && bun run check:artifact && bun run check:publint && bunx changeset publish
+          publish-script: bun run ci:publish
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }} # the granular access token

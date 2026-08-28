@@ -54,6 +54,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
+    "ci:publish": "bun run build && bun run check:artifact && bun run check:publint && bunx changeset publish",
     "changeset": "changeset"
   },
   "peerDependencies": {
