@@ -1,12 +1,16 @@
 import { create } from 'zustand';
+import type { SmokeStep } from './smoke-steps';
 
 /** In-memory only by design: a smoke run lives for one browser session —
- * persistence is out of scope for the fold-in (#61). */
+ * persistence is out of scope for the fold-in (#61). Keys are step ids, so
+ * an unknown step id is unrepresentable at this seam (the pure report
+ * builder still accepts arbitrary records and filters — its test documents
+ * that boundary). */
 interface SmokeState {
-  done: Record<string, boolean>;
-  note: Record<string, string>;
-  toggle: (id: string) => void;
-  setNote: (id: string, value: string) => void;
+  done: Partial<Record<SmokeStep['id'], boolean>>;
+  note: Partial<Record<SmokeStep['id'], string>>;
+  toggle: (id: SmokeStep['id']) => void;
+  setNote: (id: SmokeStep['id'], value: string) => void;
 }
 
 export const useSmokeStore = create<SmokeState>()((set) => ({

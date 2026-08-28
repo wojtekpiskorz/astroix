@@ -2,9 +2,9 @@ import { Button } from '#components/ui/button.tsx';
 import { Checkbox } from '#components/ui/checkbox.tsx';
 import { DialogDescription, DialogHeader, DialogTitle } from '#components/ui/dialog.tsx';
 import { Input } from '#components/ui/input.tsx';
-import type { SmokeStep } from './smoke-steps.ts';
-import { SMOKE_STEPS } from './smoke-steps.ts';
-import { useSmokeStore } from './store.ts';
+import type { SmokeStep } from './smoke-steps';
+import { SMOKE_STEPS } from './smoke-steps';
+import { useSmokeStore } from './store';
 
 interface SmokeStepScreenProps {
   step: SmokeStep;

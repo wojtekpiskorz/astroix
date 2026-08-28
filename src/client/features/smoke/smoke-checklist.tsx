@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Dialog, DialogContent } from '#components/ui/dialog.tsx';
-import { isSmokeGateOpen } from './gate.ts';
-import { SmokeStepScreen } from './smoke-step-screen.tsx';
-import { SMOKE_STEPS } from './smoke-steps.ts';
-import { SmokeSummaryScreen } from './smoke-summary-screen.tsx';
+import { isSmokeGateOpen } from './gate';
+import { SmokeStepScreen } from './smoke-step-screen';
+import { SMOKE_STEPS } from './smoke-steps';
+import { SmokeSummaryScreen } from './smoke-summary-screen';
 
 // Read once per page load: the gate never flips without a reload, so a
 // module-level constant keeps the check out of the render path entirely.

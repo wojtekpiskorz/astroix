@@ -9,15 +9,15 @@ export interface SmokeReportContext {
   isoTimestamp: string;
 }
 
-export function verifiedCount(done: Record<string, boolean>): number {
+export function verifiedCount(done: Readonly<Partial<Record<string, boolean>>>): number {
   return SMOKE_STEPS.filter((step) => done[step.id]).length;
 }
 
 /** The Copy-report payload: a markdown document ready to paste into a GitHub
  * issue for an agent session to pick up. */
 export function buildSmokeReport(
-  done: Record<string, boolean>,
-  note: Record<string, string>,
+  done: Readonly<Partial<Record<string, boolean>>>,
+  note: Readonly<Partial<Record<string, string>>>,
   context: SmokeReportContext,
 ): string {
   const stamp = context.isoTimestamp.replace('T', ' ').slice(0, 16);

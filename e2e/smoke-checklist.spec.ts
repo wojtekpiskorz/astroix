@@ -93,6 +93,15 @@ test('S typed into the shadow-rooted CodeMirror editor does not summon the wizar
 
     await page.keyboard.press('s');
     await expect(page.getByRole('dialog')).toHaveCount(0);
+
+    // the keystroke went to the editor and wrote through — wait for the
+    // bytes on disk before the finally restores the file, or the debounced
+    // write races the restore and a stray `s` survives. Disk, not the
+    // editor's `saved` badge: editing a page file triggers a full Astro
+    // reload that can unmount the chrome before the badge flips.
+    await expect
+      .poll(async () => readFileSync(filePath, 'utf8'), { timeout: 10_000 })
+      .not.toBe(original);
   } finally {
     // the keystroke went to the editor and wrote through — restore the file
     writeFileSync(filePath, original);

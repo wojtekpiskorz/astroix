@@ -7,9 +7,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from '#components/ui/dialog.tsx';
-import { buildSmokeReport, verifiedCount } from './smoke-report.ts';
-import { SMOKE_STEPS } from './smoke-steps.ts';
-import { useSmokeStore } from './store.ts';
+import { buildSmokeReport, verifiedCount } from './smoke-report';
+import { SMOKE_STEPS } from './smoke-steps';
+import { useSmokeStore } from './store';
 
 interface SmokeSummaryScreenProps {
   onBackToSteps: () => void;
