@@ -1,7 +1,7 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { useEffect } from 'react';
 import { Canvas } from './canvas/canvas';
-import { ContentEditorPane } from './features/content/editor-pane';
+import { ContentEditorPane } from './features/content/content-editor-pane';
 import { INDEX_PAYLOAD_KEY } from './features/css/api';
 import { ChromeHeader } from './features/css/chrome-header';
 import { EditorPane } from './features/css/editor-pane';
