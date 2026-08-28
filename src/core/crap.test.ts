@@ -9,11 +9,12 @@ import {
   type IstanbulCoverage,
   mergeBaseline,
   type RiskEntry,
+  toRiskEntry,
   touchedFunctions,
 } from './crap';
 
 function entry(overrides: Partial<RiskEntry> = {}): RiskEntry {
-  return {
+  const merged = {
     file: 'src/core/matcher.ts',
     name: 'fn',
     lineStart: 1,
@@ -25,7 +26,11 @@ function entry(overrides: Partial<RiskEntry> = {}): RiskEntry {
     coverage: 1,
     crap: 4,
     ...overrides,
-  };
+  } as RiskEntry;
+  merged.stop =
+    overrides.stop ??
+    (merged.metric === 'crap' ? GATE_STOPS.coreCrapStop : GATE_STOPS.watchlistCcStop);
+  return merged;
 }
 
 describe('crapScore', () => {
@@ -179,6 +184,53 @@ describe('evaluateGate', () => {
     const { violations } = evaluateGate([watchCold, watchHot], {});
     expect(violations).toEqual([watchHot]);
     expect(GATE_STOPS).toEqual({ coreCrapStop: 30, watchlistCcStop: 15 });
+  });
+});
+
+describe('toRiskEntry', () => {
+  const fn = { name: 'fn', lineStart: 3, lineEnd: 9, cc: 5 };
+
+  it('derives core rows: coverage join, CRAP metric, core stop', () => {
+    const fileCov = {
+      statementMap: {
+        s0: { start: { line: 4 }, end: { line: 4 } },
+        s1: { start: { line: 5 }, end: { line: 5 } },
+      },
+      s: { s0: 1, s1: 0 },
+    };
+    const e = toRiskEntry('src/core/matcher.ts', fn, fileCov);
+    expect(e).toMatchObject({
+      metric: 'crap',
+      coverage: 0.5,
+      crap: crapScore(5, 0.5),
+      value: crapScore(5, 0.5),
+      stop: 30,
+      band: 'moderate',
+    });
+  });
+
+  it('derives watchlist rows: no coverage term even when handed one, cc stop', () => {
+    const e = toRiskEntry('src/node/rest.ts', fn, { statementMap: {}, s: {} });
+    expect(e).toMatchObject({
+      metric: 'cc',
+      coverage: null,
+      crap: null,
+      value: 5,
+      stop: 15,
+      band: 'low',
+    });
+  });
+
+  it('degrades to a CC-only row when the coverage run itself failed (null, not undefined)', () => {
+    const e = toRiskEntry('src/core/matcher.ts', fn, null);
+    expect(e).toMatchObject({ metric: 'cc', coverage: null, crap: null, value: 5, stop: 15 });
+  });
+
+  it('reads a core file absent from coverage as 0%, not degraded', () => {
+    const e = toRiskEntry('src/core/matcher.ts', fn, undefined);
+    expect(e.coverage).toBe(0);
+    expect(e.crap).toBe(crapScore(5, 0));
+    expect(e.metric).toBe('crap');
   });
 });
 

@@ -42,6 +42,8 @@ export interface RiskEntry extends FunctionComplexity {
   metric: 'crap' | 'cc';
   /** The gate metric's value — `cc` for watchlist rows, `crap` for covered rows. */
   value: number;
+  /** The hard stop this row is gated against, derived with its metric in toRiskEntry. */
+  stop: number;
   coverage: number | null;
   crap: number | null;
 }
@@ -97,28 +99,44 @@ export function touchedFunctions(
 }
 
 /**
- * Baseline identity of a function. Named functions key on `file#name` —
- * tolerant of moves and line churn. Anonymous ones are position-pinned
- * (`file#(anonymous)@L<lineStart>`): a fresh anonymous violator must not
- * ride a sibling's pin, and a moved anonymous violator re-keys and re-fails
- * — the attention an unnamed stop-breaching function deserves.
- */
-/**
- * The single construction point for risk rows: `metric`, `value`, `band`,
- * `coverage` and `crap` all derive from the file's layer here and nowhere
- * else, so the value the gate reads can never disagree with the row the
- * report renders. Core rows join the istanbul coverage; watchlist rows
- * ignore it even when given (metric honesty).
+ * The single construction point for risk rows: `metric`, `value`, `stop`,
+ * `band`, `coverage` and `crap` all derive from the file's layer here and
+ * nowhere else, so the value the gate reads can never disagree with the row
+ * the report renders. Core rows join the istanbul coverage; watchlist rows
+ * ignore it even when given (metric honesty). `fileCoverage: null` (distinct
+ * from `undefined`) is the degraded mode — the coverage run itself failed —
+ * and downgrades any row to a CC-only one rather than lying with 0%.
  */
 export function toRiskEntry(
   file: string,
   fn: FunctionComplexity,
-  fileCoverage: IstanbulFileCoverage | undefined,
+  fileCoverage: IstanbulFileCoverage | undefined | null,
 ): RiskEntry {
+  if (fileCoverage === null) {
+    return {
+      file,
+      ...fn,
+      coverage: null,
+      crap: null,
+      metric: 'cc',
+      value: fn.cc,
+      stop: GATE_STOPS.watchlistCcStop,
+      band: bandOf(fn.cc),
+    };
+  }
   if (file.startsWith('src/core/')) {
     const coverage = coverageWithin(fn, fileCoverage);
     const crap = crapScore(fn.cc, coverage);
-    return { file, ...fn, coverage, crap, metric: 'crap', value: crap, band: bandOf(crap) };
+    return {
+      file,
+      ...fn,
+      coverage,
+      crap,
+      metric: 'crap',
+      value: crap,
+      stop: GATE_STOPS.coreCrapStop,
+      band: bandOf(crap),
+    };
   }
   return {
     file,
@@ -127,10 +145,18 @@ export function toRiskEntry(
     crap: null,
     metric: 'cc',
     value: fn.cc,
+    stop: GATE_STOPS.watchlistCcStop,
     band: bandOf(fn.cc),
   };
 }
 
+/**
+ * Baseline identity of a function. Named functions key on `file#name` —
+ * tolerant of moves and line churn. Anonymous ones are position-pinned
+ * (`file#(anonymous)@L<lineStart>`): a fresh anonymous violator must not
+ * ride a sibling's pin, and a moved anonymous violator re-keys and re-fails
+ * — the attention an unnamed stop-breaching function deserves.
+ */
 export function baselineKey(file: string, name: string, lineStart: number): string {
   return name === '(anonymous)' ? `${file}#${name}@L${lineStart}` : `${file}#${name}`;
 }
@@ -145,15 +171,13 @@ export function baselineKey(file: string, name: string, lineStart: number): stri
 export function evaluateGate(
   entries: RiskEntry[],
   baseline: Record<string, number>,
-  stops: GateStops = GATE_STOPS,
 ): { violations: RiskEntry[]; grandfathered: RiskEntry[]; improved: RiskEntry[] } {
   const violations: RiskEntry[] = [];
   const grandfathered: RiskEntry[] = [];
   const improved: RiskEntry[] = [];
 
   for (const entry of entries) {
-    const stop = entry.metric === 'crap' ? stops.coreCrapStop : stops.watchlistCcStop;
-    if (entry.value < stop) continue;
+    if (entry.value < entry.stop) continue;
     const pinned = baseline[baselineKey(entry.file, entry.name, entry.lineStart)];
     if (pinned === undefined) violations.push(entry);
     else if (entry.value > pinned) violations.push(entry);
@@ -173,14 +197,12 @@ export function evaluateGate(
 export function mergeBaseline(
   previous: Record<string, number>,
   entries: RiskEntry[],
-  stops: GateStops = GATE_STOPS,
 ): { next: Record<string, number>; refused: RiskEntry[] } {
   const next: Record<string, number> = {};
   const refused: RiskEntry[] = [];
 
   for (const entry of entries) {
-    const stop = entry.metric === 'crap' ? stops.coreCrapStop : stops.watchlistCcStop;
-    if (entry.value < stop) continue;
+    if (entry.value < entry.stop) continue;
     const key = baselineKey(entry.file, entry.name, entry.lineStart);
     const pinned = previous[key];
     if (pinned === undefined) {

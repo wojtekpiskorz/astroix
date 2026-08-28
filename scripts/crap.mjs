@@ -118,7 +118,8 @@ function buildEntries(files, coverage, read = (abs) => readFileSync(abs, 'utf8')
   const entries = [];
   for (const abs of files) {
     const { file, fns } = analyzeFile(abs, read(abs));
-    for (const fn of fns) entries.push(toRiskEntry(file, fn, coverage?.[abs]));
+    for (const fn of fns)
+      entries.push(toRiskEntry(file, fn, coverage === null ? null : coverage?.[abs]));
   }
   return entries;
 }
@@ -137,9 +138,19 @@ function touchedKeys(files, base, read) {
   return touched;
 }
 
-function runCoverage() {
+/**
+ * Runs vitest with coverage. `hard: false` (CI table, local report) degrades
+ * to null on a red suite — those outputs must never gate anything, and a
+ * CC-only table beats no review at all. The gates (preflight, baseline
+ * modes) stay hard: untrustworthy CRAP must not pass or pin.
+ */
+function runCoverage({ hard = true } = {}) {
   const r = spawnSync('bun', ['x', 'vitest', 'run', '--coverage'], { cwd: ROOT, stdio: 'inherit' });
   if (r.status !== 0) {
+    if (!hard) {
+      console.error('crap: vitest coverage run failed — degrading to a CC-only table');
+      return null;
+    }
     console.error('crap: vitest coverage run failed — the CRAP term needs it');
     process.exit(1);
   }
@@ -179,7 +190,7 @@ function headerLine() {
 // ——— modes ———
 
 function modeReport() {
-  const coverage = runCoverage();
+  const coverage = runCoverage({ hard: false });
   const entries = buildEntries(walkTs(), coverage);
   const baseline = readBaseline();
   const { violations, grandfathered, improved } = evaluateGate(entries, baseline);
@@ -193,9 +204,7 @@ function modeReport() {
   if (violations.length > 0) {
     console.log(`\nNEW violations (preflight would fail these):`);
     for (const v of violations)
-      console.log(
-        `  ${v.file} ${v.name}: ${v.metric} ${num(v.value)} >= ${v.metric === 'crap' ? GATE_STOPS.coreCrapStop : GATE_STOPS.watchlistCcStop}`,
-      );
+      console.log(`  ${v.file} ${v.name}: ${v.metric} ${num(v.value)} >= ${v.stop}`);
   }
   if (grandfathered.length > 0) {
     console.log(`\ngrandfathered (baseline, only tighten):`);
@@ -284,7 +293,7 @@ function modePreflight() {
     console.error(`\npreflight FAIL — ${violations.length} violation(s):`);
     for (const v of violations)
       console.error(
-        `  ${v.file} ${v.name}@L${v.lineStart}: ${v.metric} ${num(v.value)} >= ${v.metric === 'crap' ? GATE_STOPS.coreCrapStop : GATE_STOPS.watchlistCcStop} (refactor, or split the function)`,
+        `  ${v.file} ${v.name}@L${v.lineStart}: ${v.metric} ${num(v.value)} >= ${v.stop} (refactor, or split the function)`,
       );
     process.exit(1);
   }
@@ -293,7 +302,7 @@ function modePreflight() {
 
 function modeCi() {
   const base = process.env.GITHUB_BASE_SHA;
-  const coverage = runCoverage();
+  const coverage = runCoverage({ hard: false });
   const entries = buildEntries(walkTs(), coverage);
 
   const touched =
@@ -312,6 +321,11 @@ function modeCi() {
   lines.push(
     `CC per function (ESLint-classic counting, pinned in \`src/core/complexity.test.ts\`); CRAP = CC² × (1−cov)³ + CC where per-function coverage is real (\`src/core\`, unit tests); \`src/node\` + \`src/client\` are a CC-only watchlist (their truth is e2e coverage). Uncle Bob bands: <=5 low, <30 moderate, >=30 high.`,
   );
+  if (coverage === null)
+    lines.push(
+      '',
+      '> **DEGRADED**: the vitest coverage run failed — this is a CC-only table with no CRAP column. The deterministic gates own the red suite; this table is what the review gets anyway.',
+    );
   lines.push('');
   lines.push(
     `Hard stops (preflight, baseline-ratcheted): CRAP >= ${GATE_STOPS.coreCrapStop} (src/core) · CC >= ${GATE_STOPS.watchlistCcStop} (src/node, src/client). Pre-commit warns at CC >= ${PRECOMMIT_CC_WARN}.`,
@@ -328,7 +342,7 @@ function modeCi() {
     lines.push(`## Stop breaches (new or regressed — preflight fails these)`);
     for (const v of violations)
       lines.push(
-        `- ${v.file} ${v.name}@L${v.lineStart}: ${v.metric} ${num(v.value)} (stop ${v.metric === 'crap' ? GATE_STOPS.coreCrapStop : GATE_STOPS.watchlistCcStop})`,
+        `- ${v.file} ${v.name}@L${v.lineStart}: ${v.metric} ${num(v.value)} (stop ${v.stop})`,
       );
     lines.push('');
   }

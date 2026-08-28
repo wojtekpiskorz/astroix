@@ -21,3 +21,7 @@ The ubiquitous language of this project. Use these terms (and these exact spelli
 | **reindex** | Recomputing the indexer output after watched file changes; debounced; pushed to chrome via Vite WS events. |
 | **dev-only guarantee** | Astroix never ships in production builds — an invariant, not a preference. |
 | **core-first** | The rule that `docs/core-reuse.md` governs: if Astro/Vite core provides a mechanism, we don't build our own. |
+| **preflight** | The local CRAP hard stop (`bun run preflight`) over functions touched by the PR diff; the agent runs it before `gh pr create`. |
+| **baseline ratchet** | `crap-baseline.json`: calibrated once, then only tightens or drops. New stop-breachers fail preflight; the baseline never absorbs them. |
+| **watchlist** | The CC-only risk tier for `src/node` + `src/client`, where per-function unit coverage is not real. |
+| **metric honesty** | The principle that CRAP is computed only where per-function coverage is real (`src/core`); everywhere else stays a CC watchlist. |
