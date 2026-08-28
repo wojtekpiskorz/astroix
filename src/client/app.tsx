@@ -5,6 +5,7 @@ import { ContentEditorPane } from './features/content/content-editor-pane';
 import { INDEX_PAYLOAD_KEY } from './features/css/api';
 import { ChromeHeader } from './features/css/chrome-header';
 import { EditorPane } from './features/css/editor-pane';
+import { SmokeChecklist } from './features/smoke/smoke-checklist';
 import { Sidebar } from './sidebar';
 import { useChromeStore } from './store';
 
@@ -41,6 +42,9 @@ export function App() {
         </div>
         <Canvas />
       </div>
+      {/* Fixed-position overlay: renders nothing unless the top-level URL
+          carries ?astroix_smoke=1 — the feature owns its gate (#61). */}
+      <SmokeChecklist />
     </div>
   );
 }
