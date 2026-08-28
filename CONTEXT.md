@@ -20,6 +20,7 @@ The ubiquitous language of this project. Use these terms (and these exact spelli
 | **entry** | A Content Collections item (`.md`/`.mdx` with frontmatter); `entry.data` is parsed frontmatter. |
 | **active entry** | The entry open in the content editor; set manually (list click) or reactively (route resolution from the canvas URL). |
 | **route resolution** | Matching the canvas URL against route patterns and entry ids to find the entry rendered there, and back (entry → canvas); a unique hit selects, ambiguity/no-match stays silent; a pure `src/core` module. |
+| **raw mode** | The CSS rule editor's free-form mode: the rule's declarations edited as plain CSS text instead of property→value widget rows. |
 | **raw field** | The textarea fallback rendering an unsupported schema subtree as editable YAML. |
 | **auto-write** | The persist-on-pause write loop (debounce ~300ms) writing the real repo file; the shared persistence doctrine of both verticals. |
 | **selection** | The currently clicked element in the chrome; it survives reindex (re-matched after file changes). |
