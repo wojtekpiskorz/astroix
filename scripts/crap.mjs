@@ -96,7 +96,7 @@ function diffScopedFiles(gitArgs) {
 const changedFiles = (base) => diffScopedFiles([base, 'HEAD']);
 const stagedFiles = () => diffScopedFiles(['--cached']);
 
-/** Function content as committed at HEAD — preflight evaluates the committed state, never a dirty tree. */
+/** Function content as committed at HEAD — the CI table's in-PR marks describe the committed diff. */
 const committedSource = (abs) => gitOk(['show', `HEAD:${relative(ROOT, abs)}`]) ?? '';
 
 // ——— analysis ———
@@ -304,17 +304,17 @@ function modeStaged() {
  */
 function modePreflight() {
   const { base, ref } = mergeBaseSha();
-  // scoped to what the coverage run can actually read: src/ and the vitest
-  // config; untracked files elsewhere cannot color the CRAP term
+  // scoped to what the gate can actually read: src/ and the vitest config;
+  // untracked files elsewhere cannot color either term
   const dirty =
     (gitOk(['status', '--porcelain', '--', 'src', 'vitest.config.ts']) ?? '').length > 0;
   if (dirty) {
-    // this check is the only committed-state guard for BOTH terms now: the
+    // this check is the only committed-state guard for BOTH terms: the
     // full-src ratchet reads CC from the working tree (buildEntries default)
     // and coverage from the tree vitest runs over — a pass on a dirty src/
     // could rest on content that never gets committed
     console.error(
-      'preflight: src/ or vitest.config.ts is dirty — the CRAP coverage term would read uncommitted content. Commit or stash (git stash -u covers untracked), then rerun.',
+      'preflight: src/ or vitest.config.ts is dirty — the gate would read uncommitted content (CC from the tree, coverage from the tree vitest runs over). Commit or stash (git stash -u covers untracked), then rerun.',
     );
     process.exit(1);
   }
