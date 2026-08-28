@@ -4,11 +4,10 @@ on:
   push:
     branches: [main]
 
-# sketch #1 from research/release-channels.md (branch research/release-channels):
-# non-empty changeset queue -> opens/updates the "Version Packages" PR; empty queue
-# (that PR just merged) -> the publish script runs -> latest. Needs the repo setting
-# "Allow GitHub Actions to create and approve pull requests" and a publish-capable
-# NPM_TOKEN (bypass 2FA, see #59 / #48).
+# the changesets/action loop (#59): non-empty changeset queue -> opens/updates the
+# "Version Packages" PR; empty queue (that PR just merged) -> the publish script
+# runs -> latest. Publishes with the bypass-2FA NPM_TOKEN (#48); the repo setting
+# "Allow GitHub Actions to create and approve pull requests" must stay on.
 concurrency:
   group: stable-release
   cancel-in-progress: false
