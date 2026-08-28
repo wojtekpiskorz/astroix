@@ -1,5 +1,33 @@
 # @wojciechpiskorz/astroix
 
+## 0.0.3
+
+### Patch Changes
+
+- 025b42e: Crap4ts risk layer: static CRAP/CC checks wired into the review flow (dev-only tooling, no runtime surface).
+  
+  - New pure modules: `src/core/complexity.ts` (per-function cyclomatic complexity — oxc-parser engine with a tsc oracle, probe-pinned ESLint-classic counting) and `src/core/crap.ts` (istanbul join, CRAP score, Uncle-Bob bands, baseline-ratchet evaluation).
+  - `bun run crap` — full risk report; `bun run preflight` — hard stop over the PR diff scope (CRAP ≥ 30 in src/core, CC ≥ 15 in src/node + src/client); pre-commit hook warns at CC ≥ 10 on staged functions (`bun run hooks` wires it, no hook manager).
+  - CI (`ai-review.yml`) recomputes the table from scratch and feeds it to the advisory reviewer prompt; local runs are advisory.
+  - Baseline calibrated once (`crap-baseline.json`); from here it only tightens. New devDeps: `oxc-parser`, `@vitest/coverage-v8`.
+- 7ba79e4: Advisory GLM review on every PR (thermo-nuclear + unslop prompts through claude-code-action on the Z.AI endpoint). Deterministic gates unchanged.
+- 504959f: Review loop protocol in AGENTS.md: three-tier scale for advisory review findings. The agent implements mechanical findings and merges; reshape-level findings stop and escalate to the owner; a rejection stands on written reasoning, and the owner's word on the PR thread settles any dispute.
+- 26e4abf: refactor: chrome restructured to the ADR-0002 target layout (#58) — mechanical move, no behavior change. `app.tsx` becomes the thin shell, the css vertical lands in `features/css/` (ChromeHeader, Sidebar, RuleList, EditorPane, RuleEditor + its zustand store + `api.ts` with `useIndexPayload`), the canvas machinery moves to `canvas/`, and `store.ts` shrinks to the cross-vertical app store (selectMode/selection). The CodeMirror primitives (view setup, theme, range effects, `replaceDoc`) move to `editor/codemirror.ts`, and the raw `__astroix/file|edit` fetches move to `editor/api.ts` as-is — the Query conversion stays recorded debt per ADR-0002 Consequences.
+- d2d0943: Preflight becomes a full-src ratchet and the generated ui/ tier goes watch-only (owner rulings, issue #62).
+  
+  - `bun run preflight` now evaluates all of `src/` against the baseline on every run — coverage regressions from test-weakening PRs fail even when no product function is touched; the diff survives only as `[PR touches this file]` annotations and the CI table's in-PR marks.
+  - `src/client/components/ui/` (shadcn-generated, regenerated per ADR-0002) is watch-only: rows stay in the report and the CI table (`·gen`), the gate never blocks them (`stop: Infinity`), the baseline can never absorb them.
+  - Glossary: `preflight` and `watchlist` rows updated to the ruled semantics.
+- 7601671: Experimental release channel: manual `workflow_dispatch` snapshot publishing from CI (`changeset version --snapshot experimental` + `changeset publish --tag experimental --no-git-tag`) in an ephemeral workspace, so `latest` and the changeset queue on `main` stay untouched. Consumers opt in with `@wojciechpiskorz/astroix@experimental`.
+- b5ca6dc: Stable release loop: the official `changesets/action` job on push to `main` (#59) — non-empty changeset queue → opens/updates the "Version Packages" PR; empty queue (version PR merged) → build, artifact + manifest gates, publish to `latest`, authenticated by the bypass-2FA `NPM_TOKEN` granular token (#48).
+- 3ec30d7: Classic-stack additions (owner-approved 2026-08-28): publint gates the published manifest in CI (`bun run check:publint`, after the artifact check — the exports/types must be consumer-clean), and the pre-commit hook now blocks on staged lint/format errors (`biome check --staged`) before the CC-warn scan. New devDep: publint.
+- c49df22: Wire shadcn (Base UI) into the chrome as the UI foundation.
+  
+  - shadcn `base-nova` (Base UI primitives): `components.json` + `package.json#imports` aliases (`#components/*`, `#lib/*`, `#hooks/*`) resolve identically in tsc, the source-mode dev server and the prebuilt chrome build — no host-side alias wiring.
+  - Base component set in `src/client/components/ui/`: button, input, checkbox, select, dialog, tabs.
+  - `chrome.css` carries the nova theme tokens (`:root, :host` + `.dark`), `tw-animate-css` and the `shadcn/tailwind.css` base layer; the Geist font import is dropped on purpose — the prebuilt chrome stays one self-contained ESM.
+  - Dogfood: the header select toggle is a shadcn Button under the dark theme; e2e now asserts the theme tokens resolve inside the shadow tree.
+
 ## 0.0.2
 
 ### Patch Changes
