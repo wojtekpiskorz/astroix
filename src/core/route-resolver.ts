@@ -36,7 +36,7 @@ export interface RouteInfo {
   pattern: string;
   /** Astro's parse of the pattern: parts per segment. */
   segments: ReadonlyArray<ReadonlyArray<RouteSegmentPart>>;
-  /** Param names as Astro reports them (`...slug` for a rest param). */
+  /** Param names as Astro reports them (`...slug` for a rest param); resolution reads `segments` — `params` rides through for the routes payload's consumers (#68). */
   params: ReadonlyArray<string>;
 }
 
