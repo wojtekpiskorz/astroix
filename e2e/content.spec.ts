@@ -61,7 +61,7 @@ test('GET /__astroix/collections serves core-parsed entries with schema presence
     date: '2024-06-01T00:00:00.000Z',
     tags: ['nested'],
   });
-  expect(nested?.body).toContain('route-resolution substrate');
+  expect(nested?.body).toContain('for route resolution');
 
   const homepage = payload.find((collection) => collection.name === 'homepage');
   expect(homepage?.entries).toHaveLength(1);
@@ -111,5 +111,5 @@ test('the fixture dynamic route renders a nested-id entry through the chrome can
   await page.goto('/blog/2024/post');
   const canvas = page.frameLocator('#astroix-canvas');
   await expect(canvas.locator('.blog-title')).toHaveText('Nested post');
-  await expect(canvas.locator('.blog-body')).toContainText('route-resolution substrate');
+  await expect(canvas.locator('.blog-body')).toContainText('for route resolution');
 });

@@ -159,20 +159,24 @@ async function loadEntries(
   name: string,
 ): Promise<CollectionEntryRecord[]> {
   const raw = (await contentModule.getCollection?.(name)) ?? [];
-  return raw
-    .filter(
-      (entry): entry is { id: string; filePath?: unknown; data?: unknown; body?: unknown } =>
-        typeof entry === 'object' &&
-        entry !== null &&
-        typeof (entry as { id?: unknown }).id === 'string',
-    )
-    .map((entry) => ({
-      id: entry.id,
-      filePath: typeof entry.filePath === 'string' ? entry.filePath : null,
-      data: entry.data ?? null,
-      body: typeof entry.body === 'string' ? entry.body : null,
-    }))
-    .sort((a, b) => a.id.localeCompare(b.id));
+  return (
+    raw
+      .filter(
+        (entry): entry is { id: string; filePath?: unknown; data?: unknown; body?: unknown } =>
+          typeof entry === 'object' &&
+          entry !== null &&
+          typeof (entry as { id?: unknown }).id === 'string',
+      )
+      .map((entry) => ({
+        id: entry.id,
+        filePath: typeof entry.filePath === 'string' ? entry.filePath : null,
+        data: entry.data ?? null,
+        body: typeof entry.body === 'string' ? entry.body : null,
+      }))
+      // Code-unit order, like the collection-name sort above — localeCompare
+      // follows process collation, which can order ids per machine.
+      .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+  );
 }
 
 /**

@@ -100,6 +100,19 @@ describe('assembleCollectionsPayload', () => {
     const payload = await assembleCollectionsPayload(config, {});
     expect(payload).toEqual([{ name: 'empty', hasSchema: true, entries: [] }]);
   });
+
+  it('orders entries by code unit, not process collation (case-mixed ids)', async () => {
+    const config: RawContentConfig = { collections: { blog: {} } };
+    const content: RawContentModule = {
+      getCollection: () =>
+        Promise.resolve([
+          { id: 'a-post', data: {}, body: null },
+          { id: 'B-post', data: {}, body: null },
+        ]),
+    };
+    const payload = await assembleCollectionsPayload(config, content);
+    expect(payload[0]?.entries.map((entry) => entry.id)).toEqual(['B-post', 'a-post']);
+  });
 });
 
 describe('findContentConfigPath', () => {
