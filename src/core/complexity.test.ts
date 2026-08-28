@@ -124,13 +124,17 @@ const PROBES: Probe[] = [
     source:
       'export class C {\n  method(x: boolean): number {\n    return x ? 1 : 0;\n  }\n  property = (x: boolean): number => (x ? 1 : 0);\n}\n' +
       'export const assigned = function (x: boolean): number {\n  return x ? 1 : 0;\n};\n' +
-      'export const obj = {\n  key(x: boolean): number {\n    return x ? 1 : 0;\n  },\n};\n' +
+      'export const obj = {\n  key(x: boolean): number {\n    return x ? 1 : 0;\n  },\n' +
+      "  'lit-key': function (x: boolean): number {\n    return x ? 1 : 0;\n  },\n};\n" +
+      'export let assignedLater: (x: boolean) => number;\nassignedLater = function (x: boolean): number {\n  return x ? 1 : 0;\n};\n' +
       'export function host(cb: (x: boolean) => number): number {\n  return cb(true);\n}\nhost((x) => (x ? 1 : 0));\n',
     expected: [
       ['method', 2],
       ['property', 2],
       ['assigned', 2],
       ['key', 2],
+      ['lit-key', 2],
+      ['assignedLater', 2],
       ['host', 1],
       ['(anonymous)', 2],
     ],

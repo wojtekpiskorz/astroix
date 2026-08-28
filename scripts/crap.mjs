@@ -70,25 +70,32 @@ function mergeBaseSha() {
   throw new Error('no merge-base against origin/main or main — run preflight on a branch off main');
 }
 
-function changedFiles(base) {
-  const out = gitOk(['diff', '--name-only', '--diff-filter=ACMR', '-z', base, 'HEAD']) ?? '';
+/** Risk scope: product TS/TSX under src/ — test bodies are the coverage, not the risk. */
+function isRiskScope(relPath) {
+  return (
+    relPath.startsWith('src/') &&
+    (relPath.endsWith('.ts') || relPath.endsWith('.tsx')) &&
+    !relPath.endsWith('.test.ts') &&
+    !relPath.endsWith('.test.tsx') &&
+    !relPath.endsWith('.d.ts')
+  );
+}
+
+/** Files in risk scope named by a diff (ACMR: added/copied/modified/renamed). */
+function diffScopedFiles(gitArgs) {
+  const out = gitOk(['diff', '--name-only', '--diff-filter=ACMR', '-z', ...gitArgs]) ?? '';
   return out
     .split('\0')
     .filter((p) => p.length > 0)
-    .filter((p) => p.startsWith('src/') && (p.endsWith('.ts') || p.endsWith('.tsx')))
-    .filter((p) => !p.endsWith('.test.ts') && !p.endsWith('.test.tsx') && !p.endsWith('.d.ts'))
+    .filter(isRiskScope)
     .map((p) => join(ROOT, p));
 }
 
-function stagedFiles() {
-  const out = gitOk(['diff', '--cached', '--name-only', '--diff-filter=ACMR', '-z']) ?? '';
-  return out
-    .split('\0')
-    .filter((p) => p.length > 0)
-    .filter((p) => p.startsWith('src/') && (p.endsWith('.ts') || p.endsWith('.tsx')))
-    .filter((p) => !p.endsWith('.test.ts') && !p.endsWith('.test.tsx') && !p.endsWith('.d.ts'))
-    .map((p) => join(ROOT, p));
-}
+const changedFiles = (base) => diffScopedFiles([base, 'HEAD']);
+const stagedFiles = () => diffScopedFiles(['--cached']);
+
+/** Function content as committed at HEAD — preflight evaluates the committed state, never a dirty tree. */
+const committedSource = (abs) => gitOk(['show', `HEAD:${relative(ROOT, abs)}`]) ?? '';
 
 // ——— analysis ———
 
@@ -99,8 +106,7 @@ function walkTs(dir = SRC_ROOT) {
     if (statSync(p).isDirectory()) out.push(...walkTs(p));
     else if ((p.endsWith('.ts') || p.endsWith('.tsx')) && !p.endsWith('.d.ts')) out.push(p);
   }
-  // risk is product code; test bodies are the coverage, not the risk
-  return out.filter((p) => !p.endsWith('.test.ts') && !p.endsWith('.test.tsx'));
+  return out.filter((p) => isRiskScope(relative(ROOT, p)));
 }
 
 function analyzeFile(abs, source) {
@@ -109,11 +115,11 @@ function analyzeFile(abs, source) {
   return { file, fns };
 }
 
-/** CC + (where honest) coverage/CRAP for every non-test function in the given files. */
-function buildEntries(files, coverage) {
+/** CC + (where honest) coverage/CRAP for every function in the given files. */
+function buildEntries(files, coverage, read = (abs) => readFileSync(abs, 'utf8')) {
   const entries = [];
   for (const abs of files) {
-    const { file, fns } = analyzeFile(abs, readFileSync(abs, 'utf8'));
+    const { file, fns } = analyzeFile(abs, read(abs));
     const isCore = file.startsWith('src/core/');
     for (const fn of fns) {
       const cov = isCore ? coverageWithin(fn, coverage?.[abs]) : null;
@@ -124,6 +130,20 @@ function buildEntries(files, coverage) {
     }
   }
   return entries;
+}
+
+const touchedId = (file, fn) => `${file}#${fn.name}@L${fn.lineStart}`;
+
+/** Touched function identities across changed files, via the tested touchedFunctions helper. */
+function touchedKeys(files, base, read) {
+  const touched = new Set();
+  for (const abs of files) {
+    const file = relative(ROOT, abs);
+    const { fns } = analyzeFile(abs, read(abs));
+    const ranges = hunkRanges(gitOk(['diff', '--unified=0', base, 'HEAD', '--', file]) ?? '');
+    for (const fn of touchedFunctions(fns, ranges)) touched.add(touchedId(file, fn));
+  }
+  return touched;
 }
 
 function runCoverage() {
@@ -144,22 +164,20 @@ function readBaseline() {
 const pct = (cov) => (cov === null ? '  —  ' : `${String(Math.round(cov * 100)).padStart(3)}%`);
 const num = (v) => (Number.isInteger(v) ? String(v) : v.toFixed(1));
 
-function renderTable(entries, flags = new Map()) {
+function renderTable(entries) {
   const rows = entries
     .slice()
     .sort((a, b) => b.value - a.value)
-    .map((e) => {
-      const flag = flags.get(e) ?? '';
-      return [
+    .map((e) =>
+      [
         e.file.padEnd(28),
         `${e.name}@L${e.lineStart}`.padEnd(28),
         `cc ${String(e.cc).padStart(3)}`,
         `cov ${pct(e.coverage)}`,
         `crap ${e.crap === null ? '  —' : num(e.crap).padStart(5)}`,
         e.band.padEnd(8),
-        flag,
-      ].join('  ');
-    });
+      ].join('  '),
+    );
   return rows.join('\n');
 }
 
@@ -192,7 +210,7 @@ function modeReport() {
     console.log(`\ngrandfathered (baseline, only tighten):`);
     for (const g of grandfathered)
       console.log(
-        `  ${g.file} ${g.name}: ${g.metric} ${num(g.value)} (pinned ${baseline[baselineKey(g.file, g.name)]})`,
+        `  ${g.file} ${g.name}: ${g.metric} ${num(g.value)} (pinned ${baseline[baselineKey(g.file, g.name, g.lineStart)]})`,
       );
   }
   if (improved.length > 0) {
@@ -201,7 +219,7 @@ function modeReport() {
     );
     for (const i of improved)
       console.log(
-        `  ${i.file} ${i.name}: ${i.metric} ${num(i.value)} (pinned ${baseline[baselineKey(i.file, i.name)]})`,
+        `  ${i.file} ${i.name}: ${i.metric} ${num(i.value)} (pinned ${baseline[baselineKey(i.file, i.name, i.lineStart)]})`,
       );
   }
   if (violations.length === 0 && grandfathered.length === 0 && improved.length === 0)
@@ -248,23 +266,15 @@ function modePreflight() {
   const needCoverage = files.some((f) => relative(ROOT, f).startsWith('src/core/'));
   const coverage = needCoverage ? runCoverage() : {};
 
-  // Touched function identities per changed file, from the merge-base diff hunks.
-  const touched = new Set(); // `${file}#${name}@L${lineStart}`
   const uniqueFiles = [...new Set(files)];
-  for (const abs of uniqueFiles) {
-    const file = relative(ROOT, abs);
-    const { fns } = analyzeFile(abs, readFileSync(abs, 'utf8'));
-    const ranges = hunkRanges(gitOk(['diff', '--unified=0', base, 'HEAD', '--', file]) ?? '');
-    for (const fn of touchedFunctions(fns, ranges))
-      touched.add(`${file}#${fn.name}@L${fn.lineStart}`);
-  }
+  const touched = touchedKeys(uniqueFiles, base, committedSource);
   if (touched.size === 0) {
     console.log(`preflight: ${uniqueFiles.length} changed file(s), no function touched — pass`);
     return;
   }
 
-  const entries = buildEntries(uniqueFiles, coverage).filter((e) =>
-    touched.has(`${e.file}#${e.name}@L${e.lineStart}`),
+  const entries = buildEntries(uniqueFiles, coverage, committedSource).filter((e) =>
+    touched.has(touchedId(e.file, e)),
   );
   const { violations, grandfathered, improved } = evaluateGate(entries, readBaseline());
 
@@ -275,7 +285,7 @@ function modePreflight() {
     console.log(`grandfathered: ${g.file} ${g.name} (${g.metric} ${num(g.value)})`);
   for (const i of improved)
     console.log(
-      `improved: ${i.file} ${i.name} ${num(i.value)} < pin ${readBaseline()[baselineKey(i.file, i.name)]} — tighten the baseline`,
+      `improved: ${i.file} ${i.name} ${num(i.value)} < pin ${readBaseline()[baselineKey(i.file, i.name, i.lineStart)]} — tighten the baseline`,
     );
 
   if (violations.length > 0) {
@@ -291,23 +301,14 @@ function modePreflight() {
 
 function modeCi() {
   const base = process.env.GITHUB_BASE_SHA;
-  const filesAll = walkTs();
   const coverage = runCoverage();
-  const entries = buildEntries(filesAll, coverage);
+  const entries = buildEntries(walkTs(), coverage);
 
-  const touchedAbs = base === undefined ? [] : changedFiles(base);
-  const touchedNames = new Set(touchedAbs.map((a) => relative(ROOT, a)));
-  const hunkCache = new Map();
-  const isTouched = (e) => {
-    if (!touchedNames.has(e.file)) return false;
-    if (!hunkCache.has(e.file))
-      hunkCache.set(
-        e.file,
-        hunkRanges(gitOk(['diff', '--unified=0', base, 'HEAD', '--', e.file]) ?? ''),
-      );
-    const ranges = hunkCache.get(e.file);
-    return ranges.some(([s, t]) => e.lineStart <= t && e.lineEnd >= s);
-  };
+  const touched =
+    base === undefined
+      ? new Set()
+      : touchedKeys([...new Set(changedFiles(base))], base, committedSource);
+  const isTouched = (e) => touched.has(touchedId(e.file, e));
 
   const baseline = readBaseline();
   const { violations, grandfathered } = evaluateGate(entries, baseline);
@@ -343,7 +344,7 @@ function modeCi() {
     lines.push(`## Grandfathered (calibrated baseline — known debt, only ratchets down)`);
     for (const g of grandfathered)
       lines.push(
-        `- ${g.file} ${g.name}@L${g.lineStart}: ${g.metric} ${num(g.value)} (pinned ${baseline[baselineKey(g.file, g.name)]})`,
+        `- ${g.file} ${g.name}@L${g.lineStart}: ${g.metric} ${num(g.value)} (pinned ${baseline[baselineKey(g.file, g.name, g.lineStart)]})`,
       );
     lines.push('');
   }
@@ -368,7 +369,7 @@ function modeCalibrate() {
   const entries = buildEntries(walkTs(), coverage);
   const { violations } = evaluateGate(entries, {});
   const next = {};
-  for (const v of violations) next[baselineKey(v.file, v.name)] = v.value;
+  for (const v of violations) next[baselineKey(v.file, v.name, v.lineStart)] = v.value;
   writeFileSync(BASELINE_PATH, `${JSON.stringify(sortKeys(next), null, 2)}\n`);
   console.log(
     `calibrated ${Object.keys(next).length} baseline entr${Object.keys(next).length === 1 ? 'y' : 'ies'} (one-time act; from here only --update-baseline, which never adds):`,

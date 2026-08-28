@@ -96,8 +96,15 @@ export function touchedFunctions(
   );
 }
 
-export function baselineKey(file: string, name: string): string {
-  return `${file}#${name}`;
+/**
+ * Baseline identity of a function. Named functions key on `file#name` —
+ * tolerant of moves and line churn. Anonymous ones are position-pinned
+ * (`file#(anonymous)@L<lineStart>`): a fresh anonymous violator must not
+ * ride a sibling's pin, and a moved anonymous violator re-keys and re-fails
+ * — the attention an unnamed stop-breaching function deserves.
+ */
+export function baselineKey(file: string, name: string, lineStart: number): string {
+  return name === '(anonymous)' ? `${file}#${name}@L${lineStart}` : `${file}#${name}`;
 }
 
 /**
@@ -119,7 +126,7 @@ export function evaluateGate(
   for (const entry of entries) {
     const stop = entry.metric === 'crap' ? stops.coreCrapStop : stops.watchlistCcStop;
     if (entry.value < stop) continue;
-    const pinned = baseline[baselineKey(entry.file, entry.name)];
+    const pinned = baseline[baselineKey(entry.file, entry.name, entry.lineStart)];
     if (pinned === undefined) violations.push(entry);
     else if (entry.value > pinned) violations.push(entry);
     else if (entry.value < pinned) improved.push(entry);
@@ -146,7 +153,7 @@ export function mergeBaseline(
   for (const entry of entries) {
     const stop = entry.metric === 'crap' ? stops.coreCrapStop : stops.watchlistCcStop;
     if (entry.value < stop) continue;
-    const key = baselineKey(entry.file, entry.name);
+    const key = baselineKey(entry.file, entry.name, entry.lineStart);
     const pinned = previous[key];
     if (pinned === undefined) {
       refused.push(entry);

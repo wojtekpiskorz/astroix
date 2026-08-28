@@ -108,7 +108,7 @@ describe('evaluateGate', () => {
   });
 
   it('grandfathers a calibrated violation at its pinned value and fails worse', () => {
-    const baseline = { [baselineKey('src/node/rest.ts', 'handleApiRequest')]: 27 };
+    const baseline = { [baselineKey('src/node/rest.ts', 'handleApiRequest', 38)]: 27 };
     const ride = entry({
       file: 'src/node/rest.ts',
       name: 'handleApiRequest',
@@ -130,10 +130,32 @@ describe('evaluateGate', () => {
   });
 
   it('reports improved grandfathered entries as tighten candidates', () => {
-    const baseline = { [baselineKey('src/core/matcher.ts', 'fn')]: 40 };
+    const baseline = { [baselineKey('src/core/matcher.ts', 'fn', 1)]: 40 };
     const better = entry({ value: 32, cc: 6, crap: 32, band: 'high' });
     const { improved } = evaluateGate([better], baseline);
     expect(improved).toEqual([better]);
+  });
+
+  it('position-pins anonymous keys so a fresh anonymous violator cannot ride a sibling pin', () => {
+    expect(baselineKey('src/client/app.tsx', '(anonymous)', 12)).toBe(
+      'src/client/app.tsx#(anonymous)@L12',
+    );
+    expect(baselineKey('src/client/app.tsx', 'RuleList', 12)).toBe('src/client/app.tsx#RuleList');
+
+    const pinned = { [baselineKey('src/client/app.tsx', '(anonymous)', 12)]: 27 };
+    const sibling = entry({
+      file: 'src/client/app.tsx',
+      name: '(anonymous)',
+      lineStart: 30,
+      lineEnd: 40,
+      metric: 'cc',
+      cc: 20,
+      value: 20,
+      coverage: null,
+      crap: null,
+      band: 'moderate',
+    });
+    expect(evaluateGate([sibling], pinned).violations).toEqual([sibling]);
   });
 
   it('gates watchlist rows on CC with the cc stop, core rows on CRAP', () => {
@@ -165,8 +187,8 @@ describe('mergeBaseline', () => {
 
   it('tightens to the current value, drops recovered functions, refuses new violators', () => {
     const previous = {
-      [baselineKey(rest, 'handleApiRequest')]: 27,
-      [baselineKey(rest, 'gone')]: 40,
+      [baselineKey(rest, 'handleApiRequest', 38)]: 27,
+      [baselineKey(rest, 'gone', 50)]: 40,
     };
     const handle = entry({
       file: rest,
@@ -190,12 +212,12 @@ describe('mergeBaseline', () => {
     });
 
     const { next, refused } = mergeBaseline(previous, [handle, fresh]);
-    expect(next).toEqual({ [baselineKey(rest, 'handleApiRequest')]: 24 });
+    expect(next).toEqual({ [baselineKey(rest, 'handleApiRequest', 38)]: 24 });
     expect(refused).toEqual([fresh]);
   });
 
   it('never raises an entry even when the function got worse', () => {
-    const previous = { [baselineKey(rest, 'handleApiRequest')]: 20 };
+    const previous = { [baselineKey(rest, 'handleApiRequest', 38)]: 20 };
     const worse = entry({
       file: rest,
       name: 'handleApiRequest',
@@ -207,6 +229,6 @@ describe('mergeBaseline', () => {
       band: 'high',
     });
     const { next } = mergeBaseline(previous, [worse]);
-    expect(next[baselineKey(rest, 'handleApiRequest')]).toBe(20);
+    expect(next[baselineKey(rest, 'handleApiRequest', 38)]).toBe(20);
   });
 });
