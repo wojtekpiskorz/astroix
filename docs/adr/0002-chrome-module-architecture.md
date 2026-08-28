@@ -9,7 +9,7 @@ The chrome grew as a POC flat layout — `app.tsx` holding five components, `edi
 A module may import only from modules strictly below it — downward only, no sideways, no upward, no cycles. `src/core` is importable from anywhere (pure domain, no IO).
 
 1. **App shell** — `app.tsx`, `chrome.tsx`, `entry.tsx`: bootstrap, layout, tab composition, the editor dock slot. Thin; composes features, owns no vertical logic.
-2. **`features/<vertical>/`** — one folder per vertical: `features/css/` today, `features/content/` next. Inside: the vertical's components, its zustand store, and its `api.ts`. A feature is self-sufficient: everything it needs travels through its folder or the layers below.
+2. **`features/<vertical>/`** — one folder per vertical: `features/css/` first, `features/content/` next. Inside: the vertical's components, its zustand store, and its `api.ts`. A feature is self-sufficient: everything it needs travels through its folder or the layers below.
 3. **Shared infrastructure modules** — `canvas/` (iframe, select mode, hover/selection overlay, the re-matching effect after reindex) and `editor/` (CodeMirror infrastructure: view setup, themes, range effects, programmatic doc modeling — primitives up to composed components). Both serve multiple verticals; both are domain-aware but vertical-agnostic.
 4. **`components/ui/`** — shadcn primitives, CLI-generated, domain-deaf: no imports from features, stores, shared modules, or core. Changed by regeneration, never hand-edited toward domain needs.
 5. **`lib/`** — shared pure helpers (`cn` today).
@@ -21,7 +21,7 @@ Sideways imports are forbidden at every level: features never import each other;
 Two state systems with a one-line rule: **server/watcher-derived data is TanStack Query; chrome-only UI state is zustand.**
 
 - **zustand, per concern**: a small app-level store holds cross-vertical state — `selectMode`, `selection`, (the active tab once tabs land). Each feature owns its store (`EditorSpec` and open/close live in the css store; the future content store holds the open entry, dirty form state, …). Selection is zustand, not Query, because it holds a live DOM element, not data — and it sits app-level because canvas, sidebar, and editors consume it in both verticals. The re-matching effect after reindex lives in `canvas/` and writes the new selection into the app store.
-- **TanStack Query, colocated**: query hooks live in the feature's `api.ts` (`features/css/api.ts` exports `useIndexPayload`; `features/content/api.ts` will export `useEntries`, `useSaveEntry`, …). Query keys are namespaced `['astroix', <resource>, ...]` as today. Mutations follow the same colocated pattern.
+- **TanStack Query, colocated**: query hooks live in the feature's `api.ts` (`features/css/api.ts` will hold `useIndexPayload`, moved out of `app.tsx` by the restructure; `features/content/api.ts` will export `useEntries`, `useSaveEntry`, …). Query keys are namespaced `['astroix', <resource>, ...]` as today. Mutations follow the same colocated pattern.
 
 ## Files
 
