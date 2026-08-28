@@ -26,6 +26,10 @@ The ubiquitous language of this project. Use these terms (and these exact spelli
 | **raw mode** | The CSS rule editor's free-form mode: the rule's declarations edited as plain CSS text instead of property→value widget rows. |
 | **raw field** | The textarea fallback rendering an unsupported schema subtree as editable YAML. |
 | **auto-write** | The persist-on-pause write loop (debounce ~300ms) writing the real repo file; the shared persistence doctrine of both verticals. |
+| **smoke gate** | The manual-smoke checklist's only entry: a top-level `?astroix_smoke=1` — without the param the checklist renders nothing. |
+| **hint pill** | The small fixed-position affordance visible while the smoke gate is open; summons the wizard (as does `S`, typing-guarded). |
+| **wizard** | The in-chrome smoke checklist dialog: one step per screen over the steps mirrored from `docs/manual-smoke.md`, ending in a summary. |
+| **copy report** | The smoke run's markdown payload — header, per-step checkboxes with notes, Result line — written to the clipboard for pasting into an issue. |
 | **selection** | The currently clicked element in the chrome; it survives reindex (re-matched after file changes). |
 | **reindex** | Recomputing the indexer output after watched file changes; debounced; pushed to chrome via Vite WS events. |
 | **dev-only guarantee** | Astroix never ships in production builds — an invariant, not a preference. |
