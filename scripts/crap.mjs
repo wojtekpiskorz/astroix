@@ -264,18 +264,25 @@ function modePreflight() {
   if ((gitOk(['status', '--porcelain']) ?? '').length > 0)
     console.log('preflight: evaluating committed state (HEAD); working tree is dirty');
 
-  const needCoverage = files.some((f) => isCoreFile(relative(ROOT, f)));
-  const coverage = needCoverage ? runCoverage() : {};
-
   const uniqueFiles = [...new Set(files)];
-  const touched = touchedKeys(uniqueFiles, base, committedSource);
-  if (touched.size === 0) {
+  // one analysis pass over the changed files: touched set first, so a diff
+  // landing between functions never pays the coverage run
+  const touched = [];
+  for (const abs of uniqueFiles) {
+    const file = relative(ROOT, abs);
+    const { fns } = analyzeFile(abs, committedSource(abs));
+    const ranges = hunkRanges(gitOk(['diff', '--unified=0', base, 'HEAD', '--', file]) ?? '');
+    for (const fn of touchedFunctions(fns, ranges)) touched.push({ file, fn });
+  }
+  if (touched.length === 0) {
     console.log(`preflight: ${uniqueFiles.length} changed file(s), no function touched — pass`);
     return;
   }
 
-  const entries = buildEntries(uniqueFiles, coverage, committedSource).filter((e) =>
-    touched.has(touchedId(e.file, e)),
+  const needCoverage = uniqueFiles.some((f) => isCoreFile(relative(ROOT, f)));
+  const coverage = needCoverage ? runCoverage() : {};
+  const entries = touched.map(({ file, fn }) =>
+    toRiskEntry(file, fn, coverage === null ? null : coverage?.[join(ROOT, file)]),
   );
   const baseline = readBaseline();
   const { violations, grandfathered, improved } = evaluateGate(entries, baseline);
@@ -302,7 +309,11 @@ function modePreflight() {
 }
 
 function modeCi() {
-  const base = process.env.GITHUB_BASE_SHA;
+  const envBase = process.env.GITHUB_BASE_SHA;
+  // pull_request.base.sha is the PR-object snapshot, not the live base tip:
+  // canonicalize through merge-base or advancing main reads as PR-made changes
+  const base =
+    envBase === undefined ? undefined : (gitOk(['merge-base', envBase, 'HEAD']) ?? envBase).trim();
   const coverage = runCoverage({ hard: false });
   const entries = buildEntries(walkTs(), coverage);
 
@@ -340,7 +351,9 @@ function modeCi() {
     );
   lines.push('');
   if (violations.length > 0) {
-    lines.push(`## Stop breaches (new or regressed — preflight fails these)`);
+    lines.push(
+      `## Stop breaches (new or regressed — preflight fails these when the PR touches them)`,
+    );
     for (const v of violations)
       lines.push(
         `- ${v.file} ${v.name}@L${v.lineStart}: ${v.metric} ${num(v.value)} (stop ${v.stop})`,

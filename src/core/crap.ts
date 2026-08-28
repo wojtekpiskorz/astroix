@@ -117,19 +117,9 @@ export function toRiskEntry(
   fn: FunctionComplexity,
   fileCoverage: IstanbulFileCoverage | undefined | null,
 ): RiskEntry {
-  if (fileCoverage === null) {
-    return {
-      file,
-      ...fn,
-      coverage: null,
-      crap: null,
-      metric: 'cc',
-      value: fn.cc,
-      stop: GATE_STOPS.watchlistCcStop,
-      band: bandOf(fn.cc),
-    };
-  }
-  if (isCoreFile(file)) {
+  // null (coverage run failed) degrades even core rows to CC; only a real
+  // coverage object lets a core row take the CRAP metric
+  if (fileCoverage !== null && isCoreFile(file)) {
     const coverage = coverageWithin(fn, fileCoverage);
     const crap = crapScore(fn.cc, coverage);
     return {

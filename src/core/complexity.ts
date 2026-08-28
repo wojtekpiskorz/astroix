@@ -147,6 +147,25 @@ function estreeChildHint(node: EstreeNode): string | null {
   }
 }
 
+/** The function-entry half of the estree walk: name resolution and line range. */
+function estreeFunctionRecord(
+  n: EstreeNode,
+  hint: string | null,
+  lineOf: (offset: number) => number,
+): FunctionComplexity {
+  const start = typeof n.start === 'number' ? n.start : 0;
+  const end = typeof n.end === 'number' ? n.end : start;
+  return {
+    name:
+      (n.type === 'FunctionDeclaration' ? estreeIdentifierName(n.id) : null) ??
+      hint ??
+      '(anonymous)',
+    lineStart: lineOf(start),
+    lineEnd: lineOf(end),
+    cc: 0,
+  };
+}
+
 export function analyzeComplexity(source: string, filename: string): FunctionComplexity[] {
   const { program, errors } = parseSync(filename, source);
   const firstError = errors[0];
@@ -177,17 +196,7 @@ export function analyzeComplexity(source: string, filename: string): FunctionCom
     if (isEstreeDecision(n)) bump();
 
     if (FUNCTION_TYPES.has(n.type)) {
-      const start = typeof n.start === 'number' ? n.start : 0;
-      const end = typeof n.end === 'number' ? n.end : start;
-      const rec: FunctionComplexity = {
-        name:
-          (n.type === 'FunctionDeclaration' ? estreeIdentifierName(n.id) : null) ??
-          hint ??
-          '(anonymous)',
-        lineStart: lineOf(start),
-        lineEnd: lineOf(end),
-        cc: 0,
-      };
+      const rec = estreeFunctionRecord(n, hint, lineOf);
       fns.push(rec);
       counters.push(1); // base 1: a function with no decisions has cc 1
       for (const [key, value] of Object.entries(n)) {
