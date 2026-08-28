@@ -7,6 +7,7 @@ The ubiquitous language of this project. Use these terms (and these exact spelli
 | **Astroix** | The product: a dev-only Astro integration — a visual builder over a live page. |
 | **chrome** | The builder UI: the top-level page rendered at `?builder=1` (React app in shadow DOM), wrapping the canvas. |
 | **canvas** | The same-origin iframe (`?builder=0`) showing the real, live site. |
+| **vertical** | A top-level lane of the builder product — CSS (styles panel), Content (entries editing). The chrome's feature folders, stores, and query hooks are organized one per vertical. |
 | **repo-mapping** | The core principle: the builder reads/writes the same repo files an agent would — never a parallel world. |
 | **indexer** | The pure module that scans project CSS sources into the index: selector → (file, source range, media condition). The edit-truth. |
 | **matcher** | The pure module that, given the index and a clicked element, returns matching rules (via `el.matches()`), sorted by specificity. |
