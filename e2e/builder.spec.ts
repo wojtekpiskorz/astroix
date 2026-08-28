@@ -111,7 +111,7 @@ test('chrome components hot-swap without a document reload', async ({ page }) =>
     (window as { __astroixLoadedAt?: number }).__astroixLoadedAt = performance.now();
   });
 
-  const sourcePath = join('src', 'client', 'app.tsx');
+  const sourcePath = join('src', 'client', 'features', 'css', 'chrome-header.tsx');
   const original = readFileSync(sourcePath, 'utf8');
   try {
     writeFileSync(sourcePath, original.replace('astroix</strong>', 'astroix-hmr</strong>'));

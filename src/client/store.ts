@@ -20,32 +20,20 @@ export interface Selection {
   descriptor: string;
 }
 
-/** Which file the editor pane shows, with the matched ranges to jump between. */
-export interface EditorSpec {
-  file: string;
-  ranges: Array<{ start: number; end: number; label: string }>;
-  activeIndex: number;
-}
-
+/** Cross-vertical chrome state; per-vertical state lives in each feature's store. */
 interface ChromeState {
   /** Select mode is default-off and enabled deliberately (spec #2). */
   selectMode: boolean;
   selection: Selection | null;
-  editor: EditorSpec | null;
   toggleSelectMode: () => void;
   setSelection: (element: Element) => void;
   clearSelection: () => void;
-  openEditor: (spec: EditorSpec) => void;
-  closeEditor: () => void;
 }
 
 export const useChromeStore = create<ChromeState>()((set) => ({
   selectMode: false,
   selection: null,
-  editor: null,
   toggleSelectMode: () => set((state) => ({ selectMode: !state.selectMode })),
   setSelection: (element) => set({ selection: { element, descriptor: describeElement(element) } }),
   clearSelection: () => set({ selection: null }),
-  openEditor: (spec) => set({ editor: spec }),
-  closeEditor: () => set({ editor: null }),
 }));
