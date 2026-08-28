@@ -103,6 +103,34 @@ export function touchedFunctions(
  * ride a sibling's pin, and a moved anonymous violator re-keys and re-fails
  * — the attention an unnamed stop-breaching function deserves.
  */
+/**
+ * The single construction point for risk rows: `metric`, `value`, `band`,
+ * `coverage` and `crap` all derive from the file's layer here and nowhere
+ * else, so the value the gate reads can never disagree with the row the
+ * report renders. Core rows join the istanbul coverage; watchlist rows
+ * ignore it even when given (metric honesty).
+ */
+export function toRiskEntry(
+  file: string,
+  fn: FunctionComplexity,
+  fileCoverage: IstanbulFileCoverage | undefined,
+): RiskEntry {
+  if (file.startsWith('src/core/')) {
+    const coverage = coverageWithin(fn, fileCoverage);
+    const crap = crapScore(fn.cc, coverage);
+    return { file, ...fn, coverage, crap, metric: 'crap', value: crap, band: bandOf(crap) };
+  }
+  return {
+    file,
+    ...fn,
+    coverage: null,
+    crap: null,
+    metric: 'cc',
+    value: fn.cc,
+    band: bandOf(fn.cc),
+  };
+}
+
 export function baselineKey(file: string, name: string, lineStart: number): string {
   return name === '(anonymous)' ? `${file}#${name}@L${lineStart}` : `${file}#${name}`;
 }

@@ -28,14 +28,12 @@ import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { analyzeComplexity } from '../src/core/complexity.ts';
 import {
-  bandOf,
   baselineKey,
-  coverageWithin,
-  crapScore,
   evaluateGate,
   GATE_STOPS,
   mergeBaseline,
   PRECOMMIT_CC_WARN,
+  toRiskEntry,
   touchedFunctions,
 } from '../src/core/crap.ts';
 
@@ -120,14 +118,7 @@ function buildEntries(files, coverage, read = (abs) => readFileSync(abs, 'utf8')
   const entries = [];
   for (const abs of files) {
     const { file, fns } = analyzeFile(abs, read(abs));
-    const isCore = file.startsWith('src/core/');
-    for (const fn of fns) {
-      const cov = isCore ? coverageWithin(fn, coverage?.[abs]) : null;
-      const crap = isCore ? crapScore(fn.cc, cov) : null;
-      const metric = isCore ? 'crap' : 'cc';
-      const value = isCore ? crap : fn.cc;
-      entries.push({ file, ...fn, band: bandOf(value), metric, value, coverage: cov, crap });
-    }
+    for (const fn of fns) entries.push(toRiskEntry(file, fn, coverage?.[abs]));
   }
   return entries;
 }
@@ -276,7 +267,8 @@ function modePreflight() {
   const entries = buildEntries(uniqueFiles, coverage, committedSource).filter((e) =>
     touched.has(touchedId(e.file, e)),
   );
-  const { violations, grandfathered, improved } = evaluateGate(entries, readBaseline());
+  const baseline = readBaseline();
+  const { violations, grandfathered, improved } = evaluateGate(entries, baseline);
 
   console.log(`\npreflight — CRAP hard stop over ${entries.length} touched function(s) vs ${ref}`);
   console.log(headerLine());
@@ -285,7 +277,7 @@ function modePreflight() {
     console.log(`grandfathered: ${g.file} ${g.name} (${g.metric} ${num(g.value)})`);
   for (const i of improved)
     console.log(
-      `improved: ${i.file} ${i.name} ${num(i.value)} < pin ${readBaseline()[baselineKey(i.file, i.name, i.lineStart)]} — tighten the baseline`,
+      `improved: ${i.file} ${i.name} ${num(i.value)} < pin ${baseline[baselineKey(i.file, i.name, i.lineStart)]} — tighten the baseline`,
     );
 
   if (violations.length > 0) {

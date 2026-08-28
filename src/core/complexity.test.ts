@@ -119,13 +119,20 @@ const PROBES: Probe[] = [
     ],
   },
   {
+    name: 'non-ASCII sources: both engines line up (oxc offsets are code units, not bytes)',
+    filename: 'probe.ts',
+    source:
+      '// żółć w komentarzu\n// 🎉 emoji too\nexport function afterUnicode(): number {\n  return 1;\n}\n',
+    expected: [['afterUnicode', 1]],
+  },
+  {
     name: 'declaration-site naming',
     filename: 'probe.ts',
     source:
       'export class C {\n  method(x: boolean): number {\n    return x ? 1 : 0;\n  }\n  property = (x: boolean): number => (x ? 1 : 0);\n}\n' +
       'export const assigned = function (x: boolean): number {\n  return x ? 1 : 0;\n};\n' +
       'export const obj = {\n  key(x: boolean): number {\n    return x ? 1 : 0;\n  },\n' +
-      "  'lit-key': function (x: boolean): number {\n    return x ? 1 : 0;\n  },\n};\n" +
+      "  'lit-key': function (x: boolean): number {\n    return x ? 1 : 0;\n  },\n  2: function (x: boolean): number {\n    return x ? 1 : 0;\n  },\n};\n" +
       'export let assignedLater: (x: boolean) => number;\nassignedLater = function (x: boolean): number {\n  return x ? 1 : 0;\n};\n' +
       'export function host(cb: (x: boolean) => number): number {\n  return cb(true);\n}\nhost((x) => (x ? 1 : 0));\n',
     expected: [
@@ -134,6 +141,7 @@ const PROBES: Probe[] = [
       ['assigned', 2],
       ['key', 2],
       ['lit-key', 2],
+      ['2', 2],
       ['assignedLater', 2],
       ['host', 1],
       ['(anonymous)', 2],
@@ -166,6 +174,12 @@ describe('analyzeComplexity (oxc engine)', () => {
     const records = analyzeComplexity('export function first() {\n  return 1;\n}\n', 'probe.ts');
     expect(records[0]?.lineStart).toBe(1);
     expect(records[0]?.lineEnd).toBe(3);
+  });
+
+  it('line numbers survive non-ASCII text before the function (pins oxc offsets as code units)', () => {
+    const source = '// żółć\n// 🎉\nexport function afterUnicode(): number {\n  return 1;\n}\n';
+    expect(analyzeComplexity(source, 'probe.ts')[0]?.lineStart).toBe(3);
+    expect(analyzeComplexityTsc(source, 'probe.ts')[0]?.lineStart).toBe(3);
   });
 });
 

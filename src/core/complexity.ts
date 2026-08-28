@@ -6,8 +6,8 @@ import * as ts from 'typescript';
  * wayfinder #54; wiring: #55). Two visitors implement the same counting rule:
  *
  * - `analyzeComplexity` — the primary engine, over `oxc-parser`'s
- *   ESTree-flavored AST (in-process, sub-millisecond per file; the parser
- *   ships byte offsets, so lines come from a local line index).
+ *   ESTree-flavored AST (in-process, sub-millisecond per file; lines come
+ *   from a local code-unit line index — see unitLineIndexer).
  * - `analyzeComplexityTsc` — the TypeScript-compiler-API oracle, kept as the
  *   zero-dependency fallback. The probe test asserts both engines agree, so
  *   AST drift in either parser surfaces the day it happens.
@@ -59,12 +59,8 @@ function estreeIdentifierName(node: unknown): string | null {
   return null;
 }
 
-/** Maps byte offsets to 1-based lines; oxc emits offsets, not locations. */
-function lineIndexer(source: string): (offset: number) => number {
-  const lineStarts: number[] = [0];
-  for (let i = 0; i < source.length; i += 1) {
-    if (source.charCodeAt(i) === 10) lineStarts.push(i + 1);
-  }
+/** Maps offsets to 1-based lines over a precomputed table of line-start offsets. */
+function lineLookup(lineStarts: number[]): (offset: number) => number {
   return (offset: number): number => {
     let lo = 0;
     let hi = lineStarts.length - 1;
@@ -75,6 +71,22 @@ function lineIndexer(source: string): (offset: number) => number {
     }
     return lo + 1;
   };
+}
+
+/**
+ * Line index over UTF-16 code units — the unit both oxc offsets and tsc
+ * positions live in. Not bytes: an empirically pinned probe (non-ASCII
+ * comments before the function) places oxc's node start at the unit offset
+ * of the `function` keyword, which a byte-indexed table would miss by the
+ * non-ASCII prefix. The probe keeps this pinned; the tsc oracle needs no
+ * table (`getLineAndCharacterOfPosition` is authoritative).
+ */
+function unitLineIndexer(source: string): (offset: number) => number {
+  const lineStarts: number[] = [0];
+  for (let i = 0; i < source.length; i += 1) {
+    if (source.charCodeAt(i) === 10) lineStarts.push(i + 1);
+  }
+  return lineLookup(lineStarts);
 }
 
 // ——— primary engine (oxc-parser, ESTree flavor) ———
@@ -141,7 +153,7 @@ export function analyzeComplexity(source: string, filename: string): FunctionCom
   const firstError = errors[0];
   if (firstError !== undefined) throw new SyntaxError(`${filename}: ${firstError.message}`);
 
-  const lineOf = lineIndexer(source);
+  const lineOf = unitLineIndexer(source);
   const fns: FunctionComplexity[] = [];
   const counters: number[] = [];
 
