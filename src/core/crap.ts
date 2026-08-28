@@ -106,7 +106,7 @@ function isCoreFile(relPath: string): boolean {
 }
 
 /** The shadcn-generated tier: regenerated per ADR-0002, never hand-edited — visible in reports, never gated (owner ruling 2026-08-28, #62). */
-function isWatchOnlyFile(relPath: string): boolean {
+export function isWatchOnlyFile(relPath: string): boolean {
   return relPath.startsWith('src/client/components/ui/');
 }
 

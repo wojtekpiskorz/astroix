@@ -6,10 +6,13 @@
  *   bun run crap                full report: CC everywhere, CRAP + Uncle Bob
  *                               bands where coverage is real (src/core)
  *   bun run crap --staged       pre-commit scan: CC warn (>= 10) on functions
- *                               touched by staged changes — warns, never blocks
- *   bun run preflight           hard stop over the PR diff scope (merge-base
- *                               vs main): CRAP >= 30 in src/core, CC >= 15 in
- *                               src/node + src/client, baseline-ratcheted
+ *                               touched by staged changes — warns, never blocks,
+ *                               skips the generated ui/ tier (ruling #62: no
+ *                               un-followable advice on code we regenerate)
+ *   bun run preflight           full-src ratchet: every run evaluates all of
+ *                               src/ against the baseline — CRAP >= 30 in
+ *                               src/core, CC >= 15 in src/node + src/client,
+ *                               any new breach fails (the diff only annotates)
  *   bun run crap:ci             CI recompute: full table to crap-table.md for
  *                               the advisory reviewer prompt; never exits nonzero
  *   bun run crap --calibrate    one-time: pin current violators as the initial
@@ -31,6 +34,7 @@ import {
   baselineKey,
   evaluateGate,
   GATE_STOPS,
+  isWatchOnlyFile,
   mergeBaseline,
   PRECOMMIT_CC_WARN,
   toRiskEntry,
@@ -280,6 +284,7 @@ function modeStaged() {
   }
   let warned = 0;
   for (const { file, fn } of touched) {
+    if (isWatchOnlyFile(file)) continue; // generated tier: regenerate, never hand-split
     if (fn.cc >= PRECOMMIT_CC_WARN) {
       console.warn(
         `astroix pre-commit: ${file} ${fn.name}@L${fn.lineStart} cc ${fn.cc} >= ${PRECOMMIT_CC_WARN} — consider splitting before it grows`,
