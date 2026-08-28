@@ -1,0 +1,40 @@
+name: Stable release
+
+on:
+  push:
+    branches: [main]
+
+# the changesets/action loop (#59): non-empty changeset queue -> opens/updates the
+# "Version Packages" PR; empty queue (that PR just merged) -> the publish script
+# runs -> latest. Publishes with the bypass-2FA NPM_TOKEN (#48); the repo setting
+# "Allow GitHub Actions to create and approve pull requests" must stay on.
+concurrency:
+  group: stable-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: release (stable channel)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # push version commit + tags
+      pull-requests: write # open Version Packages PR
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org # writes .npmrc using NODE_AUTH_TOKEN
+      - run: bun install --frozen-lockfile
+      # SHA-pinned v2.1.1 (upstream v2 is a moving branch, no major tag): this job
+      # holds contents:write + pull-requests:write + NPM_TOKEN — the most privileged
+      # action in the repo, so ref movement must not swap code under it silently
+      - uses: changesets/action@8488615a623b1b9c987934bb89eae8af6a946ac1 # v2.1.1
+        with:
+          version-script: bunx changeset version
+          publish-script: bun run build && bun run check:artifact && bun run check:publint && bunx changeset publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }} # the granular access token
