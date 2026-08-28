@@ -1,5 +1,12 @@
 # @wojciechpiskorz/astroix
 
+## 0.0.6
+
+### Patch Changes
+
+- b084556: feat: chrome sidebar on the shadcn Sidebar primitive + theme preset b1Z6BvKCW (#81). The hand-rolled aside frame gives way to the generated Sidebar (Base UI variant, offcanvas collapse via rail or cmd/ctrl+b; the primitive writes its state cookie and the shell reads it back on boot, so the state survives reloads; provider row `relative` + sidebar `absolute` keep it below the chrome header; width 18rem preserved). Vertical tabs pin in the sidebar header, bodies render in the scrollable content area — behavior from #70 (activeVertical, dock swap, CSS-scoped select mode) unchanged behind the same data contracts. Theme preset b1Z6BvKCW lands as a value swap of both token blocks; touched shell surfaces (root, dock frame, header) convert from slate utilities to semantic tokens, feature bodies convert when their slices touch them. `workbench row` and `editor dock` join the glossary. New e2e: collapse/expand state preservation (incl. across reload) + theme resolution.
+- 63af78d: In-chrome owner smoke checklist (fold-in of the #46 prototype, issue #61): wizard dialog behind a top-level `?astroix_smoke=1` gate — nothing renders without the param. Gated use shows a small hint pill and the `S` shortcut (typing-guarded) summons the wizard: one step per screen over the 8 steps mirrored from `docs/manual-smoke.md`, Back/Next with progress dots, a summary screen, and a Copy report (markdown: header with date/URL/UA, per-step checkboxes with notes, Result line, agent-paste footer). Checklist state is in-memory only. The Base UI dialog portal keeps the `.dark` token re-scope on portal content.
+
 ## 0.0.5
 
 ### Patch Changes
