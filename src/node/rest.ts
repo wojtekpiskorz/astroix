@@ -8,7 +8,7 @@ import { buildCssIndex, type SourceFile } from '../core/indexer';
 import type { IndexPayloadRecord } from '../core/matcher';
 import { SpliceRangeError, spliceText } from '../core/splice-writer';
 
-const API_PREFIX = '/__astroix';
+export const API_PREFIX = '/__astroix';
 const MAX_BODY_BYTES = 1_000_000;
 
 export interface RestOptions {
@@ -43,12 +43,7 @@ async function handleApiRequest(
   options: RestOptions,
 ): Promise<void> {
   try {
-    const secFetchSite = req.headers['sec-fetch-site'];
-    if (
-      typeof secFetchSite === 'string' &&
-      secFetchSite !== 'same-origin' &&
-      secFetchSite !== 'none'
-    ) {
+    if (isCrossOriginTraffic(req)) {
       json(res, 403, { error: 'cross-origin builder traffic is not allowed' });
       return;
     }
@@ -271,6 +266,24 @@ function sha256(text: string): string {
   return createHash('sha256').update(text).digest('hex');
 }
 
+/**
+ * The builder endpoints serve same-origin chrome traffic only: a browser
+ * `sec-fetch-site` header that is not same-origin/none means cross-origin
+ * (T2). Shared by every `/__astroix` middleware.
+ */
+export function isCrossOriginTraffic(req: IncomingMessage): boolean {
+  const secFetchSite = req.headers['sec-fetch-site'];
+  return (
+    typeof secFetchSite === 'string' && secFetchSite !== 'same-origin' && secFetchSite !== 'none'
+  );
+}
+
+export function json(res: ServerResponse, status: number, body: unknown): void {
+  res.statusCode = status;
+  res.setHeader('content-type', 'application/json; charset=utf-8');
+  res.end(JSON.stringify(body));
+}
+
 function readJsonBody(req: IncomingMessage): Promise<unknown> {
   return new Promise((resolveBody, reject) => {
     const chunks: Buffer[] = [];
@@ -293,10 +306,4 @@ function readJsonBody(req: IncomingMessage): Promise<unknown> {
     });
     req.on('error', reject);
   });
-}
-
-function json(res: ServerResponse, status: number, body: unknown): void {
-  res.statusCode = status;
-  res.setHeader('content-type', 'application/json; charset=utf-8');
-  res.end(JSON.stringify(body));
 }

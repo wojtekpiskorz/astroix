@@ -1,0 +1,116 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import type { IntegrationResolvedRoute } from 'astro';
+import { afterAll, describe, expect, it } from 'vitest';
+import {
+  assembleCollectionsPayload,
+  findContentConfigPath,
+  type RawContentConfig,
+  type RawContentModule,
+  toRouteRecord,
+} from './content';
+
+const scratch = mkdtempSync(join(tmpdir(), 'astroix-content-'));
+afterAll(() => rmSync(scratch, { recursive: true, force: true }));
+
+describe('toRouteRecord', () => {
+  it('projects the JSON surface and copies params', () => {
+    const params = ['...slug'];
+    const record = toRouteRecord({
+      pattern: '/blog/[...slug]',
+      entrypoint: 'src/pages/blog/[...slug].astro',
+      params,
+      type: 'page',
+      isPrerendered: true,
+    } as unknown as IntegrationResolvedRoute);
+    expect(record).toEqual({
+      pattern: '/blog/[...slug]',
+      entrypoint: 'src/pages/blog/[...slug].astro',
+      params: ['...slug'],
+      type: 'page',
+      isPrerendered: true,
+    });
+    expect(record.params).not.toBe(params);
+  });
+});
+
+describe('assembleCollectionsPayload', () => {
+  it('joins schema presence with core-parsed entries, sorted deterministically', async () => {
+    const config: RawContentConfig = {
+      collections: {
+        blog: { schema: () => 'zod' },
+        homepage: {},
+      },
+    };
+    const content: RawContentModule = {
+      getCollection: (name) =>
+        name === 'blog'
+          ? Promise.resolve([
+              {
+                id: '2025/release-notes',
+                filePath: 'src/content/blog/2025/release-notes.md',
+                data: { title: 'Release notes' },
+                body: 'Second nested fixture post.',
+              },
+              {
+                id: '2024/post',
+                filePath: 'src/content/blog/2024/post.md',
+                data: { title: 'Nested post' },
+                body: 'Nested.',
+              },
+            ])
+          : Promise.resolve([
+              {
+                id: 'index',
+                filePath: 'src/content/homepage/index.md',
+                data: { title: 'Astroix fixture' },
+                body: null,
+                digest: 'abc',
+              },
+            ]),
+    };
+
+    const payload = await assembleCollectionsPayload(config, content);
+
+    expect(payload.map((collection) => collection.name)).toEqual(['blog', 'homepage']);
+    expect(payload[0]?.hasSchema).toBe(true);
+    expect(payload[0]?.entries.map((entry) => entry.id)).toEqual([
+      '2024/post',
+      '2025/release-notes',
+    ]);
+    expect(payload[0]?.entries[0]?.data).toEqual({ title: 'Nested post' });
+    expect(payload[1]?.hasSchema).toBe(false);
+    expect(payload[1]?.entries[0]).toEqual({
+      id: 'index',
+      filePath: 'src/content/homepage/index.md',
+      data: { title: 'Astroix fixture' },
+      body: null,
+    });
+  });
+
+  it('returns an empty payload without a content config', async () => {
+    const content: RawContentModule = { getCollection: () => Promise.resolve([]) };
+    expect(await assembleCollectionsPayload(null, content)).toEqual([]);
+    expect(await assembleCollectionsPayload({ collections: null }, content)).toEqual([]);
+  });
+
+  it('keeps going when a collection has no entries yet (sync race at boot)', async () => {
+    const config: RawContentConfig = { collections: { empty: { schema: {} } } };
+    const payload = await assembleCollectionsPayload(config, {});
+    expect(payload).toEqual([{ name: 'empty', hasSchema: true, entries: [] }]);
+  });
+});
+
+describe('findContentConfigPath', () => {
+  it('mirrors core search order: src/content.config.* before legacy src/content/config.*', () => {
+    writeFileSync(join(scratch, 'content.config.ts'), 'export const collections = {};');
+    mkdirSync(join(scratch, 'content'), { recursive: true });
+    writeFileSync(join(scratch, 'content', 'config.mjs'), 'export const collections = {};');
+    expect(findContentConfigPath(scratch)).toBe(join(scratch, 'content.config.ts'));
+  });
+
+  it('returns null when the project defines no content config', () => {
+    expect(findContentConfigPath(join(scratch, 'missing'))).toBeNull();
+  });
+});

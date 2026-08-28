@@ -2,6 +2,8 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Plugin, ViteDevServer } from 'vite';
 import { chromeHtml } from './chrome-html';
+import type { RoutesState } from './content';
+import { registerContentEndpoints } from './content';
 import { isDocumentRequest } from './document-request';
 import { registerRestEndpoints } from './rest';
 import { chromeArtifactPath, clientEntryPath } from './source-mode';
@@ -12,6 +14,8 @@ export const VIRTUAL_CHROME_ID = 'virtual:astroix/chrome';
 export interface AstroixPluginOptions {
   /** Absolute Astro src dir with the sources to index; defaults to `<root>/src`. */
   srcDir?: string;
+  /** Routes captured by the integration's `astro:routes:resolved` hook, served at `/__astroix/routes`. */
+  routes?: RoutesState;
 }
 
 /**
@@ -49,6 +53,10 @@ export function astroixVitePlugin(options: AstroixPluginOptions = {}): Plugin {
       registerRestEndpoints(server, {
         root: server.config.root,
         srcDir: options.srcDir ?? join(server.config.root, 'src'),
+      });
+      registerContentEndpoints(server, {
+        srcDir: options.srcDir ?? join(server.config.root, 'src'),
+        routes: options.routes ?? { current: [] },
       });
       registerFileSync(server, {
         root: server.config.root,
