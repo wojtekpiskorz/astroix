@@ -176,7 +176,16 @@ function touchedKeys(files, diffSpec, read) {
  */
 function runCoverage({ hard = true } = {}) {
   const r = spawnSync('bun', ['x', 'vitest', 'run', '--coverage'], { cwd: ROOT, stdio: 'inherit' });
-  if (r.status !== 0) {
+  const failed = r.status !== 0;
+  let json = null;
+  if (!failed) {
+    try {
+      json = JSON.parse(readFileSync(COVERAGE_JSON, 'utf8'));
+    } catch {
+      // a green run that wrote no coverage file is still no coverage
+    }
+  }
+  if (failed || json === null) {
     if (!hard) {
       console.error('crap: vitest coverage run failed — degrading to a CC-only table');
       return null;
@@ -184,7 +193,7 @@ function runCoverage({ hard = true } = {}) {
     console.error('crap: vitest coverage run failed — the CRAP term needs it');
     process.exit(1);
   }
-  return JSON.parse(readFileSync(COVERAGE_JSON, 'utf8'));
+  return json;
 }
 
 function readBaseline() {
@@ -296,11 +305,15 @@ function modePreflight() {
   }
 
   const needCoverage = files.some((f) => isCoreFile(relative(ROOT, f)));
-  if (needCoverage && (gitOk(['status', '--porcelain']) ?? '').length > 0) {
+  // scoped to what the coverage run can actually read: src/ and the vitest
+  // config; untracked files elsewhere cannot color the CRAP term
+  const dirty =
+    (gitOk(['status', '--porcelain', '--', 'src', 'vitest.config.ts']) ?? '').length > 0;
+  if (needCoverage && dirty) {
     // vitest coverage reads the working tree: a pass here could rest on
     // uncommitted tests — the exact class of pass committedSource closes for CC
     console.error(
-      'preflight: working tree is dirty — the CRAP coverage term would read uncommitted tests. Commit or stash, then rerun.',
+      'preflight: src/ or vitest.config.ts is dirty — the CRAP coverage term would read uncommitted content. Commit or stash (git stash -u covers untracked), then rerun.',
     );
     process.exit(1);
   }
