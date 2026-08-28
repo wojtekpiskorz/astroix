@@ -13,12 +13,17 @@ interface CollectionRecord {
   entries: CollectionEntryRecord[];
 }
 
-interface RouteRecord {
+interface RouteSegmentPart {
+  content: string;
+  dynamic: boolean;
+  spread: boolean;
+}
+
+/** The RouteInfo contract served by `GET /__astroix/routes` (src/core/route-resolver). */
+interface RouteInfo {
   pattern: string;
-  entrypoint: string;
+  segments: RouteSegmentPart[][];
   params: string[];
-  type: string;
-  isPrerendered: boolean;
 }
 
 async function getCollections(page: import('@playwright/test').Page): Promise<CollectionRecord[]> {
@@ -92,17 +97,19 @@ test('raw entry loading reuses GET /__astroix/file on the payload filePath', asy
 test('GET /__astroix/routes serves the hook-captured route array', async ({ page }) => {
   // Routes come from the astro:routes:resolved hook (boot-time here); the
   // payload exists as soon as the server does.
-  const routes = (await (await page.request.get('/__astroix/routes')).json()) as RouteRecord[];
+  const routes = (await (await page.request.get('/__astroix/routes')).json()) as RouteInfo[];
 
   const home = routes.find((route) => route.pattern === '/');
-  expect(home?.entrypoint).toBe('src/pages/index.astro');
   expect(home?.params).toEqual([]);
-  expect(home?.type).toBe('page');
-  expect(home?.isPrerendered).toBe(true);
 
+  // The resolver contract (#77): Astro's own segments parse travels with the
+  // pattern — the rest param carrying nested glob-loader ids.
   const blog = routes.find((route) => route.pattern === '/blog/[...slug]');
-  expect(blog?.entrypoint).toBe('src/pages/blog/[...slug].astro');
   expect(blog?.params).toEqual(['...slug']);
+  expect(blog?.segments).toEqual([
+    [{ content: 'blog', dynamic: false, spread: false }],
+    [{ content: '...slug', dynamic: true, spread: true }],
+  ]);
 });
 
 test('the fixture dynamic route renders a nested-id entry through the chrome canvas', async ({

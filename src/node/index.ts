@@ -4,7 +4,7 @@ import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import type { AstroIntegration } from 'astro';
 import type { Plugin as VitePlugin } from 'vite';
-import { type RoutesState, toRouteRecord } from './content';
+import { type RoutesState, toRouteInfos } from './content';
 import { clientEntryPath, isSourceMode } from './source-mode';
 import { hostRegistersTailwind } from './tailwind-guard';
 import { astroixVitePlugin } from './vite-plugin';
@@ -42,7 +42,7 @@ function astroix(): AstroIntegration {
     name: 'astroix',
     hooks: {
       'astro:routes:resolved': ({ routes }) => {
-        routesState.current = routes.map(toRouteRecord);
+        routesState.current = toRouteInfos(routes);
       },
       'astro:config:setup': ({ config, command, updateConfig, injectScript, logger }) => {
         if (command !== 'dev') return;

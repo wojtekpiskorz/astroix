@@ -8,30 +8,46 @@ import {
   findContentConfigPath,
   type RawContentConfig,
   type RawContentModule,
-  toRouteRecord,
+  toRouteInfos,
 } from './content';
 
 const scratch = mkdtempSync(join(tmpdir(), 'astroix-content-'));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
-describe('toRouteRecord', () => {
-  it('projects the JSON surface and copies params', () => {
-    const params = ['...slug'];
-    const record = toRouteRecord({
+function hookRoute(overrides: Record<string, unknown>): IntegrationResolvedRoute {
+  return {
+    pattern: '/blog/[...slug]',
+    segments: [
+      [{ content: 'blog', dynamic: false, spread: false }],
+      [{ content: '...slug', dynamic: true, spread: true }],
+    ],
+    params: ['...slug'],
+    type: 'page',
+    ...overrides,
+  } as unknown as IntegrationResolvedRoute;
+}
+
+describe('toRouteInfos', () => {
+  it('projects page routes onto RouteInfo with Astro segments, deep-copied', () => {
+    const segments = [[{ content: 'blog', dynamic: false, spread: false }]];
+    const [info] = toRouteInfos([hookRoute({ segments })]);
+    expect(info).toEqual({
       pattern: '/blog/[...slug]',
-      entrypoint: 'src/pages/blog/[...slug].astro',
-      params,
-      type: 'page',
-      isPrerendered: true,
-    } as unknown as IntegrationResolvedRoute);
-    expect(record).toEqual({
-      pattern: '/blog/[...slug]',
-      entrypoint: 'src/pages/blog/[...slug].astro',
+      segments,
       params: ['...slug'],
-      type: 'page',
-      isPrerendered: true,
     });
-    expect(record.params).not.toBe(params);
+    expect(info?.segments).not.toBe(segments);
+    expect(info?.segments[0]).not.toBe(segments[0]);
+  });
+
+  it('drops endpoint, redirect and fallback routes (resolver contract, #77 ruling)', () => {
+    const routes = [
+      hookRoute({ type: 'page' }),
+      hookRoute({ type: 'endpoint', pattern: '/api' }),
+      hookRoute({ type: 'redirect', pattern: '/old' }),
+      hookRoute({ type: 'fallback', pattern: '/404' }),
+    ];
+    expect(toRouteInfos(routes).map((info) => info.pattern)).toEqual(['/blog/[...slug]']);
   });
 });
 

@@ -3,6 +3,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { join } from 'node:path';
 import type { IntegrationResolvedRoute } from 'astro';
 import { createServerModuleRunner, type ViteDevServer } from 'vite';
+import type { RouteInfo } from '../core/route-resolver';
 import { API_PREFIX, isCrossOriginTraffic, json } from './rest';
 
 /** A single collection entry as served to the chrome (core's getCollection shape, JSON-projected). */
@@ -24,32 +25,29 @@ export interface CollectionRecord {
   entries: CollectionEntryRecord[];
 }
 
-/** A resolved route as served to the chrome — the JSON projection of the hook payload. */
-export interface RouteRecord {
-  /** Route pattern, e.g. `/blog/[...slug]`. */
-  pattern: string;
-  /** Entrypoint source, project-relative, e.g. `src/pages/index.astro`. */
-  entrypoint: string;
-  /** Dynamic and spread params, e.g. `['...slug']`. */
-  params: string[];
-  type: string;
-  isPrerendered: boolean;
-}
-
 /** Shared container between the `astro:routes:resolved` hook (writer) and the REST layer (reader). */
 export interface RoutesState {
-  current: RouteRecord[];
+  current: RouteInfo[];
 }
 
-/** Projects a hook route to its JSON form, dropping non-serializable fields (generate, regexes). */
-export function toRouteRecord(route: IntegrationResolvedRoute): RouteRecord {
-  return {
-    pattern: route.pattern,
-    entrypoint: route.entrypoint,
-    params: [...route.params],
-    type: route.type,
-    isPrerendered: route.isPrerendered,
-  };
+/**
+ * Projects hook routes to the `RouteInfo` contract of `src/core/route-resolver`
+ * (single source of truth, ADR-0002): page routes only — the resolver's
+ * contract filters out `endpoint`/`redirect`/`fallback` types at the payload
+ * (#77 ruling) — with Astro's own `segments` parse carried along, deep-copied
+ * so no live core object is held between hook runs.
+ */
+export function toRouteInfos(routes: readonly IntegrationResolvedRoute[]): RouteInfo[] {
+  return routes.flatMap((route) => {
+    if (route.type !== 'page') return [];
+    return [
+      {
+        pattern: route.pattern,
+        segments: route.segments.map((segment) => segment.map((part) => ({ ...part }))),
+        params: [...route.params],
+      },
+    ];
+  });
 }
 
 export interface ContentRestOptions {
