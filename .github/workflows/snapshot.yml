@@ -1,0 +1,42 @@
+name: Experimental snapshot
+
+on:
+  workflow_dispatch:
+
+# ephemeral publish job: the version output is never committed or pushed back,
+# so the changeset queue and changelog on main stay untouched
+permissions:
+  contents: read
+
+concurrency:
+  group: experimental-snapshot
+  cancel-in-progress: false
+
+jobs:
+  snapshot:
+    name: snapshot (experimental channel)
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - run: bun install --frozen-lockfile
+      - run: bun run build
+      - run: bun run check:artifact
+      - name: Version (snapshot, experimental)
+        run: |
+          pending=$(ls .changeset/*.md 2>/dev/null | grep -v 'README.md' | wc -l)
+          if [ "$pending" -eq 0 ]; then
+            echo "::warning::No pending changesets: this snapshot publishes nothing (main HEAD == latest stable release)"
+          fi
+          bunx changeset version --snapshot experimental
+        # never run snapshot publish bare: without --tag the snapshot lands on latest
+      - run: bunx changeset publish --tag experimental --no-git-tag
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
