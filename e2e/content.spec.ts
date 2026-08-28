@@ -24,18 +24,18 @@ interface RouteRecord {
 async function getCollections(page: import('@playwright/test').Page): Promise<CollectionRecord[]> {
   // Boot race: content sync can land after the server starts listening —
   // poll until the blog collection is fully in the store.
-  for (let attempt = 0; attempt < 40; attempt++) {
-    const payload = (await (
-      await page.request.get('/__astroix/collections')
-    ).json()) as CollectionRecord[];
-    if (
-      payload.some((collection) => collection.name === 'blog' && collection.entries.length >= 3)
-    ) {
-      return payload;
-    }
-    await page.waitForTimeout(250);
-  }
-  throw new Error('collections payload never filled up (blog × 3 entries)');
+  await expect
+    .poll(
+      async () => {
+        const response = await page.request.get('/__astroix/collections');
+        const payload = (await response.json()) as CollectionRecord[];
+        return payload.find((collection) => collection.name === 'blog')?.entries.length ?? 0;
+      },
+      { timeout: 10_000, message: 'collections payload never filled up (blog × 3 entries)' },
+    )
+    .toBeGreaterThanOrEqual(3);
+  const response = await page.request.get('/__astroix/collections');
+  return (await response.json()) as CollectionRecord[];
 }
 
 test('GET /__astroix/collections serves core-parsed entries with schema presence', async ({
