@@ -32,10 +32,10 @@ export interface RoutesState {
 
 /**
  * Projects hook routes to the `RouteInfo` contract of `src/core/route-resolver`
- * (single source of truth, ADR-0002): page routes only — the resolver's
- * contract filters out `endpoint`/`redirect`/`fallback` types at the payload
- * (#77 ruling) — with Astro's own `segments` parse carried along, deep-copied
- * so no live core object is held between hook runs.
+ * (single source of truth per the core-first ruling on PR #77): page routes
+ * only — the resolver's contract filters out `endpoint`/`redirect`/`fallback`
+ * types at the payload — with Astro's own `segments` parse carried along,
+ * deep-copied so no live core object is held between hook runs.
  */
 export function toRouteInfos(routes: readonly IntegrationResolvedRoute[]): RouteInfo[] {
   return routes.flatMap((route) => {
