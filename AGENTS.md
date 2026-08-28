@@ -94,6 +94,7 @@ Never:
 
 - Support Astro < 7, Vite < 8, or zod 3. Out of scope by spec; close such issues as wontfix with a pointer to `docs/spec.md`.
 - Break the dev-only guarantee: astroix must not exist in production builds.
+- Invest in mobile or narrow-viewport chrome affordances — the chrome is desktop-only per `docs/adr/0003-chrome-viewport-scope-desktop-only.md`; revisiting that is an owner ruling, not a PR decision.
 - Force-push (`main` is protected).
 - Weaken, skip, or regenerate tests to make a failing suite pass.
 
