@@ -7,7 +7,7 @@
 cd "$(git rev-parse --show-toplevel)" || exit 0
 if command -v bun >/dev/null 2>&1; then
   bunx biome check --staged || {
-    echo "astroix: commit blocked by biome — run 'bun run check:write' and re-stage"
+    echo "astroix: commit blocked by biome — fix with 'bunx biome check --staged --write', then re-stage"
     exit 1
   }
   bun scripts/crap.mjs --staged || echo "astroix: pre-commit CC scan skipped (engine unavailable)"
