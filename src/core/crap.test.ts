@@ -218,7 +218,20 @@ describe('toRiskEntry', () => {
       value: 5,
       stop: 15,
       band: 'low',
+      watchOnly: false,
     });
+  });
+
+  it('marks generated ui/ rows watch-only: visible, never gated', () => {
+    const e = toRiskEntry('src/client/components/ui/button.tsx', fn, undefined);
+    expect(e).toMatchObject({
+      metric: 'cc',
+      value: 5,
+      stop: Number.POSITIVE_INFINITY,
+      watchOnly: true,
+    });
+    expect(evaluateGate([e], {})).toEqual({ violations: [], grandfathered: [], improved: [] });
+    expect(mergeBaseline({}, [e]).next).toEqual({});
   });
 
   it('degrades to a CC-only row when the coverage run itself failed (null, not undefined)', () => {
