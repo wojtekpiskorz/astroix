@@ -22,6 +22,15 @@ test('tabs render at the top of the sidebar, CSS active by default', async ({ pa
   const indexBox = await index.boundingBox();
   expect(tablistBox?.y ?? -1).toBeLessThan(indexBox?.y ?? Number.POSITIVE_INFINITY);
 
+  // the absolute-over-fixed override holds: the sidebar column starts below
+  // the header — if a regeneration breaks the merge, the column goes
+  // viewport-fixed over the header and this comparison fails with numbers
+  const headerBox = await page.locator('[data-astroix-header]').boundingBox();
+  const columnBox = await page.locator('[data-sidebar="sidebar"]').boundingBox();
+  expect(columnBox?.y ?? -1).toBeGreaterThanOrEqual(
+    (headerBox?.y ?? 0) + (headerBox?.height ?? 0) - 1,
+  );
+
   await expect(cssTab).toHaveAttribute('aria-selected', 'true');
   await expect(contentTab).toHaveAttribute('aria-selected', 'false');
 
@@ -96,4 +105,70 @@ test('select mode suspends on Content and restores on return', async ({ page }) 
   await expect(selectToggle).toBeEnabled();
   await canvas.locator('.hero-title').hover();
   await expect(canvas.locator('.hero-title')).toHaveClass(/astroix-hover/);
+});
+
+test('sidebar collapses offcanvas and expands with state preserved', async ({ page }) => {
+  await page.goto('/');
+  const sidebar = page.locator('[data-slot="sidebar"]');
+  await expect(sidebar).toHaveAttribute('data-state', 'expanded');
+
+  // make the vertical state meaningful, then capture the dock's edge before
+  // collapsing via the rail (fully reachable while expanded)
+  await page.getByRole('tab', { name: 'Content' }).click();
+  const dock = page.locator('[data-astroix-content-form="pending"]');
+  await expect(dock).toBeVisible();
+  const dockXExpanded = (await dock.boundingBox())?.x;
+  await page.getByRole('button', { name: 'Toggle Sidebar' }).click();
+
+  // offcanvas collapse: the state flips and the column is reclaimed — the
+  // dock's left edge moves in by the sidebar width. The gap div animates
+  // its width (~200ms), so poll for the settled geometry instead of
+  // sampling once; a gap stuck at 18rem would never satisfy the poll
+  await expect(sidebar).toHaveAttribute('data-state', 'collapsed');
+  await expect
+    .poll(async () => (await dock.boundingBox())?.x ?? Number.NaN)
+    .toBeLessThan((dockXExpanded ?? 0) - 250);
+  await expect(page.frameLocator('#astroix-canvas').locator('.hero-title')).toBeVisible();
+
+  // the keyboard shortcut expands; the active vertical survived the roundtrip
+  await page.keyboard.press('Meta+b');
+  await expect(sidebar).toHaveAttribute('data-state', 'expanded');
+  await expect(page.locator('[data-astroix-entries="pending"]')).toBeVisible();
+  await expect(page.locator('[data-astroix-index]')).toHaveCount(0);
+
+  // the shell seeds the provider from the primitive's cookie: the collapsed
+  // state survives a full reload (memory state like the vertical resets —
+  // the CSS body is back as the default)
+  await page.getByRole('button', { name: 'Toggle Sidebar' }).click();
+  await expect(sidebar).toHaveAttribute('data-state', 'collapsed');
+  await page.reload();
+  await expect(sidebar).toHaveAttribute('data-state', 'collapsed');
+  await page.keyboard.press('Meta+b');
+  await expect(sidebar).toHaveAttribute('data-state', 'expanded');
+  await expect(page.locator('[data-astroix-index="ready"]')).toBeVisible();
+});
+
+test('theme preset b1Z6BvKCW resolves: sidebar token surface + blue primary', async ({ page }) => {
+  await page.goto('/');
+
+  // the sidebar surface styles itself from --sidebar, not the UA default
+  const sidebarBackground = await page
+    .locator('[data-sidebar="sidebar"]')
+    .evaluate((el) => getComputedStyle(el).backgroundColor);
+  expect(sidebarBackground).not.toBe('rgba(0, 0, 0, 0)');
+
+  // the preset's signature read from the cascade itself — the toggle's
+  // computed background sits behind its color transition, so mid-flight
+  // reads race; the custom property echoes the token text deterministically.
+  // --primary is a saturated blue (chroma ~0.2, hue ~265), unlike the
+  // neutral nova default
+  const primary = await page
+    .locator('[data-astroix-header]')
+    .evaluate((el) => getComputedStyle(el).getPropertyValue('--primary'));
+  const numbers = (primary.match(/[\d.]+/g) ?? []).map(Number);
+  expect(numbers.length).toBeGreaterThanOrEqual(3);
+  const [chroma = 0, hue = 0] = numbers.slice(1);
+  expect(chroma).toBeGreaterThan(0.15);
+  expect(hue).toBeGreaterThanOrEqual(250);
+  expect(hue).toBeLessThanOrEqual(280);
 });
