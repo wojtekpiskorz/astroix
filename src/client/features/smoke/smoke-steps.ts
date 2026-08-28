@@ -9,7 +9,9 @@ export interface SmokeStep {
 
 // The client-side mirror of docs/manual-smoke.md (the owner's POC definition
 // of done) — when the doc changes, this module changes alongside it (#61).
-export const SMOKE_STEPS: SmokeStep[] = [
+// `as const satisfies` narrows the ids to a real union (StepId) so the store
+// can key by them — an unknown step id is a compile error there.
+export const SMOKE_STEPS = [
   {
     id: '1',
     title: 'One command boots everything',
@@ -63,4 +65,6 @@ export const SMOKE_STEPS: SmokeStep[] = [
     detail: 'Append ?builder=0 to the top-level URL — clean page, no chrome.',
     surface: 'url bar',
   },
-];
+] as const satisfies readonly SmokeStep[];
+
+export type StepId = (typeof SMOKE_STEPS)[number]['id'];

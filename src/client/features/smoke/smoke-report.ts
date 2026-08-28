@@ -10,7 +10,9 @@ export interface SmokeReportContext {
 }
 
 export function verifiedCount(done: Readonly<Partial<Record<string, boolean>>>): number {
-  return SMOKE_STEPS.filter((step) => done[step.id]).length;
+  // same rule as buildSmokeReport's checkboxes: strictly `=== true`, so the
+  // count and the outstanding list can never disagree over a truthy value
+  return SMOKE_STEPS.filter((step) => done[step.id] === true).length;
 }
 
 /** The Copy-report payload: a markdown document ready to paste into a GitHub
