@@ -87,6 +87,12 @@ Vendored in `.agents/skills/` (`thermo-nuclear-code-quality-review`, `unslop`): 
 
 CI runs the advisory AI review on every PR (`.github/workflows/ai-review.yml`, `claude-code-action@v1` on the Z.AI GLM endpoint): thermo-nuclear + unslop applied to the diff, read-and-comment tools only, never auto-commits, never gates the merge; the deterministic gates in `ci.yml` stay the source of truth for merge status.
 
+The agent session working the PR owns the findings on a three-tier scale:
+
+1. Clean run, or mechanical findings only (punctuation, comment fixes, small guards, naming): implement on the same PR, let the review run again, and merge once the deterministic gates are green and the latest run raises nothing new.
+2. Findings that would reshape the change (behavior redesign, new structure or dependency, anything touching `docs/spec.md`, `docs/stack.md`, `docs/adr/` or a wayfinder decision): stop and hand the finding to the owner instead of deciding alone; if it needs a real decision, it opens as a grilling session or a ticket.
+3. A finding the agent rejects gets written reasoning on the PR; if the next run re-raises it, the agent implements it or escalates. Never merge over an unresolved re-raise.
+
 ### Issue tracker
 
 Issues live in GitHub Issues; use the `gh` CLI. See `docs/agents/issue-tracker.md`.
