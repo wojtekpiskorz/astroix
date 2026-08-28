@@ -28,7 +28,7 @@ export function Sidebar() {
     // row below the chrome header instead of the whole viewport
     <SidebarRoot collapsible="offcanvas" className="absolute h-full">
       <Tabs
-        className="flex min-h-0 flex-1 flex-col"
+        className="min-h-0 flex-1"
         value={activeVertical}
         onValueChange={(value: unknown) => {
           if (value === 'css' || value === 'content') setActiveVertical(value);
