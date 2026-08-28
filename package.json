@@ -1,7 +1,7 @@
 {
   "name": "@wojciechpiskorz/astroix",
   "version": "0.0.2",
-  "description": "Dev-only Astro 7 integration — a visual builder for Content Collections content and repo-mapped CSS",
+  "description": "Dev-only Astro 7 integration \u2014 a visual builder for Content Collections content and repo-mapped CSS",
   "type": "module",
   "license": "MIT",
   "repository": {
@@ -40,20 +40,21 @@
   "scripts": {
     "build": "tsup && vite build --config vite.chrome.config.ts",
     "build:chrome": "vite build --config vite.chrome.config.ts",
-    "dev": "tsup --watch",
+    "changeset": "changeset",
     "check": "biome check .",
-    "check:write": "biome check --write .",
     "check:artifact": "node scripts/check-chrome-artifact.mjs",
-    "smoke": "node scripts/smoke.mjs",
+    "check:publint": "publint",
+    "check:write": "biome check --write .",
     "crap": "bun scripts/crap.mjs",
     "crap:ci": "bun scripts/crap.mjs --ci",
-    "preflight": "bun scripts/crap.mjs --preflight",
+    "dev": "tsup --watch",
     "hooks": "node scripts/setup-hooks.mjs",
-    "typecheck": "tsc --noEmit",
+    "preflight": "bun scripts/crap.mjs --preflight",
+    "smoke": "node scripts/smoke.mjs",
     "test": "vitest run",
-    "test:watch": "vitest",
     "test:e2e": "playwright test",
-    "changeset": "changeset"
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
   },
   "peerDependencies": {
     "astro": "^7.0.0",
@@ -90,6 +91,7 @@
     "happy-dom": "^20.11.6",
     "oxc-parser": "^0.147.0",
     "oxc-transform-react": "^0.147.0",
+    "publint": "^0.3.24",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "tsup": "^8.5.1",
