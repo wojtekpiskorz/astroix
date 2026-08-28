@@ -1,9 +1,40 @@
 import { describe, expect, it } from 'vitest';
-import type { RouteInfo } from './route-resolver';
+import type { RouteInfo, RouteSegmentPart } from './route-resolver';
 import { candidateRoutes, resolveActiveEntry } from './route-resolver';
 
+const staticPart = (content: string): RouteSegmentPart => ({
+  content,
+  dynamic: false,
+  spread: false,
+});
+
+/** Test-side projection of an `astro:routes:resolved` page route from its pattern string. */
+function page(pattern: string): RouteInfo {
+  const params: string[] = [];
+  const segments = pattern
+    .split('/')
+    .filter((part) => part !== '')
+    .map((text) => partFor(text, params));
+  return { pattern, segments, params };
+}
+
+function partFor(text: string, params: string[]): RouteSegmentPart[] {
+  const single = /^\[(\.\.\.)?(.+)\]$/.exec(text);
+  if (single === null) {
+    if (text.includes('[') || text.includes(']')) {
+      throw new Error(
+        `test builder: unsupported segment "${text}" — build the RouteInfo literally`,
+      );
+    }
+    return [staticPart(text)];
+  }
+  const name = single[2] ?? text;
+  params.push(single[1] ? `...${name}` : name);
+  return [{ content: name, dynamic: true, spread: single[1] !== undefined }];
+}
+
 function routes(...patterns: string[]): RouteInfo[] {
-  return patterns.map((pattern) => ({ pattern }));
+  return patterns.map(page);
 }
 
 describe('resolveActiveEntry — forward (canvas URL → entry)', () => {
@@ -89,11 +120,20 @@ describe('resolveActiveEntry — forward (canvas URL → entry)', () => {
   });
 
   it('embedded params are not extracted — /pages/v-[id] stays silent', () => {
-    expect(resolveActiveEntry(routes('/pages/v-[id]'), '/pages/v-5', { pages: ['5'] })).toBeNull();
+    const embedded: RouteInfo = {
+      pattern: '/pages/v-[id]',
+      segments: [
+        [staticPart('pages')],
+        [staticPart('v-'), { content: 'id', dynamic: true, spread: false }],
+      ],
+      params: ['id'],
+    };
+    expect(resolveActiveEntry([embedded], '/pages/v-5', { pages: ['5'] })).toBeNull();
   });
 
-  it('malformed patterns are ignored, valid ones still resolve', () => {
-    const hit = resolveActiveEntry(routes('[]', '/[...a]/more', '/blog/[slug]'), '/blog/hello', {
+  it('segments Astro never emits (empty parts) are ignored, valid routes still resolve', () => {
+    const empty: RouteInfo = { pattern: '/weird', segments: [[]], params: [] };
+    const hit = resolveActiveEntry([empty, ...routes('/blog/[slug]')], '/blog/hello', {
       blog: ['hello'],
     });
     expect(hit).toEqual({ collection: 'blog', entryId: 'hello' });

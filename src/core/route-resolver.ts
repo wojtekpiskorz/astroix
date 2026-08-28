@@ -7,18 +7,36 @@
  * only mapping there is. Doctrine: a unique hit selects; ambiguity or no
  * match selects nothing — the heuristic never picks wrong, it picks nothing.
  *
+ * Core-first (owner ruling on PR #77): the route arrives with Astro's own
+ * parse — `segments` (`RoutePart[][]`, `{content, dynamic, spread}`) and
+ * `params` from `astro:routes:resolved` — so no grammar is re-derived here.
  * Only patterns with exactly one param participate: a single segment param
  * (`/blog/[slug]`, the id must be one segment) or a rest param
  * (`/blog/[...slug]`, glob-loader ids are slugified paths, so `2024/post.md`
  * → id `2024/post` matches a catch-all). Patterns with more params cannot
  * isolate the id (and reverse navigation could not build their URL), embedded
- * params like `/pages/v-[id]` are not extracted — both stay silent.
+ * params (`/pages/v-[id]`, multi-part segments) are not extracted — both stay
+ * silent.
+ *
+ * Contract: callers pass page routes — the routes payload filters out
+ * `endpoint`/`redirect`/`fallback` route types before serving (#68).
  */
 
-/** Minimal projection of one `astro:routes:resolved` route: its pattern string. */
+/** One part of a route segment — Astro's own parse (`RoutePart` from `astro:routes:resolved`). */
+export interface RouteSegmentPart {
+  content: string;
+  dynamic: boolean;
+  spread: boolean;
+}
+
+/** Minimal projection of one `astro:routes:resolved` route (page routes only). */
 export interface RouteInfo {
-  /** Astro route pattern: `/`, `/about`, `/blog/[slug]`, `/blog/[...slug]`. */
+  /** Astro route pattern — identity and display; resolution reads `segments`. */
   pattern: string;
+  /** Astro's parse of the pattern: parts per segment. */
+  segments: ReadonlyArray<ReadonlyArray<RouteSegmentPart>>;
+  /** Param names as Astro reports them (`...slug` for a rest param). */
+  params: ReadonlyArray<string>;
 }
 
 /** The entry a canvas URL plausibly renders — the chrome's active entry. */
@@ -36,16 +54,24 @@ export interface RouteCandidate {
 /** Collection name → entry ids (glob-loader ids are slugified paths: `2024/post`). */
 export type CollectionsIndex = Readonly<Record<string, ReadonlyArray<string>>>;
 
-type PatternSegment = { kind: 'static'; text: string } | { kind: 'param' } | { kind: 'rest' };
+type FlatSegment = { kind: 'static'; text: string } | { kind: 'param' } | { kind: 'rest' };
 
-interface ParsedPattern {
-  segments: PatternSegment[];
-  /** Number of param/rest segments; only `1` participates in resolution. */
-  paramCount: number;
+interface StaticRoute {
+  kind: 'static';
+  segments: FlatSegment[];
 }
 
+interface SingleParamRoute {
+  kind: 'single-param';
+  segments: FlatSegment[];
+  /** Position of the one param among `segments` — the invariant `kind` carries. */
+  paramAt: number;
+}
+
+/** A route flattened from Astro's parse: zero params, or exactly one (single or rest) — anything else stays silent. */
+type FlatRoute = StaticRoute | SingleParamRoute;
+
 const CANVAS_URL_BASE = 'http://astroix.canvas/';
-const REST_DOTS = '...';
 
 /**
  * Forward resolution (canvas URL → active entry): the URL must match exactly
@@ -77,9 +103,9 @@ export function candidateRoutes(
 ): RouteCandidate[] {
   const candidates: RouteCandidate[] = [];
   for (const route of routes) {
-    const pattern = parsePattern(route.pattern);
-    if (pattern === null || pattern.paramCount !== 1) continue;
-    const url = buildCandidateUrl(pattern, entryId);
+    const flat = flattenRoute(route);
+    if (flat === null || flat.kind !== 'single-param') continue;
+    const url = buildCandidateUrl(flat, entryId);
     if (url === null) continue;
     candidates.push({ pattern: route.pattern, url });
   }
@@ -96,9 +122,9 @@ function isStaticPage(
   urlSegments: ReadonlyArray<string>,
 ): boolean {
   for (const route of routes) {
-    const pattern = parsePattern(route.pattern);
-    if (pattern === null || pattern.paramCount !== 0) continue;
-    if (patternMatchesUrl(pattern, urlSegments)) return true;
+    const flat = flattenRoute(route);
+    if (flat === null || flat.kind !== 'static') continue;
+    if (patternMatchesUrl(flat.segments, urlSegments)) return true;
   }
   return false;
 }
@@ -110,9 +136,9 @@ function entryHitsFor(
 ): ActiveEntry[] {
   const hits = new Map<string, ActiveEntry>();
   for (const route of routes) {
-    const pattern = parsePattern(route.pattern);
-    if (pattern === null || pattern.paramCount !== 1) continue;
-    const entryId = captureParamValue(pattern, urlSegments);
+    const flat = flattenRoute(route);
+    if (flat === null || flat.kind !== 'single-param') continue;
+    const entryId = captureParamValue(flat, urlSegments);
     if (entryId === null) continue;
     for (const collection of collectionsWithEntry(entryId, collections)) {
       hits.set(`${collection}\u0000${entryId}`, { collection, entryId });
@@ -129,34 +155,36 @@ function collectionsWithEntry(entryId: string, collections: CollectionsIndex): s
   return names;
 }
 
-function parsePattern(pattern: string): ParsedPattern | null {
-  const raw = pattern.split('/').filter((part) => part !== '');
-  const segments: PatternSegment[] = [];
-  for (let i = 0; i < raw.length; i++) {
-    const segment = parseSegment(raw[i] ?? '', i === raw.length - 1);
+function flattenRoute(route: RouteInfo): FlatRoute | null {
+  const segments: FlatSegment[] = [];
+  let paramAt = -1;
+  for (const parts of route.segments) {
+    const segment = flattenSegment(parts);
     if (segment === null) return null;
+    if (segment.kind !== 'static') {
+      if (paramAt !== -1) return null; // two params cannot isolate the entry id
+      paramAt = segments.length;
+    }
     segments.push(segment);
   }
-  return { segments, paramCount: countParams(segments) };
+  return paramAt === -1
+    ? { kind: 'static', segments }
+    : { kind: 'single-param', segments, paramAt };
 }
 
-/** Static text, a `[param]`, or a trailing `[...rest]`; anything else (embedded params, stray brackets) is unsupported. */
-function parseSegment(text: string, isLast: boolean): PatternSegment | null {
-  if (!text.includes('[')) return { kind: 'static', text };
-  if (!text.startsWith('[') || !text.endsWith(']')) return null;
-  const inner = text.slice(1, -1);
-  if (inner.startsWith(REST_DOTS)) {
-    return isLast && inner.length > REST_DOTS.length ? { kind: 'rest' } : null;
-  }
-  return inner === '' ? null : { kind: 'param' };
+/** A single-part segment is static text, a `[param]`, or a `[...rest]`; embedded params (multi-part segments) stay silent. */
+function flattenSegment(parts: ReadonlyArray<RouteSegmentPart>): FlatSegment | null {
+  const [part] = parts;
+  if (part === undefined || parts.length !== 1) return null;
+  if (part.spread) return { kind: 'rest' };
+  if (part.dynamic) return { kind: 'param' };
+  return { kind: 'static', text: part.content };
 }
 
-function countParams(segments: ReadonlyArray<PatternSegment>): number {
-  return segments.filter((segment) => segment.kind !== 'static').length;
-}
-
-function patternMatchesUrl(pattern: ParsedPattern, urlSegments: ReadonlyArray<string>): boolean {
-  const { segments } = pattern;
+function patternMatchesUrl(
+  segments: ReadonlyArray<FlatSegment>,
+  urlSegments: ReadonlyArray<string>,
+): boolean {
   const restAt = segments.findIndex((segment) => segment.kind === 'rest');
   if (restAt === -1) {
     return (
@@ -173,28 +201,27 @@ function patternMatchesUrl(pattern: ParsedPattern, urlSegments: ReadonlyArray<st
   return true;
 }
 
-/** The captured value of the pattern's single param (`2024/post` for a rest param); null when the URL doesn't fit. */
+/** The captured value of the route's single param (`2024/post` for a rest param); null when the URL doesn't fit. */
 function captureParamValue(
-  pattern: ParsedPattern,
+  route: SingleParamRoute,
   urlSegments: ReadonlyArray<string>,
 ): string | null {
-  if (!patternMatchesUrl(pattern, urlSegments)) return null;
-  const paramAt = pattern.segments.findIndex((segment) => segment.kind !== 'static');
-  if (paramAt === -1) return null;
-  return pattern.segments[paramAt]?.kind === 'rest'
-    ? urlSegments.slice(paramAt).join('/')
-    : (urlSegments[paramAt] ?? null);
+  if (!patternMatchesUrl(route.segments, urlSegments)) return null;
+  return route.segments[route.paramAt]?.kind === 'rest'
+    ? urlSegments.slice(route.paramAt).join('/')
+    : (urlSegments[route.paramAt] ?? null);
 }
 
-function buildCandidateUrl(pattern: ParsedPattern, entryId: string): string | null {
+function buildCandidateUrl(route: SingleParamRoute, entryId: string): string | null {
   const idParts = entryId.split('/');
-  const takesEntryId = pattern.segments.some((segment) => segment.kind === 'rest')
-    ? idParts.every((part) => part !== '')
-    : idParts.length === 1 && idParts[0] !== '';
+  const takesEntryId =
+    route.segments[route.paramAt]?.kind === 'rest'
+      ? idParts.every((part) => part !== '')
+      : idParts.length === 1 && idParts[0] !== '';
   if (!takesEntryId) return null;
 
   const pathParts: string[] = [];
-  for (const segment of pattern.segments) {
+  for (const segment of route.segments) {
     if (segment.kind === 'static') pathParts.push(segment.text);
     else if (segment.kind === 'param') pathParts.push(encodeSegment(idParts[0] ?? ''));
     else pathParts.push(...idParts.map(encodeSegment));
