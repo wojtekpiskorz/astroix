@@ -29,9 +29,12 @@ jobs:
           node-version: 24
           registry-url: https://registry.npmjs.org # writes .npmrc using NODE_AUTH_TOKEN
       - run: bun install --frozen-lockfile
-      - uses: changesets/action@v2
+      # SHA-pinned v2.1.1 (upstream v2 is a moving branch, no major tag): this job
+      # holds contents:write + pull-requests:write + NPM_TOKEN — the most privileged
+      # action in the repo, so ref movement must not swap code under it silently
+      - uses: changesets/action@8488615a623b1b9c987934bb89eae8af6a946ac1 # v2.1.1
         with:
           version-script: bunx changeset version
-          publish-script: bun run build && bunx changeset publish
+          publish-script: bun run build && bun run check:artifact && bunx changeset publish
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }} # the granular access token
