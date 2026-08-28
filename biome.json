@@ -27,6 +27,21 @@
       "preset": "recommended"
     }
   },
+  "overrides": [
+    {
+      "includes": ["src/client/components/ui/**"],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "noDocumentCookie": "off"
+          },
+          "correctness": {
+            "useExhaustiveDependencies": "off"
+          }
+        }
+      }
+    }
+  ],
   "assist": {
     "actions": {
       "source": {
