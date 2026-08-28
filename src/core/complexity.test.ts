@@ -134,6 +134,7 @@ const PROBES: Probe[] = [
       'export const obj = {\n  key(x: boolean): number {\n    return x ? 1 : 0;\n  },\n' +
       "  'lit-key': function (x: boolean): number {\n    return x ? 1 : 0;\n  },\n  2: function (x: boolean): number {\n    return x ? 1 : 0;\n  },\n};\n" +
       'export let assignedLater: (x: boolean) => number;\nassignedLater = function (x: boolean): number {\n  return x ? 1 : 0;\n};\n' +
+      'export const namedExpression = function ownId(x: boolean): number {\n  return x ? 1 : 0;\n};\n' +
       'export function host(cb: (x: boolean) => number): number {\n  return cb(true);\n}\nhost((x) => (x ? 1 : 0));\n',
     expected: [
       ['constructor', 1],
@@ -144,6 +145,7 @@ const PROBES: Probe[] = [
       ['lit-key', 2],
       ['2', 2],
       ['assignedLater', 2],
+      ['ownId', 2],
       ['host', 1],
       ['(anonymous)', 2],
     ],

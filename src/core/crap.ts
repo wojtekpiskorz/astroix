@@ -151,6 +151,10 @@ export function toRiskEntry(
  * (`file#(anonymous)@L<lineStart>`): a fresh anonymous violator must not
  * ride a sibling's pin, and a moved anonymous violator re-keys and re-fails
  * — the attention an unnamed stop-breaching function deserves.
+ *
+ * Accepted risk: two same-named functions in one file share a pin. It takes
+ * two same-named stop breaches in a single file to bite; the cheap false
+ * pass is preferable to key churn on every move.
  */
 export function baselineKey(file: string, name: string, lineStart: number): string {
   return name === '(anonymous)' ? `${file}#${name}@L${lineStart}` : `${file}#${name}`;

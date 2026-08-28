@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 /**
  * crap4ts — the repo's risk report over the in-house CC engine (engine:
- * wayfinder #54; wiring: #55). One tool, five modes:
+ * wayfinder #54; wiring: #55). One tool, six modes:
  *
  *   bun run crap                full report: CC everywhere, CRAP + Uncle Bob
  *                               bands where coverage is real (src/core)

@@ -156,10 +156,8 @@ function estreeFunctionRecord(
   const start = typeof n.start === 'number' ? n.start : 0;
   const end = typeof n.end === 'number' ? n.end : start;
   return {
-    name:
-      (n.type === 'FunctionDeclaration' ? estreeIdentifierName(n.id) : null) ??
-      hint ??
-      '(anonymous)',
+    // own id first (matches the oracle): `const f = function g() {}` reports g
+    name: estreeIdentifierName(n.id) ?? hint ?? '(anonymous)',
     lineStart: lineOf(start),
     lineEnd: lineOf(end),
     cc: 0,
