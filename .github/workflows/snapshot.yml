@@ -28,7 +28,14 @@ jobs:
           registry-url: https://registry.npmjs.org
       - run: bun install --frozen-lockfile
       - run: bun run build
-      - run: bunx changeset version --snapshot experimental
+      - run: bun run check:artifact
+      - name: Version (snapshot, experimental)
+        run: |
+          pending=$(ls .changeset/*.md 2>/dev/null | grep -v 'README.md' | wc -l)
+          if [ "$pending" -eq 0 ]; then
+            echo "::warning::No pending changesets: this snapshot publishes nothing (main HEAD == latest stable release)"
+          fi
+          bunx changeset version --snapshot experimental
         # never run snapshot publish bare: without --tag the snapshot lands on latest
       - run: bunx changeset publish --tag experimental --no-git-tag
         env:
