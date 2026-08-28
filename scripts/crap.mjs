@@ -127,16 +127,26 @@ function buildEntries(files, coverage, read = (abs) => readFileSync(abs, 'utf8')
 
 const touchedId = (file, fn) => `${file}#${fn.name}@L${fn.lineStart}`;
 
-/** Touched function identities across changed files, via the tested touchedFunctions helper. */
-function touchedKeys(files, base, read) {
-  const touched = new Set();
+/**
+ * The touched pass — one implementation of "which functions did this PR
+ * touch": analyze each changed file once and select the functions whose line
+ * range intersects a diff hunk (the tested touchedFunctions helper). The
+ * gate's scope and the CI table's in-PR marks both come from here.
+ */
+function touchedIn(files, base, read) {
+  const touched = [];
   for (const abs of files) {
     const file = relative(ROOT, abs);
     const { fns } = analyzeFile(abs, read(abs));
     const ranges = hunkRanges(gitOk(['diff', '--unified=0', base, 'HEAD', '--', file]) ?? '');
-    for (const fn of touchedFunctions(fns, ranges)) touched.add(touchedId(file, fn));
+    for (const fn of touchedFunctions(fns, ranges)) touched.push({ file, fn });
   }
   return touched;
+}
+
+/** Touched function identities across changed files, as a set of ids. */
+function touchedKeys(files, base, read) {
+  return new Set(touchedIn(files, base, read).map(({ file, fn }) => touchedId(file, fn)));
 }
 
 /**
@@ -264,22 +274,14 @@ function modePreflight() {
   if ((gitOk(['status', '--porcelain']) ?? '').length > 0)
     console.log('preflight: evaluating committed state (HEAD); working tree is dirty');
 
-  const uniqueFiles = [...new Set(files)];
-  // one analysis pass over the changed files: touched set first, so a diff
-  // landing between functions never pays the coverage run
-  const touched = [];
-  for (const abs of uniqueFiles) {
-    const file = relative(ROOT, abs);
-    const { fns } = analyzeFile(abs, committedSource(abs));
-    const ranges = hunkRanges(gitOk(['diff', '--unified=0', base, 'HEAD', '--', file]) ?? '');
-    for (const fn of touchedFunctions(fns, ranges)) touched.push({ file, fn });
-  }
+  // touched set first: a diff landing between functions never pays the coverage run
+  const touched = touchedIn(files, base, committedSource);
   if (touched.length === 0) {
-    console.log(`preflight: ${uniqueFiles.length} changed file(s), no function touched — pass`);
+    console.log(`preflight: ${files.length} changed file(s), no function touched — pass`);
     return;
   }
 
-  const needCoverage = uniqueFiles.some((f) => isCoreFile(relative(ROOT, f)));
+  const needCoverage = files.some((f) => isCoreFile(relative(ROOT, f)));
   const coverage = needCoverage ? runCoverage() : {};
   const entries = touched.map(({ file, fn }) =>
     toRiskEntry(file, fn, coverage === null ? null : coverage?.[join(ROOT, file)]),
@@ -318,9 +320,7 @@ function modeCi() {
   const entries = buildEntries(walkTs(), coverage);
 
   const touched =
-    base === undefined
-      ? new Set()
-      : touchedKeys([...new Set(changedFiles(base))], base, committedSource);
+    base === undefined ? new Set() : touchedKeys(changedFiles(base), base, committedSource);
   const isTouched = (e) => touched.has(touchedId(e.file, e));
 
   const baseline = readBaseline();
