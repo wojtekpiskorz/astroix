@@ -94,9 +94,17 @@ test('typing edits the doc and fires the emitted-markdown seam', async ({ page }
   await placeCursor(editor, original.length);
   await page.keyboard.type(' Typed in the builder.');
 
+  // the doc is the committed truth — hard equality
   expect(await readDoc(editor)).toBe(`${original} Typed in the builder.`);
-  // the seam carries the new markdown — #74 wires this into the write loop
-  expect(await emittedLength(page)).toBe(original.length + ' Typed in the builder.'.length);
+  // the seam's pane state renders through React — poll for its commit (slow
+  // runners flush the re-render behind Playwright's next command); a dead
+  // seam stays at the initial length and times out
+  await expect
+    .poll(() => emittedLength(page), {
+      timeout: 5_000,
+      message: 'emitted-markdown seam never carried the typed doc',
+    })
+    .toBe(original.length + ' Typed in the builder.'.length);
 });
 
 test('the toolbar emits markdown: bold wrap/unwrap, heading toggle, link over the placeholder', async ({
@@ -112,7 +120,9 @@ test('the toolbar emits markdown: bold wrap/unwrap, heading toggle, link over th
   await selectText(editor, 'Fixture');
   await bolded.click();
   expect(await readDoc(editor)).toBe(original.replace('Fixture', '**Fixture**'));
-  expect(await emittedLength(page)).toBe(original.length + 4);
+  await expect
+    .poll(() => emittedLength(page), { timeout: 5_000, message: 'bold wrap never emitted' })
+    .toBe(original.length + 4);
   await selectText(editor, 'Fixture'); // inside the **…** pair now
   await bolded.click();
   expect(await readDoc(editor)).toBe(original);
