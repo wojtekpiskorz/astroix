@@ -270,6 +270,11 @@ test('the function-schema arm: image() marks a read-only metadata node end to en
   const meta = pane.locator('[data-astroix-image-field="meta"]');
   await expect(meta).toBeVisible();
   await expect(meta).toContainText('pixel.png');
-  await expect(meta).toContainText('1');
+  // width/height asserted per row — a resolution regression must fail, not
+  // pass on a stray '1' somewhere in the block (round 5)
+  // :text-is anchors on the dt label — the dev image src can carry a
+  // width-bearing query param, so substring filtering would match it too
+  await expect(meta.locator('div:has(> dt:text-is("width")) > dd')).toHaveText('1');
+  await expect(meta.locator('div:has(> dt:text-is("height")) > dd')).toHaveText('1');
   await expect(pane.locator('[data-astroix-form-field="hero"] input')).toHaveCount(0);
 });
