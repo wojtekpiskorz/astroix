@@ -41,9 +41,11 @@ The release run fires on the merge push itself, typically done within minutes. V
 
 ```sh
 npm view @wojciechpiskorz/astroix version
-git tag --sort=-creatordate | head -1
+git ls-remote --tags origin
 gh release list --limit 1
 ```
+
+The tag leg reads remote truth on purpose — the tag lands on `origin` minutes before a local clone's refs do, and a stale local tag list reads like a failed publish.
 
 ## Prerequisite
 
