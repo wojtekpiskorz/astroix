@@ -72,9 +72,11 @@ function insertLink(view: EditorView): void {
 /**
  * The body editor's toolbar: emits markdown around the selection through the
  * live view — bold / heading / link (owner ruling on #47: toolbar-markdown is
- * v1, rich text stays fog). Buttons never steal the editor's focus (the strip
- * prevents mousedown defaults), so every action lands in the same history
- * stream as typing and native Cmd+Z undoes through it.
+ * v1, rich text stays fog). Buttons never steal the editor's focus (each
+ * prevents its own mousedown default), so every action lands in the same
+ * history stream as typing and native Cmd+Z undoes through it. Plain Tab
+ * order, deliberately no `role="toolbar"` — the full ARIA pattern would owe
+ * roving tabindex + arrow-key navigation.
  */
 export function MarkdownToolbar({ view }: { view: () => EditorView | null }) {
   const act = (apply: (view: EditorView) => void): void => {
@@ -87,10 +89,7 @@ export function MarkdownToolbar({ view }: { view: () => EditorView | null }) {
   return (
     <div
       data-astroix-md-toolbar
-      role="toolbar"
-      aria-label="Markdown formatting"
       className="flex items-center gap-1 border-b border-border px-2 py-1.5"
-      onMouseDown={(event) => event.preventDefault()}
     >
       <Button
         type="button"
@@ -98,6 +97,7 @@ export function MarkdownToolbar({ view }: { view: () => EditorView | null }) {
         size="icon-sm"
         aria-label="Bold (markdown)"
         data-astroix-md-action="bold"
+        onMouseDown={(event) => event.preventDefault()}
         onClick={() => act((target) => toggleWrap(target, BOLD))}
       >
         <Bold />
@@ -108,6 +108,7 @@ export function MarkdownToolbar({ view }: { view: () => EditorView | null }) {
         size="icon-sm"
         aria-label="Heading (markdown)"
         data-astroix-md-action="heading"
+        onMouseDown={(event) => event.preventDefault()}
         onClick={() => act(toggleHeading)}
       >
         <Heading2 />
@@ -118,6 +119,7 @@ export function MarkdownToolbar({ view }: { view: () => EditorView | null }) {
         size="icon-sm"
         aria-label="Link (markdown)"
         data-astroix-md-action="link"
+        onMouseDown={(event) => event.preventDefault()}
         onClick={() => act(insertLink)}
       >
         <Link />

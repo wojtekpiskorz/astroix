@@ -17,9 +17,11 @@ interface MarkdownEditorProps {
 
 /**
  * The entry body editor: CodeMirror 6 over `entry.body` with the markdown
- * toolbar. The baseline (RuleEditor's model) is the last externally-loaded
- * body: external `body` prop changes rebase the doc only while it is clean —
- * a dirty doc never gets clobbered; #74's write loop owns reconciling it.
+ * toolbar. The baseline (RuleEditor's model) is the last externally-accepted
+ * body: an incoming body is accepted when it matches the doc (the write-echo
+ * of #74's loop — the baseline rebases to it) or the doc is clean; a genuine
+ * external change under a dirty doc never clobbers — #74's write loop owns
+ * reconciling it.
  */
 export function MarkdownEditor({ body, onChange }: MarkdownEditorProps) {
   const hostRef = useRef<HTMLDivElement>(null);
@@ -59,8 +61,12 @@ export function MarkdownEditor({ body, onChange }: MarkdownEditorProps) {
     const view = viewRef.current;
     if (view === null) return;
     const incoming = body ?? '';
-    if (incoming === view.state.doc.toString()) return; // echo of the same body
-    if (view.state.doc.toString() !== baselineRef.current) return; // dirty
+    const doc = view.state.doc.toString();
+    // one guard: accept the served body when it matches the doc (the echo of
+    // our own persisted edit — replaceDoc's equality short-circuit no-ops,
+    // the baseline still rebases) or the doc is clean; anything else is an
+    // external change under a dirty doc — dropped, #74 reconciles
+    if (incoming !== doc && doc !== baselineRef.current) return;
     replaceDoc(view, incoming);
     baselineRef.current = incoming;
   }, [body]);
