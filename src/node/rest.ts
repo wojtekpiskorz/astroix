@@ -59,29 +59,55 @@ async function handleEdit(
   _url: URL,
   ctx: ApiContext,
 ): Promise<void> {
-  const body = await readJsonBody(req);
+  let body: unknown;
+  try {
+    body = await readJsonBody(req);
+  } catch (error) {
+    json(res, 400, { error: error instanceof Error ? error.message : 'unreadable body' });
+    return;
+  }
   const { file, range, replacement, expected } = parseEditBody(body);
   if (file === null || range === null || replacement === null) {
     json(res, 400, { error: 'expected { file, range: { start, end }, replacement }' });
     return;
   }
+  await writeGuarded(res, ctx, file, expected, (disk) =>
+    spliceText(disk, { start: range[0], end: range[1], replacement }),
+  );
+}
+
+/**
+ * The hash-guarded write skeleton both write endpoints share (Impl #10):
+ * root confinement, the missing-file taxonomy, then the optimistic `expected`
+ * sha256 check — a mismatch means the file changed on disk under the chrome's
+ * debounce (IDE/agent edit), so refuse and hand back the current bytes for a
+ * one-roundtrip reload. `produce` computes the next bytes from the disk
+ * truth; a `SpliceRangeError` maps to the 400 taxonomy, anything else throws
+ * on through the dispatcher.
+ */
+export async function writeGuarded(
+  res: ServerResponse,
+  ctx: ApiContext,
+  file: string,
+  expected: string | null,
+  produce: (disk: string) => string,
+): Promise<void> {
   const absPath = safeResolve(ctx.root, file);
   if (absPath === null) {
     json(res, 400, { error: `file is outside the project root: ${file}` });
     return;
   }
-  const contents = readFileSync(absPath, 'utf8');
-  // Optimistic write check: the chrome sends the hash of the content it
-  // based its edit on. A mismatch means the file changed on disk under us
-  // (IDE edit racing the debounce) — refuse instead of splicing stale
-  // offsets into a shifted file, and hand back the current contents so
-  // the editor can reload in one roundtrip.
-  if (expected !== null && sha256(contents) !== expected) {
-    json(res, 409, { error: 'file changed on disk', contents });
+  if (!existsSync(absPath)) {
+    json(res, 400, { error: `file is missing: ${file}` });
+    return;
+  }
+  const disk = readFileSync(absPath, 'utf8');
+  if (expected !== null && sha256(disk) !== expected) {
+    json(res, 409, { error: 'file changed on disk', contents: disk });
     return;
   }
   try {
-    writeFileSync(absPath, spliceText(contents, { start: range[0], end: range[1], replacement }));
+    writeFileSync(absPath, produce(disk));
   } catch (error) {
     if (error instanceof SpliceRangeError) {
       json(res, 400, { error: error.message });

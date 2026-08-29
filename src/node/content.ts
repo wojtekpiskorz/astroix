@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { join } from 'node:path';
 import { z } from 'astro/zod';
@@ -11,7 +11,7 @@ import {
   walkSchemaFields,
 } from '../core/form-tree';
 import { type ApiContext, type ApiHandler, json, readJsonBody } from './api';
-import { safeResolve, sha256 } from './rest';
+import { writeGuarded } from './rest';
 
 /** The content endpoints: read-side (core-reuse §3) and the auto-write (Impl #9). */
 export const contentHandlers: readonly ApiHandler[] = [
@@ -185,11 +185,8 @@ interface AsyncSafeParse {
 /**
  * `POST /__astroix/content-write` — the content auto-write's whole-file write
  * (spec Impl #9): the chrome serializes the entry (core's entry-writer) and
- * posts the full bytes with the hash of the baseline it serialized from. The
- * hash guard mirrors `/edit` (Impl #10): a mismatch means the file changed on
- * disk under the debounce (IDE/agent edit) — refuse and hand back the current
- * contents so the form reloads in one roundtrip. Root-confined like every
- * file-touching endpoint.
+ * posts the full bytes with the hash of the baseline it serialized from.
+ * `writeGuarded` owns the shared hash-guard skeleton (Impl #10).
  */
 async function handleContentWrite(
   req: IncomingMessage,
@@ -209,22 +206,7 @@ async function handleContentWrite(
     json(res, 400, { error: 'expected { file, contents }' });
     return;
   }
-  const absPath = safeResolve(ctx.root, file);
-  if (absPath === null) {
-    json(res, 400, { error: `file is outside the project root: ${file}` });
-    return;
-  }
-  if (!existsSync(absPath)) {
-    json(res, 400, { error: `file is missing: ${file}` });
-    return;
-  }
-  const disk = readFileSync(absPath, 'utf8');
-  if (expected !== null && sha256(disk) !== expected) {
-    json(res, 409, { error: 'file changed on disk', contents: disk });
-    return;
-  }
-  writeFileSync(absPath, contents);
-  json(res, 200, { ok: true });
+  await writeGuarded(res, ctx, file, expected, () => contents);
 }
 
 function parseWriteBody(body: unknown): {

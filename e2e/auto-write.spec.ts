@@ -114,17 +114,21 @@ test('a body edit writes below the closing delimiter with the frontmatter verbat
       view.focus();
     });
     await page.keyboard.type(' Body typed in the builder.');
-    await expect
-      .poll(() => readFileSync(POST, 'utf8'), { timeout: 15_000 })
-      .toBeTruthy()
-      .catch(() => {
-        throw new Error(
-          `body never landed; disk tail: ${JSON.stringify(readFileSync(POST, 'utf8').slice(-60))}`,
-        );
-      });
-    // the frontmatter slice survives byte-identical
+    // the typed suffix reaching disk is the outcome; the frontmatter slice
+    // staying byte-identical is the byte-surgery claim
     const fmEnd = original.indexOf('\n---\n') + 5;
-    expect(readFileSync(POST, 'utf8').startsWith(original.slice(0, fmEnd))).toBe(true);
+    await expect
+      .poll(
+        () => {
+          const next = readFileSync(POST, 'utf8');
+          return (
+            next.endsWith(' Body typed in the builder.\n') &&
+            next.startsWith(original.slice(0, fmEnd))
+          );
+        },
+        { timeout: 15_000 },
+      )
+      .toBeTruthy();
     await expectSettled(pane);
   } finally {
     await restoreEntry(POST, original, { absent: [' Body typed in the builder.'] });

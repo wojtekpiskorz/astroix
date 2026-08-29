@@ -33,6 +33,11 @@ export function registerChromeReloadShield(server: ViteDevServer): void {
   const chromeClients = new Set<HotClient>();
 
   channel.on('astroix:chrome', (_data, client) => {
+    // prune clients whose socket left the channel (chrome reloads/remounts)
+    // while adding the announcer — dev scale makes this cheap, not urgent
+    for (const known of chromeClients) {
+      if (!channel.clients.has(known)) chromeClients.delete(known);
+    }
     chromeClients.add(client);
   });
 
