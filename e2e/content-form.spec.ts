@@ -248,3 +248,28 @@ test('a schema-less collection degrades to the root raw field over the whole dra
   await root.fill('kind: scratchpad');
   await expect(pane.locator('[data-astroix-field-issue=""]')).toBeHidden();
 });
+
+test('the function-schema arm: image() marks a read-only metadata node end to end', async ({
+  page,
+}) => {
+  // REST: the walker marks the stubbed image() through membership — the
+  // runtime handoff astro's canonical schema form exists for
+  const { fields } = await getSchema(page, 'gallery');
+  expect(node(fields, 'hero')).toMatchObject({ kind: 'image', required: true });
+  expect(node(fields, 'alt')).toMatchObject({ kind: 'string', required: true });
+
+  // the pane: astro's own parse resolved the field to real metadata; the
+  // widget renders it read-only — no input, src/width/height from entry.data
+  await page.goto('/');
+  await page.getByRole('tab', { name: 'Content' }).click();
+  await expect(page.locator('[data-astroix-entries="ready"]')).toBeVisible({ timeout: 10_000 });
+  await page.locator('[data-astroix-entry="showcase"]').click();
+  const pane = page.locator('[data-astroix-content-pane="form"]');
+  await expect(pane).toBeVisible();
+
+  const meta = pane.locator('[data-astroix-image-field="meta"]');
+  await expect(meta).toBeVisible();
+  await expect(meta).toContainText('pixel.png');
+  await expect(meta).toContainText('1');
+  await expect(pane.locator('[data-astroix-form-field="hero"] input')).toHaveCount(0);
+});

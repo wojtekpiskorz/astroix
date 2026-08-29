@@ -44,4 +44,16 @@ const notes = defineCollection({
   loader: glob({ pattern: '**/*.md', base: './src/content/notes' }),
 });
 
-export const collections = { homepage, blog, notes };
+// Astro's canonical function-schema form (`({ image }) => …`) — the arm the
+// image-stub machinery exists for (#72): the walker marks `hero` through
+// stub membership, and astro's own parse resolves it to real metadata.
+const gallery = defineCollection({
+  loader: glob({ pattern: '**/*.md', base: './src/content/gallery' }),
+  schema: ({ image }) =>
+    z.object({
+      hero: image(),
+      alt: z.string(),
+    }),
+});
+
+export const collections = { homepage, blog, notes, gallery };
