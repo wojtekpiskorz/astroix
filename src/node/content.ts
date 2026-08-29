@@ -1,10 +1,8 @@
 import { existsSync } from 'node:fs';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { join } from 'node:path';
-import type { IntegrationResolvedRoute } from 'astro';
-import { createServerModuleRunner, type ViteDevServer } from 'vite';
-import type { RouteInfo } from '../core/route-resolver';
-import { API_PREFIX, isCrossOriginTraffic, json } from './rest';
+import { createServerModuleRunner } from 'vite';
+import { type ApiContext, type ApiHandler, json } from './api';
 
 /** A single collection entry as served to the chrome (core's getCollection shape, JSON-projected). */
 export interface CollectionEntryRecord {
@@ -25,91 +23,31 @@ export interface CollectionRecord {
   entries: CollectionEntryRecord[];
 }
 
-/** Shared container between the `astro:routes:resolved` hook (writer) and the REST layer (reader). */
-export interface RoutesState {
-  current: RouteInfo[];
-}
+/** The content read-side endpoint (core-reuse §3). */
+export const contentHandlers: readonly ApiHandler[] = [
+  { method: 'GET', path: '/collections', handle: handleCollections },
+];
 
 /**
- * Projects hook routes to the `RouteInfo` contract of `src/core/route-resolver`
- * (single source of truth per the core-first ruling on PR #77): page routes
- * only — the resolver's contract filters out `endpoint`/`redirect`/`fallback`
- * types at the payload — with Astro's own `segments` parse carried along,
- * deep-copied so no live core object is held between hook runs.
+ * `GET /__astroix/collections` — collections + entries through core's own
+ * `astro:content` module: parsed `data`, `body`, `filePath` per entry, plus
+ * schema presence from the content config. **Stateless doctrine**: a fresh
+ * module runner per request, no module held between requests — core clears
+ * its caches on invalidation, so anything we cache would go stale. Raw entry
+ * bytes go through the root-confined `GET /__astroix/file` (rest.ts).
  */
-export function toRouteInfos(routes: readonly IntegrationResolvedRoute[]): RouteInfo[] {
-  return routes.flatMap((route) => {
-    if (route.type !== 'page') return [];
-    return [
-      {
-        pattern: route.pattern,
-        segments: route.segments.map((segment) => segment.map((part) => ({ ...part }))),
-        params: [...route.params],
-      },
-    ];
-  });
-}
-
-export interface ContentRestOptions {
-  /** Absolute Astro src dir (where the content config lives). */
-  srcDir: string;
-  /** Routes captured by the integration's `astro:routes:resolved` hook. */
-  routes: RoutesState;
-}
-
-/**
- * The content read-side endpoints (core-reuse §3):
- *
- * - `GET /__astroix/collections` — collections + entries through core's own
- *   `astro:content` module: parsed `data`, `body`, `filePath` per entry, plus
- *   schema presence from the content config. **Stateless doctrine**: a fresh
- *   module runner per request, no module held between requests — core clears
- *   its caches on invalidation, so anything we cache would go stale.
- * - `GET /__astroix/routes` — the routes array captured from
- *   `astro:routes:resolved` (re-runs on route changes via dev restarts).
- *
- * Raw entry bytes go through the existing root-confined `GET /__astroix/file`.
- */
-export function registerContentEndpoints(server: ViteDevServer, options: ContentRestOptions): void {
-  server.middlewares.use(API_PREFIX, (req, res, next) => {
-    void handleContentRequest(req, res, next, server, options);
-  });
-}
-
-async function handleContentRequest(
-  req: IncomingMessage,
+async function handleCollections(
+  _req: IncomingMessage,
   res: ServerResponse,
-  next: (err?: unknown) => void,
-  server: ViteDevServer,
-  options: ContentRestOptions,
+  _url: URL,
+  ctx: ApiContext,
 ): Promise<void> {
-  try {
-    if (isCrossOriginTraffic(req)) {
-      json(res, 403, { error: 'cross-origin builder traffic is not allowed' });
-      return;
-    }
-
-    const url = new URL(req.url ?? '/', 'http://astroix.internal');
-
-    if (req.method === 'GET' && url.pathname === '/collections') {
-      const runner = createServerModuleRunner(server.environments.ssr);
-      const configPath = findContentConfigPath(options.srcDir);
-      const configModule =
-        configPath === null ? null : ((await runner.import(configPath)) as RawContentConfig);
-      const contentModule = (await runner.import('astro:content')) as RawContentModule;
-      json(res, 200, await assembleCollectionsPayload(configModule, contentModule));
-      return;
-    }
-
-    if (req.method === 'GET' && url.pathname === '/routes') {
-      json(res, 200, options.routes.current);
-      return;
-    }
-
-    next();
-  } catch (error) {
-    next(error instanceof Error ? error : new Error(String(error)));
-  }
+  const runner = createServerModuleRunner(ctx.server.environments.ssr);
+  const configPath = findContentConfigPath(ctx.srcDir);
+  const configModule =
+    configPath === null ? null : ((await runner.import(configPath)) as RawContentConfig);
+  const contentModule = (await runner.import('astro:content')) as RawContentModule;
+  json(res, 200, await assembleCollectionsPayload(configModule, contentModule));
 }
 
 /** The user's `content.config` module as the runner evaluates it. */

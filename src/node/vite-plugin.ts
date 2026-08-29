@@ -1,11 +1,12 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Plugin, ViteDevServer } from 'vite';
+import { registerApiEndpoints } from './api';
 import { chromeHtml } from './chrome-html';
-import type { RoutesState } from './content';
-import { registerContentEndpoints } from './content';
+import { contentHandlers } from './content';
 import { isDocumentRequest } from './document-request';
-import { registerRestEndpoints } from './rest';
+import { restHandlers } from './rest';
+import { type RoutesState, routesHandlers } from './routes';
 import { chromeArtifactPath, clientEntryPath } from './source-mode';
 import { registerFileSync } from './watch-sync';
 
@@ -51,8 +52,12 @@ export function astroixVitePlugin(options: AstroixPluginOptions): Plugin {
         })();
       });
       const srcDir = options.srcDir ?? join(server.config.root, 'src');
-      registerRestEndpoints(server, { root: server.config.root, srcDir });
-      registerContentEndpoints(server, { srcDir, routes: options.routes });
+      registerApiEndpoints(server, {
+        root: server.config.root,
+        srcDir,
+        routes: options.routes,
+        handlers: [...restHandlers, ...contentHandlers, ...routesHandlers],
+      });
       registerFileSync(server, { root: server.config.root, srcDir });
     },
     resolveId(id) {

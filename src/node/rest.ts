@@ -7,120 +7,91 @@ import type { ViteDevServer } from 'vite';
 import { buildCssIndex, type SourceFile } from '../core/indexer';
 import type { IndexPayloadRecord } from '../core/matcher';
 import { SpliceRangeError, spliceText } from '../core/splice-writer';
+import { type ApiContext, type ApiHandler, json } from './api';
 
-export const API_PREFIX = '/__astroix';
 const MAX_BODY_BYTES = 1_000_000;
 
-export interface RestOptions {
-  /** Absolute project root (Vite root). */
-  root: string;
-  /** Absolute Astro src dir holding the css/astro sources to index. */
-  srcDir: string;
+/** The css endpoints: the index payload, root-confined file reads, disk splices. */
+export const restHandlers: readonly ApiHandler[] = [
+  // The bare mount serves the index payload too (connect hands it as `/`).
+  { method: 'GET', path: '/', handle: handleIndex },
+  { method: 'GET', path: '/index', handle: handleIndex },
+  { method: 'GET', path: '/file', handle: handleFile },
+  { method: 'POST', path: '/edit', handle: handleEdit },
+];
+
+async function handleIndex(
+  _req: IncomingMessage,
+  res: ServerResponse,
+  _url: URL,
+  ctx: ApiContext,
+): Promise<void> {
+  const payload = await buildIndexPayload(collectSources(ctx.srcDir), (file, blockIndex) =>
+    resolveCompiledCss(ctx.server, ctx.root, file, blockIndex),
+  );
+  // Payload paths are project-relative; the join worked in absolute space.
+  json(
+    res,
+    200,
+    payload.map((record) => ({ ...record, file: toRelative(ctx.root, record.file) })),
+  );
 }
 
-/**
- * Registers the chrome↔node contract on the Vite connect middleware
- * (core-reuse §2 — like core's `/_astro/status`, not Astro app middleware):
- *
- * - `GET /__astroix/index` — the index payload: edit-truth records joined
- *   with compiled scoped forms from the client module graph.
- * - `POST /__astroix/edit` — `{ file, range, replacement }` spliced to disk.
- *
- * Same-origin only: a browser `sec-fetch-site` header that is not
- * same-origin/none is rejected (T2).
- */
-export function registerRestEndpoints(server: ViteDevServer, options: RestOptions): void {
-  server.middlewares.use(API_PREFIX, (req, res, next) => {
-    void handleApiRequest(req, res, next, server, options);
-  });
+// File content for the editor pane — a dedicated endpoint (not payload
+// fields) so contents are fresh exactly when a rule is opened and the
+// payload stays small. Same root confinement as the edit endpoint.
+async function handleFile(
+  _req: IncomingMessage,
+  res: ServerResponse,
+  url: URL,
+  ctx: ApiContext,
+): Promise<void> {
+  const file = url.searchParams.get('file');
+  const absPath = file === null ? null : safeResolve(ctx.root, file);
+  if (file === null || absPath === null || !existsSync(absPath)) {
+    json(res, 400, { error: `file is missing or outside the project root: ${file ?? ''}` });
+    return;
+  }
+  json(res, 200, { file, contents: readFileSync(absPath, 'utf8') });
 }
 
-async function handleApiRequest(
+async function handleEdit(
   req: IncomingMessage,
   res: ServerResponse,
-  next: (err?: unknown) => void,
-  server: ViteDevServer,
-  options: RestOptions,
+  _url: URL,
+  ctx: ApiContext,
 ): Promise<void> {
-  try {
-    if (isCrossOriginTraffic(req)) {
-      json(res, 403, { error: 'cross-origin builder traffic is not allowed' });
-      return;
-    }
-
-    const url = new URL(req.url ?? '/', 'http://astroix.internal');
-
-    // The middleware is mounted at /__astroix (connect strips the prefix),
-    // so the GET path arrives as /index.
-    if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/index')) {
-      const payload = await buildIndexPayload(collectSources(options.srcDir), (file, blockIndex) =>
-        resolveCompiledCss(server, options.root, file, blockIndex),
-      );
-      // Payload paths are project-relative; the join worked in absolute space.
-      json(
-        res,
-        200,
-        payload.map((record) => ({ ...record, file: toRelative(options.root, record.file) })),
-      );
-      return;
-    }
-
-    // File content for the editor pane — a dedicated endpoint (not payload
-    // fields) so contents are fresh exactly when a rule is opened and the
-    // payload stays small. Same root confinement as the edit endpoint.
-    if (req.method === 'GET' && url.pathname === '/file') {
-      const file = url.searchParams.get('file');
-      const absPath = file === null ? null : safeResolve(options.root, file);
-      if (file === null || absPath === null || !existsSync(absPath)) {
-        json(res, 400, { error: `file is missing or outside the project root: ${file ?? ''}` });
-        return;
-      }
-      json(res, 200, { file, contents: readFileSync(absPath, 'utf8') });
-      return;
-    }
-
-    if (req.method === 'POST' && url.pathname === '/edit') {
-      const body = await readJsonBody(req);
-      const { file, range, replacement, expected } = parseEditBody(body);
-      if (file === null || range === null || replacement === null) {
-        json(res, 400, { error: 'expected { file, range: { start, end }, replacement }' });
-        return;
-      }
-      const absPath = safeResolve(options.root, file);
-      if (absPath === null) {
-        json(res, 400, { error: `file is outside the project root: ${file}` });
-        return;
-      }
-      const contents = readFileSync(absPath, 'utf8');
-      // Optimistic write check: the chrome sends the hash of the content it
-      // based its edit on. A mismatch means the file changed on disk under us
-      // (IDE edit racing the debounce) — refuse instead of splicing stale
-      // offsets into a shifted file, and hand back the current contents so
-      // the editor can reload in one roundtrip.
-      if (expected !== null && sha256(contents) !== expected) {
-        json(res, 409, { error: 'file changed on disk', contents });
-        return;
-      }
-      try {
-        writeFileSync(
-          absPath,
-          spliceText(contents, { start: range[0], end: range[1], replacement }),
-        );
-      } catch (error) {
-        if (error instanceof SpliceRangeError) {
-          json(res, 400, { error: error.message });
-          return;
-        }
-        throw error;
-      }
-      json(res, 200, { ok: true });
-      return;
-    }
-
-    next();
-  } catch (error) {
-    next(error instanceof Error ? error : new Error(String(error)));
+  const body = await readJsonBody(req);
+  const { file, range, replacement, expected } = parseEditBody(body);
+  if (file === null || range === null || replacement === null) {
+    json(res, 400, { error: 'expected { file, range: { start, end }, replacement }' });
+    return;
   }
+  const absPath = safeResolve(ctx.root, file);
+  if (absPath === null) {
+    json(res, 400, { error: `file is outside the project root: ${file}` });
+    return;
+  }
+  const contents = readFileSync(absPath, 'utf8');
+  // Optimistic write check: the chrome sends the hash of the content it
+  // based its edit on. A mismatch means the file changed on disk under us
+  // (IDE edit racing the debounce) — refuse instead of splicing stale
+  // offsets into a shifted file, and hand back the current contents so
+  // the editor can reload in one roundtrip.
+  if (expected !== null && sha256(contents) !== expected) {
+    json(res, 409, { error: 'file changed on disk', contents });
+    return;
+  }
+  try {
+    writeFileSync(absPath, spliceText(contents, { start: range[0], end: range[1], replacement }));
+  } catch (error) {
+    if (error instanceof SpliceRangeError) {
+      json(res, 400, { error: error.message });
+      return;
+    }
+    throw error;
+  }
+  json(res, 200, { ok: true });
 }
 
 /** Supplies the compiled css of a scoped style module, or null when absent. */
@@ -264,24 +235,6 @@ function parseEditBody(body: unknown): {
 
 function sha256(text: string): string {
   return createHash('sha256').update(text).digest('hex');
-}
-
-/**
- * The builder endpoints serve same-origin chrome traffic only: a browser
- * `sec-fetch-site` header that is not same-origin/none means cross-origin
- * (T2). Shared by every `/__astroix` middleware.
- */
-export function isCrossOriginTraffic(req: IncomingMessage): boolean {
-  const secFetchSite = req.headers['sec-fetch-site'];
-  return (
-    typeof secFetchSite === 'string' && secFetchSite !== 'same-origin' && secFetchSite !== 'none'
-  );
-}
-
-export function json(res: ServerResponse, status: number, body: unknown): void {
-  res.statusCode = status;
-  res.setHeader('content-type', 'application/json; charset=utf-8');
-  res.end(JSON.stringify(body));
 }
 
 function readJsonBody(req: IncomingMessage): Promise<unknown> {
