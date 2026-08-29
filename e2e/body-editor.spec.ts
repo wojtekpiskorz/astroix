@@ -101,7 +101,9 @@ test('typing edits the doc', async ({ page }) => {
 
   // the doc is the committed truth — hard equality
   expect(await readDoc(editor)).toBe(`${original} Typed in the builder.`);
-  await restoreEntry(POST, fileOriginal);
+  await restoreEntry(POST, fileOriginal, {
+    absent: [' Typed in the builder.', '**Fixture**', '#### ', '[resolution]'],
+  });
 });
 
 test('the toolbar emits markdown: bold wrap/unwrap, heading toggle, link over the placeholder', async ({
@@ -141,7 +143,9 @@ test('the toolbar emits markdown: bold wrap/unwrap, heading toggle, link over th
   expect(await readDoc(editor)).toBe(headingOut.replace('resolution', '[resolution](url)'));
   await page.keyboard.type('docs');
   expect(await readDoc(editor)).toBe(headingOut.replace('resolution', '[resolution](docs)'));
-  await restoreEntry(POST, fileOriginal);
+  await restoreEntry(POST, fileOriginal, {
+    absent: [' Typed in the builder.', '**Fixture**', '#### ', '[resolution]'],
+  });
 });
 
 test('native Cmd+Z undoes toolbar and typed edits back to the loaded body', async ({ page }) => {
@@ -164,5 +168,7 @@ test('native Cmd+Z undoes toolbar and typed edits back to the loaded body', asyn
     doc = await readDoc(editor);
   }
   expect(doc).toBe(original);
-  await restoreEntry(POST, fileOriginal);
+  await restoreEntry(POST, fileOriginal, {
+    absent: [' Typed in the builder.', '**Fixture**', '#### ', '[resolution]'],
+  });
 });

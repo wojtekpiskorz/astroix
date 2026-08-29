@@ -16,6 +16,8 @@ import type { ViteDevServer } from 'vite';
 /** The public slice of vite's per-socket client wrapper the shield consumes. */
 interface HotClient {
   send: (payload: unknown) => void;
+  /** WebSocket readyState — 1 is OPEN; sends on dead sockets throw. */
+  socket: { readyState: number };
 }
 
 /** The structural slice of vite's ws wrapper (`server.ws`/`server.hot`). */
@@ -40,8 +42,18 @@ export function registerChromeReloadShield(server: ViteDevServer): void {
       typeof payload === 'object' &&
       (payload as { type?: string } | null)?.type === 'full-reload'
     ) {
+      // vite's own broadcast only sends to OPEN sockets — a send on a dying
+      // one throws, and the throw would kill whatever pipeline called us
+      // (astro's content sync wedges mid-flight); skip exactly like vite,
+      // and never let a stray send failure escape either
       for (const client of channel.clients) {
-        if (!chromeClients.has(client)) client.send(payload);
+        if (chromeClients.has(client) || client.socket.readyState !== 1) continue;
+        try {
+          client.send(payload);
+        } catch {
+          // the socket died between the check and the send — its page
+          // reconnects and reloads on the next broadcast
+        }
       }
       return;
     }

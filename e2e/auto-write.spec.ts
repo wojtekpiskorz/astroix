@@ -95,7 +95,7 @@ test('the full loop: a form edit lands on disk byte-surgically and reloads the c
     );
     await expectSettled(pane);
   } finally {
-    await restoreEntry(POST, original);
+    await restoreEntry(POST, original, { absent: ['Renamed post'] });
   }
 });
 
@@ -127,7 +127,7 @@ test('a body edit writes below the closing delimiter with the frontmatter verbat
     expect(readFileSync(POST, 'utf8').startsWith(original.slice(0, fmEnd))).toBe(true);
     await expectSettled(pane);
   } finally {
-    await restoreEntry(POST, original);
+    await restoreEntry(POST, original, { absent: [' Body typed in the builder.'] });
   }
 });
 
@@ -148,7 +148,7 @@ test('image() round-trips untouched while a sibling field is written (gallery)',
       });
     await expectSettled(pane);
   } finally {
-    await restoreEntry(SHOWCASE, original);
+    await restoreEntry(SHOWCASE, original, { absent: ['A finer pixel'] });
   }
 });
 
@@ -156,7 +156,11 @@ test('the root raw field writes the whole draft (schema-less collection)', async
   const pane = await openEntry(page, 'scratch');
   const original = readFileSync(SCRATCH, 'utf8');
   try {
-    await pane.locator('[data-astroix-raw-field=""]').fill('kind: scratchpad\npinned: false');
+    // the extra key is the restore probe's marker — a unique string in
+    // astro's value pool once the draft persists
+    await pane
+      .locator('[data-astroix-raw-field=""]')
+      .fill('kind: scratchpad\npinned: false\nnote: zz-restore-probe');
     await expect
       .poll(() => readFileSync(SCRATCH, 'utf8'), { timeout: 15_000 })
       .toBe(
@@ -164,6 +168,7 @@ test('the root raw field writes the whole draft (schema-less collection)', async
           '---',
           'kind: scratchpad',
           'pinned: false',
+          'note: zz-restore-probe',
           '---',
           '',
           'A schema-less note — any frontmatter passes through untouched.',
@@ -172,7 +177,7 @@ test('the root raw field writes the whole draft (schema-less collection)', async
       );
     await expectSettled(pane);
   } finally {
-    await restoreEntry(SCRATCH, original);
+    await restoreEntry(SCRATCH, original, { absent: ['zz-restore-probe'] });
   }
 });
 
@@ -227,6 +232,6 @@ test('UI: a write racing an external edit reloads the form from disk (banner, ty
       original.replace('title: Nested post', 'title: External edit'),
     );
   } finally {
-    await restoreEntry(POST, original);
+    await restoreEntry(POST, original, { absent: ['External edit', 'Typed draft'] });
   }
 });

@@ -191,7 +191,7 @@ test('inline validation shows issues per field and never gates editing', async (
   await expect(issue).toBeHidden();
   // since #74 the violating draft also lands on disk (~300ms after the
   // pause, Impl #9) — restore the fixture for the specs that follow
-  await restoreEntry(POST, original);
+  await restoreEntry(POST, original, { absent: ['"ab"', '"abc"'] });
 });
 
 test('enum select and repeatable rows edit the draft', async ({ page }) => {
@@ -213,7 +213,7 @@ test('enum select and repeatable rows edit the draft', async ({ page }) => {
   await pane.locator('[data-astroix-array-remove="1"]').click();
   await expect(pane.locator('[data-astroix-form-field="tags.1"]')).toHaveCount(0);
   await expect(pane.locator('[data-astroix-form-field="tags.0"] input')).toHaveValue('nested');
-  await restoreEntry(POST, original);
+  await restoreEntry(POST, original, { absent: ['calm', 'second'] });
 });
 
 test('the raw field flags YAML syntax errors locally', async ({ page }) => {
@@ -230,7 +230,7 @@ test('the raw field flags YAML syntax errors locally', async ({ page }) => {
   // the parsed value persists — restore for the specs that follow)
   await aside.fill('a plain value');
   await expect(syntaxIssue).toBeHidden();
-  await restoreEntry(POST, original);
+  await restoreEntry(POST, original, { absent: ['a plain value'] });
 });
 
 test('a schema-less collection degrades to the root raw field over the whole draft', async ({
@@ -263,8 +263,10 @@ test('a schema-less collection degrades to the root raw field over the whole dra
   await expect(pane.locator('[data-astroix-field-issue=""]')).toBeVisible();
   await root.fill('kind: scratchpad');
   await expect(pane.locator('[data-astroix-field-issue=""]')).toBeHidden();
-  // since #74 the parsed draft persists — restore the fixture entry
-  await restoreEntry(SCRATCH, scratchOriginal);
+  // since #74 the parsed draft persists — restore the fixture entry; the
+  // final fill drops the pinned key entirely, so pristine content is the
+  // store still carrying that key
+  await restoreEntry(SCRATCH, scratchOriginal, { present: ['"pinned"'] });
 });
 
 test('the function-schema arm: image() marks a read-only metadata node end to end', async ({
