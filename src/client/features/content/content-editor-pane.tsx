@@ -1,36 +1,38 @@
 import { useState } from 'react';
 import type { CollectionRecord } from '../../../core/collections';
+import type { ActiveEntry } from '../../../core/route-resolver';
 import { MarkdownEditor } from '../../editor/markdown-editor';
 import { useCollections } from './api';
+import { useContentStore } from './store';
 
-/** The payload's own order (server sorts names, then ids) walks collections→entries. */
-function pickBodyEntry(collections: CollectionRecord[] | undefined): {
-  id: string;
-  body: string;
-} | null {
-  for (const collection of collections ?? []) {
-    for (const entry of collection.entries) {
-      if (entry.body !== null) return { id: `${collection.name}/${entry.id}`, body: entry.body };
-    }
-  }
-  return null;
+/** The active entry's body in the payload order — null when not found or body-less. */
+function pickActiveBody(
+  collections: CollectionRecord[] | undefined,
+  active: ActiveEntry | null,
+): { id: string; body: string } | null {
+  if (active === null || collections === undefined) return null;
+  const entry = collections
+    .find((collection) => collection.name === active.collection)
+    ?.entries.find((candidate) => candidate.id === active.entryId);
+  if (entry === undefined || entry.body === null) return null;
+  return { id: `${active.collection}/${entry.id}`, body: entry.body };
 }
 
 /**
- * The Content vertical's editor pane — a placeholder owner of the body editor
- * until #72's schema-generated form takes the pane over: with the real
- * selection paths (#71: list click, route resolution) not landed yet, it
- * deterministically edits the first body-bearing entry. The emitted-markdown
- * counter is this slice's stand-in for the write status #74 mounts here.
+ * The Content vertical's editor pane — the body editor on the active entry
+ * (#71: list click or route resolution set it; #72's schema-generated form
+ * takes the pane over from here). The emitted-markdown counter is this
+ * slice's stand-in for the write status #74 mounts here.
  */
 export function ContentEditorPane() {
   const { data, isPending } = useCollections();
+  const activeEntry = useContentStore((state) => state.activeEntry);
   const [emittedLength, setEmittedLength] = useState<number | null>(null);
 
   // boot race (content.spec.ts): the store sync can land after the server
   // starts listening — an empty payload reads as still-loading, not empty
   const syncing = isPending || (data !== undefined && data.length === 0);
-  const entry = pickBodyEntry(data);
+  const entry = pickActiveBody(data, activeEntry);
 
   if (syncing || entry === null) {
     return (
@@ -40,7 +42,7 @@ export function ContentEditorPane() {
       >
         {syncing
           ? 'Waiting for the content sync…'
-          : 'No entry with a body found — the entries list lands with #71.'}
+          : 'No entry open — pick one in the Content list.'}
       </div>
     );
   }

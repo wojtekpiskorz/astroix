@@ -43,8 +43,10 @@ test('switching to Content swaps the sidebar body and the editor dock', async ({
   await page.goto('/');
   await page.getByRole('tab', { name: 'Content' }).click();
 
-  // shell swap: the content pane and its placeholder sidebar in, CSS workbench out
-  await expect(page.locator('[data-astroix-entries="pending"]')).toBeVisible();
+  // shell swap: the content pane and its sidebar body in, CSS workbench out.
+  // The list (#71) has real loading states — assert presence, not the value:
+  // on a cached remount (further down this file) it renders ready instantly
+  await expect(page.locator('[data-astroix-entries]')).toBeVisible();
   await expect(page.locator('[data-astroix-content-pane]')).toBeVisible();
   await expect(page.locator('[data-astroix-index]')).toHaveCount(0);
   await expect(page.locator('[data-astroix-editor]')).toHaveCount(0);
@@ -131,9 +133,11 @@ test('sidebar collapses offcanvas and expands with state preserved', async ({ pa
   await expect(page.frameLocator('#astroix-canvas').locator('.hero-title')).toBeVisible();
 
   // the keyboard shortcut expands; the active vertical survived the roundtrip
+  // (collections are query-cached from the first visit — the list is ready,
+  // never pending, the moment the body remounts)
   await page.keyboard.press('Meta+b');
   await expect(sidebar).toHaveAttribute('data-state', 'expanded');
-  await expect(page.locator('[data-astroix-entries="pending"]')).toBeVisible();
+  await expect(page.locator('[data-astroix-entries]')).toBeVisible();
   await expect(page.locator('[data-astroix-index]')).toHaveCount(0);
 
   // the shell seeds the provider from the primitive's cookie: the collapsed

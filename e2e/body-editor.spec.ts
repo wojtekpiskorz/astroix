@@ -22,9 +22,12 @@ interface CmView {
 async function openBodyEditor(page: Page): Promise<Locator> {
   await page.goto('/');
   await page.getByRole('tab', { name: 'Content' }).click();
+  // the pane is selection-driven since #71 (at `/` route resolution is
+  // silent) — open the payload-order entry the pane used to pick itself
+  await expect(page.locator('[data-astroix-entries="ready"]')).toBeVisible({ timeout: 10_000 });
+  await page.locator('[data-astroix-entry="2024/post"]').click();
   const editor = page.locator('[data-astroix-body-editor="view"]');
-  // generous: the content sync can lag the dev server's listen (content.spec.ts)
-  await expect(editor).toBeVisible({ timeout: 10_000 });
+  await expect(editor).toBeVisible();
   return editor;
 }
 
