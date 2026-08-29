@@ -36,8 +36,16 @@ test('GET /__astroix/collections serves core-parsed entries with schema presence
 }) => {
   const payload = await getCollections(page);
 
-  expect(payload.map((collection) => collection.name)).toEqual(['blog', 'homepage']);
-  expect(payload.every((collection) => collection.hasSchema)).toBe(true);
+  expect(payload.map((collection) => collection.name)).toEqual([
+    'blog',
+    'gallery',
+    'homepage',
+    'notes',
+  ]);
+  expect(payload.find((c) => c.name === 'blog')?.hasSchema).toBe(true);
+  expect(payload.find((c) => c.name === 'homepage')?.hasSchema).toBe(true);
+  expect(payload.find((c) => c.name === 'notes')?.hasSchema).toBe(false);
+  expect(payload.find((c) => c.name === 'gallery')?.hasSchema).toBe(true);
 
   const blog = payload.find((collection) => collection.name === 'blog');
   // ids are slugified source paths — nested files keep the nested-path id
@@ -49,10 +57,14 @@ test('GET /__astroix/collections serves core-parsed entries with schema presence
 
   const nested = blog?.entries.find((entry) => entry.id === '2024/post');
   expect(nested?.filePath).toBe('src/content/blog/2024/post.md');
+  // zod output carries the #72 schema additions' defaults
   expect(nested?.data).toEqual({
     title: 'Nested post',
     date: '2024-06-01T00:00:00.000Z',
     tags: ['nested'],
+    tone: 'bold',
+    priority: 0,
+    featured: false,
   });
   expect(nested?.body).toContain('for route resolution');
 

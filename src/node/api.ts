@@ -112,3 +112,30 @@ export function json(res: ServerResponse, status: number, body: unknown): void {
   res.setHeader('content-type', 'application/json; charset=utf-8');
   res.end(JSON.stringify(body));
 }
+
+const MAX_BODY_BYTES = 1_000_000;
+
+/** The shared JSON body reader for the POST endpoints (capped, rejects bad JSON). */
+export function readJsonBody(req: IncomingMessage): Promise<unknown> {
+  return new Promise((resolveBody, reject) => {
+    const chunks: Buffer[] = [];
+    let size = 0;
+    req.on('data', (chunk: Buffer) => {
+      size += chunk.length;
+      if (size > MAX_BODY_BYTES) {
+        reject(new Error('request body too large'));
+        req.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on('end', () => {
+      try {
+        resolveBody(JSON.parse(Buffer.concat(chunks).toString('utf8')));
+      } catch {
+        reject(new Error('request body is not valid JSON'));
+      }
+    });
+    req.on('error', reject);
+  });
+}

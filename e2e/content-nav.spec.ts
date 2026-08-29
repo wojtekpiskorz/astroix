@@ -34,7 +34,7 @@ test('canvas→entry: a dynamic-route canvas marks the entry active in the Conte
   await expect(entry).toHaveAttribute('aria-current', 'true');
 
   // the editor pane follows the active entry
-  const pane = page.locator('[data-astroix-content-pane="body"]');
+  const pane = page.locator('[data-astroix-content-pane="form"]');
   await expect(pane).toBeVisible();
   await expect(pane.locator('code')).toHaveText('blog/2024/post');
 });
@@ -76,7 +76,7 @@ test('entry→canvas: a unique candidate navigates and the forward match reselec
   // the post-navigation forward match reselects the same entry
   const entry = page.locator('[data-astroix-entry="2024/post"]');
   await expect(entry).toHaveAttribute('data-active', 'true');
-  await expect(page.locator('[data-astroix-content-pane="body"] code')).toHaveText(
+  await expect(page.locator('[data-astroix-content-pane="form"] code')).toHaveText(
     'blog/2024/post',
   );
 
@@ -132,7 +132,7 @@ test('a form-only pick survives a tab roundtrip — no navigation, no re-resolut
     'data-active',
     'true',
   );
-  await expect(page.locator('[data-astroix-content-pane="body"] code')).toHaveText(
+  await expect(page.locator('[data-astroix-content-pane="form"] code')).toHaveText(
     'blog/hello-builder',
   );
 });
