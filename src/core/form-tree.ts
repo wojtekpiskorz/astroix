@@ -214,11 +214,12 @@ function walkNode(
       const itemDef = zodDef(item.schema);
       const itemTypeEnum = itemDef?.type;
       const itemKind =
-        itemTypeEnum === 'string' || itemTypeEnum === 'number' || itemTypeEnum === 'boolean'
+        itemTypeEnum === 'string' ||
+        itemTypeEnum === 'number' ||
+        itemTypeEnum === 'boolean' ||
+        itemTypeEnum === 'enum'
           ? itemTypeEnum
-          : itemTypeEnum === 'enum'
-            ? 'enum'
-            : null;
+          : null;
       if (itemKind === null) {
         return {
           kind: 'raw',

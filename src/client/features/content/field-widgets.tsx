@@ -287,7 +287,7 @@ function defaultRowItem(item: {
  * editable YAML. The draft carries the parsed value; a YAML syntax error
  * stays local to this widget as an inline issue — never blocking (US12).
  */
-function RawField({
+export function RawField({
   node,
   value,
   onChange,

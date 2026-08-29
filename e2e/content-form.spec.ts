@@ -217,3 +217,34 @@ test('the raw field flags YAML syntax errors locally', async ({ page }) => {
   await aside.fill('a plain value');
   await expect(syntaxIssue).toBeHidden();
 });
+
+test('a schema-less collection degrades to the root raw field over the whole draft', async ({
+  page,
+}) => {
+  // REST: the walk's every-collection-opens promise
+  const { fields } = await getSchema(page, 'notes');
+  expect(fields).toEqual([
+    { kind: 'raw', path: '', label: 'frontmatter', required: true, reason: 'unwalkable' },
+  ]);
+
+  // the pane: the root raw textarea holds the entry's whole frontmatter as
+  // YAML and edits replace the draft itself (no phantom '' key — round 2)
+  await page.goto('/');
+  await page.getByRole('tab', { name: 'Content' }).click();
+  await expect(page.locator('[data-astroix-entries="ready"]')).toBeVisible({ timeout: 10_000 });
+  await page.locator('[data-astroix-entry="scratch"]').click();
+  const pane = page.locator('[data-astroix-content-pane="form"]');
+  await expect(pane).toBeVisible();
+
+  const root = pane.locator('[data-astroix-raw-field=""]');
+  await expect(root).toHaveValue(/kind: scratchpad/);
+  await expect(root).toHaveAttribute('data-astroix-raw-reason', 'unwalkable');
+
+  // editing the YAML replaces the whole draft — a syntax error stays local
+  await root.fill('pinned: false');
+  await expect(pane.locator('[data-astroix-field-issue=""]')).toBeHidden();
+  await root.fill('a: [');
+  await expect(pane.locator('[data-astroix-field-issue=""]')).toBeVisible();
+  await root.fill('kind: scratchpad');
+  await expect(pane.locator('[data-astroix-field-issue=""]')).toBeHidden();
+});

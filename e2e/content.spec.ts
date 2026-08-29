@@ -36,8 +36,10 @@ test('GET /__astroix/collections serves core-parsed entries with schema presence
 }) => {
   const payload = await getCollections(page);
 
-  expect(payload.map((collection) => collection.name)).toEqual(['blog', 'homepage']);
-  expect(payload.every((collection) => collection.hasSchema)).toBe(true);
+  expect(payload.map((collection) => collection.name)).toEqual(['blog', 'homepage', 'notes']);
+  expect(payload.find((c) => c.name === 'blog')?.hasSchema).toBe(true);
+  expect(payload.find((c) => c.name === 'homepage')?.hasSchema).toBe(true);
+  expect(payload.find((c) => c.name === 'notes')?.hasSchema).toBe(false);
 
   const blog = payload.find((collection) => collection.name === 'blog');
   // ids are slugified source paths — nested files keep the nested-path id

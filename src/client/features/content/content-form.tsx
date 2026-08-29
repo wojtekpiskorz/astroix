@@ -2,6 +2,7 @@ import { useForm, useStore } from '@tanstack/react-form';
 import { type Dispatch, type SetStateAction, useEffect, useRef, useState } from 'react';
 import type { FormFieldNode, ValidationIssueRecord } from '../../../core/form-tree';
 import { validateDraft } from './api';
+import { RawField } from './field-widgets';
 import { SchemaField } from './schema-field';
 
 const VALIDATE_DEBOUNCE_MS = 300;
@@ -83,21 +84,35 @@ export function ContentForm({ collection, fields, entryData, onValuesChange }: C
     void runValidation(collection, form.store.state.values, runToken, setIssues);
   };
 
+  // the root raw field is the whole draft, not a path into it — TanStack's
+  // `makePathArray('')` reads a phantom `''` key, so it never goes through
+  // form.Field: the parsed YAML replaces the values object itself
+  const rootRaw =
+    fields.length === 1 && fields[0]?.kind === 'raw' && fields[0].path === '' ? fields[0] : null;
+
   return (
     <form
       data-astroix-content-form={collection}
       className="flex flex-col gap-4 px-3 py-3"
       onSubmit={(event) => event.preventDefault()}
     >
-      {fields.map((node) => (
-        <SchemaField
-          key={node.path}
-          node={node}
-          form={form}
-          issues={issues}
-          onFlushValidation={flushValidation}
+      {rootRaw !== null ? (
+        <RawField
+          node={rootRaw}
+          value={values}
+          onChange={(next) => form.reset(next as Record<string, unknown>)}
         />
-      ))}
+      ) : (
+        fields.map((node) => (
+          <SchemaField
+            key={node.path}
+            node={node}
+            form={form}
+            issues={issues}
+            onFlushValidation={flushValidation}
+          />
+        ))
+      )}
     </form>
   );
 }

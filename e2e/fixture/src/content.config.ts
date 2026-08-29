@@ -38,4 +38,10 @@ const blog = defineCollection({
   }),
 });
 
-export const collections = { homepage, blog };
+// Schema-less on purpose (#72's every-collection-opens promise): the walked
+// tree degrades to a single root raw field — the whole frontmatter as YAML.
+const notes = defineCollection({
+  loader: glob({ pattern: '**/*.md', base: './src/content/notes' }),
+});
+
+export const collections = { homepage, blog, notes };
