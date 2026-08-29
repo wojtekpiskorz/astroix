@@ -128,6 +128,21 @@ export function walkSchemaFields(schema: unknown, options: WalkOptions = {}): Fo
   return root.kind === 'group' ? root.children : [root];
 }
 
+/**
+ * Dotted paths of the image-kind fields — the auto-write's never-touch list:
+ * the draft carries zod output (ImageMetadata) there, while the frontmatter
+ * value round-trips byte-identical (spec Impl #4). Arrays can't hide images
+ * (their items are primitives), so only groups recurse.
+ */
+export function collectImagePaths(fields: readonly FormFieldNode[]): string[] {
+  const paths: string[] = [];
+  for (const field of fields) {
+    if (field.kind === 'image') paths.push(field.path);
+    else if (field.kind === 'group') paths.push(...collectImagePaths(field.children));
+  }
+  return paths;
+}
+
 interface Peeled {
   schema: unknown;
   required: boolean;

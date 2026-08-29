@@ -2,6 +2,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { type CSSProperties, useEffect } from 'react';
 import { SidebarProvider } from '#components/ui/sidebar.tsx';
 import { Canvas } from './canvas/canvas';
+import { COLLECTIONS_KEY, SCHEMA_KEY } from './features/content/api';
 import { ContentEditorPane } from './features/content/content-editor-pane';
 import { INDEX_PAYLOAD_KEY } from './features/css/api';
 import { ChromeHeader } from './features/css/chrome-header';
@@ -36,8 +37,19 @@ export function App() {
     const handler = (): void => {
       void queryClient.invalidateQueries({ queryKey: INDEX_PAYLOAD_KEY });
     };
+    // content freshness, core-first (spec #13): Astro's own sync signal —
+    // our writes echo through it (the form/body guards rebase), external
+    // edits flow in clean or reconcile through the write loop's hash guard
+    const contentHandler = (): void => {
+      void queryClient.invalidateQueries({ queryKey: COLLECTIONS_KEY });
+      void queryClient.invalidateQueries({ queryKey: SCHEMA_KEY });
+    };
     hot.on('astroix:file-changed', handler);
-    return () => hot.off('astroix:file-changed', handler);
+    hot.on('astro:content-changed', contentHandler);
+    return () => {
+      hot.off('astroix:file-changed', handler);
+      hot.off('astro:content-changed', contentHandler);
+    };
   }, [queryClient]);
 
   // The editor dock slot is app-shell; the pane inside it is feature-owned

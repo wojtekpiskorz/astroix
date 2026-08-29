@@ -1,6 +1,11 @@
 import { type ZodType, z } from 'astro/zod';
 import { describe, expect, it } from 'vitest';
-import { type FormFieldNode, type WalkOptions, walkSchemaFields } from './form-tree';
+import {
+  collectImagePaths,
+  type FormFieldNode,
+  type WalkOptions,
+  walkSchemaFields,
+} from './form-tree';
 
 /** The walker's contract test — behavior (the output field tree), never def internals. */
 function walk(schema: unknown, options?: WalkOptions): FormFieldNode[] {
@@ -179,6 +184,24 @@ describe('walkSchemaFields — image detection', () => {
   it('yields no image nodes without the predicate', () => {
     const fields = walk(z.object({ hero: z.any() }));
     expect(nodeAt(fields, 'hero').kind).toBe('raw');
+  });
+
+  it('collects image paths across nested groups — the auto-write skip list', () => {
+    const stubs = new Set<unknown>();
+    const image = (): ZodType => {
+      const stub = z.any();
+      stubs.add(stub);
+      return stub;
+    };
+    const fields = walk(
+      z.object({
+        hero: image(),
+        alt: z.string(),
+        media: z.object({ thumb: image().optional(), caption: z.string() }),
+      }),
+      { isImage: (schema) => stubs.has(schema) },
+    );
+    expect(collectImagePaths(fields)).toEqual(['hero', 'media.thumb']);
   });
 });
 

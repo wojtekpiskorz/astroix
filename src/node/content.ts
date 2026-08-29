@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { join } from 'node:path';
 import { z } from 'astro/zod';
@@ -11,12 +11,14 @@ import {
   walkSchemaFields,
 } from '../core/form-tree';
 import { type ApiContext, type ApiHandler, json, readJsonBody } from './api';
+import { safeResolve, sha256 } from './rest';
 
-/** The content read-side endpoints (core-reuse §3). */
+/** The content endpoints: read-side (core-reuse §3) and the auto-write (Impl #9). */
 export const contentHandlers: readonly ApiHandler[] = [
   { method: 'GET', path: '/collections', handle: handleCollections },
   { method: 'GET', path: '/content-schema', handle: handleContentSchema },
   { method: 'POST', path: '/content-validate', handle: handleContentValidate },
+  { method: 'POST', path: '/content-write', handle: handleContentWrite },
 ];
 
 /**
@@ -178,6 +180,67 @@ interface AsyncSafeParse {
   safeParseAsync?: (
     input: unknown,
   ) => Promise<{ success: true } | { success: false; error: { issues: readonly IssueLike[] } }>;
+}
+
+/**
+ * `POST /__astroix/content-write` — the content auto-write's whole-file write
+ * (spec Impl #9): the chrome serializes the entry (core's entry-writer) and
+ * posts the full bytes with the hash of the baseline it serialized from. The
+ * hash guard mirrors `/edit` (Impl #10): a mismatch means the file changed on
+ * disk under the debounce (IDE/agent edit) — refuse and hand back the current
+ * contents so the form reloads in one roundtrip. Root-confined like every
+ * file-touching endpoint.
+ */
+async function handleContentWrite(
+  req: IncomingMessage,
+  res: ServerResponse,
+  _url: URL,
+  ctx: ApiContext,
+): Promise<void> {
+  let body: unknown;
+  try {
+    body = await readJsonBody(req);
+  } catch (error) {
+    json(res, 400, { error: error instanceof Error ? error.message : 'unreadable body' });
+    return;
+  }
+  const { file, contents, expected } = parseWriteBody(body);
+  if (file === null || contents === null) {
+    json(res, 400, { error: 'expected { file, contents }' });
+    return;
+  }
+  const absPath = safeResolve(ctx.root, file);
+  if (absPath === null) {
+    json(res, 400, { error: `file is outside the project root: ${file}` });
+    return;
+  }
+  if (!existsSync(absPath)) {
+    json(res, 400, { error: `file is missing: ${file}` });
+    return;
+  }
+  const disk = readFileSync(absPath, 'utf8');
+  if (expected !== null && sha256(disk) !== expected) {
+    json(res, 409, { error: 'file changed on disk', contents: disk });
+    return;
+  }
+  writeFileSync(absPath, contents);
+  json(res, 200, { ok: true });
+}
+
+function parseWriteBody(body: unknown): {
+  file: string | null;
+  contents: string | null;
+  expected: string | null;
+} {
+  if (body === null || typeof body !== 'object') {
+    return { file: null, contents: null, expected: null };
+  }
+  const { file, contents, expected } = body as Record<string, unknown>;
+  return {
+    file: typeof file === 'string' ? file : null,
+    contents: typeof contents === 'string' ? contents : null,
+    expected: typeof expected === 'string' ? expected : null,
+  };
 }
 
 /**

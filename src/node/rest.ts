@@ -197,7 +197,8 @@ export function toRelative(root: string, file: string): string {
   return relative(root, file).split(sep).join('/');
 }
 
-function safeResolve(root: string, file: string): string | null {
+/** The confinement check every file-touching endpoint shares (content.ts too). */
+export function safeResolve(root: string, file: string): string | null {
   const absPath = resolve(root, file);
   if (absPath !== root && !absPath.startsWith(`${root}${sep}`)) return null;
   return absPath;
@@ -231,6 +232,7 @@ function parseEditBody(body: unknown): {
   };
 }
 
-function sha256(text: string): string {
+/** sha256 hex — the optimistic-write guard's currency, shared with content.ts. */
+export function sha256(text: string): string {
   return createHash('sha256').update(text).digest('hex');
 }

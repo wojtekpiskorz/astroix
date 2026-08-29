@@ -1,4 +1,12 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { expect, type Locator, type Page, test } from '@playwright/test';
+import { restoreEntry } from './entry-restore';
+
+// Since #74 every doc edit persists through the auto-write loop — the
+// editing tests restore the fixture entry so the specs that follow read
+// pristine bytes.
+const POST = join('e2e', 'fixture', 'src', 'content', 'blog', '2024', 'post.md');
 
 // The body editor's round-trip on the fixture entry (issue #73): the loaded
 // `entry.body` renders in CodeMirror, typing and toolbar actions edit the doc,
@@ -7,9 +15,8 @@ import { expect, type Locator, type Page, test } from '@playwright/test';
 // history stream).
 //
 // Since #72 the pane renders the schema-generated form around the editor;
-// the draft seam (`onDraftChange`) is a prop, not DOM state, so these specs
-// assert the committed doc through the stashed view like editor.spec.ts.
-// No disk writes here: persistence is #74.
+// the draft lives in the pane's refs, not DOM state, so these specs assert
+// the committed doc through the stashed view like editor.spec.ts.
 
 /** The stashed-view handle as exercised in editor.spec.ts — the same change path as typing. */
 interface CmView {
@@ -87,12 +94,14 @@ test('the pane opens the deterministic entry inside the schema form with the mar
 test('typing edits the doc', async ({ page }) => {
   const editor = await openBodyEditor(page);
   const original = await readDoc(editor);
+  const fileOriginal = readFileSync(POST, 'utf8');
 
   await placeCursor(editor, original.length);
   await page.keyboard.type(' Typed in the builder.');
 
   // the doc is the committed truth — hard equality
   expect(await readDoc(editor)).toBe(`${original} Typed in the builder.`);
+  await restoreEntry(POST, fileOriginal);
 });
 
 test('the toolbar emits markdown: bold wrap/unwrap, heading toggle, link over the placeholder', async ({
@@ -100,6 +109,7 @@ test('the toolbar emits markdown: bold wrap/unwrap, heading toggle, link over th
 }) => {
   const editor = await openBodyEditor(page);
   const original = await readDoc(editor);
+  const fileOriginal = readFileSync(POST, 'utf8');
   const bolded = page.getByRole('button', { name: 'Bold (markdown)' });
   const heading = page.getByRole('button', { name: 'Heading (markdown)' });
   const link = page.getByRole('button', { name: 'Link (markdown)' });
@@ -131,11 +141,13 @@ test('the toolbar emits markdown: bold wrap/unwrap, heading toggle, link over th
   expect(await readDoc(editor)).toBe(headingOut.replace('resolution', '[resolution](url)'));
   await page.keyboard.type('docs');
   expect(await readDoc(editor)).toBe(headingOut.replace('resolution', '[resolution](docs)'));
+  await restoreEntry(POST, fileOriginal);
 });
 
 test('native Cmd+Z undoes toolbar and typed edits back to the loaded body', async ({ page }) => {
   const editor = await openBodyEditor(page);
   const original = await readDoc(editor);
+  const fileOriginal = readFileSync(POST, 'utf8');
 
   // one toolbar transaction + one typed group on top
   await selectText(editor, 'Fixture');
@@ -152,4 +164,5 @@ test('native Cmd+Z undoes toolbar and typed edits back to the loaded body', asyn
     doc = await readDoc(editor);
   }
   expect(doc).toBe(original);
+  await restoreEntry(POST, fileOriginal);
 });

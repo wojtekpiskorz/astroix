@@ -1,5 +1,11 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { expect, type Locator, type Page, test } from '@playwright/test';
 import type { FormFieldNode } from '../src/core/form-tree';
+import { restoreEntry } from './entry-restore';
+
+const POST = join('e2e', 'fixture', 'src', 'content', 'blog', '2024', 'post.md');
+const SCRATCH = join('e2e', 'fixture', 'src', 'content', 'notes', 'scratch.md');
 
 // The schema-generated form (issue #72): the fixture's blog schema walks into
 // a widget tree (REST contract), the pane renders every mapped widget from
@@ -170,6 +176,7 @@ test('inline validation shows issues per field and never gates editing', async (
   const pane = await openFormPane(page);
   const title = pane.locator('[data-astroix-form-field="title"] input');
   await expect(title).toHaveValue('Nested post');
+  const original = readFileSync(POST, 'utf8');
 
   // break the min(3) contract and blur — the flush path validates immediately
   await title.fill('ab');
@@ -182,10 +189,14 @@ test('inline validation shows issues per field and never gates editing', async (
   await title.fill('abc');
   await expect(title).toHaveValue('abc');
   await expect(issue).toBeHidden();
+  // since #74 the violating draft also lands on disk (~300ms after the
+  // pause, Impl #9) — restore the fixture for the specs that follow
+  await restoreEntry(POST, original);
 });
 
 test('enum select and repeatable rows edit the draft', async ({ page }) => {
   const pane = await openFormPane(page);
+  const original = readFileSync(POST, 'utf8');
 
   // enum: open the popup (portaled — the .dark re-scope keeps tokens on it)
   const tone = pane.locator('[data-astroix-form-field="tone"] [role="combobox"]');
@@ -202,10 +213,12 @@ test('enum select and repeatable rows edit the draft', async ({ page }) => {
   await pane.locator('[data-astroix-array-remove="1"]').click();
   await expect(pane.locator('[data-astroix-form-field="tags.1"]')).toHaveCount(0);
   await expect(pane.locator('[data-astroix-form-field="tags.0"] input')).toHaveValue('nested');
+  await restoreEntry(POST, original);
 });
 
 test('the raw field flags YAML syntax errors locally', async ({ page }) => {
   const pane = await openFormPane(page);
+  const original = readFileSync(POST, 'utf8');
 
   const aside = pane.locator('[data-astroix-raw-field="aside"]');
   await aside.fill('a: [');
@@ -213,9 +226,11 @@ test('the raw field flags YAML syntax errors locally', async ({ page }) => {
   await expect(syntaxIssue).toBeVisible();
   await expect(syntaxIssue).toContainText('YAML');
 
-  // recovering parses cleanly — the local flag clears
+  // recovering parses cleanly — the local flag clears (and, since #74,
+  // the parsed value persists — restore for the specs that follow)
   await aside.fill('a plain value');
   await expect(syntaxIssue).toBeHidden();
+  await restoreEntry(POST, original);
 });
 
 test('a schema-less collection degrades to the root raw field over the whole draft', async ({
@@ -235,6 +250,7 @@ test('a schema-less collection degrades to the root raw field over the whole dra
   await page.locator('[data-astroix-entry="scratch"]').click();
   const pane = page.locator('[data-astroix-content-pane="form"]');
   await expect(pane).toBeVisible();
+  const scratchOriginal = readFileSync(SCRATCH, 'utf8');
 
   const root = pane.locator('[data-astroix-raw-field=""]');
   await expect(root).toHaveValue(/kind: scratchpad/);
@@ -247,6 +263,8 @@ test('a schema-less collection degrades to the root raw field over the whole dra
   await expect(pane.locator('[data-astroix-field-issue=""]')).toBeVisible();
   await root.fill('kind: scratchpad');
   await expect(pane.locator('[data-astroix-field-issue=""]')).toBeHidden();
+  // since #74 the parsed draft persists — restore the fixture entry
+  await restoreEntry(SCRATCH, scratchOriginal);
 });
 
 test('the function-schema arm: image() marks a read-only metadata node end to end', async ({

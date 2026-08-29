@@ -1,5 +1,6 @@
 import { useForm, useStore } from '@tanstack/react-form';
 import { type Dispatch, type SetStateAction, useEffect, useRef, useState } from 'react';
+import { jsonEqual } from '../../../core/entry-writer';
 import type { FormFieldNode, ValidationIssueRecord } from '../../../core/form-tree';
 import { validateDraft } from './api';
 import { RawField } from './field-widgets';
@@ -66,6 +67,26 @@ export function ContentForm({ collection, fields, entryData, onValuesChange }: C
     onValuesChangeRef.current = onValuesChange;
   }, [onValuesChange]);
 
+  // external sync, the body editor's guard mirrored (spec #13): a refetched
+  // entryData is accepted when it matches the values (the auto-write's own
+  // echo — rebase only) or the values are clean against the last accepted
+  // truth (an external change under a clean form — reload from disk); a
+  // genuine external change under a dirty form never clobbers — the write
+  // loop's hash guard reconciles on the next write
+  const acceptedRef = useRef(entryData);
+  useEffect(() => {
+    if (entryData === acceptedRef.current) return;
+    const current = form.store.state.values;
+    if (jsonEqual(entryData, current)) {
+      acceptedRef.current = entryData;
+      return;
+    }
+    if (jsonEqual(current, acceptedRef.current)) {
+      acceptedRef.current = entryData;
+      form.reset(entryData as Record<string, unknown>, { keepDefaultValues: true });
+    }
+  }, [entryData, form]);
+
   // only the latest run may land issues
   const runToken = useRef(0);
 
@@ -105,8 +126,11 @@ export function ContentForm({ collection, fields, entryData, onValuesChange }: C
             // `?? {}`: cleared root text means an empty draft — reset with
             // undefined would fall back to defaultValues (form-core), and the
             // draft would silently keep the frontmatter the textarea no
-            // longer shows (round 3)
-            form.reset((next ?? {}) as Record<string, unknown>)
+            // longer shows (round 3). `keepDefaultValues`: a bare reset
+            // overwrites the form's defaultValues with the draft, and the
+            // next render's update() would then "re-initialize" the form
+            // back to the loaded entryData — silently reverting the edit
+            form.reset((next ?? {}) as Record<string, unknown>, { keepDefaultValues: true })
           }
         />
       ) : (
