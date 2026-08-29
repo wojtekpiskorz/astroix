@@ -37,28 +37,30 @@ async function readDoc(editor: Locator): Promise<string> {
   });
 }
 
-/** Selects `text`'s first occurrence through the view and focuses the editor. */
+/** Dispatches a selection through the view and focuses the editor. */
+async function setSelection(editor: Locator, anchor: number, head?: number): Promise<void> {
+  await editor.locator('.cm-content').evaluate(
+    (el, at) => {
+      const view = (el.closest('.cm-editor') as (HTMLElement & { __astroixView?: CmView }) | null)
+        ?.__astroixView;
+      if (view === undefined) throw new Error('editor view not stashed');
+      view.dispatch({ selection: { anchor: at.anchor, head: at.head } });
+      view.focus();
+    },
+    { anchor, head },
+  );
+}
+
+/** Selects `text`'s first occurrence (doc read TS-side) and focuses the editor. */
 async function selectText(editor: Locator, text: string): Promise<void> {
-  await editor.locator('.cm-content').evaluate((el, wanted) => {
-    const view = (el.closest('.cm-editor') as (HTMLElement & { __astroixView?: CmView }) | null)
-      ?.__astroixView;
-    if (view === undefined) throw new Error('editor view not stashed');
-    const from = view.state.doc.toString().indexOf(wanted);
-    if (from === -1) throw new Error(`not found in doc: ${wanted}`);
-    view.dispatch({ selection: { anchor: from, head: from + wanted.length } });
-    view.focus();
-  }, text);
+  const from = (await readDoc(editor)).indexOf(text);
+  if (from === -1) throw new Error(`not found in doc: ${text}`);
+  await setSelection(editor, from, from + text.length);
 }
 
 /** Places the caret at `pos` through the view and focuses the editor. */
 async function placeCursor(editor: Locator, pos: number): Promise<void> {
-  await editor.locator('.cm-content').evaluate((el, at) => {
-    const view = (el.closest('.cm-editor') as (HTMLElement & { __astroixView?: CmView }) | null)
-      ?.__astroixView;
-    if (view === undefined) throw new Error('editor view not stashed');
-    view.dispatch({ selection: { anchor: at } });
-    view.focus();
-  }, pos);
+  await setSelection(editor, pos);
 }
 
 async function emittedLength(page: Page): Promise<number> {

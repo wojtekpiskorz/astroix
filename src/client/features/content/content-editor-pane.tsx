@@ -1,9 +1,10 @@
 import { useState } from 'react';
+import type { CollectionRecord } from '../../../core/collections';
 import { MarkdownEditor } from '../../editor/markdown-editor';
-import { type CollectionsPayload, useCollections } from './api';
+import { useCollections } from './api';
 
 /** The payload's own order (server sorts names, then ids) walks collections→entries. */
-function pickBodyEntry(collections: CollectionsPayload[] | undefined): {
+function pickBodyEntry(collections: CollectionRecord[] | undefined): {
   id: string;
   body: string;
 } | null {

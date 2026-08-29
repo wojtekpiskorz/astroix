@@ -17,30 +17,33 @@ interface MarkdownEditorProps {
 
 /**
  * The entry body editor: CodeMirror 6 over `entry.body` with the markdown
- * toolbar. Mounts once per entry (the pane keys it); external body changes
- * (query refetch) rebase the doc only while it is clean — a dirty doc is
- * #74's to reconcile through its write loop.
+ * toolbar. The baseline (RuleEditor's model) is the last externally-loaded
+ * body: external `body` prop changes rebase the doc only while it is clean —
+ * a dirty doc never gets clobbered; #74's write loop owns reconciling it.
  */
 export function MarkdownEditor({ body, onChange }: MarkdownEditorProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
-  const lastEmittedRef = useRef<string>(body ?? '');
+  const baselineRef = useRef<string>(body ?? '');
   const onChangeRef = useRef(onChange);
-  onChangeRef.current = onChange;
+
+  // latest-callback ref, kept in an effect — render-time ref writes don't
+  // survive React Compiler replay
+  useEffect(() => {
+    onChangeRef.current = onChange;
+  }, [onChange]);
 
   useEffect(() => {
     const host = hostRef.current;
     if (host === null) return;
     const view = createEditorView({
-      doc: lastEmittedRef.current,
+      doc: baselineRef.current,
       parent: host,
       extensions: [
         markdown(),
         EditorView.updateListener.of((update) => {
           if (!update.docChanged) return;
-          const text = update.state.doc.toString();
-          lastEmittedRef.current = text;
-          onChangeRef.current(text);
+          onChangeRef.current(update.state.doc.toString());
         }),
       ],
     });
@@ -57,9 +60,9 @@ export function MarkdownEditor({ body, onChange }: MarkdownEditorProps) {
     if (view === null) return;
     const incoming = body ?? '';
     if (incoming === view.state.doc.toString()) return; // echo of the same body
-    if (view.state.doc.toString() !== lastEmittedRef.current) return; // dirty
+    if (view.state.doc.toString() !== baselineRef.current) return; // dirty
     replaceDoc(view, incoming);
-    lastEmittedRef.current = incoming;
+    baselineRef.current = incoming;
   }, [body]);
 
   return (

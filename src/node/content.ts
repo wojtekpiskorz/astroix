@@ -2,26 +2,8 @@ import { existsSync } from 'node:fs';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { join } from 'node:path';
 import { createServerModuleRunner } from 'vite';
+import type { CollectionEntryRecord, CollectionRecord } from '../core/collections';
 import { type ApiContext, type ApiHandler, json } from './api';
-
-/** A single collection entry as served to the chrome (core's getCollection shape, JSON-projected). */
-export interface CollectionEntryRecord {
-  /** Slugified source path (glob loader id), e.g. `2024/post`. */
-  id: string;
-  /** Root-relative posix source path, or null for store entries without one. */
-  filePath: string | null;
-  /** Parsed frontmatter (zod output). */
-  data: unknown;
-  /** Raw markdown body, or null for data-only entries. */
-  body: string | null;
-}
-
-/** A collection with its entries and schema presence (spec Impl #4 — read side). */
-export interface CollectionRecord {
-  name: string;
-  hasSchema: boolean;
-  entries: CollectionEntryRecord[];
-}
 
 /** The content read-side endpoint (core-reuse §3). */
 export const contentHandlers: readonly ApiHandler[] = [
