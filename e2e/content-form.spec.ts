@@ -1,4 +1,4 @@
-import { expect, type Page, test } from '@playwright/test';
+import { expect, type Locator, type Page, test } from '@playwright/test';
 import type { FormFieldNode } from '../src/core/form-tree';
 
 // The schema-generated form (issue #72): the fixture's blog schema walks into
@@ -123,13 +123,22 @@ test('POST /__astroix/content-validate projects issues onto dotted paths', async
   expect(paths).toEqual(['tags.1', 'title', 'tone']);
 });
 
-test('the pane renders the generated form over the deterministic entry', async ({ page }) => {
+async function openFormPane(page: Page): Promise<Locator> {
   await page.goto('/');
   await page.getByRole('tab', { name: 'Content' }).click();
+  // the pane is selection-driven since #71 (at `/` route resolution is
+  // silent) — open the payload-order entry the pane used to pick itself
+  await expect(page.locator('[data-astroix-entries="ready"]')).toBeVisible({ timeout: 10_000 });
+  await page.locator('[data-astroix-entry="2024/post"]').click();
   const pane = page.locator('[data-astroix-content-pane="form"]');
-  await expect(pane).toBeVisible({ timeout: 10_000 });
+  await expect(pane).toBeVisible();
+  return pane;
+}
 
-  // deterministic pick: first entry of the first schema-bearing collection
+test('the pane renders the generated form over the active entry', async ({ page }) => {
+  const pane = await openFormPane(page);
+
+  // the active entry's id rides the pane header
   await expect(pane.locator('code')).toHaveText('blog/2024/post');
 
   const title = pane.locator('[data-astroix-form-field="title"] input');
@@ -158,10 +167,7 @@ test('the pane renders the generated form over the deterministic entry', async (
 });
 
 test('inline validation shows issues per field and never gates editing', async ({ page }) => {
-  await page.goto('/');
-  await page.getByRole('tab', { name: 'Content' }).click();
-  const pane = page.locator('[data-astroix-content-pane="form"]');
-  await expect(pane).toBeVisible({ timeout: 10_000 });
+  const pane = await openFormPane(page);
   const title = pane.locator('[data-astroix-form-field="title"] input');
   await expect(title).toHaveValue('Nested post');
 
@@ -179,10 +185,7 @@ test('inline validation shows issues per field and never gates editing', async (
 });
 
 test('enum select and repeatable rows edit the draft', async ({ page }) => {
-  await page.goto('/');
-  await page.getByRole('tab', { name: 'Content' }).click();
-  const pane = page.locator('[data-astroix-content-pane="form"]');
-  await expect(pane).toBeVisible({ timeout: 10_000 });
+  const pane = await openFormPane(page);
 
   // enum: open the popup (portaled — the .dark re-scope keeps tokens on it)
   const tone = pane.locator('[data-astroix-form-field="tone"] [role="combobox"]');
@@ -202,10 +205,7 @@ test('enum select and repeatable rows edit the draft', async ({ page }) => {
 });
 
 test('the raw field flags YAML syntax errors locally', async ({ page }) => {
-  await page.goto('/');
-  await page.getByRole('tab', { name: 'Content' }).click();
-  const pane = page.locator('[data-astroix-content-pane="form"]');
-  await expect(pane).toBeVisible({ timeout: 10_000 });
+  const pane = await openFormPane(page);
 
   const aside = pane.locator('[data-astroix-raw-field="aside"]');
   await aside.fill('a: [');

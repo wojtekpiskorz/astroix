@@ -98,7 +98,9 @@ function PaneEditor({ collection, entry, fields, onDraftChange }: PaneEditorProp
  */
 export function ContentEditorPane({
   onDraftChange,
-}: { onDraftChange?: (draft: ContentDraft) => void } = {}) {
+}: {
+  onDraftChange?: (draft: ContentDraft) => void;
+} = {}) {
   const { data: collections, isPending } = useCollections();
   const activeEntry = useContentStore((state) => state.activeEntry);
   const picked = findActiveEntry(collections, activeEntry);
@@ -114,7 +116,9 @@ export function ContentEditorPane({
         data-astroix-content-pane={syncing ? 'syncing' : 'empty'}
         className="flex min-h-0 flex-1 items-center justify-center px-4 text-center text-xs text-muted-foreground"
       >
-        {syncing ? 'Waiting for the content sync…' : 'No entry open — pick one in the Content list.'}
+        {syncing
+          ? 'Waiting for the content sync…'
+          : 'No entry open — pick one in the Content list.'}
       </div>
     );
   }
