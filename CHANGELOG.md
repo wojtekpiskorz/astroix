@@ -1,5 +1,11 @@
 # @wojciechpiskorz/astroix
 
+## 0.0.11
+
+### Patch Changes
+
+- 15d2c55: feat: content form generation — zod def-walk (`src/core/form-tree.ts`), `GET /__astroix/content-schema` + `POST /__astroix/content-validate` endpoints, TanStack Form chrome with widget mapping, raw-field YAML fallback and advisory inline validation (never gating); fixture schema grows enum/number/boolean/array/union/nested coverage
+
 ## 0.0.10
 
 ### Patch Changes
