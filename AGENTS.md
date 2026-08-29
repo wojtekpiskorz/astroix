@@ -19,7 +19,7 @@ When your work touches an architectural decision, these files win over your prio
 - `bun run test:e2e` — Playwright e2e; boots the fixture dev server on `http://localhost:4314` (npm-pack lane on :4313; the owner's manual smoke owns :4312 — lanes never share servers).
 - `bun run crap` — crap4ts risk report: CC per function, CRAP + Uncle-Bob bands where coverage is real (src/core); `--calibrate` (one-time, already done) / `--update-baseline` manage the ratchet baseline.
 - `bun run preflight` — full-src CRAP ratchet (every run evaluates all of src/ against the baseline; owner ruling, issue #62); the agent runs it before `gh pr create`.
-- `bun run hooks` — once per clone: wires `git config core.hooksPath scripts/hooks` (pre-commit: biome blocks on staged lint/format errors, the crap4ts CC scan warns). Not a postinstall on purpose — this package is published and must not touch consumers' git config.
+- `bun run hooks` — once per clone: wires `git config core.hooksPath scripts/hooks` (pre-commit: biome blocks on staged lint/format errors; the typecheck blocks when the staged set touches `.ts`/`.tsx`; the crap4ts CC scan warns). Not a postinstall on purpose — this package is published and must not touch consumers' git config.
 - `bun run check:publint` — publint over the published manifest (needs `bun run build`; CI gates it after the artifact check).
 - `bun run build` — tsup (node side) + vite build (the prebuilt chrome bundle `dist/chrome.js`) — chrome delivery is hybrid per `docs/adr/0001` (source-served in our dev checkout, prebuilt for consumers).
 
