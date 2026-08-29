@@ -49,10 +49,14 @@ test('GET /__astroix/collections serves core-parsed entries with schema presence
 
   const nested = blog?.entries.find((entry) => entry.id === '2024/post');
   expect(nested?.filePath).toBe('src/content/blog/2024/post.md');
+  // zod output carries the #72 schema additions' defaults
   expect(nested?.data).toEqual({
     title: 'Nested post',
     date: '2024-06-01T00:00:00.000Z',
     tags: ['nested'],
+    tone: 'bold',
+    priority: 0,
+    featured: false,
   });
   expect(nested?.body).toContain('for route resolution');
 

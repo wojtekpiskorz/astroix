@@ -2,13 +2,14 @@ import { expect, type Locator, type Page, test } from '@playwright/test';
 
 // The body editor's round-trip on the fixture entry (issue #73): the loaded
 // `entry.body` renders in CodeMirror, typing and toolbar actions edit the doc,
-// the emitted-markdown seam fires, and native Cmd+Z undoes through toolbar and
-// typed transactions alike (the undo note on the ticket — #74 builds the
-// write loop on exactly that history stream).
+// and native Cmd+Z undoes through toolbar and typed transactions alike (the
+// undo note on the ticket — #74 builds the write loop on exactly that
+// history stream).
 //
-// No disk writes here: persistence is #74; this slice ends at the emit seam
-// (`data-astroix-body-emitted` mirrors the last emitted markdown's length,
-// the doc itself is asserted through the stashed view like editor.spec.ts).
+// Since #72 the pane renders the schema-generated form around the editor;
+// the draft seam (`onDraftChange`) is a prop, not DOM state, so these specs
+// assert the committed doc through the stashed view like editor.spec.ts.
+// No disk writes here: persistence is #74.
 
 /** The stashed-view handle as exercised in editor.spec.ts — the same change path as typing. */
 interface CmView {
@@ -66,19 +67,13 @@ async function placeCursor(editor: Locator, pos: number): Promise<void> {
   await setSelection(editor, pos);
 }
 
-async function emittedLength(page: Page): Promise<number> {
-  const value = await page
-    .locator('[data-astroix-body-emitted]')
-    .getAttribute('data-astroix-body-emitted');
-  if (value === null) throw new Error('emit seam not rendered');
-  return Number(value);
-}
-
-test('the pane edits the first body-bearing entry with the markdown toolbar', async ({ page }) => {
+test('the pane opens the deterministic entry inside the schema form with the markdown toolbar', async ({
+  page,
+}) => {
   const editor = await openBodyEditor(page);
 
   // deterministic placeholder pick (payload order: collection name, then id)
-  await expect(page.locator('[data-astroix-content-pane="body"] code')).toHaveText(
+  await expect(page.locator('[data-astroix-content-pane="form"] code')).toHaveText(
     'blog/2024/post',
   );
   await expect(editor.locator('.cm-content')).toContainText('Fixture post with a nested-path id');
@@ -89,25 +84,15 @@ test('the pane edits the first body-bearing entry with the markdown toolbar', as
   }
 });
 
-test('typing edits the doc and fires the emitted-markdown seam', async ({ page }) => {
+test('typing edits the doc', async ({ page }) => {
   const editor = await openBodyEditor(page);
   const original = await readDoc(editor);
-  expect(await emittedLength(page)).toBe(original.length);
 
   await placeCursor(editor, original.length);
   await page.keyboard.type(' Typed in the builder.');
 
   // the doc is the committed truth — hard equality
   expect(await readDoc(editor)).toBe(`${original} Typed in the builder.`);
-  // the seam's pane state renders through React — poll for its commit (slow
-  // runners flush the re-render behind Playwright's next command); a dead
-  // seam stays at the initial length and times out
-  await expect
-    .poll(() => emittedLength(page), {
-      timeout: 5_000,
-      message: 'emitted-markdown seam never carried the typed doc',
-    })
-    .toBe(original.length + ' Typed in the builder.'.length);
 });
 
 test('the toolbar emits markdown: bold wrap/unwrap, heading toggle, link over the placeholder', async ({
@@ -123,9 +108,6 @@ test('the toolbar emits markdown: bold wrap/unwrap, heading toggle, link over th
   await selectText(editor, 'Fixture');
   await bolded.click();
   expect(await readDoc(editor)).toBe(original.replace('Fixture', '**Fixture**'));
-  await expect
-    .poll(() => emittedLength(page), { timeout: 5_000, message: 'bold wrap never emitted' })
-    .toBe(original.length + 4);
   await selectText(editor, 'Fixture'); // inside the **…** pair now
   await bolded.click();
   expect(await readDoc(editor)).toBe(original);

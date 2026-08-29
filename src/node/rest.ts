@@ -7,9 +7,7 @@ import type { ViteDevServer } from 'vite';
 import { buildCssIndex, type SourceFile } from '../core/indexer';
 import type { IndexPayloadRecord } from '../core/matcher';
 import { SpliceRangeError, spliceText } from '../core/splice-writer';
-import { type ApiContext, type ApiHandler, json } from './api';
-
-const MAX_BODY_BYTES = 1_000_000;
+import { type ApiContext, type ApiHandler, json, readJsonBody } from './api';
 
 /** The css endpoints: the index payload, root-confined file reads, disk splices. */
 export const restHandlers: readonly ApiHandler[] = [
@@ -235,28 +233,4 @@ function parseEditBody(body: unknown): {
 
 function sha256(text: string): string {
   return createHash('sha256').update(text).digest('hex');
-}
-
-function readJsonBody(req: IncomingMessage): Promise<unknown> {
-  return new Promise((resolveBody, reject) => {
-    const chunks: Buffer[] = [];
-    let size = 0;
-    req.on('data', (chunk: Buffer) => {
-      size += chunk.length;
-      if (size > MAX_BODY_BYTES) {
-        reject(new Error('request body too large'));
-        req.destroy();
-        return;
-      }
-      chunks.push(chunk);
-    });
-    req.on('end', () => {
-      try {
-        resolveBody(JSON.parse(Buffer.concat(chunks).toString('utf8')));
-      } catch {
-        reject(new Error('request body is not valid JSON'));
-      }
-    });
-    req.on('error', reject);
-  });
 }

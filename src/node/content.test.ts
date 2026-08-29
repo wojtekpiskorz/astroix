@@ -1,12 +1,16 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { type ZodType, z } from 'astro/zod';
 import { afterAll, describe, expect, it } from 'vitest';
+import { walkSchemaFields } from '../core/form-tree';
 import {
   assembleCollectionsPayload,
   findContentConfigPath,
   type RawContentConfig,
   type RawContentModule,
+  resolveCollectionSchema,
+  validateDraft,
 } from './content';
 
 const scratch = mkdtempSync(join(tmpdir(), 'astroix-content-'));
@@ -89,6 +93,100 @@ describe('assembleCollectionsPayload', () => {
     };
     const payload = await assembleCollectionsPayload(config, content);
     expect(payload[0]?.entries.map((entry) => entry.id)).toEqual(['B-post', 'a-post']);
+  });
+});
+
+describe('resolveCollectionSchema', () => {
+  it('passes static schemas through untouched', () => {
+    const schema = z.object({ title: z.string() });
+    const config: RawContentConfig = { collections: { blog: { schema } } };
+    expect(resolveCollectionSchema(config, 'blog')).toEqual({ schema, imageStubs: new Set() });
+  });
+
+  it('returns null for unknown collections', () => {
+    expect(resolveCollectionSchema({ collections: {} }, 'missing')).toBeNull();
+    expect(resolveCollectionSchema(null, 'missing')).toBeNull();
+  });
+
+  it('calls function schemas with image stubs the walker recognizes by membership', () => {
+    const config: RawContentConfig = {
+      collections: {
+        gallery: {
+          schema: ({ image }: { image: () => ZodType }) =>
+            z.object({ hero: image(), badge: image().optional(), alt: z.string() }),
+        },
+      },
+    };
+    const resolved = resolveCollectionSchema(config, 'gallery');
+    if (resolved === null) throw new Error('unresolved');
+    const fields = walkSchemaFields(resolved.schema, {
+      isImage: (schema) => resolved.imageStubs.has(schema as object),
+    });
+    expect(fields.find((field) => field.path === 'hero')).toMatchObject({
+      kind: 'image',
+      required: true,
+    });
+    expect(fields.find((field) => field.path === 'badge')).toMatchObject({
+      kind: 'image',
+      required: false,
+    });
+    expect(fields.find((field) => field.path === 'alt')).toMatchObject({ kind: 'string' });
+  });
+
+  it('degrades a throwing schema function to the raw-field root', () => {
+    const config: RawContentConfig = {
+      collections: {
+        broken: {
+          schema: () => {
+            throw new Error('boom');
+          },
+        },
+      },
+    };
+    const resolved = resolveCollectionSchema(config, 'broken');
+    expect(resolved?.schema).toBeNull();
+    expect(walkSchemaFields(resolved?.schema)).toEqual([
+      expect.objectContaining({ kind: 'raw', path: '' }),
+    ]);
+  });
+});
+
+describe('validateDraft', () => {
+  it('projects zod issues onto dotted paths, indexes included', async () => {
+    const schema = z.object({
+      title: z.string().min(3),
+      tags: z.array(z.string()),
+    });
+    const issues = await validateDraft(schema, { title: 'ab', tags: ['ok', 42] });
+    expect(issues).toEqual([
+      expect.objectContaining({ path: 'title', code: 'too_small' }),
+      expect.objectContaining({ path: 'tags.1', code: 'invalid_type' }),
+    ]);
+  });
+
+  it('validates clean on a passing draft', async () => {
+    const issues = await validateDraft(z.object({ title: z.string() }), { title: 'Fine' });
+    expect(issues).toEqual([]);
+  });
+
+  it('treats schema-less collections as clean (nothing to validate)', async () => {
+    expect(await validateDraft(null, { anything: true })).toEqual([]);
+    expect(await validateDraft(undefined, {})).toEqual([]);
+  });
+
+  it('never issues on image stubs — the draft carries zod output (metadata objects)', async () => {
+    const config: RawContentConfig = {
+      collections: {
+        gallery: {
+          schema: ({ image }: { image: () => ZodType }) => z.object({ hero: image().optional() }),
+        },
+      },
+    };
+    const resolved = resolveCollectionSchema(config, 'gallery');
+    const issues = await validateDraft(resolved?.schema, {
+      hero: { src: '/img.png', width: 640, height: 480, ASTRO_ASSET: '/tmp/x' },
+    });
+    expect(issues).toEqual([]);
   });
 });
 
