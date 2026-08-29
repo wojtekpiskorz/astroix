@@ -67,8 +67,6 @@ export function ContentForm({ collection, fields, entryData, onValuesChange }: C
 
   // only the latest run may land issues
   const runToken = useRef(0);
-  const valuesRef = useRef(values);
-  valuesRef.current = values;
 
   // the values effect covers mount too: the initial draft emits through the
   // seam once and the debounced baseline validation runs against it
@@ -81,7 +79,8 @@ export function ContentForm({ collection, fields, entryData, onValuesChange }: C
   }, [collection, values]);
 
   const flushValidation = (): void => {
-    void runValidation(collection, valuesRef.current, runToken, setIssues);
+    // the store's synchronous snapshot — no ref mirror to keep honest
+    void runValidation(collection, form.store.state.values, runToken, setIssues);
   };
 
   return (

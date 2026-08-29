@@ -94,10 +94,15 @@ export interface ValidationIssueRecord {
   message: string;
 }
 
+/** The structural slice of a zod issue `toIssueRecords` consumes. */
+export interface IssueLike {
+  path?: readonly PropertyKey[];
+  code?: unknown;
+  message: unknown;
+}
+
 /** Maps zod's issues to the served records — structural (path keys join by code unit). */
-export function toIssueRecords(
-  issues: Iterable<{ path?: readonly PropertyKey[]; code?: unknown; message: unknown }>,
-): ValidationIssueRecord[] {
+export function toIssueRecords(issues: Iterable<IssueLike>): ValidationIssueRecord[] {
   const records: ValidationIssueRecord[] = [];
   for (const issue of issues) {
     const path = (issue.path ?? [])

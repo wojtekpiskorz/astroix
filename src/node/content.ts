@@ -4,7 +4,12 @@ import { join } from 'node:path';
 import { z } from 'astro/zod';
 import { createServerModuleRunner } from 'vite';
 import type { CollectionEntryRecord, CollectionRecord } from '../core/collections';
-import { toIssueRecords, type ValidationIssueRecord, walkSchemaFields } from '../core/form-tree';
+import {
+  type IssueLike,
+  toIssueRecords,
+  type ValidationIssueRecord,
+  walkSchemaFields,
+} from '../core/form-tree';
 import { type ApiContext, type ApiHandler, json, readJsonBody } from './api';
 
 /** The content read-side endpoints (core-reuse §3). */
@@ -28,12 +33,27 @@ async function handleCollections(
   _url: URL,
   ctx: ApiContext,
 ): Promise<void> {
+  const { runner, configModule } = await importContentConfig(ctx);
+  const contentModule = (await runner.import('astro:content')) as RawContentModule;
+  json(res, 200, await assembleCollectionsPayload(configModule, contentModule));
+}
+
+/**
+ * The stateless-doctrine sequence every content endpoint starts with: one
+ * fresh module runner per request (nothing held between requests — core
+ * clears its caches on invalidation), importing the user's content config
+ * as the runner evaluates it. The runner comes back along for callers that
+ * need sibling imports (`astro:content`) on the same per-request instance.
+ */
+async function importContentConfig(ctx: ApiContext): Promise<{
+  runner: ReturnType<typeof createServerModuleRunner>;
+  configModule: RawContentConfig | null;
+}> {
   const runner = createServerModuleRunner(ctx.server.environments.ssr);
   const configPath = findContentConfigPath(ctx.srcDir);
   const configModule =
     configPath === null ? null : ((await runner.import(configPath)) as RawContentConfig);
-  const contentModule = (await runner.import('astro:content')) as RawContentModule;
-  json(res, 200, await assembleCollectionsPayload(configModule, contentModule));
+  return { runner, configModule };
 }
 
 /** The user's `content.config` module as the runner evaluates it. */
@@ -157,7 +177,7 @@ async function handleContentValidate(
 interface AsyncSafeParse {
   safeParseAsync?: (
     input: unknown,
-  ) => Promise<{ success: true } | { success: false; error: { issues: readonly unknown[] } }>;
+  ) => Promise<{ success: true } | { success: false; error: { issues: readonly IssueLike[] } }>;
 }
 
 /**
@@ -173,11 +193,7 @@ export async function validateDraft(
   if (parse === undefined) return [];
   try {
     const result = await parse.call(schema, data);
-    if (result.success) return [];
-    const issues = (result as { error: { issues?: unknown } }).error.issues;
-    return toIssueRecords(
-      (Array.isArray(issues) ? issues : []) as Parameters<typeof toIssueRecords>[0],
-    );
+    return result.success ? [] : toIssueRecords(result.error.issues);
   } catch {
     return [];
   }
@@ -233,10 +249,7 @@ async function loadCollectionSchema(
   name: string | null,
 ): Promise<{ name: string; resolved: ResolvedCollectionSchema } | null> {
   if (name === null) return null;
-  const runner = createServerModuleRunner(ctx.server.environments.ssr);
-  const configPath = findContentConfigPath(ctx.srcDir);
-  const configModule =
-    configPath === null ? null : ((await runner.import(configPath)) as RawContentConfig);
+  const { configModule } = await importContentConfig(ctx);
   const resolved = resolveCollectionSchema(configModule, name);
   return resolved === null ? null : { name, resolved };
 }
