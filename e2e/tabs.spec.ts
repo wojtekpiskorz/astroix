@@ -36,16 +36,16 @@ test('tabs render at the top of the sidebar, CSS active by default', async ({ pa
 
   // the Content slice is not mounted yet (Base UI panels unmount when hidden)
   await expect(page.locator('[data-astroix-entries]')).toHaveCount(0);
-  await expect(page.locator('[data-astroix-content-form]')).toHaveCount(0);
+  await expect(page.locator('[data-astroix-content-pane]')).toHaveCount(0);
 });
 
 test('switching to Content swaps the sidebar body and the editor dock', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('tab', { name: 'Content' }).click();
 
-  // shell swap: content placeholders in, CSS workbench out
+  // shell swap: the content pane and its placeholder sidebar in, CSS workbench out
   await expect(page.locator('[data-astroix-entries="pending"]')).toBeVisible();
-  await expect(page.locator('[data-astroix-content-form="pending"]')).toBeVisible();
+  await expect(page.locator('[data-astroix-content-pane]')).toBeVisible();
   await expect(page.locator('[data-astroix-index]')).toHaveCount(0);
   await expect(page.locator('[data-astroix-editor]')).toHaveCount(0);
 
@@ -56,7 +56,7 @@ test('switching to Content swaps the sidebar body and the editor dock', async ({
   // and back: the CSS body remounts and refetches the index
   await page.getByRole('tab', { name: 'CSS' }).click();
   await expect(page.locator('[data-astroix-index="ready"]')).toBeVisible();
-  await expect(page.locator('[data-astroix-content-form]')).toHaveCount(0);
+  await expect(page.locator('[data-astroix-content-pane]')).toHaveCount(0);
   await expect(page.locator('[data-astroix-editor="empty"]')).toBeVisible();
 });
 
@@ -73,7 +73,7 @@ test('an open rule editor survives a Content roundtrip', async ({ page }) => {
 
   // the dock swap unmounts the rule editor; the css store keeps the spec
   await page.getByRole('tab', { name: 'Content' }).click();
-  await expect(page.locator('[data-astroix-content-form="pending"]')).toBeVisible();
+  await expect(page.locator('[data-astroix-content-pane]')).toBeVisible();
 
   await page.getByRole('tab', { name: 'CSS' }).click();
   await expect(editor).toBeVisible();
@@ -115,7 +115,7 @@ test('sidebar collapses offcanvas and expands with state preserved', async ({ pa
   // make the vertical state meaningful, then capture the dock's edge before
   // collapsing via the rail (fully reachable while expanded)
   await page.getByRole('tab', { name: 'Content' }).click();
-  const dock = page.locator('[data-astroix-content-form="pending"]');
+  const dock = page.locator('[data-astroix-content-pane]');
   await expect(dock).toBeVisible();
   const dockXExpanded = (await dock.boundingBox())?.x;
   await page.getByRole('button', { name: 'Toggle Sidebar' }).click();

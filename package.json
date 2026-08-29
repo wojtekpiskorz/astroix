@@ -65,6 +65,7 @@
     "@astrojs/compiler-binding": "^0.4.0",
     "@base-ui/react": "^1.7.0",
     "@codemirror/lang-css": "^6.3.1",
+    "@codemirror/lang-markdown": "^6.5.2",
     "@codemirror/language": "^6.12.4",
     "@codemirror/state": "^6.7.1",
     "@codemirror/view": "^6.43.9",
