@@ -7,6 +7,15 @@ import { restoreEntry } from './entry-restore';
 // editing tests restore the fixture entry so the specs that follow read
 // pristine bytes.
 const POST = join('e2e', 'fixture', 'src', 'content', 'blog', '2024', 'post.md');
+// captured before any test runs: the spec opens on pristine bytes, and the
+// hook below restores them even when an assertion fails mid-edit
+const ORIGINAL_POST = readFileSync(POST, 'utf8');
+
+test.afterEach(async () => {
+  await restoreEntry(POST, ORIGINAL_POST, {
+    absent: [' Typed in the builder.', '**Fixture**', '#### ', '[resolution]'],
+  });
+});
 
 // The body editor's round-trip on the fixture entry (issue #73): the loaded
 // `entry.body` renders in CodeMirror, typing and toolbar actions edit the doc,
@@ -94,16 +103,12 @@ test('the pane opens the deterministic entry inside the schema form with the mar
 test('typing edits the doc', async ({ page }) => {
   const editor = await openBodyEditor(page);
   const original = await readDoc(editor);
-  const fileOriginal = readFileSync(POST, 'utf8');
 
   await placeCursor(editor, original.length);
   await page.keyboard.type(' Typed in the builder.');
 
   // the doc is the committed truth — hard equality
   expect(await readDoc(editor)).toBe(`${original} Typed in the builder.`);
-  await restoreEntry(POST, fileOriginal, {
-    absent: [' Typed in the builder.', '**Fixture**', '#### ', '[resolution]'],
-  });
 });
 
 test('the toolbar emits markdown: bold wrap/unwrap, heading toggle, link over the placeholder', async ({
@@ -111,7 +116,6 @@ test('the toolbar emits markdown: bold wrap/unwrap, heading toggle, link over th
 }) => {
   const editor = await openBodyEditor(page);
   const original = await readDoc(editor);
-  const fileOriginal = readFileSync(POST, 'utf8');
   const bolded = page.getByRole('button', { name: 'Bold (markdown)' });
   const heading = page.getByRole('button', { name: 'Heading (markdown)' });
   const link = page.getByRole('button', { name: 'Link (markdown)' });
@@ -143,15 +147,11 @@ test('the toolbar emits markdown: bold wrap/unwrap, heading toggle, link over th
   expect(await readDoc(editor)).toBe(headingOut.replace('resolution', '[resolution](url)'));
   await page.keyboard.type('docs');
   expect(await readDoc(editor)).toBe(headingOut.replace('resolution', '[resolution](docs)'));
-  await restoreEntry(POST, fileOriginal, {
-    absent: [' Typed in the builder.', '**Fixture**', '#### ', '[resolution]'],
-  });
 });
 
 test('native Cmd+Z undoes toolbar and typed edits back to the loaded body', async ({ page }) => {
   const editor = await openBodyEditor(page);
   const original = await readDoc(editor);
-  const fileOriginal = readFileSync(POST, 'utf8');
 
   // one toolbar transaction + one typed group on top
   await selectText(editor, 'Fixture');
@@ -168,7 +168,4 @@ test('native Cmd+Z undoes toolbar and typed edits back to the loaded body', asyn
     doc = await readDoc(editor);
   }
   expect(doc).toBe(original);
-  await restoreEntry(POST, fileOriginal, {
-    absent: [' Typed in the builder.', '**Fixture**', '#### ', '[resolution]'],
-  });
 });

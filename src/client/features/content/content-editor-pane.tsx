@@ -1,11 +1,11 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { CollectionEntryRecord, CollectionRecord } from '../../../core/collections';
 import type { FormFieldNode } from '../../../core/form-tree';
 import { MarkdownEditor } from '../../editor/markdown-editor';
 import { useCollections, useContentSchema } from './api';
 import { ContentForm } from './content-form';
 import { useContentStore } from './store';
-import { type ContentWriteStatus, useAutoWrite } from './use-auto-write';
+import { type ContentWriteStatus, type EntryReload, useAutoWrite } from './use-auto-write';
 
 /** The active entry's record in the payload — null when not found. */
 function findActiveEntry(
@@ -55,25 +55,45 @@ function PaneEditor({ collection, entry, fields }: PaneEditorProps) {
     fields,
   });
 
+  // the 409 reload's snapshot, held locally so it can expire: the loop's
+  // invalidation refetches the collections payload, and the next entry
+  // identity is the same disk truth in the payload's own projection (zod
+  // defaults included) — handing the halves back to it un-freezes the echo
+  // guards and repairs fields the raw parse could not fill
+  const [diskReload, setDiskReload] = useState<EntryReload | null>(null);
+  const [remountSeq, setRemountSeq] = useState(0);
+  useEffect(() => {
+    if (autoWrite.reload === null) return;
+    setDiskReload(autoWrite.reload);
+    setRemountSeq((seq) => seq + 1);
+  }, [autoWrite.reload]);
+  // the snapshot expires with the payload generation, adjusted during
+  // render — entry.data's identity is the object the refetch rebuilt; the
+  // entry record around it re-renders more often
+  const payloadGenRef = useRef(entry.data);
+  if (payloadGenRef.current !== entry.data) {
+    payloadGenRef.current = entry.data;
+    setDiskReload(null);
+  }
+
   const emit = (): void => {
     autoWrite.notify({ data: dataRef.current, body: bodyRef.current });
   };
 
-  // the 409 reload's disk truth re-seeds the refs: the remounted form
-  // re-reports its values on mount, the body editor never does — so the body
-  // ref is set here, not left holding the dropped draft
+  // the reload's disk truth re-seeds the refs: the remounted form re-reports
+  // its values on mount, the body editor never does — so the body ref is set
+  // here, not left holding the dropped draft
   useEffect(() => {
-    if (autoWrite.reload === null) return;
-    dataRef.current = autoWrite.reload.data;
-    bodyRef.current = autoWrite.reload.body;
-  }, [autoWrite.reload]);
+    if (diskReload === null) return;
+    dataRef.current = diskReload.data;
+    bodyRef.current = diskReload.body;
+  }, [diskReload]);
 
-  // keyed by the reload seq: a 409 remounts both halves with the disk truth
+  // keyed by the remount seq: a 409 remounts both halves with the disk truth
   // (the typed edit is dropped — Impl #10; keeping it would be a one-line
   // form.reset onto the reload instead, not doctrine)
-  const seq = autoWrite.reload?.seq ?? 0;
-  const formData = autoWrite.reload?.data ?? entry.data;
-  const formBody = autoWrite.reload?.body ?? entry.body;
+  const formData = diskReload?.data ?? entry.data;
+  const formBody = diskReload?.body ?? entry.body;
 
   return (
     <div data-astroix-content-pane="form" className="flex min-h-0 flex-1 flex-col">
@@ -98,7 +118,7 @@ function PaneEditor({ collection, entry, fields }: PaneEditorProps) {
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto">
         <ContentForm
-          key={seq}
+          key={remountSeq}
           collection={collection}
           fields={fields}
           entryData={formData}
@@ -110,7 +130,7 @@ function PaneEditor({ collection, entry, fields }: PaneEditorProps) {
       </div>
       <div className="flex h-[45%] min-h-0 shrink-0 flex-col border-t border-border">
         <MarkdownEditor
-          key={seq}
+          key={remountSeq}
           body={formBody}
           onChange={(markdown) => {
             bodyRef.current = markdown;

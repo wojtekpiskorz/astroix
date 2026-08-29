@@ -132,13 +132,19 @@ export function useAutoWrite({ file, data, body, fields }: AutoWriteParams): Aut
         return;
       }
       if (result.status === 'conflict' && result.contents !== null) {
-        // JSON round-trip: the disk truth in the payload's projection (a
-        // yaml date would otherwise leak a Date object into the baseline)
+        // JSON round-trip + trimmed body: the disk truth in the payload's
+        // projection — astro serves `parsed.content.trim()`, and everything
+        // downstream of this compare (the draft, the editor doc, the
+        // baseline) lives in that trimmed space; the raw slice belongs to
+        // the hash baseline alone
         let disk: AutoWriteDraft;
         try {
           const split = splitEntryFile(result.contents);
           const parsed = split.yaml === null ? {} : parse(split.yaml);
-          disk = { data: JSON.parse(JSON.stringify(parsed)) ?? {}, body: split.body };
+          disk = {
+            data: JSON.parse(JSON.stringify(parsed)) ?? {},
+            body: split.body.trim(),
+          };
         } catch {
           setStatus('error');
           return;
@@ -149,7 +155,10 @@ export function useAutoWrite({ file, data, body, fields }: AutoWriteParams): Aut
         invalidateCollections();
         if (jsonEqual(disk.data, draft.data) && disk.body === draft.body) {
           // the conflict's truth is what the pane already shows — an external
-          // change accepted while clean; rebase silently, nothing to reload
+          // change accepted while clean; rebase silently, nothing to reload.
+          // (The data compare still misses for schemas with zod defaults —
+          // the disk parse skips the zod pass — those take the reload; its
+          // snapshot expires when the refetched payload catches up.)
           setStatus('idle');
           return;
         }

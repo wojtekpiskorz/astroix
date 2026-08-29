@@ -6,6 +6,17 @@ import { restoreEntry } from './entry-restore';
 
 const POST = join('e2e', 'fixture', 'src', 'content', 'blog', '2024', 'post.md');
 const SCRATCH = join('e2e', 'fixture', 'src', 'content', 'notes', 'scratch.md');
+// captured before any test runs: the spec opens on pristine bytes, and the
+// hook below restores them even when an assertion fails mid-edit
+const ORIGINAL_POST = readFileSync(POST, 'utf8');
+const ORIGINAL_SCRATCH = readFileSync(SCRATCH, 'utf8');
+
+test.afterEach(async () => {
+  await restoreEntry(POST, ORIGINAL_POST, {
+    absent: ['"ab"', '"abc"', 'a plain value', 'calm', 'second'],
+  });
+  await restoreEntry(SCRATCH, ORIGINAL_SCRATCH, { present: ['"pinned"'] });
+});
 
 // The schema-generated form (issue #72): the fixture's blog schema walks into
 // a widget tree (REST contract), the pane renders every mapped widget from
@@ -176,7 +187,6 @@ test('inline validation shows issues per field and never gates editing', async (
   const pane = await openFormPane(page);
   const title = pane.locator('[data-astroix-form-field="title"] input');
   await expect(title).toHaveValue('Nested post');
-  const original = readFileSync(POST, 'utf8');
 
   // break the min(3) contract and blur — the flush path validates immediately
   await title.fill('ab');
@@ -189,14 +199,10 @@ test('inline validation shows issues per field and never gates editing', async (
   await title.fill('abc');
   await expect(title).toHaveValue('abc');
   await expect(issue).toBeHidden();
-  // since #74 the violating draft also lands on disk (~300ms after the
-  // pause, Impl #9) — restore the fixture for the specs that follow
-  await restoreEntry(POST, original, { absent: ['"ab"', '"abc"'] });
 });
 
 test('enum select and repeatable rows edit the draft', async ({ page }) => {
   const pane = await openFormPane(page);
-  const original = readFileSync(POST, 'utf8');
 
   // enum: open the popup (portaled — the .dark re-scope keeps tokens on it)
   const tone = pane.locator('[data-astroix-form-field="tone"] [role="combobox"]');
@@ -213,12 +219,10 @@ test('enum select and repeatable rows edit the draft', async ({ page }) => {
   await pane.locator('[data-astroix-array-remove="1"]').click();
   await expect(pane.locator('[data-astroix-form-field="tags.1"]')).toHaveCount(0);
   await expect(pane.locator('[data-astroix-form-field="tags.0"] input')).toHaveValue('nested');
-  await restoreEntry(POST, original, { absent: ['calm', 'second'] });
 });
 
 test('the raw field flags YAML syntax errors locally', async ({ page }) => {
   const pane = await openFormPane(page);
-  const original = readFileSync(POST, 'utf8');
 
   const aside = pane.locator('[data-astroix-raw-field="aside"]');
   await aside.fill('a: [');
@@ -230,7 +234,6 @@ test('the raw field flags YAML syntax errors locally', async ({ page }) => {
   // the parsed value persists — restore for the specs that follow)
   await aside.fill('a plain value');
   await expect(syntaxIssue).toBeHidden();
-  await restoreEntry(POST, original, { absent: ['a plain value'] });
 });
 
 test('a schema-less collection degrades to the root raw field over the whole draft', async ({
@@ -250,7 +253,6 @@ test('a schema-less collection degrades to the root raw field over the whole dra
   await page.locator('[data-astroix-entry="scratch"]').click();
   const pane = page.locator('[data-astroix-content-pane="form"]');
   await expect(pane).toBeVisible();
-  const scratchOriginal = readFileSync(SCRATCH, 'utf8');
 
   const root = pane.locator('[data-astroix-raw-field=""]');
   await expect(root).toHaveValue(/kind: scratchpad/);
@@ -263,10 +265,6 @@ test('a schema-less collection degrades to the root raw field over the whole dra
   await expect(pane.locator('[data-astroix-field-issue=""]')).toBeVisible();
   await root.fill('kind: scratchpad');
   await expect(pane.locator('[data-astroix-field-issue=""]')).toBeHidden();
-  // since #74 the parsed draft persists — restore the fixture entry; the
-  // final fill drops the pinned key entirely, so pristine content is the
-  // store still carrying that key
-  await restoreEntry(SCRATCH, scratchOriginal, { present: ['"pinned"'] });
 });
 
 test('the function-schema arm: image() marks a read-only metadata node end to end', async ({
