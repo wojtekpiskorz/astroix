@@ -142,10 +142,11 @@ test('native Cmd+Z undoes toolbar and typed edits back to the loaded body', asyn
   expect(await readDoc(editor)).not.toBe(original);
 
   // the toolbar never stole focus (its strip prevents mousedown defaults), so
-  // the editor's own history keymap receives the undo directly
+  // the editor's own history keymap receives the undo directly — CM6 binds
+  // Mod-z (Cmd locally, Ctrl on CI's Linux), hence the portable chord
   let doc = await readDoc(editor);
   for (let step = 0; step < 10 && doc !== original; step += 1) {
-    await page.keyboard.press('Meta+z');
+    await page.keyboard.press('ControlOrMeta+z');
     doc = await readDoc(editor);
   }
   expect(doc).toBe(original);
