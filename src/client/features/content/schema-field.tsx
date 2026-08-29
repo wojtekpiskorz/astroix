@@ -19,15 +19,16 @@ import type { FormFieldNode } from '../../../core/form-tree';
  * The chrome's value draft: TanStack Form's store — raw paths hold the
  * subtree as a parsed value; the YAML text itself lives in the raw widget's
  * local state (#74 serializes the store, never the text). The type is the
- * exact `useForm` return for a record draft (an instantiation expression
- * keeps it locked to the real API instead of re-declaring twelve generics).
+ * exact `useForm` return for a record draft (an instantiation-expression
+ * helper below keeps it locked to the real API instead of re-declaring
+ * twelve generics).
  */
+export type ContentDraftForm = ReturnType<typeof useFormDraft>;
+
 /** `useForm` narrowed to the record draft — the named type the widgets consume. */
 function useFormDraft(options: { defaultValues: Record<string, unknown> }) {
   return useForm(options);
 }
-
-export type ContentDraftForm = ReturnType<typeof useFormDraft>;
 
 interface SchemaFieldProps {
   node: FormFieldNode;
@@ -91,37 +92,13 @@ interface FieldWidgetProps {
   issues: Record<string, string>;
 }
 
+/** Pure dispatch over the walked node's kind — the widgets own their behavior. */
 function FieldWidget({ node, value, onChange, issues }: FieldWidgetProps) {
   switch (node.kind) {
     case 'string':
-      return (
-        <Input
-          value={
-            typeof value === 'string'
-              ? value
-              : value === undefined || value === null
-                ? ''
-                : String(value)
-          }
-          onChange={(event) => onChange(event.target.value)}
-        />
-      );
+      return <StringWidget value={value} onChange={onChange} />;
     case 'number':
-      return (
-        <Input
-          type="number"
-          value={value === undefined || value === null ? '' : String(value)}
-          onChange={(event) => {
-            const text = event.target.value;
-            if (text === '') {
-              onChange(undefined);
-              return;
-            }
-            const parsed = Number(text);
-            onChange(Number.isNaN(parsed) ? undefined : parsed);
-          }}
-        />
-      );
+      return <NumberWidget value={value} onChange={onChange} />;
     case 'boolean':
       return (
         <Checkbox
@@ -130,29 +107,7 @@ function FieldWidget({ node, value, onChange, issues }: FieldWidgetProps) {
         />
       );
     case 'enum':
-      return (
-        <Select
-          items={node.options.map((option) => ({ value: option, label: String(option) }))}
-          value={value === undefined || value === null ? null : value}
-          onValueChange={(selected) => onChange(selected)}
-        >
-          <SelectTrigger>
-            <SelectValue placeholder="—" />
-          </SelectTrigger>
-          <SelectContent
-            // `.dark` re-scope: Base UI portals the popup into document.body,
-            // outside the shadow root — same finding as the smoke dialog (#46);
-            // the adopted sheet carries the token block document-wide (T1)
-            className="dark"
-          >
-            {node.options.map((option) => (
-              <SelectItem key={String(option)} value={option}>
-                {String(option)}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      );
+      return <EnumWidget options={node.options} value={value} onChange={onChange} />;
     case 'image':
       return <ImageMeta value={value} />;
     case 'array':
@@ -160,6 +115,72 @@ function FieldWidget({ node, value, onChange, issues }: FieldWidgetProps) {
     case 'raw':
       return <RawField node={node} value={value} onChange={onChange} />;
   }
+}
+
+interface ValueWidgetProps {
+  value: unknown;
+  onChange: (value: unknown) => void;
+}
+
+/** A string field — any non-string display value stringifies rather than lying. */
+function StringWidget({ value, onChange }: ValueWidgetProps) {
+  return (
+    <Input
+      value={typeof value === 'string' ? value : value == null ? '' : String(value)}
+      onChange={(event) => onChange(event.target.value)}
+    />
+  );
+}
+
+/**
+ * A number field: cleared input means `undefined` (a required number then
+ * shows its real issue), a non-numeric intermediate degrades the same way
+ * instead of inventing NaN into the draft.
+ */
+function NumberWidget({ value, onChange }: ValueWidgetProps) {
+  return (
+    <Input
+      type="number"
+      value={value == null ? '' : String(value)}
+      onChange={(event) => onChange(numberFromInput(event.target.value))}
+    />
+  );
+}
+
+function numberFromInput(text: string): number | undefined {
+  if (text === '') return undefined;
+  const parsed = Number(text);
+  return Number.isNaN(parsed) ? undefined : parsed;
+}
+
+interface EnumWidgetProps extends ValueWidgetProps {
+  options: (string | number)[];
+}
+
+function EnumWidget({ options, value, onChange }: EnumWidgetProps) {
+  return (
+    <Select
+      items={options.map((option) => ({ value: option, label: String(option) }))}
+      value={value == null ? null : value}
+      onValueChange={(selected) => onChange(selected)}
+    >
+      <SelectTrigger>
+        <SelectValue placeholder="—" />
+      </SelectTrigger>
+      <SelectContent
+        // `.dark` re-scope: Base UI portals the popup into document.body,
+        // outside the shadow root — same finding as the smoke dialog (#46);
+        // the adopted sheet carries the token block document-wide (T1)
+        className="dark"
+      >
+        {options.map((option) => (
+          <SelectItem key={String(option)} value={option}>
+            {String(option)}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
 }
 
 /** `image()` metadata — read-only display (spec Impl #4; the picker is deferred). */
@@ -194,6 +215,33 @@ function ImageMeta({ value }: { value: unknown }) {
   );
 }
 
+/** One repeatable row's widget — same primitives as full-size fields. */
+function RowWidget({
+  item,
+  value,
+  onChange,
+}: {
+  item: { kind: 'string' | 'number' | 'boolean' | 'enum'; options?: (string | number)[] };
+  value: unknown;
+  onChange: (value: unknown) => void;
+}) {
+  switch (item.kind) {
+    case 'string':
+      return <StringWidget value={value} onChange={onChange} />;
+    case 'number':
+      return <NumberWidget value={value} onChange={onChange} />;
+    case 'boolean':
+      return (
+        <Checkbox
+          checked={Boolean(value)}
+          onCheckedChange={(checked) => onChange(Boolean(checked))}
+        />
+      );
+    case 'enum':
+      return <EnumWidget options={item.options ?? []} value={value} onChange={onChange} />;
+  }
+}
+
 /** Repeatable rows for arrays of primitives; anything else walked to raw. */
 function ArrayRows({
   node,
@@ -207,14 +255,6 @@ function ArrayRows({
   issues: Record<string, string>;
 }) {
   const rows = Array.isArray(value) ? value : [];
-  const defaultItem = (): unknown =>
-    node.item.kind === 'string'
-      ? ''
-      : node.item.kind === 'number'
-        ? 0
-        : node.item.kind === 'boolean'
-          ? false
-          : (node.item.options?.[0] ?? '');
 
   return (
     <div className="flex flex-col gap-2">
@@ -256,7 +296,7 @@ function ArrayRows({
         size="xs"
         className="w-fit"
         data-astroix-array-add={node.path}
-        onClick={() => onChange([...rows, defaultItem()])}
+        onClick={() => onChange([...rows, defaultRowItem(node.item)])}
       >
         Add {node.label} row
       </Button>
@@ -264,78 +304,21 @@ function ArrayRows({
   );
 }
 
-function RowWidget({
-  item,
-  value,
-  onChange,
-}: {
-  item: { kind: 'string' | 'number' | 'boolean' | 'enum'; options?: (string | number)[] };
-  value: unknown;
-  onChange: (value: unknown) => void;
-}) {
-  if (item.kind === 'boolean') {
-    return (
-      <Checkbox
-        checked={Boolean(value)}
-        onCheckedChange={(checked) => onChange(Boolean(checked))}
-      />
-    );
+/** The value a fresh row starts with, per the item's kind. */
+function defaultRowItem(item: {
+  kind: 'string' | 'number' | 'boolean' | 'enum';
+  options?: (string | number)[];
+}): unknown {
+  switch (item.kind) {
+    case 'string':
+      return '';
+    case 'number':
+      return 0;
+    case 'boolean':
+      return false;
+    case 'enum':
+      return item.options?.[0] ?? '';
   }
-  if (item.kind === 'enum') {
-    const options = item.options ?? [];
-    return (
-      <Select
-        items={options.map((option) => ({ value: option, label: String(option) }))}
-        value={value === undefined || value === null ? null : value}
-        onValueChange={(selected) => onChange(selected)}
-      >
-        <SelectTrigger className="w-full">
-          <SelectValue placeholder="—" />
-        </SelectTrigger>
-        <SelectContent
-          // `.dark` re-scope: Base UI portals the popup into document.body,
-          // outside the shadow root — same finding as the smoke dialog (#46);
-          // the adopted sheet carries the token block document-wide (T1)
-          className="dark"
-        >
-          {options.map((option) => (
-            <SelectItem key={String(option)} value={option}>
-              {String(option)}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-    );
-  }
-  if (item.kind === 'number') {
-    return (
-      <Input
-        type="number"
-        value={value === undefined || value === null ? '' : String(value)}
-        onChange={(event) => {
-          const text = event.target.value;
-          if (text === '') {
-            onChange(undefined);
-            return;
-          }
-          const parsed = Number(text);
-          onChange(Number.isNaN(parsed) ? undefined : parsed);
-        }}
-      />
-    );
-  }
-  return (
-    <Input
-      value={
-        typeof value === 'string'
-          ? value
-          : value === undefined || value === null
-            ? ''
-            : String(value)
-      }
-      onChange={(event) => onChange(event.target.value)}
-    />
-  );
 }
 
 /**
