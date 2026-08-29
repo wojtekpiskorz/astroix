@@ -235,7 +235,30 @@ test('UI: a write racing an external edit reloads the form from disk (banner, ty
     expect(readFileSync(POST, 'utf8')).toBe(
       original.replace('title: Nested post', 'title: External edit'),
     );
+
+    // the reload's body half: typing after the banner must land once, with
+    // the file's leading blank line still single — the phantom-blank-line
+    // and compounding class (the 409 truth is payload-projected; the write
+    // re-anchors the trimmed draft in the raw slice's whitespace)
+    const editor = pane.locator('[data-astroix-body-editor="view"]');
+    await editor.locator('.cm-content').evaluate((el) => {
+      const view = (el.closest('.cm-editor') as (HTMLElement & { __astroixView?: CmView }) | null)
+        ?.__astroixView;
+      if (view === undefined) throw new Error('editor view not stashed');
+      view.dispatch({ selection: { anchor: view.state.doc.length } });
+      view.focus();
+    });
+    await page.keyboard.insertText(' Typed after the 409.');
+    await expect
+      .poll(() => readFileSync(POST, 'utf8'), { timeout: 15_000 })
+      .toBe(
+        original
+          .replace('title: Nested post', 'title: External edit')
+          .replace('for route resolution.\n', 'for route resolution. Typed after the 409.\n'),
+      );
   } finally {
-    await restoreEntry(POST, original, { absent: ['External edit', 'Typed draft'] });
+    await restoreEntry(POST, original, {
+      absent: ['External edit', 'Typed draft', ' Typed after the 409.'],
+    });
   }
 });
