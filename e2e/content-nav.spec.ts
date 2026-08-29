@@ -108,3 +108,54 @@ test('ambiguity is silence: two candidate routes open the form without navigatin
   await expect(canvas.locator('.hero-title')).toBeVisible();
   await expect(canvas.locator('.blog-title')).toHaveCount(0);
 });
+
+test('a form-only pick survives a tab roundtrip — no navigation, no re-resolution', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await page.getByRole('tab', { name: 'Content' }).click();
+  await expect(page.locator('[data-astroix-entries="ready"]')).toBeVisible();
+
+  // the ambiguous entry opens form-only (no navigation happened)
+  await page.locator('[data-astroix-entry="hello-builder"]').click();
+  await expect(page.locator('[data-astroix-entry="hello-builder"]')).toHaveAttribute(
+    'data-active',
+    'true',
+  );
+
+  // a tab roundtrip unmounts and remounts the tracker, but the canvas URL
+  // never changed — no load fired, so the manual pick must survive it
+  await page.getByRole('tab', { name: 'CSS' }).click();
+  await expect(page.locator('[data-astroix-index="ready"]')).toBeVisible();
+  await page.getByRole('tab', { name: 'Content' }).click();
+  await expect(page.locator('[data-astroix-entry="hello-builder"]')).toHaveAttribute(
+    'data-active',
+    'true',
+  );
+  await expect(page.locator('[data-astroix-content-pane="body"] code')).toHaveText(
+    'blog/hello-builder',
+  );
+});
+
+test('re-clicking the entry the canvas already shows consumes the arm on the reload', async ({
+  page,
+}) => {
+  await page.goto('/blog/2024/post');
+  await page.getByRole('tab', { name: 'Content' }).click();
+  const entry = page.locator('[data-astroix-entry="2024/post"]');
+  await expect(page.locator('[data-astroix-entries="ready"]')).toBeVisible();
+  await expect(entry).toHaveAttribute('data-active', 'true');
+
+  // the click navigates to the URL the canvas already shows — the reload is
+  // a new load (bumped seq), its forward match re-verifies the same entry
+  await entry.click();
+  const canvas = page.frameLocator('#astroix-canvas');
+  await expect(canvas.locator('.blog-title')).toHaveText('Nested post');
+  await expect(entry).toHaveAttribute('data-active', 'true');
+
+  // the arm was consumed by that reload — the next plain navigation adopts
+  // freely instead of being eaten by a stale arm
+  await navigateCanvas(page, '/');
+  await expect(canvas.locator('.hero-title')).toBeVisible();
+  await expect(page.locator('[data-astroix-entries="ready"] [data-active="true"]')).toHaveCount(0);
+});

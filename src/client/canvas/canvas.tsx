@@ -26,7 +26,7 @@ export function Canvas() {
   // #71: the canvas reports its URL on every load (the navigation signal
   // route resolution listens to) and applies navigation commands from the
   // store — URL in, URL out, no vertical knowledge
-  const setCanvasUrl = useChromeStore((state) => state.setCanvasUrl);
+  const reportCanvasLoad = useChromeStore((state) => state.reportCanvasLoad);
   const canvasNav = useChromeStore((state) => state.canvasNav);
 
   useEffect(() => {
@@ -97,10 +97,11 @@ export function Canvas() {
         title="astroix canvas"
         className="h-full w-full border-0"
         // same-origin: the location is readable, and every navigation —
-        // initial load, in-canvas link, store command, sync reload — fires here
+        // initial load, in-canvas link, store command, sync reload — fires
+        // here; the report bumps the load seq even for a same-URL reload
         onLoad={() => {
           const href = iframeRef.current?.contentWindow?.location.href;
-          if (href !== undefined) setCanvasUrl(href);
+          if (href !== undefined) reportCanvasLoad(href);
         }}
       />
     </div>

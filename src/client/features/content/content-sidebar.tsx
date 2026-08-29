@@ -13,7 +13,7 @@ import { useContentStore } from './store';
 export function ContentSidebar() {
   const { data: collections, isPending: collectionsPending } = useCollections();
   const { data: routes, isPending: routesPending } = useRoutes();
-  const canvasUrl = useChromeStore((state) => state.canvasUrl);
+  const canvasLoad = useChromeStore((state) => state.canvasLoad);
   const requestCanvasNav = useChromeStore((state) => state.requestCanvasNav);
   const activeEntry = useContentStore((state) => state.activeEntry);
   const selectEntry = useContentStore((state) => state.selectEntry);
@@ -21,13 +21,18 @@ export function ContentSidebar() {
   const applyCanvasResolution = useContentStore((state) => state.applyCanvasResolution);
 
   // Reactive selection (canvas→entry): every canvas load resolves the URL
-  // against routes × collections. Runs only while this tab is mounted — the
-  // URL signal (store `canvasUrl`) stays live regardless, so entering the
-  // tab resolves the current canvas position fresh.
+  // against routes × collections. The effect re-runs on remounts and
+  // refetches too — the store applies each load seq at most once, so only
+  // actual loads resolve (a tab roundtrip never re-resolves an unchanged
+  // URL). While this tab is unmounted the load signal stays live in the
+  // app store; entering the tab resolves the current canvas position.
   useEffect(() => {
-    if (canvasUrl === null || collections === undefined || routes === undefined) return;
-    applyCanvasResolution(resolveActiveEntry(routes, canvasUrl, toCollectionsIndex(collections)));
-  }, [canvasUrl, collections, routes, applyCanvasResolution]);
+    if (canvasLoad === null || collections === undefined || routes === undefined) return;
+    applyCanvasResolution(
+      resolveActiveEntry(routes, canvasLoad.url, toCollectionsIndex(collections)),
+      canvasLoad.seq,
+    );
+  }, [canvasLoad, collections, routes, applyCanvasResolution]);
 
   // boot race (content.spec.ts): the store sync can land after the server
   // starts listening — an empty payload reads as still-loading; routes gate

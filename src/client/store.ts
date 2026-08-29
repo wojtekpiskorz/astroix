@@ -29,21 +29,27 @@ export interface CanvasNav {
   seq: number;
 }
 
+/** One canvas load: the URL as of the iframe's `load` event; `seq` is the load's identity — same-URL reloads bump it. */
+export interface CanvasLoad {
+  url: string;
+  seq: number;
+}
+
 /** Cross-vertical chrome state; per-vertical state lives in each feature's store. */
 interface ChromeState {
   activeVertical: Vertical;
   /** Select mode is default-off and enabled deliberately (spec #2). */
   selectMode: boolean;
   selection: Selection | null;
-  /** The canvas iframe's URL as of its last `load` — the in-canvas navigation signal (#71). */
-  canvasUrl: string | null;
+  /** The canvas iframe's last load — the in-canvas navigation signal (#71). */
+  canvasLoad: CanvasLoad | null;
   /** The pending canvas navigation, consumed by the canvas (never cleared — `seq` drives it). */
   canvasNav: CanvasNav | null;
   setActiveVertical: (vertical: Vertical) => void;
   toggleSelectMode: () => void;
   setSelection: (element: Element) => void;
   clearSelection: () => void;
-  setCanvasUrl: (url: string) => void;
+  reportCanvasLoad: (url: string) => void;
   requestCanvasNav: (url: string) => void;
 }
 
@@ -51,13 +57,14 @@ export const useChromeStore = create<ChromeState>()((set) => ({
   activeVertical: 'css',
   selectMode: false,
   selection: null,
-  canvasUrl: null,
+  canvasLoad: null,
   canvasNav: null,
   setActiveVertical: (vertical) => set({ activeVertical: vertical }),
   toggleSelectMode: () => set((state) => ({ selectMode: !state.selectMode })),
   setSelection: (element) => set({ selection: { element, descriptor: describeElement(element) } }),
   clearSelection: () => set({ selection: null }),
-  setCanvasUrl: (url) => set({ canvasUrl: url }),
+  reportCanvasLoad: (url) =>
+    set((state) => ({ canvasLoad: { url, seq: (state.canvasLoad?.seq ?? 0) + 1 } })),
   requestCanvasNav: (url) =>
     set((state) => ({ canvasNav: { url, seq: (state.canvasNav?.seq ?? 0) + 1 } })),
 }));
