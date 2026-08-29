@@ -292,11 +292,14 @@ export function RawField({
   value,
   onChange,
   id,
+  ariaLabel,
 }: {
   node: Extract<FormFieldNode, { kind: 'raw' }>;
   value: unknown;
   onChange: (value: unknown) => void;
   id?: string;
+  /** Names the control when its label is not a sibling (the root raw field). */
+  ariaLabel?: string;
 }) {
   const [text, setText] = useState(() => rawTextFrom(value));
   const [syntaxIssue, setSyntaxIssue] = useState<string | null>(null);
@@ -320,6 +323,7 @@ export function RawField({
     <div className="flex flex-col gap-1">
       <Textarea
         id={id}
+        aria-label={ariaLabel}
         data-astroix-raw-field={node.path}
         data-astroix-raw-reason={node.reason}
         value={text}

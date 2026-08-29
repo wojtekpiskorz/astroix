@@ -100,7 +100,14 @@ export function ContentForm({ collection, fields, entryData, onValuesChange }: C
         <RawField
           node={rootRaw}
           value={values}
-          onChange={(next) => form.reset(next as Record<string, unknown>)}
+          ariaLabel={rootRaw.label}
+          onChange={(next) =>
+            // `?? {}`: cleared root text means an empty draft — reset with
+            // undefined would fall back to defaultValues (form-core), and the
+            // draft would silently keep the frontmatter the textarea no
+            // longer shows (round 3)
+            form.reset((next ?? {}) as Record<string, unknown>)
+          }
         />
       ) : (
         fields.map((node) => (
