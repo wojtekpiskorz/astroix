@@ -77,6 +77,7 @@ Static and deterministic, upstream of the advisory AI review (wayfinder #55). En
 - Conventional-commit titles (`feat:`, `fix:`, `docs:`, `chore:`).
 - Keep PRs surgical: every changed line should trace to the task.
 - Run `bun run preflight` before `gh pr create` — the CRAP gate is a full-src baseline ratchet.
+- Release-loop ops for agent sessions (approve ritual, merge conventions, brownout ladder, publish verification) live in `docs/agents/release-loop.md`.
 
 ## Parallel sessions & worktrees
 
