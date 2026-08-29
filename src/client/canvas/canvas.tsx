@@ -5,11 +5,16 @@ const SELECTION_STYLE_ID = 'astroix-selection-style';
 const HOVER_CLASS = 'astroix-hover';
 const SELECTED_CLASS = 'astroix-selected';
 
-/** The clean-page twin of the current builder URL (client-side twin of canvasUrl). */
-function canvasSrc(): string {
-  const url = new URL(window.location.href);
+/** The clean-page twin of the given path (client-side twin of canvasUrl). */
+function canvasHref(path: string): string {
+  const url = new URL(path, window.location.href);
   url.searchParams.set('builder', '0');
   return `${url.pathname}${url.search}`;
+}
+
+/** The clean-page twin of the current builder URL — the iframe's boot target. */
+function canvasSrc(): string {
+  return canvasHref(window.location.href);
 }
 
 export function Canvas() {
@@ -18,6 +23,18 @@ export function Canvas() {
   // tab is active, restored on return — the effect below does both
   const selectMode = useSelectModeActive();
   const setSelection = useChromeStore((state) => state.setSelection);
+  // #71: the canvas reports its URL on every load (the navigation signal
+  // route resolution listens to) and applies navigation commands from the
+  // store — URL in, URL out, no vertical knowledge
+  const setCanvasUrl = useChromeStore((state) => state.setCanvasUrl);
+  const canvasNav = useChromeStore((state) => state.canvasNav);
+
+  useEffect(() => {
+    if (canvasNav === null) return;
+    const iframe = iframeRef.current;
+    if (iframe === null) return;
+    iframe.src = canvasHref(canvasNav.url);
+  }, [canvasNav]);
 
   useEffect(() => {
     const iframe = iframeRef.current;
@@ -79,6 +96,12 @@ export function Canvas() {
         src={canvasSrc()}
         title="astroix canvas"
         className="h-full w-full border-0"
+        // same-origin: the location is readable, and every navigation —
+        // initial load, in-canvas link, store command, sync reload — fires here
+        onLoad={() => {
+          const href = iframeRef.current?.contentWindow?.location.href;
+          if (href !== undefined) setCanvasUrl(href);
+        }}
       />
     </div>
   );
