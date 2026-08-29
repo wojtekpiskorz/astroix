@@ -4,7 +4,7 @@ import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import type { AstroIntegration } from 'astro';
 import type { Plugin as VitePlugin } from 'vite';
-import { type RoutesState, toRouteInfos } from './content';
+import { type RoutesState, toRouteInfos } from './routes';
 import { clientEntryPath, isSourceMode } from './source-mode';
 import { hostRegistersTailwind } from './tailwind-guard';
 import { astroixVitePlugin } from './vite-plugin';
