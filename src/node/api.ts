@@ -2,7 +2,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { ViteDevServer } from 'vite';
 import type { RoutesState } from './routes';
 
-export const API_PREFIX = '/__astroix';
+const API_PREFIX = '/__astroix';
 
 /** The shared server context every `/__astroix` handler may touch. */
 export interface ApiContext {
