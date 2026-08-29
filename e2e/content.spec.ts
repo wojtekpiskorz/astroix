@@ -1,17 +1,5 @@
 import { expect, test } from '@playwright/test';
-
-interface CollectionEntryRecord {
-  id: string;
-  filePath: string | null;
-  data: Record<string, unknown>;
-  body: string | null;
-}
-
-interface CollectionRecord {
-  name: string;
-  hasSchema: boolean;
-  entries: CollectionEntryRecord[];
-}
+import type { CollectionRecord } from '../src/core/collections';
 
 interface RouteSegmentPart {
   content: string;
@@ -71,9 +59,9 @@ test('GET /__astroix/collections serves core-parsed entries with schema presence
   const homepage = payload.find((collection) => collection.name === 'homepage');
   expect(homepage?.entries).toHaveLength(1);
   expect(homepage?.entries[0]?.id).toBe('index');
-  expect(homepage?.entries[0]?.data.lead).toBe(
-    'A synthetic Astro 7 project exercising the builder e2e loop.',
-  );
+  // the payload's `data` is the schema's zod output — unknown to the contract
+  const homepageData = homepage?.entries[0]?.data as { lead?: string } | undefined;
+  expect(homepageData?.lead).toBe('A synthetic Astro 7 project exercising the builder e2e loop.');
 });
 
 test('raw entry loading reuses GET /__astroix/file on the payload filePath', async ({ page }) => {
