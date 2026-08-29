@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import type { Plugin, ViteDevServer } from 'vite';
 import { registerApiEndpoints } from './api';
 import { chromeHtml } from './chrome-html';
+import { registerChromeReloadShield } from './chrome-reload-shield';
 import { contentHandlers } from './content';
 import { isDocumentRequest } from './document-request';
 import { restHandlers } from './rest';
@@ -59,6 +60,7 @@ export function astroixVitePlugin(options: AstroixPluginOptions): Plugin {
         handlers: [...restHandlers, ...contentHandlers, ...routesHandlers],
       });
       registerFileSync(server, { root: server.config.root, srcDir });
+      registerChromeReloadShield(server);
     },
     resolveId(id) {
       // The HTML references `/virtual:astroix/chrome`; imports may use the bare id.

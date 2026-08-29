@@ -1,5 +1,22 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { expect, type Locator, type Page, test } from '@playwright/test';
 import type { FormFieldNode } from '../src/core/form-tree';
+import { restoreEntry } from './entry-restore';
+
+const POST = join('e2e', 'fixture', 'src', 'content', 'blog', '2024', 'post.md');
+const SCRATCH = join('e2e', 'fixture', 'src', 'content', 'notes', 'scratch.md');
+// captured before any test runs: the spec opens on pristine bytes, and the
+// hook below restores them even when an assertion fails mid-edit
+const ORIGINAL_POST = readFileSync(POST, 'utf8');
+const ORIGINAL_SCRATCH = readFileSync(SCRATCH, 'utf8');
+
+test.afterEach(async () => {
+  await restoreEntry(POST, ORIGINAL_POST, {
+    absent: ['"ab"', '"abc"', 'a plain value', 'calm', 'second'],
+  });
+  await restoreEntry(SCRATCH, ORIGINAL_SCRATCH, { present: ['"pinned"'] });
+});
 
 // The schema-generated form (issue #72): the fixture's blog schema walks into
 // a widget tree (REST contract), the pane renders every mapped widget from
@@ -213,7 +230,8 @@ test('the raw field flags YAML syntax errors locally', async ({ page }) => {
   await expect(syntaxIssue).toBeVisible();
   await expect(syntaxIssue).toContainText('YAML');
 
-  // recovering parses cleanly — the local flag clears
+  // recovering parses cleanly — the local flag clears (and, since #74,
+  // the parsed value persists — restore for the specs that follow)
   await aside.fill('a plain value');
   await expect(syntaxIssue).toBeHidden();
 });

@@ -22,5 +22,11 @@ rmSync(join(root, fileName));
 if (!existsSync(join(fixture, tarballName))) {
   throw new Error('tarball copy failed');
 }
+// a same-named file: tarball does not re-install on its own: bun's lockfile
+// pins the recorded resolution and its cache serves the old extraction —
+// drop both the installed package and the lock so the fresh artifact always
+// lands; both are no-ops on a clean CI checkout
+rmSync(join(fixture, 'node_modules', '@wojciechpiskorz'), { recursive: true, force: true });
+rmSync(join(fixture, 'bun.lock'), { force: true });
 execSync('bun install', { cwd: fixture, stdio: 'inherit' });
 console.log(`pack fixture ready (${tarballName} = ${fileName})`);

@@ -1,4 +1,21 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { expect, type Locator, type Page, test } from '@playwright/test';
+import { restoreEntry } from './entry-restore';
+
+// Since #74 every doc edit persists through the auto-write loop — the
+// editing tests restore the fixture entry so the specs that follow read
+// pristine bytes.
+const POST = join('e2e', 'fixture', 'src', 'content', 'blog', '2024', 'post.md');
+// captured before any test runs: the spec opens on pristine bytes, and the
+// hook below restores them even when an assertion fails mid-edit
+const ORIGINAL_POST = readFileSync(POST, 'utf8');
+
+test.afterEach(async () => {
+  await restoreEntry(POST, ORIGINAL_POST, {
+    absent: [' Typed in the builder.', '**Fixture**', '#### ', '[resolution]'],
+  });
+});
 
 // The body editor's round-trip on the fixture entry (issue #73): the loaded
 // `entry.body` renders in CodeMirror, typing and toolbar actions edit the doc,
@@ -7,9 +24,8 @@ import { expect, type Locator, type Page, test } from '@playwright/test';
 // history stream).
 //
 // Since #72 the pane renders the schema-generated form around the editor;
-// the draft seam (`onDraftChange`) is a prop, not DOM state, so these specs
-// assert the committed doc through the stashed view like editor.spec.ts.
-// No disk writes here: persistence is #74.
+// the draft lives in the pane's refs, not DOM state, so these specs assert
+// the committed doc through the stashed view like editor.spec.ts.
 
 /** The stashed-view handle as exercised in editor.spec.ts — the same change path as typing. */
 interface CmView {

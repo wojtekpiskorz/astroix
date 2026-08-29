@@ -69,8 +69,8 @@ test('typing writes through the splice loop: disk bytes, format preserved, canva
       view.dispatch({ changes: { from, to: from + '#1e293b'.length, insert: '#b91c1c' } });
     });
 
-    await expect(editor.locator('[data-astroix-editor-status]')).toHaveAttribute(
-      'data-astroix-editor-status',
+    await expect(editor.locator('[data-astroix-write-status]')).toHaveAttribute(
+      'data-astroix-write-status',
       'saved',
       { timeout: 5_000 },
     );

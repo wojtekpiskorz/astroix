@@ -11,12 +11,14 @@ import {
   walkSchemaFields,
 } from '../core/form-tree';
 import { type ApiContext, type ApiHandler, json, readJsonBody } from './api';
+import { writeGuarded } from './rest';
 
-/** The content read-side endpoints (core-reuse §3). */
+/** The content endpoints: read-side (core-reuse §3) and the auto-write (Impl #9). */
 export const contentHandlers: readonly ApiHandler[] = [
   { method: 'GET', path: '/collections', handle: handleCollections },
   { method: 'GET', path: '/content-schema', handle: handleContentSchema },
   { method: 'POST', path: '/content-validate', handle: handleContentValidate },
+  { method: 'POST', path: '/content-write', handle: handleContentWrite },
 ];
 
 /**
@@ -178,6 +180,49 @@ interface AsyncSafeParse {
   safeParseAsync?: (
     input: unknown,
   ) => Promise<{ success: true } | { success: false; error: { issues: readonly IssueLike[] } }>;
+}
+
+/**
+ * `POST /__astroix/content-write` — the content auto-write's whole-file write
+ * (spec Impl #9): the chrome serializes the entry (core's entry-writer) and
+ * posts the full bytes with the hash of the baseline it serialized from.
+ * `writeGuarded` owns the shared hash-guard skeleton (Impl #10).
+ */
+async function handleContentWrite(
+  req: IncomingMessage,
+  res: ServerResponse,
+  _url: URL,
+  ctx: ApiContext,
+): Promise<void> {
+  let body: unknown;
+  try {
+    body = await readJsonBody(req);
+  } catch (error) {
+    json(res, 400, { error: error instanceof Error ? error.message : 'unreadable body' });
+    return;
+  }
+  const { file, contents, expected } = parseWriteBody(body);
+  if (file === null || contents === null) {
+    json(res, 400, { error: 'expected { file, contents }' });
+    return;
+  }
+  await writeGuarded(res, ctx, file, expected, () => contents);
+}
+
+function parseWriteBody(body: unknown): {
+  file: string | null;
+  contents: string | null;
+  expected: string | null;
+} {
+  if (body === null || typeof body !== 'object') {
+    return { file: null, contents: null, expected: null };
+  }
+  const { file, contents, expected } = body as Record<string, unknown>;
+  return {
+    file: typeof file === 'string' ? file : null,
+    contents: typeof contents === 'string' ? contents : null,
+    expected: typeof expected === 'string' ? expected : null,
+  };
 }
 
 /**

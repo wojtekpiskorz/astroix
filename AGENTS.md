@@ -53,7 +53,7 @@ Rationale and trade-offs live in `docs/adr/0002-chrome-module-architecture.md`; 
 - Vertical UI lands in its feature folder — components + its zustand store + its `api.ts`; a feature never imports another feature.
 - Server/watcher-derived data goes through TanStack Query, colocated in the owning module's `api.ts` (feature or shared — `editor/` owns its own file hooks), query keys `['astroix', <resource>, …]`; chrome-only UI state goes zustand (per-feature store; cross-vertical state like `selection` lives in the small app store at `src/client/store.ts`, importable from anywhere like `src/core`).
 - `components/ui/` is shadcn-generated and domain-deaf — extend by regeneration, never by hand-editing toward domain needs.
-- Code with one consumer stays in the feature that needs it; a shared module beyond ui/lib is born only when 2+ verticals need it (a prospective need counts only if the owner rules it does), and stays as small as its job. `lib/` stays helpers-only.
+- Code with one consumer stays in the feature that needs it; a shared module beyond ui/lib is born only when 2+ verticals need it (a prospective need counts only if the owner rules it does), and stays as small as its job — first fire: `editor/write-status-badge.tsx` (WriteStatusBadge + WriteStatus) at the auto-write second consumer (#74, PR #107); the write loops stay feature-local. `lib/` stays helpers-only.
 - One exported component per file, lowercase-dash name matching the component (`rule-list.tsx` ← `RuleList`); extract on multi-use, ~300 lines, or two distinct concerns in one file — the line count is a signal, not a gate.
 
 ## Testing doctrine

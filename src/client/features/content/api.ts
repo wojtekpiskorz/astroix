@@ -87,3 +87,35 @@ export async function validateDraft(
   const payload = (await response.json()) as { issues?: ValidationIssueRecord[] };
   return payload.issues ?? [];
 }
+
+export interface ContentWrite {
+  file: string;
+  /** The whole serialized entry file (core's entry-writer output). */
+  contents: string;
+  /** sha256 of the baseline the contents were serialized from (Impl #10). */
+  expected: string;
+}
+
+export type ContentWriteResult =
+  | { status: 'written' }
+  /** a 409: the disk moved first — `contents` carries its truth when present */
+  | { status: 'conflict'; contents: string | null }
+  | { status: 'error' };
+
+/** POST /__astroix/content-write — the auto-write's whole-file write. */
+export async function postContentWrite(write: ContentWrite): Promise<ContentWriteResult> {
+  const response = await fetch('/__astroix/content-write', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(write),
+  });
+  if (response.status === 409) {
+    const body = (await response.json()) as { contents?: string };
+    return {
+      status: 'conflict',
+      contents: typeof body.contents === 'string' ? body.contents : null,
+    };
+  }
+  if (response.ok) return { status: 'written' };
+  return { status: 'error' };
+}

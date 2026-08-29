@@ -2,8 +2,8 @@
 // the restructure; they migrate to Query hooks in this file when editor data
 // handling is next touched — deliberately not the mechanical move's job.
 
-/** Browser-side sha256 hex of the editor's believed-on-disk content. */
-async function sha256Hex(text: string): Promise<string> {
+/** Browser-side sha256 hex — the optimistic-write currency of both verticals. */
+export async function sha256Hex(text: string): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
