@@ -127,20 +127,25 @@ test('the toolbar emits markdown: bold wrap/unwrap, heading toggle, link over th
   await bolded.click();
   expect(await readDoc(editor)).toBe(original);
 
-  // heading: prefix toggles on, then off (level normalize covered by unit-level semantics)
+  // heading: prefix toggles on, then off, and a deeper level normalizes to `## `
   await placeCursor(editor, 0);
   await heading.click();
   expect(await readDoc(editor)).toBe(`## ${original}`);
   await heading.click();
   expect(await readDoc(editor)).toBe(original);
+  await placeCursor(editor, 0);
+  await page.keyboard.type('#### ');
+  await heading.click();
+  const headingOut = `## ${original}`;
+  expect(await readDoc(editor)).toBe(headingOut);
 
   // link: the selection wraps as [text](url) with the placeholder selected —
   // typing replaces it, proving the caret contract functionally
   await selectText(editor, 'resolution');
   await link.click();
-  expect(await readDoc(editor)).toBe(original.replace('resolution', '[resolution](url)'));
+  expect(await readDoc(editor)).toBe(headingOut.replace('resolution', '[resolution](url)'));
   await page.keyboard.type('docs');
-  expect(await readDoc(editor)).toBe(original.replace('resolution', '[resolution](docs)'));
+  expect(await readDoc(editor)).toBe(headingOut.replace('resolution', '[resolution](docs)'));
 });
 
 test('native Cmd+Z undoes toolbar and typed edits back to the loaded body', async ({ page }) => {
@@ -153,9 +158,9 @@ test('native Cmd+Z undoes toolbar and typed edits back to the loaded body', asyn
   await page.keyboard.type('x'); // replaces the selected inner text
   expect(await readDoc(editor)).not.toBe(original);
 
-  // the toolbar never stole focus (its strip prevents mousedown defaults), so
-  // the editor's own history keymap receives the undo directly — CM6 binds
-  // Mod-z (Cmd locally, Ctrl on CI's Linux), hence the portable chord
+  // the toolbar never stole focus (each button prevents its own mousedown
+  // default), so the editor's own history keymap receives the undo directly —
+  // CM6 binds Mod-z (Cmd locally, Ctrl on CI's Linux), hence the portable chord
   let doc = await readDoc(editor);
   for (let step = 0; step < 10 && doc !== original; step += 1) {
     await page.keyboard.press('ControlOrMeta+z');
