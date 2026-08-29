@@ -60,6 +60,13 @@ test('GET /__astroix/index serves the payload with module-graph effective select
   expect(scoped[0]?.effectiveSelector).toContain(`data-astro-cid-${cid}`);
 });
 
+test('GET /__astroix (bare mount) serves the same payload as /index', async ({ page }) => {
+  await page.goto('/');
+  const bare = await (await page.request.get('/__astroix')).json();
+  const indexed = await (await page.request.get('/__astroix/index')).json();
+  expect(bare).toEqual(indexed);
+});
+
 test('POST /__astroix/edit splices bytes on disk and host HMR picks it up', async ({ page }) => {
   await page.setViewportSize({ width: 600, height: 800 });
   await page.goto('/');

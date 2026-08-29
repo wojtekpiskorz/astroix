@@ -35,16 +35,14 @@ export function toRouteInfos(routes: readonly IntegrationResolvedRoute[]): Route
  * resolver (#69) and the overrides-file naming both key on route patterns.
  */
 export const routesHandlers: readonly ApiHandler[] = [
-  {
-    method: 'GET',
-    path: '/routes',
-    handle: async (
-      _req: IncomingMessage,
-      res: ServerResponse,
-      _url: URL,
-      ctx: ApiContext,
-    ): Promise<void> => {
-      json(res, 200, ctx.routes.current);
-    },
-  },
+  { method: 'GET', path: '/routes', handle: handleRoutes },
 ];
+
+async function handleRoutes(
+  _req: IncomingMessage,
+  res: ServerResponse,
+  _url: URL,
+  ctx: ApiContext,
+): Promise<void> {
+  json(res, 200, ctx.routes.current);
+}

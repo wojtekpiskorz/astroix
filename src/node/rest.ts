@@ -13,6 +13,8 @@ const MAX_BODY_BYTES = 1_000_000;
 
 /** The css endpoints: the index payload, root-confined file reads, disk splices. */
 export const restHandlers: readonly ApiHandler[] = [
+  // The bare mount serves the index payload too (connect hands it as `/`).
+  { method: 'GET', path: '/', handle: handleIndex },
   { method: 'GET', path: '/index', handle: handleIndex },
   { method: 'GET', path: '/file', handle: handleFile },
   { method: 'POST', path: '/edit', handle: handleEdit },

@@ -39,18 +39,8 @@ export interface ApiOptions {
  * (core-reuse §2 — like core's `/_astro/status`, not Astro app middleware):
  * one `/__astroix` mount dispatching over a handler table keyed by
  * `method + path`, so the same-origin invariant is structural (checked once,
- * in the dispatcher) instead of conventional (per registrar). The endpoints:
- *
- * - `GET /__astroix/index` — the index payload: edit-truth records joined
- *   with compiled scoped forms from the client module graph (`rest.ts`).
- * - `GET /__astroix/file` — root-confined file contents for the editor
- *   pane (`rest.ts`).
- * - `POST /__astroix/edit` — `{ file, range, replacement }` spliced to
- *   disk (`rest.ts`).
- * - `GET /__astroix/collections` — collections + entries through core's
- *   `astro:content` module (`content.ts`).
- * - `GET /__astroix/routes` — the routes captured from
- *   `astro:routes:resolved` (`routes.ts`).
+ * in the dispatcher) instead of conventional (per registrar). Handlers are
+ * contributed by the owning modules — see each module for its endpoints.
  *
  * Same-origin only: a browser `sec-fetch-site` header that is not
  * same-origin/none is rejected (T2).
@@ -88,10 +78,9 @@ async function dispatchApi(
       return;
     }
     const url = new URL(req.url ?? '/', 'http://astroix.internal');
-    // The middleware is mounted at /__astroix (connect strips the prefix), so
-    // GET /__astroix/index arrives as /index; the bare mount serves the index.
-    const path = url.pathname === '/' ? '/index' : url.pathname;
-    const handler = table.get(handlerKey(req.method ?? '', path));
+    // The middleware is mounted at /__astroix (connect strips the prefix),
+    // so GET /__astroix/index arrives as /index.
+    const handler = table.get(handlerKey(req.method ?? '', url.pathname));
     if (handler === undefined) {
       next();
       return;
