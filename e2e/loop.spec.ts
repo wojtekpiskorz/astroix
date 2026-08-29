@@ -63,8 +63,8 @@ test('the full CSS editing loop', async ({ page }) => {
     });
 
     // 6. debounce (~300 ms) → written through the splice endpoint
-    await expect(editor.locator('[data-astroix-editor-status]')).toHaveAttribute(
-      'data-astroix-editor-status',
+    await expect(editor.locator('[data-astroix-write-status]')).toHaveAttribute(
+      'data-astroix-write-status',
       'saved',
       { timeout: 5_000 },
     );

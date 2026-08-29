@@ -4,11 +4,10 @@ import { parse } from 'yaml';
 import { jsonEqual, serializeEntry, splitEntryFile } from '../../../core/entry-writer';
 import { collectImagePaths, type FormFieldNode } from '../../../core/form-tree';
 import { fetchFileContents, sha256Hex } from '../../editor/api';
+import type { WriteStatus } from '../../editor/write-status-badge';
 import { COLLECTIONS_KEY, postContentWrite } from './api';
 
 const WRITE_DEBOUNCE_MS = 300;
-
-export type ContentWriteStatus = 'loading' | 'idle' | 'pending' | 'saved' | 'stale' | 'error';
 
 /** The 409 reload's disk truth — the pane remounts its halves on `seq`. */
 export interface EntryReload {
@@ -34,7 +33,7 @@ interface AutoWriteParams {
 }
 
 interface AutoWrite {
-  status: ContentWriteStatus;
+  status: WriteStatus;
   reload: EntryReload | null;
   /** The pane's emit path calls this on every draft change. */
   notify: (draft: AutoWriteDraft) => void;
@@ -51,7 +50,7 @@ interface AutoWrite {
  * while clean), which then rebases silently.
  */
 export function useAutoWrite({ file, data, body, fields }: AutoWriteParams): AutoWrite {
-  const [status, setStatus] = useState<ContentWriteStatus>('loading');
+  const [status, setStatus] = useState<WriteStatus>('loading');
   const [reload, setReload] = useState<EntryReload | null>(null);
   const queryClient = useQueryClient();
 
@@ -88,7 +87,7 @@ export function useAutoWrite({ file, data, body, fields }: AutoWriteParams): Aut
     // the last meaningful badge (written / the reload banner): a duplicate
     // no-op emission — a remount's initial values re-arming the loop —
     // restores it instead of flashing the loop back to idle
-    let badge: ContentWriteStatus = 'idle';
+    let badge: WriteStatus = 'idle';
 
     const invalidateCollections = (): void => {
       void queryClient.invalidateQueries({ queryKey: COLLECTIONS_KEY });

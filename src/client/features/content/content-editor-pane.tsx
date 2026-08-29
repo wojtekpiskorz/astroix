@@ -2,10 +2,11 @@ import { useEffect, useRef, useState } from 'react';
 import type { CollectionEntryRecord, CollectionRecord } from '../../../core/collections';
 import type { FormFieldNode } from '../../../core/form-tree';
 import { MarkdownEditor } from '../../editor/markdown-editor';
+import { WriteStatusBadge } from '../../editor/write-status-badge';
 import { useCollections, useContentSchema } from './api';
 import { ContentForm } from './content-form';
 import { useContentStore } from './store';
-import { type ContentWriteStatus, type EntryReload, useAutoWrite } from './use-auto-write';
+import { type EntryReload, useAutoWrite } from './use-auto-write';
 
 /** The active entry's record in the payload — null when not found. */
 function findActiveEntry(
@@ -19,16 +20,6 @@ function findActiveEntry(
   if (entry === undefined) return null;
   return { collection: active.collection, entry };
 }
-
-/** The pane header's write-status text — empty where the loop is quiet. */
-const WRITE_STATUS_TEXT: Record<ContentWriteStatus, string> = {
-  loading: '',
-  idle: '',
-  pending: 'writing…',
-  saved: 'written',
-  stale: 'changed on disk — reloaded',
-  error: 'write error',
-};
 
 interface PaneEditorProps {
   collection: string;
@@ -101,20 +92,7 @@ function PaneEditor({ collection, entry, fields }: PaneEditorProps) {
         <code className="truncate text-muted-foreground">
           {collection}/{entry.id}
         </code>
-        <span
-          data-astroix-write-status={autoWrite.status}
-          className={
-            autoWrite.status === 'saved'
-              ? 'text-emerald-400'
-              : autoWrite.status === 'pending' || autoWrite.status === 'stale'
-                ? 'text-amber-400'
-                : autoWrite.status === 'error'
-                  ? 'text-red-400'
-                  : 'text-muted-foreground'
-          }
-        >
-          {WRITE_STATUS_TEXT[autoWrite.status]}
-        </span>
+        <WriteStatusBadge status={autoWrite.status} />
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto">
         <ContentForm

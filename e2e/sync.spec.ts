@@ -29,8 +29,8 @@ test('IDE edit reflects live in the open chrome editor (file→chrome sync)', as
       timeout: 10_000,
     });
     // the external change was ACCEPTED, not treated as a pending local write
-    await expect(editor.locator('[data-astroix-editor-status]')).toHaveAttribute(
-      'data-astroix-editor-status',
+    await expect(editor.locator('[data-astroix-write-status]')).toHaveAttribute(
+      'data-astroix-write-status',
       'idle',
     );
   } finally {

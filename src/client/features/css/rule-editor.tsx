@@ -4,6 +4,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 import { fetchFileContents, putFileRangeEdit } from '../../editor/api';
 import { createEditorView, replaceDoc, revealRange } from '../../editor/codemirror';
+import { type WriteStatus, WriteStatusBadge } from '../../editor/write-status-badge';
 import { INDEX_PAYLOAD_KEY } from './api';
 import { type EditorSpec, useCssStore } from './store';
 
@@ -21,9 +22,7 @@ const WRITE_DEBOUNCE_MS = 300;
 export function RuleEditor({ spec }: { spec: EditorSpec }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const baselineRef = useRef<string>('');
-  const [status, setStatus] = useState<
-    'loading' | 'idle' | 'pending' | 'saved' | 'stale' | 'error'
-  >('loading');
+  const [status, setStatus] = useState<WriteStatus>('loading');
   const [activeIndex, setActiveIndex] = useState(spec.activeIndex);
   const queryClient = useQueryClient();
   const closeEditor = useCssStore((state) => state.closeEditor);
@@ -166,28 +165,7 @@ export function RuleEditor({ spec }: { spec: EditorSpec }) {
     <div data-astroix-editor="view" className="flex min-h-0 flex-1 flex-col">
       <div className="flex items-center gap-2 border-b border-slate-800 px-3 py-2 text-xs">
         <code className="truncate text-slate-300">{spec.file}</code>
-        <span
-          data-astroix-editor-status={status}
-          className={
-            status === 'saved'
-              ? 'text-emerald-400'
-              : status === 'pending'
-                ? 'text-amber-400'
-                : status === 'stale'
-                  ? 'text-amber-400'
-                  : status === 'error'
-                    ? 'text-red-400'
-                    : 'text-slate-500'
-          }
-        >
-          {status === 'saved'
-            ? 'written'
-            : status === 'pending'
-              ? 'writing…'
-              : status === 'stale'
-                ? 'changed on disk — reloaded'
-                : status}
-        </span>
+        <WriteStatusBadge status={status} />
         <button
           type="button"
           onClick={closeEditor}
