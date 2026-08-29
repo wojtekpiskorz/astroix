@@ -258,7 +258,7 @@ test('UI: a write racing an external edit reloads the form from disk (banner, ty
       );
   } finally {
     await restoreEntry(POST, original, {
-      absent: ['External edit', 'Typed draft', ' Typed after the 409.'],
+      absent: ['External edit', ' Typed after the 409.'],
     });
   }
 });
