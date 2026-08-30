@@ -18,7 +18,7 @@ function hookRoute(overrides: Record<string, unknown>): IntegrationResolvedRoute
 }
 
 function state(): RoutesState {
-  return { current: [], captured: [], projectionChanged: false };
+  return { current: [], captured: [] };
 }
 
 describe('toRouteInfos', () => {
@@ -72,42 +72,44 @@ describe('toRouteInfos', () => {
 });
 
 describe('captureRoutes — the hook writer (#119)', () => {
-  it('flags the projection change on the first capture and fires onCapture', () => {
+  it('reports the projection change on the first capture and fires onCapture', () => {
     const routesState = state();
     const onCapture = vi.fn();
     routesState.onCapture = onCapture;
     captureRoutes(routesState, [hookRoute({})]);
-    expect(routesState.projectionChanged).toBe(true);
-    expect(onCapture).toHaveBeenCalledOnce();
+    expect(onCapture).toHaveBeenCalledExactlyOnceWith(true);
     expect(routesState.captured).toHaveLength(1);
   });
 
-  it('a re-capture with unchanged routes keeps the payload byte-identical — no change flagged', () => {
+  it('a re-capture with unchanged routes keeps the payload byte-identical — change reported false', () => {
     const routesState = state();
+    const onCapture = vi.fn();
+    routesState.onCapture = onCapture;
     captureRoutes(routesState, [hookRoute({})]);
-    routesState.projectionChanged = false;
     captureRoutes(routesState, [hookRoute({})]);
-    expect(routesState.projectionChanged).toBe(false);
+    expect(onCapture).toHaveBeenNthCalledWith(2, false);
   });
 
   it('preserves enumerated renders by pattern across a re-capture', () => {
     const routesState = state();
+    const onCapture = vi.fn();
+    routesState.onCapture = onCapture;
     captureRoutes(routesState, [hookRoute({})]);
     expect(applyRenders(routesState, new Map([['/blog/[...slug]', ['hello-builder']]]))).toBe(true);
-    routesState.projectionChanged = false;
     // same routes re-captured (e.g. an unrelated srcDir watcher event) — the
     // enumerated truth survives; the payload is unchanged, so no push
     captureRoutes(routesState, [hookRoute({})]);
-    expect(routesState.projectionChanged).toBe(false);
+    expect(onCapture).toHaveBeenLastCalledWith(false);
     expect(routesState.current[0]?.renders).toEqual(['hello-builder']);
   });
 
-  it('a dropped pattern takes its renders with it — a changed projection flags', () => {
+  it('a dropped pattern takes its renders with it — a changed projection reports true', () => {
     const routesState = state();
+    const onCapture = vi.fn();
+    routesState.onCapture = onCapture;
     captureRoutes(routesState, [hookRoute({})]);
-    applyRenders(routesState, new Map([['/blog/[...slug]', ['hello-builder']]]));
     captureRoutes(routesState, [hookRoute({ pattern: '/blog/[slug]', params: ['slug'] })]);
-    expect(routesState.projectionChanged).toBe(true);
+    expect(onCapture).toHaveBeenLastCalledWith(true);
     expect(routesState.current[0]?.pattern).toBe('/blog/[slug]');
     expect(routesState.current[0]?.renders).toBeUndefined();
   });

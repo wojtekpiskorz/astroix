@@ -62,7 +62,11 @@ export function astroixVitePlugin(options: AstroixPluginOptions): Plugin {
       });
       // the background getStaticPaths pass — fills `renders` into the routes
       // payload and pushes `astroix:routes-changed` when it lands (#119)
-      registerRouteEnumeration(server, { root: server.config.root, routes: options.routes });
+      registerRouteEnumeration(server, {
+        root: server.config.root,
+        srcDir,
+        routes: options.routes,
+      });
       registerFileSync(server, { root: server.config.root, srcDir });
       registerChromeReloadShield(server);
     },

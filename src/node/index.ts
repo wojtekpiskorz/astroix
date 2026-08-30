@@ -39,7 +39,7 @@ function astroix(): AstroIntegration {
   // across dev restarts (restarts re-run the routes hook on the same instance).
   // The background enumeration (`route-enumeration.ts`) fills `renders` into
   // it and watches the captures through `onCapture` (#119).
-  const routesState: RoutesState = { current: [], captured: [], projectionChanged: false };
+  const routesState: RoutesState = { current: [], captured: [] };
   return {
     name: 'astroix',
     hooks: {

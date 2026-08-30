@@ -19,17 +19,12 @@ export interface RoutesState {
    */
   captured: readonly IntegrationResolvedRoute[];
   /**
-   * Set by `captureRoutes` when the served projection changed (patterns,
-   * segments, rendering — preserved `renders` aside); the server-side sync
-   * reads and clears it to decide the WS push.
-   */
-  projectionChanged: boolean;
-  /**
-   * Fired by `captureRoutes` on every hook capture; set by the enumeration
+   * Fired by `captureRoutes` on every hook capture with whether the served
+   * projection changed (preserved `renders` aside); set by the enumeration
    * registration, which owns the server handles (latest server wins across
    * dev restarts — the integration instance persists).
    */
-  onCapture?: () => void;
+  onCapture?: (changed: boolean) => void;
 }
 
 /**
@@ -85,9 +80,9 @@ export function captureRoutes(
     const renders = previous.get(info.pattern);
     return renders === undefined ? info : { ...info, renders };
   });
-  state.projectionChanged = !samePayload(next, state.current);
+  const changed = !samePayload(next, state.current);
   state.current = next;
-  state.onCapture?.();
+  state.onCapture?.(changed);
 }
 
 /**

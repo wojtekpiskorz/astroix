@@ -78,9 +78,8 @@ interface SingleParamRoute {
   segments: FlatSegment[];
   /** Position of the one param among `segments` — the invariant `kind` carries. */
   paramAt: number;
-  /** Rendering truth carried from `RouteInfo` — the render-aware gates read it. */
-  rendering: RouteInfo['rendering'];
-  renders: RouteInfo['renders'];
+  /** The source `RouteInfo` — rendering truth (`routeRendersId`) reads straight off it. */
+  source: RouteInfo;
 }
 
 /** A route flattened from Astro's parse: zero params, or exactly one (single or rest) — anything else stays silent. */
@@ -174,7 +173,7 @@ function rankedCandidates(entryId: string, routes: ReadonlyArray<RouteInfo>): Ra
   for (const route of routes) {
     const flat = flattenRoute(route);
     if (flat === null || flat.kind !== 'single-param') continue;
-    if (!flatRendersId(flat, entryId)) continue;
+    if (!routeRendersId(flat.source, entryId)) continue;
     const url = buildCandidateUrl(flat, entryId);
     if (url === null) continue;
     if (isStaticPage(routes, toUrlSegments(url))) continue;
@@ -217,7 +216,7 @@ function entryHitsFor(
     if (entryId === null) continue;
     // prerendered-known routes only render their enumerated params — a URL
     // outside that space 404s in dev, so the id never counts as a hit (#119)
-    if (!flatRendersId(flat, entryId)) continue;
+    if (!routeRendersId(flat.source, entryId)) continue;
     for (const collection of collectionsWithEntry(entryId, collections)) {
       hits.set(`${collection}\u0000${entryId}`, { collection, entryId });
     }
@@ -250,19 +249,7 @@ function flattenRoute(route: RouteInfo): FlatRoute | null {
   }
   return paramAt === -1
     ? { kind: 'static', segments }
-    : {
-        kind: 'single-param',
-        segments,
-        paramAt,
-        rendering: route.rendering,
-        renders: route.renders,
-      };
-}
-
-/** The flat twin of `routeRendersId` — same predicate over the flattened route. */
-function flatRendersId(route: SingleParamRoute, entryId: string): boolean {
-  if (route.rendering === 'on-demand') return true;
-  return route.renders === undefined || route.renders.includes(entryId);
+    : { kind: 'single-param', segments, paramAt, source: route };
 }
 
 /** A single-part segment is static text, a `[param]`, or a `[...rest]`; embedded params (multi-part segments) stay silent. */
