@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "astro dev --port ${ASTROIX_E2E_PACK_PORT:-4313}"
+    "dev": "node ../boot-heal.mjs e2e/pack-fixture/src/pages ASTROIX_E2E_PACK_PORT && astro dev --port ${ASTROIX_E2E_PACK_PORT:-4313}"
   },
   "dependencies": {
     "@wojciechpiskorz/astroix": "file:./astroix-pack.tgz",
