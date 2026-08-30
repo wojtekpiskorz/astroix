@@ -62,6 +62,12 @@ export function Canvas() {
   // store — URL in, URL out, no vertical knowledge
   const reportCanvasLoad = useChromeStore((state) => state.reportCanvasLoad);
   const canvasNav = useChromeStore((state) => state.canvasNav);
+  // #141: the iframe's document is replaced on every navigation — store
+  // command, in-canvas link, HMR full-reload. The load report is the
+  // document-identity signal: the select handlers below re-attach per
+  // document, or a reload leaves the live canvas listener-less and clicks
+  // pass through unselected
+  const canvasLoad = useChromeStore((state) => state.canvasLoad);
 
   useEffect(() => {
     if (canvasNav === null) return;
@@ -70,6 +76,7 @@ export function Canvas() {
     iframe.src = canvasHref(canvasNav.url);
   }, [canvasNav]);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: canvasLoad is the document-identity trigger — the body reads contentDocument, which a new load swaps (#141)
   useEffect(() => {
     const iframe = iframeRef.current;
     const doc = iframe?.contentDocument;
@@ -120,7 +127,9 @@ export function Canvas() {
       }
       style.remove();
     };
-  }, [selectMode, setSelection]);
+    // canvasLoad in the deps: a new load is a new document — the handlers
+    // must follow it or a reload leaves the live canvas listener-less (#141)
+  }, [selectMode, setSelection, canvasLoad]);
 
   return (
     <div className="min-w-0 flex-1 bg-white">

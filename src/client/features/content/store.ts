@@ -1,16 +1,20 @@
 import { create } from 'zustand';
 import type { ActiveEntry } from '../../../core/route-resolver';
+import type { CanvasLoad } from '../../store';
 
 interface ContentState {
   /** The entry open in the content editor (glossary: active entry). */
   activeEntry: ActiveEntry | null;
   /**
-   * The entry a reverse navigation is taking the canvas to: armed by the
-   * entry click, consumed by the next canvas resolution — a forward match
-   * confirms the navigation, a miss keeps the clicked entry (the
-   * form-only fallback).
+   * The URL whose load verifies the armed reverse navigation (#71, #140),
+   * null when none is armed. The load that consumes the arm must match its
+   * pathname; a load for any other URL means the armed navigation was
+   * superseded before its load event fired — that load is a plain
+   * navigation and adopts its resolution, so a stale arm can never eat the
+   * selection clear. The pick itself lives in `activeEntry`: a verifying
+   * match reselects it, a miss keeps it (the form-only fallback).
    */
-  pendingVerify: ActiveEntry | null;
+  pendingVerify: string | null;
   /**
    * The canvas load the last resolution applied. Each load resolves at
    * most once: the tracker effect re-runs on remounts and refetches, but a
@@ -27,17 +31,28 @@ interface ContentState {
   selectEntry: (entry: ActiveEntry) => void;
   /** Toggles one tree folder between collapsed and open. */
   toggleFolder: (key: string) => void;
-  /** Arms the forward-match verification for a reverse navigation. */
-  armReverseVerify: (entry: ActiveEntry) => void;
+  /** Arms the forward-match verification for a reverse navigation to `targetUrl`. */
+  armReverseVerify: (targetUrl: string) => void;
   /**
-   * A canvas resolution (URL → entry) lands here, tagged with its load seq.
-   * A new seq is applied exactly once: plain navigations adopt the
+   * A canvas resolution (URL → entry) lands here, tagged with its load.
+   * A new load seq is applied exactly once: plain navigations adopt the
    * resolution — silence clears the entry; an armed reverse navigation is
    * verified instead — a match reselects the same entry, a miss keeps the
-   * manual pick, and the arm clears either way. A stale seq (remount,
-   * StrictMode's second pass, refetch identity change) changes nothing.
+   * manual pick, and the arm clears either way. The one exception: an armed
+   * load for a URL other than the armed navigation's target (#140 — the
+   * navigation was superseded, its load never fired) is a plain navigation
+   * and adopts the resolution. A stale seq (remount, StrictMode's second
+   * pass, refetch identity change) changes nothing.
    */
-  applyCanvasResolution: (resolved: ActiveEntry | null, loadSeq: number) => void;
+  applyCanvasResolution: (resolved: ActiveEntry | null, load: CanvasLoad) => void;
+}
+
+/** Pathname equality against the chrome's origin — the arm's load-vs-target comparator. */
+function samePathname(target: string, loadUrl: string): boolean {
+  return (
+    new URL(loadUrl, window.location.href).pathname ===
+    new URL(target, window.location.href).pathname
+  );
 }
 
 export const useContentStore = create<ContentState>()((set) => ({
@@ -53,15 +68,18 @@ export const useContentStore = create<ContentState>()((set) => ({
       if (!collapsed.delete(key)) collapsed.add(key);
       return { collapsedFolders: collapsed };
     }),
-  armReverseVerify: (entry) => set({ pendingVerify: entry }),
-  applyCanvasResolution: (resolved, loadSeq) =>
+  armReverseVerify: (targetUrl) => set({ pendingVerify: targetUrl }),
+  applyCanvasResolution: (resolved, load) =>
     set((state) => {
-      if (loadSeq <= state.appliedLoadSeq) return state;
+      if (load.seq <= state.appliedLoadSeq) return state;
       if (state.pendingVerify !== null) {
+        if (!samePathname(state.pendingVerify, load.url)) {
+          return { pendingVerify: null, activeEntry: resolved, appliedLoadSeq: load.seq };
+        }
         // the manual pick stays: on a successful forward match it equals
         // `resolved` already, on a miss it is the form-only fallback
-        return { pendingVerify: null, appliedLoadSeq: loadSeq };
+        return { pendingVerify: null, appliedLoadSeq: load.seq };
       }
-      return { activeEntry: resolved, appliedLoadSeq: loadSeq };
+      return { activeEntry: resolved, appliedLoadSeq: load.seq };
     }),
 }));

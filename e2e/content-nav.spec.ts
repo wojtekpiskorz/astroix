@@ -181,6 +181,36 @@ test('re-clicking the entry the canvas already shows consumes the arm on the rel
   await expect(page.locator('[data-astroix-entries="ready"] [data-active="true"]')).toHaveCount(0);
 });
 
+// The #140 flake, pinned deterministically: the armed navigation's load
+// event never fires when a newer navigation supersedes it before
+// window-load (its document may even commit and parse — the event still
+// belongs to whichever navigation completes last). Holding the armed
+// navigation's response makes the supersession guaranteed instead of a
+// load-race; the arm must not survive into the plain `/` navigation's
+// resolution and eat its clear.
+test('a superseded reverse navigation leaves no stale arm — the plain navigation still clears (#140)', async ({
+  page,
+}) => {
+  await page.route('**/blog/2024/post*', async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    await route.continue().catch(() => {});
+  });
+
+  await page.goto('/');
+  await page.getByRole('tab', { name: 'Content' }).click();
+  await expect(page.locator('[data-astroix-entries="ready"]')).toBeVisible();
+
+  await page.locator('[data-astroix-entry="2024/post"]').click();
+  // the canvas moves on before the held response can ever land — the armed
+  // navigation is superseded, its load event never fires
+  await navigateCanvas(page, '/');
+
+  const canvas = page.frameLocator('#astroix-canvas');
+  await expect(canvas.locator('.hero-title')).toBeVisible();
+  await expect(page.locator('[data-astroix-entries="ready"] [data-active="true"]')).toHaveCount(0);
+  await expect(page.locator('[data-astroix-content-pane="empty"]')).toBeVisible();
+});
+
 // --- #111: the tree sidebar ---
 
 test('nested ids render as folders with basename labels, flat ids stay bare', async ({ page }) => {
