@@ -1,5 +1,11 @@
 # @wojciechpiskorz/astroix
 
+## 0.0.24
+
+### Patch Changes
+
+- fc7e39e: Split the repeatable-rows cluster (`ArrayRows`, `RowWidget`, `defaultRowItem`) out of `field-widgets.tsx` into `array-rows.tsx`, with the shared leaf widgets in `value-widgets.tsx` — a pure file split, no behavior change (#156).
+
 ## 0.0.23
 
 ### Patch Changes
