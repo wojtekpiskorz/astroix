@@ -167,7 +167,7 @@ describe('extractRenders — getStaticPaths output → rendered param values (#1
     expect(extractRenders(pages, 'page')).toEqual(['2', '3']);
   });
 
-  it('the rest-param key arrives without dots (…slug → slug)', () => {
+  it('the rest-param key arrives without dots (...slug → slug)', () => {
     expect(extractRenders([{ params: { slug: 'nested/post' } }], 'slug')).toEqual(['nested/post']);
   });
 });
