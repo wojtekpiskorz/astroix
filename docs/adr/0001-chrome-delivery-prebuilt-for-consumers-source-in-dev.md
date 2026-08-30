@@ -12,6 +12,7 @@ The builder chrome is a React 19 app, and the original doctrine served it as raw
 ## Consequences
 
 - react/react-dom are **devDependencies**: consumed at package build, bundled into the chrome bundle; consumers never resolve them (zero React surface for host projects).
+- `dependencies` is defined by reachability, not by folders (#138): exactly the packages node-side code must resolve at runtime, kept honest by the `check:dist-graph` CI gate over `dist/` bare imports, while everything else — chrome libraries and node-side build-time utilities like `yaml` — is a `devDependency` bundled into the artifact, never consumer install weight.
 - Two serving modes exist and both are e2e-tested: the main fixture (`file:` link) exercises source mode; an `npm-pack` smoke fixture exercises the exact shipped artifact (need already flagged by T1).
 - The mode switch lives in the virtual chrome module's `load()` (dev-checkout detection is a backlog detail). The `plugin-react` preamble behavior in source mode is an implementation-time verification (open question from T3).
 - A cheap warn-only React instance/version guard ships in the chrome; a host-React-18 fixture is unnecessary by construction (foreign hosts load the bundle) — recorded as the tripwire to revisit only if source-serving is ever extended to foreign hosts.
