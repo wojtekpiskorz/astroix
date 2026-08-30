@@ -57,13 +57,17 @@ function treeHash(dir) {
 }
 
 /** A publish-shaped copy carries dist + manifest and never the repo itself. */
+function isPublishShaped(dir) {
+  return (
+    !['src', 'e2e'].some((name) => existsSync(join(dir, name))) &&
+    existsSync(join(dir, 'package.json')) &&
+    existsSync(join(dir, 'dist'))
+  );
+}
+
 function assertPublishShape(dir, label) {
-  const forbidden = ['src', 'e2e'].filter((name) => existsSync(join(dir, name)));
-  if (
-    forbidden.length > 0 ||
-    !existsSync(join(dir, 'package.json')) ||
-    !existsSync(join(dir, 'dist'))
-  ) {
+  if (!isPublishShaped(dir)) {
+    const forbidden = ['src', 'e2e'].filter((name) => existsSync(join(dir, name)));
     throw new Error(
       `[astroix] ${label} at ${dir} is not publish-shaped` +
         (forbidden.length > 0
@@ -109,8 +113,21 @@ assertPublishShape(staging, 'staging dir');
 // from, keeping CI's committed-lockfile guard meaningful.
 const stagedDist = treeHash(join(staging, 'dist'));
 const installedDist = treeHash(join(installed, 'dist'));
-if (stagedDist !== installedDist) {
-  console.log('[astroix] staged dist differs from the installed copy — bun install in e2e/fixture');
+// Shape arm (#152): a regressed copy (pre-#123 full-repo residue) must
+// self-heal on the next boot even when its dist still hashes equal — the
+// digest alone is blind to foreign dirs. Unlike the tarball lane, where
+// bun's cache serves the old extraction, a frozen dir-`file:` install
+// rebuilds the installed tree wholesale and evicts whatever the source
+// does not carry (verified: planted src/ + loose files vanish) — no
+// rmSync needed.
+const digestStale = stagedDist !== installedDist;
+const shapeBroken = !isPublishShaped(installed);
+if (digestStale || shapeBroken) {
+  const triggers = [
+    ...(digestStale ? ['staged dist differs from the installed copy'] : []),
+    ...(shapeBroken ? ['installed copy is not publish-shaped'] : []),
+  ];
+  console.log(`[astroix] ${triggers.join('; ')} — bun install in e2e/fixture`);
   run('bun install --frozen-lockfile', fixture);
 }
 
