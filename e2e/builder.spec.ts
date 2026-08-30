@@ -154,6 +154,10 @@ test('a Canvas re-render after navigation never reloads the iframe', async ({ pa
   await page.getByRole('tab', { name: 'CSS' }).click();
   await page.getByText('Select: off').click();
   await expect(page.getByText('Select: on')).toBeVisible();
+  // settle before the read (rest.spec.ts precedent): the old document stays
+  // queryable until a replacement navigation commits — an in-flight reload
+  // would answer from the old window and coin-flip the guard green
+  await page.waitForTimeout(250);
   expect(
     await canvasTitle.evaluate(
       (el) =>
