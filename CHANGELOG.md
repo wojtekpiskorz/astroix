@@ -1,5 +1,11 @@
 # @wojciechpiskorz/astroix
 
+## 0.0.21
+
+### Patch Changes
+
+- df151a3: Close the per-request/per-pass `ServerModuleRunner` after use (`ModuleRunner#close()`): each fresh runner pinned a `send` listener on the ssr hot channel, tripping `MaxListenersExceededWarning` after ~10 collections/schema/enumeration hits (#146)
+
 ## 0.0.20
 
 ### Patch Changes
