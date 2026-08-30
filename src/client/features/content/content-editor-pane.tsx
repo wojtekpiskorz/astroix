@@ -73,7 +73,9 @@ function PaneEditor({ collection, entry, fields }: PaneEditorProps) {
       </div>
       {truth === null ? (
         <div className="flex min-h-0 flex-1 items-center justify-center px-4 text-center text-xs text-muted-foreground">
-          Reading the entry file…
+          {autoWrite.status === 'error'
+            ? 'The entry file could not be read — the write loop is down.'
+            : 'Reading the entry file…'}
         </div>
       ) : (
         <>

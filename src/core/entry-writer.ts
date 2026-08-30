@@ -4,26 +4,50 @@
  * through the `yaml` package's Document API (comments, key order and quoting
  * of untouched nodes survive by construction), body as the raw string below
  * the closing `---`. Diffing runs in JSON space (draft vs the loaded
- * baseline, both zod-output-shaped): only differing keys reach the Document,
- * so untransformed keys — a `date: 2024-06-01` whose draft twin is an ISO
- * string — never touch their node; a differing-on-paper value whose node
- * already holds its JSON twin is left alone too, so a stale baseline cannot
- * churn untouched lines. The Document API's own normalization is
- * the accepted cost of a re-serialized block: flow collections keep their
- * style but respaced (`[a]` → `[ a ]`); block content stays byte-identical.
+ * baseline, both raw-parse-shaped — #149's one truth-space): only differing
+ * keys reach the Document, so untouched keys never touch their node; a
+ * differing-on-paper value whose node already holds its JSON twin is left
+ * alone too, so a stale baseline cannot churn untouched lines. The Document
+ * API's own normalization is the accepted cost of a re-serialized block:
+ * flow collections keep their style but respaced (`[a]` → `[ a ]`); block
+ * content stays byte-identical.
  */
-import { type Document, isCollection, isNode, parseDocument } from 'yaml';
+import { type Document, isCollection, isNode, parse, parseDocument } from 'yaml';
 
-/** The loaded state a write splices into — zod output as the chrome holds it. */
+/**
+ * The loaded state a write splices into — the raw file parse (the chrome's
+ * truth-space since #149; the zod projection is display-only).
+ */
 export interface EntryBaseline {
   data: unknown;
-  body: string | null;
+  body: string;
 }
 
-/** The pane's draft — the form values and the body editor's doc. */
+/**
+ * The pane's draft — the form values and the body editor's doc — and the
+ * shape every truth in the write loop parses into.
+ */
 export interface EntryDraft {
   data: unknown;
   body: string;
+}
+
+/**
+ * The raw file parse — one truth-space's both sides (#149): frontmatter
+ * through the yaml package plus a JSON round-trip (yaml scalars land as
+ * their JSON twins — Dates as ISO strings, the same space `serializeEntry`
+ * compares nodes in), body trimmed (the payload's body space). Zod defaults
+ * stay absent — they are widget-display, materializing only on touch. Null
+ * when the frontmatter cannot parse.
+ */
+export function parseEntryDraft(contents: string): EntryDraft | null {
+  try {
+    const split = splitEntryFile(contents);
+    const parsed = split.yaml === null ? {} : parse(split.yaml);
+    return { data: JSON.parse(JSON.stringify(parsed)) ?? {}, body: split.body.trim() };
+  } catch {
+    return null;
+  }
 }
 
 export interface SerializeEntryParams {
@@ -97,7 +121,7 @@ export function serializeEntry({
 
   // astro serves the payload body trimmed; an edited body is re-anchored in
   // the file's own leading/trailing whitespace so writes stay byte-surgical
-  const nextBody = draft.body === (baseline.body ?? '') ? null : anchorBody(split.body, draft.body);
+  const nextBody = draft.body === baseline.body ? null : anchorBody(split.body, draft.body);
   const bodyText = nextBody ?? split.body;
   // the body starts on its own line: a file whose closing `---` ends it (`''`)
   // gains the separator back whenever a non-empty body follows

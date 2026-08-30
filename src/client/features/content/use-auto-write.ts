@@ -1,7 +1,11 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
-import { parse } from 'yaml';
-import { jsonEqual, serializeEntry, splitEntryFile } from '../../../core/entry-writer';
+import {
+  type EntryDraft,
+  jsonEqual,
+  parseEntryDraft,
+  serializeEntry,
+} from '../../../core/entry-writer';
 import { collectImagePaths, type FormFieldNode } from '../../../core/form-tree';
 import { fetchFileContents, sha256Hex } from '../../editor/api';
 import type { WriteStatus } from '../../editor/write-status-badge';
@@ -9,38 +13,17 @@ import { COLLECTIONS_KEY, postContentWrite } from './api';
 
 const WRITE_DEBOUNCE_MS = 300;
 
-/** The pane's draft halves, as its emit path reports them. */
-export interface AutoWriteDraft {
-  data: unknown;
-  body: string;
-}
-
 /**
- * The entry's raw truth (#149): the file parse the pane's halves mount on.
- * The seq increments on every accepted change — the mount read, a 409's disk
- * reload, an external change accepted while clean — and the pane keys its
- * halves on it, so each bump remounts them onto the new truth.
+ * The entry's raw truth (#149): `parseEntryDraft`'s output — the file parse
+ * the pane's halves mount on. The seq increments on every accepted change —
+ * the mount read, a 409's disk reload, an external change accepted while
+ * clean — and the pane keys its halves on it, so each bump remounts them
+ * onto the new truth.
  */
 export interface EntryTruth {
   seq: number;
   data: unknown;
   body: string;
-}
-
-/**
- * The raw file parse, the one space both diff sides live in: frontmatter
- * through the yaml package plus a JSON round-trip (Dates land as ISO strings
- * — the same space core's entry-writer compares nodes in), body trimmed (the
- * payload's body space). Null when the frontmatter cannot parse.
- */
-function parseEntryDraft(contents: string): AutoWriteDraft | null {
-  try {
-    const split = splitEntryFile(contents);
-    const parsed = split.yaml === null ? {} : parse(split.yaml);
-    return { data: JSON.parse(JSON.stringify(parsed)) ?? {}, body: split.body.trim() };
-  } catch {
-    return null;
-  }
 }
 
 interface AutoWriteParams {
@@ -62,7 +45,7 @@ interface AutoWrite {
   /** The current raw truth — null until the mount read lands. */
   truth: EntryTruth | null;
   /** The pane's emit path calls this on every draft change. */
-  notify: (draft: AutoWriteDraft) => void;
+  notify: (draft: EntryDraft) => void;
 }
 
 /**
@@ -81,7 +64,7 @@ export function useAutoWrite({ file, fields, payloadSignal }: AutoWriteParams): 
   const [truth, setTruth] = useState<EntryTruth | null>(null);
   const queryClient = useQueryClient();
 
-  const draftRef = useRef<AutoWriteDraft | null>(null);
+  const draftRef = useRef<EntryDraft | null>(null);
   const fieldsRef = useRef(fields);
   const seqRef = useRef(0);
 
@@ -91,9 +74,9 @@ export function useAutoWrite({ file, fields, payloadSignal }: AutoWriteParams): 
 
   // the render→loop bridges: event-time ref writes only (render-time ref
   // writes don't survive React Compiler replay)
-  const handleRef = useRef<((draft: AutoWriteDraft) => void) | null>(null);
+  const handleRef = useRef<((draft: EntryDraft) => void) | null>(null);
   const reconcileRef = useRef<(() => void) | null>(null);
-  const notify = (draft: AutoWriteDraft): void => {
+  const notify = (draft: EntryDraft): void => {
     draftRef.current = draft;
     handleRef.current?.(draft);
   };
@@ -117,7 +100,7 @@ export function useAutoWrite({ file, fields, payloadSignal }: AutoWriteParams): 
     // publishes a truth — the seq is monotonic across effect re-runs
     // (StrictMode): a repeated mount read must still remount the halves,
     // never collide with a live seq
-    const setEntryTruth = (draft: AutoWriteDraft): void => {
+    const setEntryTruth = (draft: EntryDraft): void => {
       seqRef.current += 1;
       setTruth({ seq: seqRef.current, data: draft.data, body: draft.body });
     };
@@ -129,7 +112,7 @@ export function useAutoWrite({ file, fields, payloadSignal }: AutoWriteParams): 
     // deps) are both stable, and StrictMode's first pass is cancelled
     // before its writes land — so there is nothing to carry across runs
     let raw: string | null = null;
-    let baseline: AutoWriteDraft | null = null;
+    let baseline: EntryDraft | null = null;
     let chain: Promise<void> = Promise.resolve();
     // the last meaningful badge (written / the reload banner): a duplicate
     // no-op emission — a remount's initial values re-arming the loop —
@@ -151,7 +134,7 @@ export function useAutoWrite({ file, fields, payloadSignal }: AutoWriteParams): 
       try {
         next = serializeEntry({
           raw,
-          baseline: { data: baseline.data, body: baseline.body },
+          baseline,
           draft,
           protectedPaths: collectImagePaths(fieldsRef.current),
         });
