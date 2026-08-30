@@ -14,6 +14,9 @@
 
 import { execFileSync } from 'node:child_process';
 
+// both args are repo-root-relative: git below always runs -C <toplevel>, so a
+// cwd-relative pathspec (tempting from a fixture cwd) matches nothing and
+// silently disables the heal
 const [trackedDir = 'e2e/fixture/src/content', gate = 'ASTROIX_E2E_PORT'] = process.argv.slice(2);
 
 function git(args) {
