@@ -1,5 +1,12 @@
 # @wojciechpiskorz/astroix
 
+## 0.0.16
+
+### Patch Changes
+
+- 149b1dc: e2e settle-then-restore (#114): `restoreEntry` first waits out the auto-write debounce (entry file + data-store quiet together past the ~300ms window) before writing the original bytes back, closing the race where a late debounced write re-dirtied the fixture entry after the restore; the fixture dev script now heals any dirty fixture content (git restore, loud log per file) before the playwright-driven server boots.
+- a11c110: Per-lane e2e ports (#120): both Playwright webServers (main fixture, npm-pack lane) read their ports from `ASTROIX_E2E_PORT` / `ASTROIX_E2E_PACK_PORT`, keeping 4314/4313 as canonical CI defaults — parallel local lanes no longer race for, or adopt, a sibling lane's dev server. The pack spec takes its base URL from the shared ports module instead of a hardcoded `:4313`.
+
 ## 0.0.15
 
 ### Patch Changes
