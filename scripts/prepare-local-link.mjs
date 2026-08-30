@@ -103,12 +103,15 @@ assertPublishShape(staging, 'staging dir');
 // the digest stays content-based so a plain-copy layout (other bun versions,
 // copyfile backend) refreshes too: `bun install` re-links/re-copies and needs
 // none of the lockfile gymnastics the tarball lane has
-// (prepare-pack-fixture.mjs), so a plain install suffices.
+// (prepare-pack-fixture.mjs). Frozen on purpose: a dir `file:` dep's lockfile
+// spec never changes with dist bytes, so frozen never blocks a legitimate
+// refresh — it only refuses to rewrite a lockfile the fixture manifest drifted
+// from, keeping CI's committed-lockfile guard meaningful.
 const stagedDist = treeHash(join(staging, 'dist'));
 const installedDist = treeHash(join(installed, 'dist'));
 if (stagedDist !== installedDist) {
   console.log('[astroix] staged dist differs from the installed copy — bun install in e2e/fixture');
-  run('bun install', fixture);
+  run('bun install --frozen-lockfile', fixture);
 }
 
 // 4. Guard: whatever sits in the fixture's node_modules must be
