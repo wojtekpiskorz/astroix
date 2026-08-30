@@ -64,6 +64,75 @@ test('escape hatch: ?builder=0 returns the untouched page', async ({ request }) 
   expect(html).not.toContain('virtual:astroix/chrome');
 });
 
+// #110: the chrome URL carries the canvas position (?canvas=) — refresh and
+// share re-boot the canvas where it was. Entry-click navigation, the
+// self-assembling invariant and the no-reload guarantee all ride the same
+// canvas-load signal the reactive resolution listens to.
+test('the chrome URL carries the canvas position and updates without reloads', async ({ page }) => {
+  await page.goto('/');
+  const canvas = page.frameLocator('#astroix-canvas');
+  await expect(canvas.locator('.hero-title')).toBeVisible();
+  const canvasParam = (): string | null => new URL(page.url()).searchParams.get('canvas');
+
+  // boot without the param: today's derivation (the chrome page's own path),
+  // then the invariant self-assembles — the first load writes canvas=/
+  await expect.poll(canvasParam).toBe('/');
+
+  // the chrome document must not reload when the param updates (prior art:
+  // the __astroixLoadedAt marker from the hot-swap tests below)
+  await page.evaluate(() => {
+    (window as { __astroixLoadedAt?: number }).__astroixLoadedAt = performance.now();
+  });
+  const historyLength = await page.evaluate(() => history.length);
+
+  // entry→canvas navigation (single candidate) mirrors into the param — and
+  // the builder's clean-page marker never leaks into the carried position.
+  // Position is proven by the URL param + the blog-page marker (other specs
+  // mutate the title text — the chrome seam stays content-agnostic).
+  await page.getByRole('tab', { name: 'Content' }).click();
+  await expect(page.locator('[data-astroix-entries="ready"]')).toBeVisible();
+  await page.locator('[data-astroix-entry="2024/post"]').click();
+  await expect(canvas.locator('.blog-title')).toBeVisible();
+  await expect.poll(canvasParam).toBe('/blog/2024/post');
+  expect(canvasParam()).not.toContain('builder');
+
+  // replaceState only: the entry-click navigation itself appends one joint
+  // session-history entry (the iframe's own — browser behavior, unchanged);
+  // a pushState-based mirror would make this +2
+  expect(await page.evaluate(() => history.length)).toBe(historyLength + 1);
+  expect(
+    await page.evaluate(() => (window as { __astroixLoadedAt?: number }).__astroixLoadedAt),
+  ).toBeDefined();
+});
+
+test('a chrome refresh restores the canvas from the carried position', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('tab', { name: 'Content' }).click();
+  await expect(page.locator('[data-astroix-entries="ready"]')).toBeVisible();
+  await page.locator('[data-astroix-entry="2024/post"]').click();
+  await expect(page.frameLocator('#astroix-canvas').locator('.blog-title')).toBeVisible();
+
+  // the refresh re-boots the chrome with the canvas already at the position —
+  // and the reactive resolution re-arms the matching entry over the restored load
+  await page.reload();
+  const canvas = page.frameLocator('#astroix-canvas');
+  await expect(canvas.locator('.blog-title')).toBeVisible();
+  await page.getByRole('tab', { name: 'Content' }).click();
+  await expect(page.locator('[data-astroix-entry="2024/post"]')).toHaveAttribute(
+    'data-active',
+    'true',
+  );
+});
+
+test('a shared URL with the param boots the canvas at the carried position', async ({ page }) => {
+  // boot precedence: the param wins over deriving from the chrome page's own
+  // path (/) — another session opens the builder pre-positioned
+  await page.goto('/?canvas=/blog/2024/post');
+  const canvas = page.frameLocator('#astroix-canvas');
+  await expect(canvas.locator('.blog-title')).toBeVisible();
+  await expect.poll(() => new URL(page.url()).searchParams.get('canvas')).toBe('/blog/2024/post');
+});
+
 test('dev toolbar is hidden inside the canvas iframe', async ({ page }) => {
   await page.goto('/');
   const canvas = page.frameLocator('#astroix-canvas');
