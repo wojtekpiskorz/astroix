@@ -100,10 +100,15 @@ describe('content store — a stale arm never eats a plain navigation (#140)', (
     const store = useContentStore.getState();
     store.selectEntry(post);
     store.armReverseVerify('/blog/2024/post');
-    useContentStore.getState().applyCanvasResolution(post, {
-      ...POST_LOAD,
-      url: `${POST_LOAD.url}&x=1`,
-    });
-    expect(useContentStore.getState().activeEntry).toEqual(post);
+    // the synthetic miss shape: a resolution over the armed target's own
+    // pathname must take the verify branch (miss keeps the pick) — a
+    // comparator that regressed to full-URL equality would read this load
+    // as foreign and adopt the silence, clearing the pick
+    useContentStore
+      .getState()
+      .applyCanvasResolution(null, { ...POST_LOAD, url: `${POST_LOAD.url}&x=1#frag` });
+    const state = useContentStore.getState();
+    expect(state.pendingVerify).toBeNull();
+    expect(state.activeEntry).toEqual(post);
   });
 });
