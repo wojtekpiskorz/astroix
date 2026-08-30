@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { jsonEqual, parseEntryDraft, serializeEntry, splitEntryFile } from './entry-writer';
+import {
+  jsonEqual,
+  parseEntryDraft,
+  sameDraft,
+  serializeEntry,
+  splitEntryFile,
+} from './entry-writer';
 
 // A mechanical fixture, not the chrome's truth-space (that is the raw parse,
 // parseEntryDraft below): the ISO date and the schema-default `tone` stay in
@@ -78,6 +84,19 @@ describe('parseEntryDraft', () => {
 
   it('returns null on a frontmatter the Document API cannot parse', () => {
     expect(parseEntryDraft('---\na: [\n---\n')).toBeNull();
+  });
+});
+
+describe('sameDraft', () => {
+  it('equals on deep-equal data and the same body', () => {
+    const a = { data: { tags: ['x'] }, body: 'b' };
+    expect(sameDraft(a, { data: { tags: ['x'] }, body: 'b' })).toBe(true);
+  });
+
+  it('differs on data or body alone', () => {
+    const a = { data: { n: 1 }, body: 'b' };
+    expect(sameDraft(a, { data: { n: 2 }, body: 'b' })).toBe(false);
+    expect(sameDraft(a, { data: { n: 1 }, body: 'c' })).toBe(false);
   });
 });
 

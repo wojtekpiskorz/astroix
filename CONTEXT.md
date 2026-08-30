@@ -28,6 +28,7 @@ The ubiquitous language of this project. Use these terms (and these exact spelli
 | **raw field** | The textarea fallback rendering an unsupported schema subtree as editable YAML. |
 | **raw truth** | The entry file's own parse — what the write loop's `parseEntryDraft` produces — as the content editor's single truth-space (#149): the form's values, the write loop's baseline and the pane's halves all live in it. Distinct from raw mode/raw field (both widget concerns); the file's bytes are its anchor, writes are byte-surgical against them. |
 | **zod projection** | The collections payload's `entry.data` — astro's zod output with defaults filled and transforms applied. In the pane it is display-only (image() metadata the raw truth cannot produce), plus sidebar data and the change signal; never the form's truth. |
+| **widget-display** | A zod default rendered by the widget while the raw truth keeps the key absent (#149): placeholder semantics for string, number, enum and raw kinds, checked-state display for boolean, natural-empty for arrays; a touch materializes the key, the write follows. |
 | **auto-write** | The persist-on-pause write loop (debounce ~300ms) writing the real repo file; the shared persistence doctrine of both verticals. |
 | **smoke gate** | The manual-smoke checklist's only entry: a top-level `?astroix_smoke=1` — without the param the checklist renders nothing. |
 | **hint pill** | The small fixed-position affordance visible while the smoke gate is open; summons the wizard (as does `S`, typing-guarded). |

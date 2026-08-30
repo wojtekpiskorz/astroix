@@ -2,8 +2,8 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 import {
   type EntryDraft,
-  jsonEqual,
   parseEntryDraft,
+  sameDraft,
   serializeEntry,
 } from '../../../core/entry-writer';
 import { collectImagePaths, type FormFieldNode } from '../../../core/form-tree';
@@ -169,7 +169,7 @@ export function useAutoWrite({ file, fields, payloadSignal }: AutoWriteParams): 
         raw = result.contents;
         baseline = disk;
         invalidateCollections();
-        if (jsonEqual(disk.data, draft.data) && disk.body === draft.body) {
+        if (sameDraft(disk, draft)) {
           // the conflict's truth is what the pane already shows — an external
           // change accepted while clean; rebase silently, nothing to reload.
           // One truth-space makes the compare honest: the draft and the disk
@@ -222,7 +222,7 @@ export function useAutoWrite({ file, fields, payloadSignal }: AutoWriteParams): 
         if (raw !== startedFrom) return;
         const parsed = parseEntryDraft(contents);
         if (parsed === null) return;
-        if (jsonEqual(parsed.data, baseline.data) && parsed.body === baseline.body) {
+        if (sameDraft(parsed, baseline)) {
           // the loop's own echo coming back through the payload — the hash
           // baseline rebases (bytes may still differ: comments), the truth
           // does not move and nothing remounts
@@ -230,11 +230,7 @@ export function useAutoWrite({ file, fields, payloadSignal }: AutoWriteParams): 
           return;
         }
         const draft = draftRef.current;
-        if (
-          draft === null ||
-          !jsonEqual(draft.data, baseline.data) ||
-          draft.body !== baseline.body
-        ) {
+        if (draft === null || !sameDraft(draft, baseline)) {
           // dirty — the write loop's hash guard reconciles on the next write
           return;
         }

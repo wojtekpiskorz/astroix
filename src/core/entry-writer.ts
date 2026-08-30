@@ -150,6 +150,15 @@ function anchorBody(rawBody: string, draftBody: string): string {
   return `${lead}${draftBody}${tail}`;
 }
 
+/**
+ * Whether two drafts hold the same truth — data deep-equal in JSON space,
+ * body equal as the trimmed string it always is. The write loop's whole
+ * decision basis: its echo, clean and dirty legs all spell this one name.
+ */
+export function sameDraft(a: EntryDraft, b: EntryDraft): boolean {
+  return jsonEqual(a.data, b.data) && a.body === b.body;
+}
+
 /** Deep equality over JSON space (zod output never carries richer leaves). */
 export function jsonEqual(a: unknown, b: unknown): boolean {
   if (a === b) return true;
