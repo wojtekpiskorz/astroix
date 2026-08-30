@@ -22,7 +22,7 @@ test('canvas→entry: a dynamic-route canvas marks the entry active in the Conte
   const list = page.locator('[data-astroix-entries="ready"]');
   await expect(list).toBeVisible();
 
-  // the two-level list: collections → entries (entry id as label)
+  // the list: collections → entries (entry id as the key, basename as the label, #111)
   await expect(page.locator('[data-astroix-collection="blog"]')).toBeVisible();
   await expect(page.locator('[data-astroix-collection="homepage"]')).toBeVisible();
   await expect(page.locator('[data-astroix-collection="blog"] [data-astroix-entry]')).toHaveCount(
