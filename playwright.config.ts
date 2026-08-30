@@ -1,10 +1,13 @@
 import { defineConfig, devices } from '@playwright/test';
+import { MAIN_PORT, PACK_PORT } from './e2e/ports';
 
-// The e2e lanes own their ports: main :4314, npm-pack :4313. The owner's
-// manual smoke lives on :4312 — structural separation, never shared servers
-// (PR #36 debugged a "broken" suite that was actually playwright adopting
-// the owner's orphaned smoke server with a stale dist).
-const PORT = 4314;
+// The e2e lanes own their ports: main :4314, npm-pack :4313 (canonical for
+// CI). Parallel local lanes override the pair via ASTROIX_E2E_PORT /
+// ASTROIX_E2E_PACK_PORT (#120) so sibling worktrees never share a server.
+// The owner's manual smoke lives on :4312 — structural separation, never
+// shared servers (PR #36 debugged a "broken" suite that was actually
+// playwright adopting the owner's orphaned smoke server with a stale
+// dist).
 
 export default defineConfig({
   testDir: 'e2e',
@@ -18,7 +21,7 @@ export default defineConfig({
   retries: process.env.CI ? 2 : 0,
   reporter: process.env.CI ? 'github' : 'list',
   use: {
-    baseURL: `http://localhost:${PORT}`,
+    baseURL: `http://localhost:${MAIN_PORT}`,
   },
   projects: [
     {
@@ -28,9 +31,9 @@ export default defineConfig({
   ],
   webServer: [
     {
-      command: `ASTROIX_E2E_PORT=${PORT} bun run dev`,
+      command: `ASTROIX_E2E_PORT=${MAIN_PORT} bun run dev`,
       cwd: 'e2e/fixture',
-      url: `http://localhost:${PORT}`,
+      url: `http://localhost:${MAIN_PORT}`,
       // CI parity — no zombie adoption, ever; the boot cost is seconds
       reuseExistingServer: false,
       timeout: 60_000,
@@ -39,9 +42,9 @@ export default defineConfig({
       // npm-pack smoke lane (ADR-0001): build + pack the repo, install the
       // tarball into the pack fixture, boot it. Managed as a webServer so
       // playwright owns the lifecycle and the generous cold-install timeout.
-      command: 'node ../../scripts/prepare-pack-fixture.mjs && bun run dev',
+      command: `node ../../scripts/prepare-pack-fixture.mjs && ASTROIX_E2E_PACK_PORT=${PACK_PORT} bun run dev`,
       cwd: 'e2e/pack-fixture',
-      url: 'http://localhost:4313',
+      url: `http://localhost:${PACK_PORT}`,
       reuseExistingServer: false,
       timeout: 240_000,
     },

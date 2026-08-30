@@ -16,7 +16,7 @@ When your work touches an architectural decision, these files win over your prio
 - `bun run check` — Biome lint + format check; `bun run check:write` autofixes.
 - `bun run typecheck` — `tsc --noEmit`.
 - `bun run test` — unit tests (vitest + happy-dom); `bun run test:watch` for watch mode.
-- `bun run test:e2e` — Playwright e2e; boots the fixture dev server on `http://localhost:4314` (npm-pack lane on :4313; the owner's manual smoke owns :4312 — lanes never share servers).
+- `bun run test:e2e` — Playwright e2e; boots the fixture dev server on `http://localhost:4314` (npm-pack lane on :4313; the owner's manual smoke owns :4312 — lanes never share servers). Parallel local lanes override the pair via `ASTROIX_E2E_PORT` / `ASTROIX_E2E_PACK_PORT` (#120); 4314/4313 stay canonical for CI.
 - `bun run crap` — crap4ts risk report: CC per function, CRAP + Uncle-Bob bands where coverage is real (src/core); `--calibrate` (one-time, already done) / `--update-baseline` manage the ratchet baseline.
 - `bun run preflight` — full-src CRAP ratchet (every run evaluates all of src/ against the baseline; owner ruling, issue #62); the agent runs it before `gh pr create`.
 - `bun run hooks` — once per clone: wires `git config core.hooksPath scripts/hooks` (pre-commit: biome blocks on staged lint/format errors; the typecheck blocks when the staged set touches `.ts`/`.tsx`; the crap4ts CC scan warns). Not a postinstall on purpose — this package is published and must not touch consumers' git config.
