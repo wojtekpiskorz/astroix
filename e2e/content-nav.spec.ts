@@ -1,9 +1,10 @@
 import { expect, test } from '@playwright/test';
 
-// The navigation bridge (#71): reactive selection canvas→entry (route
+// The navigation bridge (#71, #109): reactive selection canvas→entry (route
 // resolution over the canvas URL, reported on every iframe load), entry→canvas
-// reverse navigation gated on a single candidate and verified by forward
-// match, and ambiguity = silence — the form opens, the canvas stays put.
+// reverse navigation on a benign route plurality (candidates that all render
+// the clicked entry, most specific first) verified by forward match, and
+// ambiguity = silence — the form opens, the canvas stays put.
 
 /** Drives an in-canvas navigation — the load event is the signal under test, the initiator is not. */
 async function navigateCanvas(page: import('@playwright/test').Page, path: string): Promise<void> {
@@ -87,7 +88,33 @@ test('entry→canvas: a unique candidate navigates and the forward match reselec
   await expect(page.locator('[data-astroix-content-pane="empty"]')).toBeVisible();
 });
 
-test('ambiguity is silence: two candidate routes open the form without navigating', async ({
+test('entry→canvas: a benign route plurality navigates and the forward match reselects', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await page.getByRole('tab', { name: 'Content' }).click();
+  await expect(page.locator('[data-astroix-entries="ready"]')).toBeVisible();
+
+  // hello-builder fills both /blog/[slug] and /blog/[...slug] — two patterns
+  // rendering the same entry (#109's benign plurality): the click navigates
+  // through the segment-param spelling
+  await page.locator('[data-astroix-entry="hello-builder"]').click();
+  const canvas = page.frameLocator('#astroix-canvas');
+  await expect(canvas.locator('.blog-title')).toHaveText('Hello builder');
+  const pathname = await page
+    .locator('#astroix-canvas')
+    .evaluate((frame: HTMLIFrameElement) => frame.contentWindow?.location.pathname);
+  expect(pathname).toBe('/blog/hello-builder');
+
+  // the post-navigation forward match reselects the same entry
+  const entry = page.locator('[data-astroix-entry="hello-builder"]');
+  await expect(entry).toHaveAttribute('data-active', 'true');
+  await expect(page.locator('[data-astroix-content-pane="form"] code')).toHaveText(
+    'blog/hello-builder',
+  );
+});
+
+test('ambiguity is silence: an id held by two collections opens the form without navigating', async ({
   page,
 }) => {
   await page.goto('/');
@@ -97,12 +124,11 @@ test('ambiguity is silence: two candidate routes open the form without navigatin
   await page.getByRole('tab', { name: 'Content' }).click();
   await expect(page.locator('[data-astroix-entries="ready"]')).toBeVisible();
 
-  // hello-builder fills both /blog/[...slug] and /blog/[slug] — no navigation
-  await page.locator('[data-astroix-entry="hello-builder"]').click();
-  await expect(page.locator('[data-astroix-entry="hello-builder"]')).toHaveAttribute(
-    'data-active',
-    'true',
-  );
+  // `index` lives in homepage and notes (the two-collection holder fixture)
+  // — the shared-id class stays silent
+  const entry = page.locator('[data-astroix-collection="homepage"] [data-astroix-entry="index"]');
+  await entry.click();
+  await expect(entry).toHaveAttribute('data-active', 'true');
 
   // the canvas never left the home page
   await expect(canvas.locator('.hero-title')).toBeVisible();
@@ -116,24 +142,19 @@ test('a form-only pick survives a tab roundtrip — no navigation, no re-resolut
   await page.getByRole('tab', { name: 'Content' }).click();
   await expect(page.locator('[data-astroix-entries="ready"]')).toBeVisible();
 
-  // the ambiguous entry opens form-only (no navigation happened)
-  await page.locator('[data-astroix-entry="hello-builder"]').click();
-  await expect(page.locator('[data-astroix-entry="hello-builder"]')).toHaveAttribute(
-    'data-active',
-    'true',
-  );
+  // the two-collection-holder entry opens form-only (no navigation happened)
+  const entry = page.locator('[data-astroix-collection="homepage"] [data-astroix-entry="index"]');
+  await entry.click();
+  await expect(entry).toHaveAttribute('data-active', 'true');
 
   // a tab roundtrip unmounts and remounts the tracker, but the canvas URL
   // never changed — no load fired, so the manual pick must survive it
   await page.getByRole('tab', { name: 'CSS' }).click();
   await expect(page.locator('[data-astroix-index="ready"]')).toBeVisible();
   await page.getByRole('tab', { name: 'Content' }).click();
-  await expect(page.locator('[data-astroix-entry="hello-builder"]')).toHaveAttribute(
-    'data-active',
-    'true',
-  );
+  await expect(entry).toHaveAttribute('data-active', 'true');
   await expect(page.locator('[data-astroix-content-pane="form"] code')).toHaveText(
-    'blog/hello-builder',
+    'homepage/index',
   );
 });
 
