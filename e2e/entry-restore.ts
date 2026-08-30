@@ -51,8 +51,9 @@ function readStore(): string {
 
 /** Waits out any armed auto-write: file+store silent together for QUIET_MS. */
 async function settleWrites(file: string): Promise<void> {
+  const readSignature = () => `${readFileSync(file, 'utf8')}\u0000${readStore()}`;
   const start = Date.now();
-  let signature = `${readFileSync(file, 'utf8')}\u0000${readStore()}`;
+  let signature = readSignature();
   let lastChange = Date.now();
   while (Date.now() - lastChange < QUIET_MS) {
     if (Date.now() - start >= SETTLE_TIMEOUT_MS) {
@@ -61,7 +62,7 @@ async function settleWrites(file: string): Promise<void> {
       );
     }
     await sleep(POLL_MS);
-    const next = `${readFileSync(file, 'utf8')}\u0000${readStore()}`;
+    const next = readSignature();
     if (next !== signature) {
       signature = next;
       lastChange = Date.now();
