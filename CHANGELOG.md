@@ -1,5 +1,12 @@
 # @wojciechpiskorz/astroix
 
+## 0.0.17
+
+### Patch Changes
+
+- 94c55c9: getStaticPaths-aware routes payload (#119): `rendering` + `renders` fields on `GET /__astroix/routes` (additive, background-enumerated — the endpoint never awaits the pass), a true unrouted-entry marker, render-aware navigation that stops landing clicks on 404 pages, `astroix:routes-changed` WS invalidation for the chrome's routes cache, and a vendored paginate shim pinned to core semantics.
+- 3333ccc: Publish-shaped local link for the e2e fixture (#123): `scripts/prepare-local-link.mjs` (wired into the fixture dev script and `bun run prepare-local`) rebuilds `dist` when stale, syncs only the publish surface (`dist`, `package.json`, `README`, `LICENSE`) into the gitignored `.astroix-local/` staging dir, refreshes the fixture's installed copy, and guards that the copy never regresses to a full-repo shape (no `src/`/`e2e/` inside). The fixture dependency moves from `file:../..` to `file:../../.astroix-local`, killing the recursive `node_modules` nesting (10 levels, 316M) that `file:`-linking the repo root produced; CI stages the link before the fixture's frozen install.
+
 ## 0.0.16
 
 ### Patch Changes
