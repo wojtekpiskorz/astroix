@@ -4,7 +4,6 @@ import type { IntegrationResolvedRoute, PaginateFunction } from 'astro';
 import { createServerModuleRunner, type ViteDevServer } from 'vite';
 import {
   createContentSignalClassifier,
-  createContentSyncPusher,
   createLoaderCommitClassifier,
   pushToChrome,
 } from './content-signal';
@@ -52,9 +51,10 @@ import { applyRenders, isProjectPageRoute, type RoutesState } from './routes';
  * the chrome's collections/schema caches have no other external-edit
  * invalidation. Both the shared srcDir content signal and the loader's
  * data-store write (the post-commit half — the loader debounces the store
- * write 500 ms) schedule the deferred push; the deferral keeps the chrome's
- * refetch from racing the canvas's post-commit full-reload render (see
- * createContentSyncPusher).
+ * write 500 ms) push immediately, labeled with the leg that fired (#155) —
+ * the chrome, not a server-side grace, sequences the loader leg's refetch
+ * after the canvas's post-commit full-reload render (see
+ * synced-invalidation.ts on the client side).
  */
 
 const DEBOUNCE_MS = 400;
@@ -89,7 +89,6 @@ export function registerRouteEnumeration(
 ): void {
   const isContentSignal = createContentSignalClassifier(options);
   const isLoaderCommit = createLoaderCommitClassifier(options.root);
-  const pushContentSynced = createContentSyncPusher(server);
   const results = new Map<string, readonly string[]>();
   let timer: ReturnType<typeof setTimeout> | null = null;
   let running = false;
@@ -121,15 +120,16 @@ export function registerRouteEnumeration(
   // runner already reads those as transformed) nor css is treated as
   // content moving — the pass re-runs now and twice more to out-wait the
   // loader's data commit. Both that signal and the loader's store write
-  // push `astroix:content-synced` (see the module doc); the store write
-  // re-arms nothing — the enumeration cadence is #119's, unchanged.
+  // push `astroix:content-synced` labeled with their leg (see the module
+  // doc); the store write re-arms nothing — the enumeration cadence is
+  // #119's, unchanged.
   const onFileEvent = (file: string): void => {
     if (isLoaderCommit(file)) {
-      pushContentSynced();
+      pushToChrome(server, 'astroix:content-synced', 'loader');
       return;
     }
     if (!isContentSignal(file)) return;
-    pushContentSynced();
+    pushToChrome(server, 'astroix:content-synced', 'srcdir');
     contentFollowups = CONTENT_FOLLOWUPS;
     schedule();
   };

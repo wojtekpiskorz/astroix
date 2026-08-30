@@ -293,8 +293,9 @@ test('UI: an idle user post-409 writes nothing — the file keeps the external e
     // the banner's reload won: the form shows the disk truth
     await expect(title).toHaveValue('External edit');
 
-    // the idle window: no typing, past every push/refetch path — the 1 s
-    // render grace, the loop's own invalidation, the ssr-walk refetch
+    // the idle window: no typing, past every push/refetch path — the
+    // loader leg's canvas-load-sequenced invalidation (3 s fallback bound,
+    // #155), the loop's own invalidation, the ssr-walk refetch
     await page.waitForTimeout(4_000);
 
     // byte-stability is the claim: the external edit's bytes, untouched —

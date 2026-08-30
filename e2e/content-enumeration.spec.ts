@@ -12,11 +12,11 @@ import { expect, test } from '@playwright/test';
 // spec asserts the payload truth against the live fixture, both directions
 // (add and remove). The chrome-side half lives in the second test (#133):
 // the same external edit must live-refresh the Content sidebar — the
-// deferred `astroix:content-synced` push (srcDir signal + the loader's
-// post-commit data-store write, behind a render grace) invalidates the
-// chrome's collections cache without a reload or a tab roundtrip; astro's
-// own content event rides the ssr hot channel and never reaches the client
-// chrome.
+// `astroix:content-synced` push (srcDir signal + the loader's post-commit
+// data-store write; the loader leg's invalidation sequenced on the
+// canvas's next load, #155) invalidates the chrome's collections cache
+// without a reload or a tab roundtrip; astro's own content event rides the
+// ssr hot channel and never reaches the client chrome.
 
 interface RouteInfo {
   pattern: string;
@@ -81,8 +81,9 @@ test('a content change re-enumerates renders without a restart — add and remov
 // external content edit with no reload and no tab roundtrip. The signal
 // chain: the srcDir file event pushes immediately (pre-commit — the loader's
 // store write is debounced 500 ms), then the data-store write itself fires
-// the post-commit push whose refetch lands fresh — the poll budget must
-// cover both legs plus the loader sync.
+// the post-commit push whose invalidation waits out the canvas's full-reload
+// load before refetching (#155) — the poll budget must cover both legs plus
+// the loader sync and the reload render.
 test('an external content edit live-refreshes the chrome collections list — add and remove', async ({
   page,
 }) => {
