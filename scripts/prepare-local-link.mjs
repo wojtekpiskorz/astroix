@@ -21,6 +21,9 @@ const installed = join(fixture, 'node_modules', '@wojciechpiskorz', 'astroix');
 
 // exactly what `files: ["dist"]` + the npm defaults allow into a tarball
 const PUBLISH_SURFACE = ['dist', 'package.json', 'README.md', 'LICENSE'];
+// repo-only dirs a publish-shaped copy must never carry; shared by the shape
+// predicate and its diagnostic so the two cannot drift
+const FORBIDDEN_DIRS = ['src', 'e2e'];
 // dist is the load-bearing surface for the freshness comparison; the staging
 // package.json is byte-identical to the root one, so dist bytes decide
 const BUILD_INPUTS = ['tsup.config.ts', 'vite.chrome.config.ts', 'package.json'];
@@ -59,7 +62,7 @@ function treeHash(dir) {
 /** A publish-shaped copy carries dist + manifest and never the repo itself. */
 function isPublishShaped(dir) {
   return (
-    !['src', 'e2e'].some((name) => existsSync(join(dir, name))) &&
+    !FORBIDDEN_DIRS.some((name) => existsSync(join(dir, name))) &&
     existsSync(join(dir, 'package.json')) &&
     existsSync(join(dir, 'dist'))
   );
@@ -67,7 +70,7 @@ function isPublishShaped(dir) {
 
 function assertPublishShape(dir, label) {
   if (!isPublishShaped(dir)) {
-    const forbidden = ['src', 'e2e'].filter((name) => existsSync(join(dir, name)));
+    const forbidden = FORBIDDEN_DIRS.filter((name) => existsSync(join(dir, name)));
     throw new Error(
       `[astroix] ${label} at ${dir} is not publish-shaped` +
         (forbidden.length > 0
