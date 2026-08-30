@@ -21,8 +21,8 @@ The ubiquitous language of this project. Use these terms (and these exact spelli
 | **overrides file** | Fallback destination (`src/styles/builder/[route].css`), loaded last in the cascade, when no home exists. |
 | **entry** | A Content Collections item (`.md`/`.mdx` with frontmatter); `entry.data` is parsed frontmatter. |
 | **active entry** | The entry open in the content editor; set manually (list click) or reactively (route resolution from the canvas URL). |
-| **route resolution** | Matching the canvas URL against route patterns and entry ids to find the entry rendered there, and back (entry → canvas); a unique hit selects, ambiguity/no-match stays silent; a pure `src/core` module. |
-| **candidate route** | A route pattern that plausibly renders a given entry, with the canvas URL it produces; entry→canvas navigation acts only on a single candidate, re-verified by forward match. |
+| **route resolution** | Matching the canvas URL against route patterns and entry ids to find the entry rendered there, and back (entry → canvas); a unique hit — or a plurality whose candidates all resolve to the same entry — selects; other ambiguity/no-match stays silent; a pure `src/core` module. |
+| **candidate route** | A route pattern that plausibly renders a given entry, with the canvas URL it produces; entry→canvas navigation picks the most specific candidate of a same-entry plurality (segment param before catch-all, then shallowest), re-verified by forward match. |
 | **raw mode** | The CSS rule editor's free-form mode: the rule's declarations edited as plain CSS text instead of property→value widget rows. |
 | **raw field** | The textarea fallback rendering an unsupported schema subtree as editable YAML. |
 | **auto-write** | The persist-on-pause write loop (debounce ~300ms) writing the real repo file; the shared persistence doctrine of both verticals. |

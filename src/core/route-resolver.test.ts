@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { RouteInfo, RouteSegmentPart } from './route-resolver';
-import { candidateRoutes, pickNavigableCandidate, resolveActiveEntry } from './route-resolver';
+import { pickNavigableCandidate, resolveActiveEntry } from './route-resolver';
 
 const staticPart = (content: string): RouteSegmentPart => ({
   content,
@@ -149,7 +149,7 @@ describe('resolveActiveEntry — forward (canvas URL → entry)', () => {
     };
     expect(resolveActiveEntry([midRest], '/foo/edit', { pages: ['foo/edit'] })).toBeNull();
     expect(resolveActiveEntry([midRest], '/foo/edit', { pages: ['foo'] })).toBeNull();
-    expect(candidateRoutes('foo/edit', [midRest])).toEqual([]);
+    expect(pickNavigableCandidate('foo/edit', [midRest], { pages: ['foo/edit'] })).toBeNull();
   });
 
   it('percent-decoded segments match unicode entry ids', () => {
@@ -167,76 +167,49 @@ describe('resolveActiveEntry — forward (canvas URL → entry)', () => {
   });
 });
 
-describe('candidateRoutes — reverse (entry → canvas routes)', () => {
-  it('builds the single-param route URL for a single-segment id', () => {
-    expect(candidateRoutes('hello', routes('/blog/[slug]'))).toEqual([
-      { pattern: '/blog/[slug]', url: '/blog/hello' },
-    ]);
-  });
-
-  it('builds the catch-all URL for a nested-path id', () => {
-    expect(candidateRoutes('2024/post', routes('/blog/[...slug]'))).toEqual([
-      { pattern: '/blog/[...slug]', url: '/blog/2024/post' },
-    ]);
-  });
-
-  it('a single-segment id also fits a catch-all', () => {
-    expect(candidateRoutes('hello', routes('/blog/[...slug]'))).toEqual([
-      { pattern: '/blog/[...slug]', url: '/blog/hello' },
-    ]);
-  });
-
-  it('a root-level catch-all has no static prefix', () => {
-    expect(candidateRoutes('blog/hello', routes('/[...slug]'))).toEqual([
-      { pattern: '/[...slug]', url: '/blog/hello' },
-    ]);
-  });
-
-  it('a nested id cannot fill a single-param route — no candidate', () => {
-    expect(candidateRoutes('2024/post', routes('/blog/[slug]'))).toEqual([]);
-  });
-
-  it('skips static and multi-param routes', () => {
-    const candidates = candidateRoutes(
-      'hello',
-      routes('/', '/about', '/[lang]/blog/[slug]', '/blog/[slug]'),
-    );
-    expect(candidates).toEqual([{ pattern: '/blog/[slug]', url: '/blog/hello' }]);
-  });
-
-  it('drops candidates whose URL a static route renders — forward stays silent there', () => {
-    expect(candidateRoutes('hello', routes('/blog/hello', '/blog/[slug]'))).toEqual([]);
-    expect(candidateRoutes('hello', routes('/blog/[slug]'))).toEqual([
-      { pattern: '/blog/[slug]', url: '/blog/hello' },
-    ]);
-  });
-
-  it('returns every plausible route in input order — plurality is the caller ambiguity call', () => {
-    const candidates = candidateRoutes('hello', routes('/blog/[slug]', '/posts/[slug]'));
-    expect(candidates).toEqual([
-      { pattern: '/blog/[slug]', url: '/blog/hello' },
-      { pattern: '/posts/[slug]', url: '/posts/hello' },
-    ]);
-  });
-
-  it('encodes the id into the URL', () => {
-    expect(candidateRoutes('café', routes('/blog/[slug]'))).toEqual([
-      { pattern: '/blog/[slug]', url: '/blog/caf%C3%A9' },
-    ]);
-  });
-
-  it('an empty id yields no candidates', () => {
-    expect(candidateRoutes('', routes('/blog/[slug]', '/blog/[...slug]'))).toEqual([]);
-  });
-});
-
-describe('pickNavigableCandidate — the benign-plurality pick (#109)', () => {
+describe('pickNavigableCandidate — reverse (entry → canvas URL, #109)', () => {
   it('a single candidate returns its URL — the nested-id catch-all case unchanged', () => {
     expect(
       pickNavigableCandidate('2024/post', routes('/blog/[slug]', '/blog/[...slug]'), {
         blog: ['2024/post'],
       }),
     ).toBe('/blog/2024/post');
+  });
+
+  it('a single-segment id fills a catch-all alone when no segment-param route exists', () => {
+    expect(
+      pickNavigableCandidate('hello', routes('/blog/[...slug]'), {
+        blog: ['hello'],
+      }),
+    ).toBe('/blog/hello');
+  });
+
+  it('a root-level catch-all has no static prefix', () => {
+    expect(
+      pickNavigableCandidate('blog/hello', routes('/[...slug]'), {
+        pages: ['blog/hello'],
+      }),
+    ).toBe('/blog/hello');
+  });
+
+  it('skips static and multi-param routes', () => {
+    expect(
+      pickNavigableCandidate(
+        'hello',
+        routes('/', '/about', '/[lang]/blog/[slug]', '/blog/[slug]'),
+        {
+          blog: ['hello'],
+        },
+      ),
+    ).toBe('/blog/hello');
+  });
+
+  it('encodes the id into the URL', () => {
+    expect(
+      pickNavigableCandidate('café', routes('/blog/[slug]'), {
+        blog: ['café'],
+      }),
+    ).toBe('/blog/caf%C3%A9');
   });
 
   it('a same-entry plurality navigates — the segment param beats the catch-all regardless of input order', () => {
@@ -302,6 +275,32 @@ describe('pickNavigableCandidate — the benign-plurality pick (#109)', () => {
         blog: ['hello'],
       }),
     ).toBe('/other/hello');
+  });
+
+  it('a candidate URL fully shadowed by a static page leaves nothing to navigate', () => {
+    expect(
+      pickNavigableCandidate('hello', routes('/blog/hello', '/blog/[slug]'), {
+        blog: ['hello'],
+      }),
+    ).toBeNull();
+  });
+
+  it('a dangling id (held by no collection) stays silent — its candidate would forward-resolve to another entry', () => {
+    // /blog/hello captures 'hello' via [slug] (unheld) and 'blog/hello' via
+    // the root catch-all (held by pages) — a single hit, but the wrong entry
+    expect(
+      pickNavigableCandidate('hello', routes('/blog/[slug]', '/[...slug]'), {
+        pages: ['blog/hello'],
+      }),
+    ).toBeNull();
+  });
+
+  it('an empty id yields no candidates', () => {
+    expect(
+      pickNavigableCandidate('', routes('/blog/[slug]', '/blog/[...slug]'), {
+        blog: ['hello'],
+      }),
+    ).toBeNull();
   });
 
   it('no candidates — null', () => {
