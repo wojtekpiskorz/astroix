@@ -69,7 +69,11 @@ test('rule list: no matching rules → explicit empty state', async ({ page }) =
 // iframe's document (the live-preview full-reload family); the select
 // handlers must re-attach to the new document, or its clicks pass through
 // unselected — the store keeps the pre-reload selection, so the pin clicks
-// a different element and requires its rules to render.
+// a different element and requires its rules to render. Two monotone gates
+// keep it off timing: the outgoing document is stamped and waited out (the
+// swap), and the hover outline is polled for (the attach — it paints only
+// through live listeners), so the click cannot land on a stale or
+// listener-less document and pass for the wrong reason.
 test('select mode survives a canvas reload — clicks in the new document still select (#141)', async ({
   page,
 }) => {
@@ -79,12 +83,28 @@ test('select mode survives a canvas reload — clicks in the new document still 
   await canvas.locator('.hero-title').click();
   await expect(page.locator('[data-astroix-rule]')).toHaveCount(4);
 
-  // the document swap: a reload is a new document with none of the old one's
-  // listeners
+  // gate 1 — the swap: stamp the outgoing document, reload, and wait for
+  // the stamp to die (the old document stays queryable until the
+  // replacement commits; builder.spec.ts:157 records the window)
   await page.locator('#astroix-canvas').evaluate((frame: HTMLIFrameElement) => {
+    frame.contentDocument?.documentElement.setAttribute('data-astroix-pin-outgoing', '');
     frame.contentWindow?.location.reload();
   });
-  await expect(canvas.locator('.hero-title')).toBeVisible();
+  await expect(canvas.locator('html[data-astroix-pin-outgoing]')).toHaveCount(0);
+
+  // gate 2 — the attach: re-hover until the outline paints (the listeners
+  // land one render after the load report)
+  await expect
+    .poll(
+      async () => {
+        await canvas.locator('.hero-lead').hover();
+        return canvas
+          .locator('.hero-lead')
+          .evaluate((el) => el.classList.contains('astroix-hover'));
+      },
+      { timeout: 5_000 },
+    )
+    .toBe(true);
 
   // the new document's click selects its own target — a stale list still
   // showing the pre-reload selection's rows is exactly the #141 failure
