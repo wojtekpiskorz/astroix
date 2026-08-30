@@ -14,7 +14,9 @@ import { applyRenders, isProjectPageRoute, type RoutesState } from './routes';
  * values into the routes payload's `renders`.
  *
  * Freshness rides the codebase's stateless-doctrine runner (content.ts): a
- * NEW `createServerModuleRunner` per pass, nothing held between passes. The
+ * NEW `createServerModuleRunner` per pass, nothing held between passes —
+ * and closed when the pass settles, because each runner's transport pins a
+ * `send` listener on the ssr hot channel (#146). The
  * long-lived `environments.ssr.runner` cannot serve this pass — its cached
  * module bindings never see content commits (verified live on astro@7.2.7:
  * after a content edit, a direct `runner.import('astro:content')` keeps
@@ -130,8 +132,9 @@ export function registerRouteEnumeration(
       return;
     }
     running = true;
+    let runner: ReturnType<typeof createServerModuleRunner> | null = null;
     try {
-      const runner = createServerModuleRunner(server.environments.ssr);
+      runner = createServerModuleRunner(server.environments.ssr);
       for (const route of options.routes.captured) {
         if (!isEnumeratable(route)) continue;
         const entryUrl = pathToFileURL(join(options.root, route.entrypoint)).href;
@@ -150,6 +153,9 @@ export function registerRouteEnumeration(
       // the pass itself must never reject in the background; route-level
       // failures were already contained above
     } finally {
+      // close() drops the transport's `send` listener (one leaked per pass
+      // otherwise, #146); cleanup failure must not reject the background pass
+      await runner?.close().catch(() => {});
       running = false;
     }
     if (applyRenders(options.routes, results)) push();
