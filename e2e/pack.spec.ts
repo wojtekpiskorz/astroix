@@ -5,10 +5,13 @@ import { expect, test } from '@playwright/test';
 /**
  * npm-pack smoke lane (ADR-0001): the exact shipped artifact, not the
  * `file:`-linked checkout. The second playwright webServer packs the repo,
- * installs the tarball into the pack fixture and boots it on :4313. Catches
+ * installs the tarball into the pack fixture and boots it (canonical :4313,
+ * per-lane override via the shared ports module — #120). Catches
  * `files`/`exports`/package-shape regressions source mode can never see.
  */
-const BASE_URL = 'http://localhost:4313';
+import { PACK_PORT } from './ports';
+
+const BASE_URL = `http://localhost:${PACK_PORT}`;
 const FIXTURE = join('e2e', 'pack-fixture');
 
 test('chrome loads from the shipped artifact (prebuilt mode)', async ({ page }) => {
