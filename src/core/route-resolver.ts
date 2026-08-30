@@ -4,8 +4,10 @@
  * A pure heuristic over Astro route patterns × content-collection entry ids:
  * nothing instruments entries at runtime (`data-astro-source-*` is a stub on
  * astro@7.2.7 and only reaches components anyway), so pattern shape is the
- * only mapping there is. Doctrine: a unique hit selects; ambiguity or no
- * match selects nothing — the heuristic never picks wrong, it picks nothing.
+ * only mapping there is. Doctrine: a unique hit — or a plurality whose every
+ * candidate resolves to the same entry (#109) — selects, taking the most
+ * specific pattern; any other ambiguity or no match selects nothing — the
+ * heuristic never picks wrong, it picks nothing.
  *
  * Core-first (owner ruling on PR #77): the route arrives with Astro's own
  * parse — `segments` (`RoutePart[][]`, `{content, dynamic, spread}`) and
@@ -72,6 +74,16 @@ interface SingleParamRoute {
 /** A route flattened from Astro's parse: zero params, or exactly one (single or rest) — anything else stays silent. */
 type FlatRoute = StaticRoute | SingleParamRoute;
 
+/** A candidate with the specificity facts the picking rule reads. */
+interface RankedCandidate {
+  pattern: string;
+  url: string;
+  /** The param is a trailing catch-all — less specific than a segment param. */
+  rest: boolean;
+  /** Pattern depth in segments — shallower is more specific. */
+  segments: number;
+}
+
 const CANVAS_URL_BASE = 'http://astroix.canvas/';
 
 /**
@@ -97,21 +109,58 @@ export function resolveActiveEntry(
  * pattern the id could fill, with the canvas URL it produces — minus URLs a
  * static route renders (forward resolution would stay silent there, so the
  * candidate could not re-verify). Order follows the routes input; plurality
- * is the caller's ambiguity call (#71 navigates only on a single candidate,
- * then re-verifies by forward match).
+ * is the caller's ambiguity call (#71 navigates on a benign plurality via
+ * `pickNavigableCandidate`, then re-verifies by forward match).
  */
 export function candidateRoutes(
   entryId: string,
   routes: ReadonlyArray<RouteInfo>,
 ): RouteCandidate[] {
-  const candidates: RouteCandidate[] = [];
+  return rankedCandidates(entryId, routes).map(({ pattern, url }) => ({ pattern, url }));
+}
+
+/**
+ * The benign-plurality pick (#109): the canvas URL an entry click navigates
+ * to, or null when it must stay silent. Plurality is benign only when every
+ * candidate forward-resolves to the same entry — the click then takes the
+ * most specific pattern: a single-segment param before a catch-all, then the
+ * shallowest pattern, then route input order (the stable sort keeps it).
+ * Zero candidates, a candidate that does not forward-resolve, or candidates
+ * disagreeing on the entry — null; the heuristic never picks wrong.
+ */
+export function pickNavigableCandidate(
+  entryId: string,
+  routes: ReadonlyArray<RouteInfo>,
+  collections: CollectionsIndex,
+): string | null {
+  const candidates = rankedCandidates(entryId, routes);
+  let target: ActiveEntry | undefined;
+  for (const candidate of candidates) {
+    const hit = resolveActiveEntry(routes, candidate.url, collections);
+    if (hit === null) return null;
+    if (target === undefined) target = hit;
+    else if (target.collection !== hit.collection || target.entryId !== hit.entryId) return null;
+  }
+  const [best] = [...candidates].sort(
+    (a, b) => Number(a.rest) - Number(b.rest) || a.segments - b.segments,
+  );
+  return best?.url ?? null;
+}
+
+function rankedCandidates(entryId: string, routes: ReadonlyArray<RouteInfo>): RankedCandidate[] {
+  const candidates: RankedCandidate[] = [];
   for (const route of routes) {
     const flat = flattenRoute(route);
     if (flat === null || flat.kind !== 'single-param') continue;
     const url = buildCandidateUrl(flat, entryId);
     if (url === null) continue;
     if (isStaticPage(routes, toUrlSegments(url))) continue;
-    candidates.push({ pattern: route.pattern, url });
+    candidates.push({
+      pattern: route.pattern,
+      url,
+      rest: flat.segments[flat.paramAt]?.kind === 'rest',
+      segments: flat.segments.length,
+    });
   }
   return candidates;
 }

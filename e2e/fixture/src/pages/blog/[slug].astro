@@ -1,10 +1,11 @@
 ---
 import { getCollection, render } from 'astro:content';
 
-// Ambiguity fixture for route resolution (#71): a single-segment param beside
-// the catch-all — every flat blog id (e.g. `hello-builder`) now fills two
-// patterns, so entry→canvas navigation must stay silent for it, while nested
-// ids (`2024/post`) still resolve through [...slug] alone.
+// Route-plurality fixture for route resolution (#71 → #109): a single-segment
+// param beside the catch-all — every flat blog id (e.g. `hello-builder`)
+// fills two patterns that render the same entry, so entry→canvas navigation
+// takes the segment-param spelling; nested ids (`2024/post`) still resolve
+// through [...slug] alone.
 export async function getStaticPaths() {
   const posts = await getCollection('blog');
   return posts

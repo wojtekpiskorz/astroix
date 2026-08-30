@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { candidateRoutes, resolveActiveEntry } from '../../../core/route-resolver';
+import { pickNavigableCandidate, resolveActiveEntry } from '../../../core/route-resolver';
 import { useChromeStore } from '../../store';
 import { toCollectionsIndex, useCollections, useRoutes } from './api';
 import { useContentStore } from './store';
@@ -7,8 +7,9 @@ import { useContentStore } from './store';
 /**
  * The Content vertical's sidebar body: the collections→entries list with the
  * active entry highlighted (#71). Clicking an entry opens it (active entry,
- * manual) and — when route resolution yields exactly one candidate route —
- * navigates the canvas there, verified by forward match after the load.
+ * manual) and — when route resolution yields a benign plurality (#109:
+ * candidates that all forward-resolve to this entry) — navigates the canvas
+ * through the most specific one, verified by forward match after the load.
  */
 export function ContentSidebar() {
   const { data: collections, isPending: collectionsPending } = useCollections();
@@ -59,13 +60,14 @@ export function ContentSidebar() {
     // on — no navigation, the entry just opened
     const holders = collections.filter((c) => c.entries.some((entry) => entry.id === entryId));
     if (holders.length !== 1) return;
-    // unique-hit-or-silent: exactly one candidate route navigates, then the
-    // load's forward match verifies it (a miss keeps the manual pick)
-    const candidates = candidateRoutes(entryId, routes);
-    const [candidate] = candidates;
-    if (candidate === undefined || candidates.length !== 1) return;
+    // benign plurality (#109): candidates that all forward-resolve to this
+    // entry navigate through the most specific one — the load's forward
+    // match verifies it (a miss keeps the manual pick); plurality to
+    // different entries or no candidate at all stays silent
+    const url = pickNavigableCandidate(entryId, routes, toCollectionsIndex(collections));
+    if (url === null) return;
     armReverseVerify({ collection, entryId });
-    requestCanvasNav(candidate.url);
+    requestCanvasNav(url);
   };
 
   return (

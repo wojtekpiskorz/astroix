@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { RouteInfo, RouteSegmentPart } from './route-resolver';
-import { candidateRoutes, resolveActiveEntry } from './route-resolver';
+import { candidateRoutes, pickNavigableCandidate, resolveActiveEntry } from './route-resolver';
 
 const staticPart = (content: string): RouteSegmentPart => ({
   content,
@@ -227,5 +227,86 @@ describe('candidateRoutes — reverse (entry → canvas routes)', () => {
 
   it('an empty id yields no candidates', () => {
     expect(candidateRoutes('', routes('/blog/[slug]', '/blog/[...slug]'))).toEqual([]);
+  });
+});
+
+describe('pickNavigableCandidate — the benign-plurality pick (#109)', () => {
+  it('a single candidate returns its URL — the nested-id catch-all case unchanged', () => {
+    expect(
+      pickNavigableCandidate('2024/post', routes('/blog/[slug]', '/blog/[...slug]'), {
+        blog: ['2024/post'],
+      }),
+    ).toBe('/blog/2024/post');
+  });
+
+  it('a same-entry plurality navigates — the segment param beats the catch-all regardless of input order', () => {
+    expect(
+      pickNavigableCandidate('hello', routes('/[...slug]', '/blog/[slug]'), {
+        blog: ['hello'],
+      }),
+    ).toBe('/blog/hello');
+  });
+
+  it('the fixture shape — segment param and catch-all spelling one URL — navigates it', () => {
+    expect(
+      pickNavigableCandidate('hello-builder', routes('/blog/[slug]', '/blog/[...slug]'), {
+        blog: ['hello-builder'],
+      }),
+    ).toBe('/blog/hello-builder');
+  });
+
+  it('among segment params the shallower pattern wins', () => {
+    expect(
+      pickNavigableCandidate('hello', routes('/a/b/[slug]', '/a/[slug]'), {
+        blog: ['hello'],
+      }),
+    ).toBe('/a/hello');
+  });
+
+  it('equal specificity keeps route input order', () => {
+    expect(
+      pickNavigableCandidate('hello', routes('/x/[slug]', '/y/[slug]'), {
+        blog: ['hello'],
+      }),
+    ).toBe('/x/hello');
+    expect(
+      pickNavigableCandidate('hello', routes('/y/[slug]', '/x/[slug]'), {
+        blog: ['hello'],
+      }),
+    ).toBe('/y/hello');
+  });
+
+  it('a plurality leading to different entries stays silent', () => {
+    // /blog/hello forward-resolves to two entries (blog:hello through
+    // [slug], pages:blog/hello through the root catch-all) — ambiguity
+    expect(
+      pickNavigableCandidate('hello', routes('/blog/[slug]', '/[...slug]'), {
+        blog: ['hello'],
+        pages: ['blog/hello'],
+      }),
+    ).toBeNull();
+  });
+
+  it('an id held by two collections stays silent', () => {
+    expect(
+      pickNavigableCandidate('hello', routes('/blog/[slug]'), {
+        blog: ['hello'],
+        news: ['hello'],
+      }),
+    ).toBeNull();
+  });
+
+  it('a static page keeps its candidate filtered out — the surviving candidate navigates', () => {
+    expect(
+      pickNavigableCandidate('hello', routes('/blog/hello', '/blog/[slug]', '/other/[slug]'), {
+        blog: ['hello'],
+      }),
+    ).toBe('/other/hello');
+  });
+
+  it('no candidates — null', () => {
+    expect(
+      pickNavigableCandidate('2024/post', routes('/blog/[slug]'), { blog: ['2024/post'] }),
+    ).toBeNull();
   });
 });
