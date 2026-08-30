@@ -17,8 +17,16 @@ interface ContentState {
    * load seq already applied is a no-op — no navigation, no resolution.
    */
   appliedLoadSeq: number;
+  /**
+   * Tree folders rendered collapsed (#111), keyed by collection-scoped path
+   * ('blog/2024'). Chrome-only UI state per ADR-0002 — it lives here so the
+   * choices survive tab roundtrips like the active entry does.
+   */
+  collapsedFolders: Set<string>;
   /** A manual list click: the entry opens first, navigation is secondary. */
   selectEntry: (entry: ActiveEntry) => void;
+  /** Toggles one tree folder between collapsed and open. */
+  toggleFolder: (key: string) => void;
   /** Arms the forward-match verification for a reverse navigation. */
   armReverseVerify: (entry: ActiveEntry) => void;
   /**
@@ -36,7 +44,15 @@ export const useContentStore = create<ContentState>()((set) => ({
   activeEntry: null,
   pendingVerify: null,
   appliedLoadSeq: 0,
+  collapsedFolders: new Set<string>(),
   selectEntry: (entry) => set({ activeEntry: entry }),
+  toggleFolder: (key) =>
+    set((state) => {
+      // a fresh Set per toggle: zustand readers compare by identity
+      const collapsed = new Set(state.collapsedFolders);
+      if (!collapsed.delete(key)) collapsed.add(key);
+      return { collapsedFolders: collapsed };
+    }),
   armReverseVerify: (entry) => set({ pendingVerify: entry }),
   applyCanvasResolution: (resolved, loadSeq) =>
     set((state) => {

@@ -22,7 +22,7 @@ test('canvas→entry: a dynamic-route canvas marks the entry active in the Conte
   const list = page.locator('[data-astroix-entries="ready"]');
   await expect(list).toBeVisible();
 
-  // the two-level list: collections → entries (entry id as label)
+  // the list: collections → entries (entry id as the key, basename as the label, #111)
   await expect(page.locator('[data-astroix-collection="blog"]')).toBeVisible();
   await expect(page.locator('[data-astroix-collection="homepage"]')).toBeVisible();
   await expect(page.locator('[data-astroix-collection="blog"] [data-astroix-entry]')).toHaveCount(
@@ -179,4 +179,130 @@ test('re-clicking the entry the canvas already shows consumes the arm on the rel
   await navigateCanvas(page, '/');
   await expect(canvas.locator('.hero-title')).toBeVisible();
   await expect(page.locator('[data-astroix-entries="ready"] [data-active="true"]')).toHaveCount(0);
+});
+
+// --- #111: the tree sidebar ---
+
+test('nested ids render as folders with basename labels, flat ids stay bare', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('tab', { name: 'Content' }).click();
+  await expect(page.locator('[data-astroix-entries="ready"]')).toBeVisible();
+
+  // each '/'-prefix of a nested id is a folder, open by default — the tree
+  // must never hide an entry from a click that used to work flat
+  const folder2024 = page.locator('[data-astroix-tree-folder="blog/2024"]');
+  const folder2025 = page.locator('[data-astroix-tree-folder="blog/2025"]');
+  await expect(folder2024).toBeVisible();
+  await expect(folder2024).toHaveAttribute('aria-expanded', 'true');
+  await expect(folder2025).toHaveAttribute('aria-expanded', 'true');
+  await expect(folder2024).toHaveText('2024');
+
+  // entries stay full-id keyed (the click contract) but show the basename
+  await expect(page.locator('[data-astroix-entry="2024/post"]')).toHaveText('post');
+  await expect(page.locator('[data-astroix-entry="2025/release-notes"]')).toHaveText(
+    'release-notes',
+  );
+  await expect(page.locator('[data-astroix-collection="blog"] [data-astroix-entry]')).toHaveCount(
+    3,
+  );
+
+  // a flat collection renders no wrapper folder — the id is the label
+  // (`index` lives in two collections since #112 — scope by collection)
+  await expect(
+    page.locator('[data-astroix-collection="homepage"] [data-astroix-tree-folder]'),
+  ).toHaveCount(0);
+  await expect(
+    page.locator('[data-astroix-collection="homepage"] [data-astroix-entry="index"]'),
+  ).toHaveText('index');
+  await expect(page.locator('[data-astroix-entry="hello-builder"]')).toHaveText('hello-builder');
+});
+
+test('folders collapse on toggle and the choice survives a tab roundtrip', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('tab', { name: 'Content' }).click();
+  await expect(page.locator('[data-astroix-entries="ready"]')).toBeVisible();
+
+  // collapsing unmounts the folder's entries
+  const folder2024 = page.locator('[data-astroix-tree-folder="blog/2024"]');
+  await folder2024.click();
+  await expect(folder2024).toHaveAttribute('aria-expanded', 'false');
+  await expect(page.locator('[data-astroix-entry="2024/post"]')).toHaveCount(0);
+
+  // the sibling folder is untouched
+  await expect(page.locator('[data-astroix-tree-folder="blog/2025"]')).toHaveAttribute(
+    'aria-expanded',
+    'true',
+  );
+  await expect(page.locator('[data-astroix-entry="2025/release-notes"]')).toBeVisible();
+
+  // the collapsed set lives in the content store — a tab roundtrip keeps it
+  await page.getByRole('tab', { name: 'CSS' }).click();
+  await expect(page.locator('[data-astroix-index="ready"]')).toBeVisible();
+  await page.getByRole('tab', { name: 'Content' }).click();
+  await expect(page.locator('[data-astroix-tree-folder="blog/2024"]')).toHaveAttribute(
+    'aria-expanded',
+    'false',
+  );
+  await expect(page.locator('[data-astroix-entry="2024/post"]')).toHaveCount(0);
+
+  // and re-expands
+  await page.locator('[data-astroix-tree-folder="blog/2024"]').click();
+  await expect(page.locator('[data-astroix-entry="2024/post"]')).toBeVisible();
+});
+
+// The marker's ruled semantics: zero candidate routes → dimmed marker
+// (#111, grilling Q4). Against the real fixture payload NO entry qualifies —
+// every flat id fills /blog/[slug], /blog/[...slug] and /_server-islands/[name]
+// (3 candidates), so the silence of showcase/scratch/index clicks is
+// ambiguity, not unroutedness. The ticket's "marker on showcase, scratch,
+// index" expectation does not hold against the shipped fixture; surfaced to
+// the owner on the PR — this spec pins the real behavior instead.
+test('no fixture entry has zero candidate routes — the marker stays absent', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('tab', { name: 'Content' }).click();
+  await expect(page.locator('[data-astroix-entries="ready"]')).toBeVisible();
+
+  await expect(page.locator('[data-astroix-entry-unrouted]')).toHaveCount(0);
+});
+
+// Marker mechanics under a controlled routes payload: intercepting the
+// sidebar's own query input (the fetch is real, the payload is ours) makes
+// every entry zero-candidate — the marker renders, explains itself, and
+// disables nothing. The tree, store, and click path all stay live.
+test('zero-candidate entries carry the marker and stay fully openable', async ({ page }) => {
+  await page.route('**/__astroix/routes', (route) =>
+    route.fulfill({ contentType: 'application/json', body: '[]' }),
+  );
+  await page.goto('/');
+  await page.getByRole('tab', { name: 'Content' }).click();
+  await expect(page.locator('[data-astroix-entries="ready"]')).toBeVisible();
+
+  // every entry is unrouted against an empty route set (`index` lives in two
+  // collections since #112 — the id alone is not unique, the pair is)
+  const marked: Array<[collection: string, id: string]> = [
+    ['gallery', 'showcase'],
+    ['notes', 'scratch'],
+    ['homepage', 'index'],
+    ['blog', 'hello-builder'],
+    ['blog', '2024/post'],
+  ];
+  for (const [collection, id] of marked) {
+    const entry = page.locator(
+      `[data-astroix-collection="${collection}"] [data-astroix-entry="${id}"]`,
+    );
+    await expect(entry).toHaveAttribute('data-astroix-entry-unrouted', 'true');
+    await expect(entry).toHaveAttribute('title', 'no route renders this entry');
+  }
+
+  // the marker never disables: the entry opens its form, and with zero
+  // candidates the click navigates nowhere — the canvas stays home
+  await page.locator('[data-astroix-entry="showcase"]').click();
+  await expect(page.locator('[data-astroix-entry="showcase"]')).toHaveAttribute(
+    'data-active',
+    'true',
+  );
+  await expect(page.locator('[data-astroix-content-pane="form"] code')).toHaveText(
+    'gallery/showcase',
+  );
+  await expect(page.frameLocator('#astroix-canvas').locator('.hero-title')).toBeVisible();
 });
