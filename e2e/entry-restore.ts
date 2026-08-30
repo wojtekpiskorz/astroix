@@ -21,7 +21,8 @@ import { settleWrites } from './settle-writes';
  * immediately, correctly.
  */
 
-const STORE = join('e2e', 'fixture', '.astro', 'data-store.json');
+const storeFor = (file: string): string =>
+  join(...file.split(/[\\/]/).slice(0, 2), '.astro', 'data-store.json');
 
 export interface RestoreProbe {
   /** Strings the store pool must contain (pristine-only markers). */
@@ -35,16 +36,20 @@ export async function restoreEntry(
   original: string,
   probe: RestoreProbe = {},
 ): Promise<void> {
-  await settleWrites([file, STORE]);
+  // the data-store sits in the owning fixture's .astro/ — derived from the
+  // entry's path, so specs driving either lane's fixture restore against
+  // the right store
+  const store = storeFor(file);
+  await settleWrites([file, store]);
   writeFileSync(file, original);
   await expect
     .poll(
       () => {
         try {
-          const store = readFileSync(STORE, 'utf8');
+          const data = readFileSync(store, 'utf8');
           return (
-            (probe.present ?? []).every((marker) => store.includes(marker)) &&
-            (probe.absent ?? []).every((marker) => !store.includes(marker))
+            (probe.present ?? []).every((marker) => data.includes(marker)) &&
+            (probe.absent ?? []).every((marker) => !data.includes(marker))
           );
         } catch {
           return false;

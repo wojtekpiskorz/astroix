@@ -2,7 +2,10 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
 
-// Serial: the tests rewrite a fixture source on disk (restoring in finally).
+// The write-staleness REST guard. The file→chrome IDE-edit half of sync
+// moved to live-refresh.spec.ts on the source lane (#150): the pushed
+// invalidation rides the vite hot channel, which the prebuilt chrome this
+// lane boots cannot subscribe to.
 test.describe.configure({ mode: 'serial' });
 
 const FILE_PATH = join('e2e', 'fixture', 'src', 'pages', 'home.css');
@@ -15,28 +18,6 @@ async function openHomeCssEditor(page: import('@playwright/test').Page): Promise
   const editor = page.locator('[data-astroix-editor="view"]');
   await expect(editor.locator('.cm-content')).toContainText('font-weight: 800');
 }
-
-test('IDE edit reflects live in the open chrome editor (file→chrome sync)', async ({ page }) => {
-  await openHomeCssEditor(page);
-  const editor = page.locator('[data-astroix-editor="view"]');
-  const original = readFileSync(FILE_PATH, 'utf8');
-
-  try {
-    // simulate the IDE: external write to the file the editor is showing
-    writeFileSync(FILE_PATH, original.replace('font-weight: 800;', 'font-weight: 700;'));
-
-    await expect(editor.locator('.cm-content')).toContainText('font-weight: 700;', {
-      timeout: 10_000,
-    });
-    // the external change was ACCEPTED, not treated as a pending local write
-    await expect(editor.locator('[data-astroix-write-status]')).toHaveAttribute(
-      'data-astroix-write-status',
-      'idle',
-    );
-  } finally {
-    writeFileSync(FILE_PATH, original);
-  }
-});
 
 test('stale write guard: a chrome edit based on outdated disk content is refused, never spliced', async ({
   page,
