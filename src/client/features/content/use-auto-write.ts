@@ -81,7 +81,6 @@ export function useAutoWrite({ file, fields, payloadSignal }: AutoWriteParams): 
   const [truth, setTruth] = useState<EntryTruth | null>(null);
   const queryClient = useQueryClient();
 
-  const baselineRef = useRef<AutoWriteDraft | null>(null);
   const draftRef = useRef<AutoWriteDraft | null>(null);
   const fieldsRef = useRef(fields);
   const seqRef = useRef(0);
@@ -125,8 +124,12 @@ export function useAutoWrite({ file, fields, payloadSignal }: AutoWriteParams): 
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let queuedWhileLoading = false;
+    // the baseline is born with the mount read below and never survives an
+    // effect re-run: within a pane lifetime `file` and `queryClient` (the
+    // deps) are both stable, and StrictMode's first pass is cancelled
+    // before its writes land — so there is nothing to carry across runs
     let raw: string | null = null;
-    let baseline = baselineRef.current;
+    let baseline: AutoWriteDraft | null = null;
     let chain: Promise<void> = Promise.resolve();
     // the last meaningful badge (written / the reload banner): a duplicate
     // no-op emission — a remount's initial values re-arming the loop —
@@ -169,7 +172,6 @@ export function useAutoWrite({ file, fields, payloadSignal }: AutoWriteParams): 
       if (result.status === 'written') {
         raw = next;
         baseline = draft;
-        baselineRef.current = draft;
         badge = 'saved';
         setStatus('saved');
         invalidateCollections();
@@ -183,7 +185,6 @@ export function useAutoWrite({ file, fields, payloadSignal }: AutoWriteParams): 
         }
         raw = result.contents;
         baseline = disk;
-        baselineRef.current = disk;
         invalidateCollections();
         if (jsonEqual(disk.data, draft.data) && disk.body === draft.body) {
           // the conflict's truth is what the pane already shows — an external
@@ -256,7 +257,6 @@ export function useAutoWrite({ file, fields, payloadSignal }: AutoWriteParams): 
         }
         raw = contents;
         baseline = parsed;
-        baselineRef.current = parsed;
         draftRef.current = parsed;
         setEntryTruth(parsed);
       })();
@@ -276,7 +276,6 @@ export function useAutoWrite({ file, fields, payloadSignal }: AutoWriteParams): 
       }
       raw = contents;
       baseline = parsed;
-      baselineRef.current = parsed;
       // a draft that raced the mount read (an effect re-run's emission)
       // stays — the queue flag below reconciles it once raw lands
       if (!queuedWhileLoading) draftRef.current = parsed;

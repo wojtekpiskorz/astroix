@@ -4,6 +4,15 @@ import { toRelative } from './rest';
 import type { RoutesState } from './routes';
 
 /**
+ * A dir path as posix with the trailing slash stripped, so the `startsWith`
+ * joins below match astro's URL-form dirs (a windows-style or suffixed path
+ * would never match). watch-sync.ts carries the same idiom for its own dirs.
+ */
+function toPosixDir(dir: string): string {
+  return dir.split(sep).join('/').replace(/\/+$/, '');
+}
+
+/**
  * The content signal, shared (#133): the one classification every watcher
  * subscriber that needs "content may have moved" consumes — today the
  * enumeration re-arm (route-enumeration.ts, #119) and the
@@ -22,9 +31,7 @@ export interface ContentSignalScope {
 export function createContentSignalClassifier(
   scope: ContentSignalScope,
 ): (file: string) => boolean {
-  // astro hands srcDir as a URL with a trailing slash — strip it or the
-  // prefix check below never matches (same normalization as watch-sync)
-  const srcDir = scope.srcDir.split(sep).join('/').replace(/\/+$/, '');
+  const srcDir = toPosixDir(scope.srcDir);
   return (file: string): boolean => {
     // the prefix check runs in absolute space (srcDir is absolute — a
     // relative path would never match); the entrypoint check in relative
@@ -53,7 +60,7 @@ export function createContentSignalClassifier(
  * never a break).
  */
 export function createLoaderCommitClassifier(root: string): (file: string) => boolean {
-  const storePrefix = `${root.split(sep).join('/').replace(/\/+$/, '')}/.astro/`;
+  const storePrefix = `${toPosixDir(root)}/.astro/`;
   return (file: string): boolean => {
     const norm = file.split(sep).join('/');
     return norm === `${storePrefix}data-store.json` || norm.startsWith(`${storePrefix}data-store/`);
@@ -92,10 +99,11 @@ export function createContentSyncPusher(server: ViteDevServer): () => void {
 }
 
 /**
- * The no-audience guard every astroix pusher shares (routes push, #119;
- * content-synced push, #133): with no connected client nobody holds a
- * stale cache key, and vite accumulates a send listener per early send,
- * which trips its EventEmitter warning.
+ * The no-audience guard this file's pushers share (routes push, #119;
+ * content-synced push, #133 — watch-sync's older `file-changed` push
+ * predates it): with no connected client nobody holds a stale cache key,
+ * and vite accumulates a send listener per early send, which trips its
+ * EventEmitter warning.
  */
 export function pushToChrome(
   server: ViteDevServer,
