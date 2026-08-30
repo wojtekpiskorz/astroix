@@ -79,13 +79,22 @@ describe('pushToChrome', () => {
 
   it('skips the send when no client is connected (the no-audience guard)', () => {
     const { server, send } = serverWithClients(0);
-    pushToChrome(server, 'astroix:content-synced');
+    pushToChrome(server, 'astroix:content-synced', 'loader');
+    pushToChrome(server, 'astroix:routes-changed');
     expect(send).not.toHaveBeenCalled();
   });
 
-  it('sends the event when an audience exists', () => {
+  it('sends the content-synced push immediately, labeled with the leg that fired (#155)', () => {
     const { server, send } = serverWithClients(1);
-    pushToChrome(server, 'astroix:content-synced');
-    expect(send).toHaveBeenCalledWith('astroix:content-synced', {});
+    pushToChrome(server, 'astroix:content-synced', 'loader');
+    pushToChrome(server, 'astroix:content-synced', 'srcdir');
+    expect(send).toHaveBeenNthCalledWith(1, 'astroix:content-synced', { leg: 'loader' });
+    expect(send).toHaveBeenNthCalledWith(2, 'astroix:content-synced', { leg: 'srcdir' });
+  });
+
+  it('sends the routes-changed push payload-less', () => {
+    const { server, send } = serverWithClients(1);
+    pushToChrome(server, 'astroix:routes-changed');
+    expect(send).toHaveBeenCalledWith('astroix:routes-changed', {});
   });
 });

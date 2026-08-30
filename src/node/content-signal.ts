@@ -67,36 +67,20 @@ export function createLoaderCommitClassifier(root: string): (file: string) => bo
   };
 }
 
-/** The grace between the content signal and the push — see createContentSyncPusher. */
-const RENDER_GRACE_MS = 1_000;
-
 /**
- * The content-synced pusher (#133): every content signal (srcDir or loader
- * commit) schedules one deferred `astroix:content-synced` push,
- * leading-edge per window — a burst coalesces into the first pending push,
- * and a signal after it fired schedules the next, so sustained churn never
- * starves the chrome. The deferral is load-bearing, not cosmetic: on the
- * loader commit, core's own data-store listener (registered ahead of ours
- * on the same watcher event) broadcasts a vite `full-reload`, and the
- * canvas iframe's re-render goes through the ssr environment's shared
- * module runner at the same moment the chrome's invalidation refetch would
- * evaluate that graph through a fresh runner — those two evaluations
- * racing leave the re-render serving the pre-commit store for good
- * (verified live on astro@7.2.7: the canvas keeps the old title until the
- * next edit; a srcDir-only push, whose refetch lands well before the
- * reload, never triggers it). The grace schedules the refetch after the
- * reload render has served.
+ * Which watcher leg a `astroix:content-synced` push carries (#155): the
+ * srcDir signal fires pre-commit (the loader's store write is debounced
+ * 500 ms), the loader's data-store write is the post-commit leg. The label
+ * is the whole payload — the chrome sequences on it: only the loader leg's
+ * refetch races the canvas's post-commit full-reload render (verified live
+ * on astro@7.2.7: the re-render and a concurrent fresh-runner evaluation
+ * leave the canvas serving the pre-commit store for good), so the chrome
+ * holds that leg's invalidation until its canvas-load signal proves the
+ * reload's render served, while the srcDir leg — whose refetch lands well
+ * before the reload — invalidates immediately. The server stays dumb about
+ * timing; it only says which signal fired.
  */
-export function createContentSyncPusher(server: ViteDevServer): () => void {
-  let timer: ReturnType<typeof setTimeout> | null = null;
-  return (): void => {
-    if (timer !== null) return;
-    timer = setTimeout(() => {
-      timer = null;
-      pushToChrome(server, 'astroix:content-synced');
-    }, RENDER_GRACE_MS);
-  };
-}
+export type ContentSyncLeg = 'srcdir' | 'loader';
 
 /**
  * The no-audience guard this file's pushers share (routes push, #119;
@@ -105,10 +89,17 @@ export function createContentSyncPusher(server: ViteDevServer): () => void {
  * and vite accumulates a send listener per early send, which trips its
  * EventEmitter warning.
  */
+export function pushToChrome(server: ViteDevServer, event: 'astroix:routes-changed'): void;
+export function pushToChrome(
+  server: ViteDevServer,
+  event: 'astroix:content-synced',
+  leg: ContentSyncLeg,
+): void;
 export function pushToChrome(
   server: ViteDevServer,
   event: 'astroix:routes-changed' | 'astroix:content-synced',
+  leg?: ContentSyncLeg,
 ): void {
   if (server.ws.clients.size === 0) return;
-  server.ws.send(event, {});
+  server.ws.send(event, event === 'astroix:content-synced' ? { leg } : {});
 }

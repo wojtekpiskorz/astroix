@@ -2,8 +2,13 @@ import { useQueryClient } from '@tanstack/react-query';
 import { type CSSProperties, useEffect } from 'react';
 import { SidebarProvider } from '#components/ui/sidebar.tsx';
 import { Canvas, reflectCanvasPosition } from './canvas/canvas';
-import { COLLECTIONS_KEY, ROUTES_KEY, SCHEMA_KEY } from './features/content/api';
+import { ROUTES_KEY } from './features/content/api';
 import { ContentEditorPane } from './features/content/content-editor-pane';
+import {
+  type ContentSyncLeg,
+  invalidateContentCaches,
+  invalidateOnContentSynced,
+} from './features/content/synced-invalidation';
 import { INDEX_PAYLOAD_KEY } from './features/css/api';
 import { ChromeHeader } from './features/css/chrome-header';
 import { EditorPane } from './features/css/editor-pane';
@@ -46,8 +51,15 @@ export function App() {
     // under a clean draft or reconcile through the hash guard under a
     // dirty one (#149)
     const contentHandler = (): void => {
-      void queryClient.invalidateQueries({ queryKey: COLLECTIONS_KEY });
-      void queryClient.invalidateQueries({ queryKey: SCHEMA_KEY });
+      invalidateContentCaches(queryClient);
+    };
+    // the astroix half (#133/#155): the push carries the leg that fired —
+    // the srcDir leg invalidates immediately (its refetch lands well before
+    // the reload), the loader leg waits for the canvas's next load so its
+    // refetch cannot race the post-commit full-reload render
+    // (synced-invalidation.ts owns the sequencing)
+    const syncedHandler = ({ leg }: { leg: ContentSyncLeg }): void => {
+      invalidateOnContentSynced(queryClient, leg);
     };
     // routes freshness (#119): the background getStaticPaths pass fills
     // `renders` after the hook capture serves — marker truth and render-aware
@@ -57,12 +69,12 @@ export function App() {
     };
     hot.on('astroix:file-changed', handler);
     hot.on('astro:content-changed', contentHandler);
-    hot.on('astroix:content-synced', contentHandler);
+    hot.on('astroix:content-synced', syncedHandler);
     hot.on('astroix:routes-changed', routesHandler);
     return () => {
       hot.off('astroix:file-changed', handler);
       hot.off('astro:content-changed', contentHandler);
-      hot.off('astroix:content-synced', contentHandler);
+      hot.off('astroix:content-synced', syncedHandler);
       hot.off('astroix:routes-changed', routesHandler);
     };
   }, [queryClient]);

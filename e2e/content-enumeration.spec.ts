@@ -10,13 +10,11 @@ import { expect, test } from '@playwright/test';
 // until the `renders` delta lands. Advisory review on PR #126 challenged
 // exactly this — a permanently-stale marker on a newly-added entry — so the
 // spec asserts the payload truth against the live fixture, both directions
-// (add and remove). The chrome-side half lives in the second test (#133):
-// the same external edit must live-refresh the Content sidebar — the
-// deferred `astroix:content-synced` push (srcDir signal + the loader's
-// post-commit data-store write, behind a render grace) invalidates the
-// chrome's collections cache without a reload or a tab roundtrip; astro's
-// own content event rides the ssr hot channel and never reaches the client
-// chrome.
+// (add and remove). The chrome-side half — the same external edit
+// live-refreshing the Content sidebar through the `astroix:content-synced`
+// push — moved to live-refresh.spec.ts on the source lane (#150): the push
+// rides the vite hot channel, which the prebuilt chrome this lane boots
+// cannot subscribe to (#166).
 
 interface RouteInfo {
   pattern: string;

@@ -1,5 +1,23 @@
 # @wojciechpiskorz/astroix
 
+## 0.0.26
+
+### Patch Changes
+
+- 71949db: Sequence the content-synced invalidation on the canvas-load event instead of the 1s render grace (#155): the `astroix:content-synced` push now fires immediately, labeled with the watcher leg that fired (`srcdir` pre-commit or `loader` post-commit), and the chrome owns the timing it can observe — the srcDir leg invalidates COLLECTIONS_KEY + SCHEMA_KEY on receipt (its refetch lands well before the loader's debounced store write and reload), while the loader leg holds its invalidation until the canvas's next `load` event (the store's `canvasLoad` seq bump) proves the post-commit full-reload render served, with a 3s bounded fallback so a push that no canvas load ever answers still refreshes the sidebar. Removes the last timing assumption in the #133 chain: the fixed grace only assumed the render had finished — a machine whose reload outran it re-raced the fresh-runner refetch against the re-render and the canvas kept serving the pre-commit store until the next edit.
+
+## 0.0.25
+
+### Patch Changes
+
+- 53277a6: Shape-aware self-heal for the local-link fixture boot: `scripts/prepare-local-link.mjs` now extracts a non-throwing `isPublishShaped` predicate and re-installs the fixture's `file:` dep when the installed copy stops being publish-shaped (pre-#123 full-repo residue), not only on a dist digest mismatch — a regressed copy self-heals on the next boot instead of bricking it. Verified: a frozen dir-`file:` install evicts foreign dirs/files wholesale, so no explicit removal is needed (unlike the tarball lane).
+
+## 0.0.24
+
+### Patch Changes
+
+- fc7e39e: Split the repeatable-rows cluster (`ArrayRows`, `RowWidget`, `defaultRowItem`) out of `field-widgets.tsx` into `array-rows.tsx`, with the shared leaf widgets in `value-widgets.tsx` — a pure file split, no behavior change (#156).
+
 ## 0.0.23
 
 ### Patch Changes

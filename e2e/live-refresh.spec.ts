@@ -132,7 +132,8 @@ test('UI: a write racing an external edit reloads the form from disk (banner, ty
 });
 
 // #149's main-side repair, pinned: the idle post-banner user. The 409's own
-// invalidation (and under #133 the deferred content-synced push) refetches
+// invalidation (and under #133 the content-synced push's canvas-load-sequenced
+// invalidation, #155) refetches
 // the collections payload while the form sits clean on the disk truth — the
 // pane must NOT reset onto the payload's zod projection (the delta between
 // the projection and the raw file would auto-write `tone`/`priority`/
@@ -161,8 +162,9 @@ test('UI: an idle user post-409 writes nothing — the file keeps the external e
     // the banner's reload won: the form shows the disk truth
     await expect(title).toHaveValue('External edit');
 
-    // the idle window: no typing, past every push/refetch path — the 1 s
-    // render grace, the loop's own invalidation, the ssr-walk refetch
+    // the idle window: no typing, past every push/refetch path — the
+    // loader leg's canvas-load-sequenced invalidation (3 s fallback bound,
+    // #155), the loop's own invalidation, the ssr-walk refetch
     await page.waitForTimeout(4_000);
 
     // byte-stability is the claim: the external edit's bytes, untouched —
@@ -227,8 +229,9 @@ test('IDE edit reflects live in the open chrome editor (file→chrome sync)', as
 // external content edit with no reload and no tab roundtrip. The signal
 // chain: the srcDir file event pushes immediately (pre-commit — the loader's
 // store write is debounced 500 ms), then the data-store write itself fires
-// the post-commit push whose refetch lands fresh — the poll budget must
-// cover both legs plus the loader sync.
+// the post-commit push whose invalidation waits out the canvas's full-reload
+// load before refetching (#155) — the poll budget must cover both legs plus
+// the loader sync and the reload render.
 test('an external content edit live-refreshes the chrome collections list — add and remove', async ({
   page,
 }) => {
