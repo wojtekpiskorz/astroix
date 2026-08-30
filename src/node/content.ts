@@ -35,27 +35,38 @@ async function handleCollections(
   _url: URL,
   ctx: ApiContext,
 ): Promise<void> {
-  const { runner, configModule } = await importContentConfig(ctx);
-  const contentModule = (await runner.import('astro:content')) as RawContentModule;
-  json(res, 200, await assembleCollectionsPayload(configModule, contentModule));
+  const payload = await withContentConfig(ctx, async (runner, configModule) => {
+    const contentModule = (await runner.import('astro:content')) as RawContentModule;
+    return assembleCollectionsPayload(configModule, contentModule);
+  });
+  json(res, 200, payload);
 }
 
 /**
  * The stateless-doctrine sequence every content endpoint starts with: one
  * fresh module runner per request (nothing held between requests — core
  * clears its caches on invalidation), importing the user's content config
- * as the runner evaluates it. The runner comes back along for callers that
- * need sibling imports (`astro:content`) on the same per-request instance.
+ * as the runner evaluates it. The runner closes when `use` settles: its
+ * transport pins a `send` listener on the ssr hot channel, and a fresh
+ * runner per request leaks one listener each otherwise (#146).
  */
-async function importContentConfig(ctx: ApiContext): Promise<{
-  runner: ReturnType<typeof createServerModuleRunner>;
-  configModule: RawContentConfig | null;
-}> {
+async function withContentConfig<T>(
+  ctx: ApiContext,
+  use: (
+    runner: ReturnType<typeof createServerModuleRunner>,
+    configModule: RawContentConfig | null,
+  ) => Promise<T>,
+): Promise<T> {
   const runner = createServerModuleRunner(ctx.server.environments.ssr);
-  const configPath = findContentConfigPath(ctx.srcDir);
-  const configModule =
-    configPath === null ? null : ((await runner.import(configPath)) as RawContentConfig);
-  return { runner, configModule };
+  try {
+    const configPath = findContentConfigPath(ctx.srcDir);
+    const configModule =
+      configPath === null ? null : ((await runner.import(configPath)) as RawContentConfig);
+    return await use(runner, configModule);
+  } finally {
+    // teardown of dev-only listener noise must not mask the endpoint's result
+    await runner.close().catch(() => {});
+  }
 }
 
 /** The user's `content.config` module as the runner evaluates it. */
@@ -294,9 +305,10 @@ async function loadCollectionSchema(
   name: string | null,
 ): Promise<{ name: string; resolved: ResolvedCollectionSchema } | null> {
   if (name === null) return null;
-  const { configModule } = await importContentConfig(ctx);
-  const resolved = resolveCollectionSchema(configModule, name);
-  return resolved === null ? null : { name, resolved };
+  return withContentConfig(ctx, async (_runner, configModule) => {
+    const resolved = resolveCollectionSchema(configModule, name);
+    return resolved === null ? null : { name, resolved };
+  });
 }
 
 /**
