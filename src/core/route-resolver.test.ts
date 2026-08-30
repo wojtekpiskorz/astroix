@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { RouteInfo, RouteSegmentPart } from './route-resolver';
-import { pickNavigableCandidate, resolveActiveEntry } from './route-resolver';
+import { hasCandidateRoutes, pickNavigableCandidate, resolveActiveEntry } from './route-resolver';
 
 const staticPart = (content: string): RouteSegmentPart => ({
   content,
@@ -307,5 +307,21 @@ describe('pickNavigableCandidate — reverse (entry → canvas URL, #109)', () =
     expect(
       pickNavigableCandidate('2024/post', routes('/blog/[slug]'), { blog: ['2024/post'] }),
     ).toBeNull();
+  });
+});
+
+describe('hasCandidateRoutes — the unrouted marker predicate (#111)', () => {
+  it('a fillable single-param pattern counts, regardless of plurality', () => {
+    expect(hasCandidateRoutes('hello', routes('/blog/[slug]', '/blog/[...slug]'))).toBe(true);
+    expect(hasCandidateRoutes('2024/post', routes('/blog/[...slug]'))).toBe(true);
+  });
+
+  it('nothing fills the id — false (static routes render no candidate)', () => {
+    expect(hasCandidateRoutes('hello', routes('/', '/about'))).toBe(false);
+    expect(hasCandidateRoutes('2024/post', routes('/blog/[slug]'))).toBe(false);
+  });
+
+  it('an empty route set is unrouted', () => {
+    expect(hasCandidateRoutes('hello', [])).toBe(false);
   });
 });

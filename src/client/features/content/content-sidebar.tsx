@@ -1,7 +1,11 @@
 import { ChevronDown, ChevronRight, CircleOff } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { useEffect } from 'react';
-import { candidateRoutes, pickNavigableCandidate, resolveActiveEntry } from '../../../core/route-resolver';
+import {
+  hasCandidateRoutes,
+  pickNavigableCandidate,
+  resolveActiveEntry,
+} from '../../../core/route-resolver';
 import { useChromeStore } from '../../store';
 import { toCollectionsIndex, useCollections, useRoutes } from './api';
 import { useContentStore } from './store';
@@ -188,8 +192,7 @@ export function ContentSidebar() {
 
   // zero candidate routes = no page follows this entry — the marker is the
   // legend for the click's silence, presentation only (never a disable)
-  const unrouted = (entryId: string): boolean =>
-    candidateRoutes(entryId, routes ?? []).length === 0;
+  const unrouted = (entryId: string): boolean => !hasCandidateRoutes(entryId, routes ?? []);
 
   const renderFolder = (collection: string, folder: TreeFolder): ReactNode => {
     const folderKey = `${collection}/${folder.path}`;

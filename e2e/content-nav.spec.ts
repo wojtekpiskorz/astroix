@@ -207,10 +207,13 @@ test('nested ids render as folders with basename labels, flat ids stay bare', as
   );
 
   // a flat collection renders no wrapper folder — the id is the label
+  // (`index` lives in two collections since #112 — scope by collection)
   await expect(
     page.locator('[data-astroix-collection="homepage"] [data-astroix-tree-folder]'),
   ).toHaveCount(0);
-  await expect(page.locator('[data-astroix-entry="index"]')).toHaveText('index');
+  await expect(
+    page.locator('[data-astroix-collection="homepage"] [data-astroix-entry="index"]'),
+  ).toHaveText('index');
   await expect(page.locator('[data-astroix-entry="hello-builder"]')).toHaveText('hello-builder');
 });
 
@@ -274,9 +277,19 @@ test('zero-candidate entries carry the marker and stay fully openable', async ({
   await page.getByRole('tab', { name: 'Content' }).click();
   await expect(page.locator('[data-astroix-entries="ready"]')).toBeVisible();
 
-  // every entry is unrouted against an empty route set
-  for (const id of ['showcase', 'scratch', 'index', 'hello-builder', '2024/post']) {
-    const entry = page.locator(`[data-astroix-entry="${id}"]`);
+  // every entry is unrouted against an empty route set (`index` lives in two
+  // collections since #112 — the id alone is not unique, the pair is)
+  const marked: Array<[collection: string, id: string]> = [
+    ['gallery', 'showcase'],
+    ['notes', 'scratch'],
+    ['homepage', 'index'],
+    ['blog', 'hello-builder'],
+    ['blog', '2024/post'],
+  ];
+  for (const [collection, id] of marked) {
+    const entry = page.locator(
+      `[data-astroix-collection="${collection}"] [data-astroix-entry="${id}"]`,
+    );
     await expect(entry).toHaveAttribute('data-astroix-entry-unrouted', 'true');
     await expect(entry).toHaveAttribute('title', 'no route renders this entry');
   }

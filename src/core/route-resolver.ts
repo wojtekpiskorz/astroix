@@ -124,6 +124,15 @@ export function pickNavigableCandidate(
   return best?.url ?? null;
 }
 
+/**
+ * Whether any single-param pattern could render this entry — the sidebar's
+ * unrouted marker (#111): zero candidates means no route follows the id.
+ * Plurality and specificity are the picker's concern, not this predicate's.
+ */
+export function hasCandidateRoutes(entryId: string, routes: ReadonlyArray<RouteInfo>): boolean {
+  return rankedCandidates(entryId, routes).length > 0;
+}
+
 function rankedCandidates(entryId: string, routes: ReadonlyArray<RouteInfo>): RankedCandidate[] {
   const candidates: RankedCandidate[] = [];
   for (const route of routes) {
