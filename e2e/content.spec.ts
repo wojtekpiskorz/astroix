@@ -12,6 +12,8 @@ interface RouteInfo {
   pattern: string;
   segments: RouteSegmentPart[][];
   params: string[];
+  rendering: 'prerendered' | 'on-demand';
+  renders?: string[];
 }
 
 async function getCollections(page: import('@playwright/test').Page): Promise<CollectionRecord[]> {
@@ -114,6 +116,40 @@ test('GET /__astroix/routes serves the hook-captured route array', async ({ page
   // Astro-core internal routes stay out of the payload (#109): the dev
   // server-islands route is a same-shape candidate that would navigate to a 404
   expect(routes.some((route) => route.pattern.startsWith('/_server-islands'))).toBe(false);
+});
+
+test('GET /__astroix/routes carries rendering mode and the getStaticPaths enumeration (#119)', async ({
+  page,
+}) => {
+  // `rendering` is the hook's synchronous projection — served on the first
+  // request, never waiting for the background pass (static-output fixture:
+  // every page prerendered by default)
+  const routes = (await (await page.request.get('/__astroix/routes')).json()) as RouteInfo[];
+  expect(routes.find((route) => route.pattern === '/')?.rendering).toBe('prerendered');
+  expect(routes.find((route) => route.pattern === '/blog/[slug]')?.rendering).toBe('prerendered');
+
+  // `renders` is the background enumeration (debounced, ms-scale here) —
+  // poll until the pass lands on the payload
+  await expect
+    .poll(
+      async () => {
+        const payload = (await (await page.request.get('/__astroix/routes')).json()) as RouteInfo[];
+        return payload.find((route) => route.pattern === '/blog/[slug]')?.renders ?? null;
+      },
+      { timeout: 10_000, message: 'enumeration never landed on /blog/[slug]' },
+    )
+    .toEqual(['hello-builder']);
+
+  const payload = (await (await page.request.get('/__astroix/routes')).json()) as RouteInfo[];
+  // the catch-all renders every blog id, nested included — order is the
+  // collection's, membership is the contract
+  const catchAll = payload.find((route) => route.pattern === '/blog/[...slug]');
+  expect(catchAll?.renders).toHaveLength(3);
+  expect(new Set(catchAll?.renders)).toEqual(
+    new Set(['hello-builder', '2024/post', '2025/release-notes']),
+  );
+  // static routes are not the `renders` space — the field stays absent
+  expect(payload.find((route) => route.pattern === '/')?.renders).toBeUndefined();
 });
 
 test('the fixture dynamic route renders a nested-id entry through the chrome canvas', async ({

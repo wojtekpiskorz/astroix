@@ -7,6 +7,7 @@ import { registerChromeReloadShield } from './chrome-reload-shield';
 import { contentHandlers } from './content';
 import { isDocumentRequest } from './document-request';
 import { restHandlers } from './rest';
+import { registerRouteEnumeration } from './route-enumeration';
 import { type RoutesState, routesHandlers } from './routes';
 import { chromeArtifactPath, clientEntryPath } from './source-mode';
 import { registerFileSync } from './watch-sync';
@@ -59,6 +60,9 @@ export function astroixVitePlugin(options: AstroixPluginOptions): Plugin {
         routes: options.routes,
         handlers: [...restHandlers, ...contentHandlers, ...routesHandlers],
       });
+      // the background getStaticPaths pass — fills `renders` into the routes
+      // payload and pushes `astroix:routes-changed` when it lands (#119)
+      registerRouteEnumeration(server, { root: server.config.root, routes: options.routes });
       registerFileSync(server, { root: server.config.root, srcDir });
       registerChromeReloadShield(server);
     },

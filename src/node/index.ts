@@ -4,7 +4,7 @@ import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import type { AstroIntegration } from 'astro';
 import type { Plugin as VitePlugin } from 'vite';
-import { type RoutesState, toRouteInfos } from './routes';
+import { captureRoutes, type RoutesState } from './routes';
 import { clientEntryPath, isSourceMode } from './source-mode';
 import { hostRegistersTailwind } from './tailwind-guard';
 import { astroixVitePlugin } from './vite-plugin';
@@ -37,12 +37,14 @@ function astroix(): AstroIntegration {
   // (spec Impl #13). Lives on the integration instance so both hooks —
   // the writer and the plugin that serves the state — share one container
   // across dev restarts (restarts re-run the routes hook on the same instance).
-  const routesState: RoutesState = { current: [] };
+  // The background enumeration (`route-enumeration.ts`) fills `renders` into
+  // it and watches the captures through `onCapture` (#119).
+  const routesState: RoutesState = { current: [], captured: [], projectionChanged: false };
   return {
     name: 'astroix',
     hooks: {
       'astro:routes:resolved': ({ routes }) => {
-        routesState.current = toRouteInfos(routes);
+        captureRoutes(routesState, routes);
       },
       'astro:config:setup': ({ config, command, updateConfig, injectScript, logger }) => {
         if (command !== 'dev') return;

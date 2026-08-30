@@ -2,7 +2,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { type CSSProperties, useEffect } from 'react';
 import { SidebarProvider } from '#components/ui/sidebar.tsx';
 import { Canvas, reflectCanvasPosition } from './canvas/canvas';
-import { COLLECTIONS_KEY, SCHEMA_KEY } from './features/content/api';
+import { COLLECTIONS_KEY, ROUTES_KEY, SCHEMA_KEY } from './features/content/api';
 import { ContentEditorPane } from './features/content/content-editor-pane';
 import { INDEX_PAYLOAD_KEY } from './features/css/api';
 import { ChromeHeader } from './features/css/chrome-header';
@@ -44,11 +44,19 @@ export function App() {
       void queryClient.invalidateQueries({ queryKey: COLLECTIONS_KEY });
       void queryClient.invalidateQueries({ queryKey: SCHEMA_KEY });
     };
+    // routes freshness (#119): the background getStaticPaths pass fills
+    // `renders` after the hook capture serves — marker truth and render-aware
+    // navigation arrive on this push, not on the session-cached first fetch
+    const routesHandler = (): void => {
+      void queryClient.invalidateQueries({ queryKey: ROUTES_KEY });
+    };
     hot.on('astroix:file-changed', handler);
     hot.on('astro:content-changed', contentHandler);
+    hot.on('astroix:routes-changed', routesHandler);
     return () => {
       hot.off('astroix:file-changed', handler);
       hot.off('astro:content-changed', contentHandler);
+      hot.off('astroix:routes-changed', routesHandler);
     };
   }, [queryClient]);
 
