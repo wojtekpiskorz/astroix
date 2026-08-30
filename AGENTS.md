@@ -85,6 +85,7 @@ Lanes run concurrently — the owner steers several agent sessions at once — s
 
 - A session that branches works from its own worktree (`git worktree add ../astroix-<issue-or-pr> <branch>`), never by switching the shared main checkout: two sessions ping-ponging one checkout is how commits land on the wrong branch (the `b1d1ee6` incident, PR #88 thread).
 - At lane close, the worktree is always removed and the branch deleted. Canonical sequence: exit the worktree first (`git worktree remove` refuses the one you are standing in), remove it, then `gh pr merge <n> --delete-branch` — merge, local + remote delete, and prune in one step. The `changeset-release/*` branch is never deleted; it belongs to the release loop.
+- macOS fallback (`File name too long`, #125): on any lane that installed the fixtures, `git worktree remove` can fail — git's recursive delete chokes on the deep `node_modules` nesting. Recover with `rm -rf ../astroix-<lane>` + `git worktree prune`; the worktree must be gone before `gh pr merge --delete-branch` (its local branch delete fails the same way while the worktree exists), so if the merge already ran, finish with `git branch -D <branch>`.
 
 ## Boundaries
 
