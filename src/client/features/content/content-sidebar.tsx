@@ -146,8 +146,7 @@ export function ContentSidebar() {
     if (canvasLoad === null || collections === undefined || routes === undefined) return;
     applyCanvasResolution(
       resolveActiveEntry(routes, canvasLoad.url, toCollectionsIndex(collections)),
-      canvasLoad.seq,
-      canvasLoad.url,
+      canvasLoad,
     );
   }, [canvasLoad, collections, routes, applyCanvasResolution]);
 
