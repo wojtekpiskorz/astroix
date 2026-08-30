@@ -1,5 +1,13 @@
 # @wojciechpiskorz/astroix
 
+## 0.0.22
+
+### Patch Changes
+
+- 8f72536: Chrome collections list live-refresh on external content edits (#133): an astroix-owned `astroix:content-synced` WS push rides the client hot channel (astro's own content event only ever fires on the ssr channel, so the chrome never heard it) — scheduled from the shared content-signal classification (`src/node/content-signal.ts`, the same predicate that re-arms the #119 enumeration) and the loader's post-commit data-store write, deferred by a render grace so the chrome's refetch never races the canvas's post-commit full-reload render; the chrome invalidates COLLECTIONS_KEY + SCHEMA_KEY on receipt.
+  
+  Raw-truth form hardening (#149, unblocks #133): the content editor's write path lives in one truth-space — the form's values, the write loop's baseline and the pane's halves all mount on the loop's raw file parse; the collections payload is demoted to a change signal (identity flip → file re-read → compare: echoes rebase silently, a genuine change under a clean draft becomes the new truth, a dirty draft is left to the hash guard) and never resets the form onto its zod projection. Zod defaults become widget-display (placeholder semantics — a key absent from the file renders its default visibly but materializes only when the field is touched). Repairs the latent main-side normalization: an idle post-409 user no longer auto-writes a zod-normalized file with no action at all.
+
 ## 0.0.21
 
 ### Patch Changes
