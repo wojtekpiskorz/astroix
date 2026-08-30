@@ -264,7 +264,8 @@ test('UI: a write racing an external edit reloads the form from disk (banner, ty
 });
 
 // #149's main-side repair, pinned: the idle post-banner user. The 409's own
-// invalidation (and under #133 the deferred content-synced push) refetches
+// invalidation (and under #133 the content-synced push's canvas-load-sequenced
+// invalidation) refetches
 // the collections payload while the form sits clean on the disk truth — the
 // pane must NOT reset onto the payload's zod projection (the delta between
 // the projection and the raw file would auto-write `tone`/`priority`/
@@ -293,8 +294,9 @@ test('UI: an idle user post-409 writes nothing — the file keeps the external e
     // the banner's reload won: the form shows the disk truth
     await expect(title).toHaveValue('External edit');
 
-    // the idle window: no typing, past every push/refetch path — the 1 s
-    // render grace, the loop's own invalidation, the ssr-walk refetch
+    // the idle window: no typing, past every push/refetch path — the
+    // loader leg's canvas-load-sequenced invalidation (3 s fallback bound,
+    // #155), the loop's own invalidation, the ssr-walk refetch
     await page.waitForTimeout(4_000);
 
     // byte-stability is the claim: the external edit's bytes, untouched —
