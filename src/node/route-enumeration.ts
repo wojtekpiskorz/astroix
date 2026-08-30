@@ -16,8 +16,8 @@ import { applyRenders, isProjectPageRoute, type RoutesState } from './routes';
  * Freshness rides the codebase's stateless-doctrine runner (content.ts): a
  * NEW `createServerModuleRunner` per pass, nothing held between passes —
  * and closed when the pass settles, because each runner's transport pins a
- * `send` listener on the ssr hot channel (#146). The
- * long-lived `environments.ssr.runner` cannot serve this pass — its cached
+ * `send` listener on the ssr hot channel (#146). The long-lived
+ * `environments.ssr.runner` cannot serve this pass — its cached
  * module bindings never see content commits (verified live on astro@7.2.7:
  * after a content edit, a direct `runner.import('astro:content')` keeps
  * returning the old entries forever, while dev requests go fresh through
