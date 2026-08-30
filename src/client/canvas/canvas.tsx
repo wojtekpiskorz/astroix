@@ -4,6 +4,9 @@ import { useChromeStore, useSelectModeActive } from '../store';
 const SELECTION_STYLE_ID = 'astroix-selection-style';
 const HOVER_CLASS = 'astroix-hover';
 const SELECTED_CLASS = 'astroix-selected';
+// the chrome-URL param carrying the canvas position (#110) — the owner's
+// pick, consistent with the `builder`/`astroix_smoke` param family
+const CANVAS_PARAM = 'canvas';
 
 /** The clean-page twin of the given path (client-side twin of canvasUrl). */
 function canvasHref(path: string): string {
@@ -12,10 +15,41 @@ function canvasHref(path: string): string {
   return `${url.pathname}${url.search}`;
 }
 
+/** The iframe URL reduced to its shareable position: path + search, the builder marker stripped. */
+function canvasPosition(url: string): string {
+  const parsed = new URL(url, window.location.href);
+  parsed.searchParams.delete('builder');
+  return `${parsed.pathname}${parsed.search}`;
+}
+
+/**
+ * Mirrors the canvas position into the chrome URL (#110): replaceState, never
+ * pushState — the back button must not fill with canvas positions — and only
+ * the param rides along; the chrome page's own path is never rewritten.
+ */
+export function reflectCanvasPosition(url: string): void {
+  const chromeUrl = new URL(window.location.href);
+  chromeUrl.searchParams.set(CANVAS_PARAM, canvasPosition(url));
+  history.replaceState(null, '', chromeUrl);
+}
+
 /** The clean-page twin of the current builder URL — the iframe's boot target. */
 function canvasSrc(): string {
-  return canvasHref(window.location.href);
+  // boot precedence (#110): a carried position wins over deriving from the
+  // chrome page's own URL — a refresh or shared link re-opens the canvas
+  // where it was; an absent param keeps today's derivation
+  const carried = new URL(window.location.href).searchParams.get(CANVAS_PARAM);
+  return canvasHref(carried ?? window.location.href);
 }
+
+// boot-only: parsed once at module load, before any render (the
+// SIDEBAR_OPEN_AT_BOOT idiom). The mirror below rewrites the chrome URL on
+// every canvas load, so re-deriving the src mid-render drifts the computed
+// value after any navigation — today the React Compiler's prop memoization
+// masks the drift (verified: no reload with a per-render derivation), but
+// boot precedence is boot semantics: the param is read exactly once, by
+// construction rather than compiler grace.
+const CANVAS_BOOT_SRC = canvasSrc();
 
 export function Canvas() {
   const iframeRef = useRef<HTMLIFrameElement>(null);
@@ -93,7 +127,7 @@ export function Canvas() {
       <iframe
         id="astroix-canvas"
         ref={iframeRef}
-        src={canvasSrc()}
+        src={CANVAS_BOOT_SRC}
         title="astroix canvas"
         className="h-full w-full border-0"
         // same-origin: the location is readable, and every navigation —

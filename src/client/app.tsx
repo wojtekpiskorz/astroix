@@ -1,7 +1,7 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { type CSSProperties, useEffect } from 'react';
 import { SidebarProvider } from '#components/ui/sidebar.tsx';
-import { Canvas } from './canvas/canvas';
+import { Canvas, reflectCanvasPosition } from './canvas/canvas';
 import { COLLECTIONS_KEY, SCHEMA_KEY } from './features/content/api';
 import { ContentEditorPane } from './features/content/content-editor-pane';
 import { INDEX_PAYLOAD_KEY } from './features/css/api';
@@ -51,6 +51,14 @@ export function App() {
       hot.off('astro:content-changed', contentHandler);
     };
   }, [queryClient]);
+
+  // #110: the chrome URL carries the canvas position — one replaceState per
+  // load, on the same signal reactive resolution listens to; idempotent under
+  // StrictMode, no reloads, the back button untouched
+  const canvasLoad = useChromeStore((state) => state.canvasLoad);
+  useEffect(() => {
+    if (canvasLoad !== null) reflectCanvasPosition(canvasLoad.url);
+  }, [canvasLoad]);
 
   // The editor dock slot is app-shell; the pane inside it is feature-owned
   // and chosen by the active tab (ADR-0002 Consequences).
