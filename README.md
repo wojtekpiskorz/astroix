@@ -35,7 +35,7 @@ bun run build                      # tsup (node) + vite (chrome bundle) → dist
 
 ### Dogfood loop
 
-The e2e fixture consumes the local package via `file:../..` and registers `astroix()` in its `astro.config.mjs`. With both packages installed, run `bun run dev` (tsup watch) at the root in one terminal and `bun run dev` in `e2e/fixture/` in the other — the fixture dev server on `http://localhost:4312` runs the integration straight from your checkout.
+The e2e fixture consumes the local package through `.astroix-local/` — a gitignored staging dir holding only the publish surface (`dist`, `package.json`, `README`, `LICENSE`), linked as `file:../../.astroix-local` (#123: a `file:` link to the repo root copies the whole checkout, nesting `node_modules` recursively). `bun run prepare-local` (run automatically before the fixture dev server boots) rebuilds `dist` when stale, re-syncs the staging dir, and refreshes the installed copy — so `bun run dev` in `e2e/fixture/` always serves the current build. A root `bun run dev` (tsup watch) plus a fixture dev server still works for iteration; re-run the fixture's dev script (or `bun run prepare-local`) to pick up each fresh build.
 
 ### Ports
 

@@ -3,12 +3,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "node ../boot-heal.mjs && astro dev --ignore-lock --port ${ASTROIX_E2E_PORT:-4312}",
+    "dev": "node ../../scripts/prepare-local-link.mjs && node ../boot-heal.mjs && astro dev --ignore-lock --port ${ASTROIX_E2E_PORT:-4312}",
     "build": "astro build",
     "preview": "astro preview --port 4312"
   },
   "dependencies": {
-    "@wojciechpiskorz/astroix": "file:../..",
+    "@wojciechpiskorz/astroix": "file:../../.astroix-local",
     "astro": "^7.2.7"
   }
 }

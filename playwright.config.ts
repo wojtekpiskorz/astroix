@@ -34,9 +34,11 @@ export default defineConfig({
       command: `ASTROIX_E2E_PORT=${MAIN_PORT} bun run dev`,
       cwd: 'e2e/fixture',
       url: `http://localhost:${MAIN_PORT}`,
-      // CI parity — no zombie adoption, ever; the boot cost is seconds
+      // CI parity — no zombie adoption, ever; the boot cost is seconds. The
+      // dev script stages the local link first (#123), which on a cold
+      // checkout also owns the fixture install — hence the doubled budget.
       reuseExistingServer: false,
-      timeout: 60_000,
+      timeout: 120_000,
     },
     {
       // npm-pack smoke lane (ADR-0001): build + pack the repo, install the
