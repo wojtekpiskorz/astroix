@@ -9,9 +9,10 @@ import { parseSync } from 'oxc-parser';
 // in `dependencies`, or peers supplied by the host (`astro`, `vite`). A
 // devDep leaking as a bare import (the yaml/entry-writer trap class: node-side
 // code picking up a client-only library) fails here in CI instead of at a
-// consumer's first install. dist/chrome.js is out of scope by design: it is
-// the browser artifact whose deps vite bundles (ADR-0001), gated separately
-// by check-chrome-artifact.mjs.
+// consumer's first install. Scope: exactly what tsup emits — `*.js` and
+// `*.d.ts` under dist/; `chrome.js` is out of scope by design as the browser
+// artifact whose deps vite bundles (ADR-0001), gated separately by
+// check-chrome-artifact.mjs.
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const DIST = join(ROOT, 'dist');
@@ -56,7 +57,11 @@ function importSpecifiers(code, filename) {
       node.type === 'ImportExpression' &&
       (node.source?.type === 'StringLiteral' || node.source?.type === 'Literal')
     ) {
-      // raw-oxc string literals are `Literal`; the ESTree flavor says StringLiteral
+      // this parseSync yields the ESTree flavor (`Literal`); oxc's raw/babel
+      // flavor names it StringLiteral — accept both so either stays covered
+      specs.push(node.source.value);
+    } else if (node.type === 'TSImportType' && typeof node.source?.value === 'string') {
+      // `import("pkg").Type` in .d.ts output — the same trap, declaration form
       specs.push(node.source.value);
     }
     for (const value of Object.values(node)) visit(value);
@@ -75,7 +80,7 @@ function packageNameOf(specifier) {
     : (segments[0] ?? '');
 }
 
-const surface = new Map(); // package (or :builtin/:skip) → [file, specifier]
+const surface = new Map(); // package name (or :builtin/:relative) → [file, specifier]
 
 function classify(specifier, file) {
   if (specifier.startsWith('.') || specifier.startsWith('/')) {
@@ -103,10 +108,19 @@ const files = existsSync(DIST)
       .sort()
   : [];
 
+let indexImports = -1;
 for (const entry of files) {
-  for (const specifier of importSpecifiers(readFileSync(join(DIST, entry), 'utf8'), entry)) {
+  const specs = importSpecifiers(readFileSync(join(DIST, entry), 'utf8'), entry);
+  if (entry === 'index.js') indexImports = specs.length;
+  for (const specifier of specs) {
     classify(specifier, entry);
   }
+}
+
+// self-check: externals and builtins guarantee index.js always imports
+// something — zero collected means the walker regressed to a vacuous pass
+if (existsSync(join(DIST, 'index.js')) && indexImports === 0) {
+  failures.push('vacuous pass: dist/index.js yielded no imports — walker regression');
 }
 
 if (failures.length > 0) {
