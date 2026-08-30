@@ -3,9 +3,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "node ../../scripts/prepare-src-link.mjs && node ../boot-heal.mjs e2e/src-fixture/src/content ASTROIX_E2E_SRC_PORT && astro dev --ignore-lock --port ${ASTROIX_E2E_SRC_PORT:-4311}",
+    "dev": "node ../../scripts/prepare-src-link.mjs && node ../boot-heal.mjs e2e/src-fixture/src/content ASTROIX_E2E_SRC_PORT && astro dev --ignore-lock --port ${ASTROIX_E2E_SRC_PORT:-4310}",
     "build": "astro build",
-    "preview": "astro preview --port 4311"
+    "preview": "astro preview --port 4310"
   },
   "dependencies": {
     "@wojciechpiskorz/astroix": "file:../../.astroix-local-src",

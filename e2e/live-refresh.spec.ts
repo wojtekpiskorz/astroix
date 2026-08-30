@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { expect, type Locator, type Page, test } from '@playwright/test';
+import { expect, test } from '@playwright/test';
+import { type CmView, expectSettled, openEntry } from './entry-pane';
 import { restoreEntry } from './entry-restore';
 import { SRC_PORT } from './ports';
 
@@ -27,38 +28,6 @@ const FIXTURE = join('e2e', 'src-fixture');
 const POST = join(FIXTURE, 'src', 'content', 'blog', '2024', 'post.md');
 const HOME_CSS = join(FIXTURE, 'src', 'pages', 'home.css');
 const ENTRY_PROBE = join(FIXTURE, 'src', 'content', 'blog', 'new-entry.md');
-
-/** The stashed CM6 view handle (body-editor.spec's CmView, body-append slice). */
-interface CmView {
-  state: { doc: { toString: () => string; length: number } };
-  dispatch: (spec: { selection?: { anchor: number } }) => void;
-  focus: () => void;
-}
-
-async function openEntry(page: Page, entry: string): Promise<Locator> {
-  await page.goto('/');
-  await page.getByRole('tab', { name: 'Content' }).click();
-  await expect(page.locator('[data-astroix-entries="ready"]')).toBeVisible({ timeout: 10_000 });
-  await page.locator(`[data-astroix-entry="${entry}"]`).click();
-  const pane = page.locator('[data-astroix-content-pane="form"]');
-  await expect(pane).toBeVisible();
-  // the loop's raw baseline must be loaded before any edit can schedule
-  await expect(pane.locator('[data-astroix-write-status]')).toHaveAttribute(
-    'data-astroix-write-status',
-    'idle',
-    { timeout: 10_000 },
-  );
-  return pane;
-}
-
-/** The loop came to rest without conflict or failure. */
-async function expectSettled(pane: Locator): Promise<void> {
-  await expect(pane.locator('[data-astroix-write-status]')).toHaveAttribute(
-    'data-astroix-write-status',
-    /(idle|saved)/,
-    { timeout: 15_000 },
-  );
-}
 
 test('the full loop: a form edit lands on disk byte-surgically and reloads the canvas', async ({
   page,
