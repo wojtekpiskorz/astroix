@@ -202,19 +202,22 @@ export function ContentSidebar() {
         onToggle={toggleFolder}
       >
         {folder.folders.map((child) => renderFolder(collection, child))}
-        {folder.entries.map((entryId) => (
-          <EntryRow
-            key={entryId}
-            collection={collection}
-            entryId={entryId}
-            active={isActive(collection, entryId)}
-            unrouted={unrouted(entryId)}
-            onOpen={openEntry}
-          />
-        ))}
+        {folder.entries.map((entryId) => renderEntry(collection, entryId))}
       </FolderRow>
     );
   };
+
+  // one row shape for every nesting depth — the full id stays the click contract
+  const renderEntry = (collection: string, entryId: string): ReactNode => (
+    <EntryRow
+      key={entryId}
+      collection={collection}
+      entryId={entryId}
+      active={isActive(collection, entryId)}
+      unrouted={unrouted(entryId)}
+      onOpen={openEntry}
+    />
+  );
 
   return (
     <div data-astroix-entries="ready" className="flex min-h-0 flex-1 flex-col gap-3 px-2 pb-2">
@@ -227,16 +230,7 @@ export function ContentSidebar() {
             </h2>
             <ul className="flex flex-col">
               {tree.folders.map((folder) => renderFolder(collection.name, folder))}
-              {tree.rootEntries.map((entryId) => (
-                <EntryRow
-                  key={entryId}
-                  collection={collection.name}
-                  entryId={entryId}
-                  active={isActive(collection.name, entryId)}
-                  unrouted={unrouted(entryId)}
-                  onOpen={openEntry}
-                />
-              ))}
+              {tree.rootEntries.map((entryId) => renderEntry(collection.name, entryId))}
             </ul>
           </section>
         );

@@ -23,6 +23,7 @@ The ubiquitous language of this project. Use these terms (and these exact spelli
 | **active entry** | The entry open in the content editor; set manually (list click) or reactively (route resolution from the canvas URL). |
 | **route resolution** | Matching the canvas URL against route patterns and entry ids to find the entry rendered there, and back (entry → canvas); a unique hit — or a plurality whose candidates all resolve to the same entry — selects; other ambiguity/no-match stays silent; a pure `src/core` module. |
 | **candidate route** | A route pattern that plausibly renders a given entry, with the canvas URL it produces; entry→canvas navigation picks the most specific candidate of a same-entry plurality (segment param before catch-all, then shallowest), re-verified by forward match. |
+| **unrouted entry** | An entry with zero candidate routes — no pattern the id could fill. The sidebar marks it (dimmed marker + tooltip): a legend for the click's navigational silence, never a disable. |
 | **raw mode** | The CSS rule editor's free-form mode: the rule's declarations edited as plain CSS text instead of property→value widget rows. |
 | **raw field** | The textarea fallback rendering an unsupported schema subtree as editable YAML. |
 | **auto-write** | The persist-on-pause write loop (debounce ~300ms) writing the real repo file; the shared persistence doctrine of both verticals. |
