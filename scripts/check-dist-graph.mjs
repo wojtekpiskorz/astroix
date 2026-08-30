@@ -8,7 +8,7 @@ import { parseSync } from 'oxc-parser';
 // node-side dist output must resolve at a consumer — node builtins, packages
 // in `dependencies`, or peers supplied by the host (`astro`, `vite`). A
 // devDep leaking as a bare import (the yaml/entry-writer trap class: node-side
-// code picking up a client-only library) fails here in CI instead of at a
+// code picking up a package that ships as a devDependency) fails here in CI instead of at a
 // consumer's first install. Scope: exactly what tsup emits — `*.js` and
 // `*.d.ts` under dist/; `chrome.js` is out of scope by design as the browser
 // artifact whose deps vite bundles (ADR-0001), gated separately by
@@ -118,9 +118,10 @@ for (const entry of files) {
 }
 
 // self-check: externals and builtins guarantee index.js always imports
-// something — zero collected means the walker regressed to a vacuous pass
-if (existsSync(join(DIST, 'index.js')) && indexImports === 0) {
-  failures.push('vacuous pass: dist/index.js yielded no imports — walker regression');
+// something — `< 1` covers both not-scanned (filter dropped it) and
+// scanned-but-empty (walker regression): either way this gate went vacuous
+if (existsSync(join(DIST, 'index.js')) && indexImports < 1) {
+  failures.push('vacuous pass: dist/index.js yielded no imports — walker or filter regression');
 }
 
 if (failures.length > 0) {
