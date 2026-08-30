@@ -8,10 +8,10 @@ import { expect, type Locator, type Page } from '@playwright/test';
  * beats byte-copies that drift.
  */
 
-/** The stashed CM6 view handle (body-editor.spec's CmView, body-append slice). */
+/** The stashed CM6 view handle shared by the editor-driving specs. */
 export interface CmView {
   state: { doc: { toString: () => string; length: number } };
-  dispatch: (spec: { selection?: { anchor: number } }) => void;
+  dispatch: (spec: { selection?: { anchor: number; head?: number } }) => void;
   focus: () => void;
 }
 

@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, type Locator, type Page, test } from '@playwright/test';
+import type { CmView } from './entry-pane';
 import { restoreEntry } from './entry-restore';
 
 // Since #74 every doc edit persists through the auto-write loop — the
@@ -28,12 +29,6 @@ test.afterEach(async () => {
 // the committed doc through the stashed view like editor.spec.ts.
 
 /** The stashed-view handle as exercised in editor.spec.ts — the same change path as typing. */
-interface CmView {
-  state: { doc: { toString: () => string; length: number } };
-  dispatch: (spec: { selection?: { anchor: number; head?: number } }) => void;
-  focus: () => void;
-}
-
 // evaluate callbacks serialize alone — the view extraction inlines in each
 // (the editor.spec.ts pattern); outer-scope helpers don't carry over
 async function openBodyEditor(page: Page): Promise<Locator> {

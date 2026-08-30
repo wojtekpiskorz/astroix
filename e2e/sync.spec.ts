@@ -10,15 +10,6 @@ test.describe.configure({ mode: 'serial' });
 
 const FILE_PATH = join('e2e', 'fixture', 'src', 'pages', 'home.css');
 
-async function openHomeCssEditor(page: import('@playwright/test').Page): Promise<void> {
-  await page.goto('/');
-  await page.getByText('Select: off').click();
-  await page.frameLocator('#astroix-canvas').locator('.hero-title').click();
-  await page.locator('[data-astroix-rule]', { hasText: 'home.css' }).first().click();
-  const editor = page.locator('[data-astroix-editor="view"]');
-  await expect(editor.locator('.cm-content')).toContainText('font-weight: 800');
-}
-
 test('stale write guard: a chrome edit based on outdated disk content is refused, never spliced', async ({
   page,
 }) => {
