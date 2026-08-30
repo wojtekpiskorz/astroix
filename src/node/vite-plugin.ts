@@ -81,8 +81,10 @@ export function astroixVitePlugin(options: AstroixPluginOptions): Plugin {
       if (id !== VIRTUAL_CHROME_ID) return null;
       if (clientEntryPath !== null) {
         // ADR-0001 source mode: the chrome loads from this checkout's source,
-        // so the host dev server transforms it (fast-refresh, Tailwind).
-        return `import { mountChrome } from '/@fs${clientEntryPath}';\nmountChrome();\n`;
+        // so the host dev server transforms it (fast-refresh, Tailwind). The
+        // mode discriminator rides the mount call so each e2e lane can pin
+        // the delivery mode it boots (#150).
+        return `import { mountChrome } from '/@fs${clientEntryPath}';\nmountChrome('source');\n`;
       }
       // ADR-0001 prebuilt mode: serve the shipped bundle — a self-contained
       // ESM with react, the compiled CSS and CodeMirror inside, so foreign

@@ -13,3 +13,4 @@
 // and the config always exports the var on that path.
 export const MAIN_PORT = Number(process.env.ASTROIX_E2E_PORT || 4314);
 export const PACK_PORT = Number(process.env.ASTROIX_E2E_PACK_PORT || 4313);
+export const SRC_PORT = Number(process.env.ASTROIX_E2E_SRC_PORT || 4311);

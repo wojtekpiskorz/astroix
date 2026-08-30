@@ -1,13 +1,13 @@
 import { defineConfig, devices } from '@playwright/test';
-import { MAIN_PORT, PACK_PORT } from './e2e/ports';
+import { MAIN_PORT, PACK_PORT, SRC_PORT } from './e2e/ports';
 
-// The e2e lanes own their ports: main :4314, npm-pack :4313 (canonical for
-// CI). Parallel local lanes override the pair via ASTROIX_E2E_PORT /
-// ASTROIX_E2E_PACK_PORT (#120) so sibling worktrees never share a server.
-// The owner's manual smoke lives on :4312 — structural separation, never
-// shared servers (PR #36 debugged a "broken" suite that was actually
-// playwright adopting the owner's orphaned smoke server with a stale
-// dist).
+// The e2e lanes own their ports: main :4314, npm-pack :4313, source-mode
+// :4311 (canonical for CI). Parallel local lanes override the trio via
+// ASTROIX_E2E_PORT / ASTROIX_E2E_PACK_PORT / ASTROIX_E2E_SRC_PORT (#120) so
+// sibling worktrees never share a server. The owner's manual smoke lives on
+// :4312 — structural separation, never shared servers (PR #36 debugged a
+// "broken" suite that was actually playwright adopting the owner's orphaned
+// smoke server with a stale dist).
 
 export default defineConfig({
   testDir: 'e2e',
@@ -49,6 +49,18 @@ export default defineConfig({
       url: `http://localhost:${PACK_PORT}`,
       reuseExistingServer: false,
       timeout: 240_000,
+    },
+    {
+      // source-mode lane (ADR-0001, #150): the src-fixture links the
+      // src-ful staging (dist copy + src symlink), so the chrome boots from
+      // this checkout's source with fast-refresh — the HMR promise of
+      // ADR-0001, covered nowhere else since the main lane went
+      // publish-shaped (#123). Its dev script stages the link first.
+      command: `ASTROIX_E2E_SRC_PORT=${SRC_PORT} bun run dev`,
+      cwd: 'e2e/src-fixture',
+      url: `http://localhost:${SRC_PORT}`,
+      reuseExistingServer: false,
+      timeout: 120_000,
     },
   ],
 });

@@ -15,6 +15,9 @@ dist/
 # publish-shaped local link the e2e fixture installs from (#123)
 .astroix-local/
 
+# src-ful local link the src-fixture installs from (#150)
+.astroix-local-src/
+
 # tests
 coverage/
 crap-table.md
