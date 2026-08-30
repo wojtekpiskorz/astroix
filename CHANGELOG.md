@@ -1,5 +1,11 @@
 # @wojciechpiskorz/astroix
 
+## 0.0.18
+
+### Patch Changes
+
+- 4b3c7a8: Move `shadcn` from `dependencies` to `devDependencies` — consumers no longer install the shadcn CLI tree (`ts-morph`, `execa`, `@modelcontextprotocol/sdk`, …). Nothing imports it at runtime; the documented workflow uses `bunx shadcn@latest add`.
+
 ## 0.0.17
 
 ### Patch Changes
