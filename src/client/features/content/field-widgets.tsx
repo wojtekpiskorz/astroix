@@ -26,21 +26,51 @@ interface FieldWidgetProps {
   issues: Record<string, string>;
   /** Associates the widget's control with its FieldLabel (a11y). */
   id?: string;
+  /** The projection value for read-only display (image kind only, #149). */
+  display?: unknown;
+}
+
+/**
+ * The zod default as widget text (#149's widget-display ruling): visible in
+ * the widget while `values` stay absent — placeholder semantics, the key
+ * materializes only when the field is touched.
+ */
+function defaultText(node: Exclude<FormFieldNode, { kind: 'group' }>): string | undefined {
+  return node.initial === undefined || node.initial === null ? undefined : String(node.initial);
 }
 
 /** Pure dispatch over the walked node's kind — the widgets own their behavior. */
-export function FieldWidget({ node, value, onChange, issues, id }: FieldWidgetProps) {
+export function FieldWidget({ node, value, onChange, issues, id, display }: FieldWidgetProps) {
   switch (node.kind) {
     case 'string':
-      return <StringWidget id={id} value={value} onChange={onChange} />;
+      return (
+        <StringWidget id={id} value={value} onChange={onChange} placeholder={defaultText(node)} />
+      );
     case 'number':
-      return <NumberWidget id={id} value={value} onChange={onChange} />;
+      return (
+        <NumberWidget id={id} value={value} onChange={onChange} placeholder={defaultText(node)} />
+      );
     case 'boolean':
-      return <CheckboxWidget label={node.label} value={value} onChange={onChange} />;
+      return (
+        <CheckboxWidget
+          label={node.label}
+          value={value}
+          onChange={onChange}
+          initial={node.initial}
+        />
+      );
     case 'enum':
-      return <EnumWidget id={id} options={node.options} value={value} onChange={onChange} />;
+      return (
+        <EnumWidget
+          id={id}
+          options={node.options}
+          value={value}
+          onChange={onChange}
+          placeholder={defaultText(node) ?? '—'}
+        />
+      );
     case 'image':
-      return <ImageMeta value={value} />;
+      return <ImageMeta value={display ?? value} />;
     case 'array':
       return <ArrayRows node={node} value={value} onChange={onChange} issues={issues} />;
     case 'raw':
@@ -52,17 +82,20 @@ interface ValueWidgetProps {
   value: unknown;
   onChange: (value: unknown) => void;
   id?: string;
+  /** The zod default shown while the value is absent (#149 widget-display). */
+  placeholder?: string;
   /** Names the control when its label is a group, not a single field (array rows). */
   ariaLabel?: string;
 }
 
 /** A string field — any non-string display value stringifies rather than lying. */
-function StringWidget({ value, onChange, id, ariaLabel }: ValueWidgetProps) {
+function StringWidget({ value, onChange, id, ariaLabel, placeholder }: ValueWidgetProps) {
   return (
     <Input
       id={id}
       aria-label={ariaLabel}
       value={typeof value === 'string' ? value : value == null ? '' : String(value)}
+      placeholder={placeholder}
       onChange={(event) => onChange(event.target.value)}
     />
   );
@@ -73,13 +106,14 @@ function StringWidget({ value, onChange, id, ariaLabel }: ValueWidgetProps) {
  * shows its real issue), a non-numeric intermediate degrades the same way
  * instead of inventing NaN into the draft.
  */
-function NumberWidget({ value, onChange, id, ariaLabel }: ValueWidgetProps) {
+function NumberWidget({ value, onChange, id, ariaLabel, placeholder }: ValueWidgetProps) {
   return (
     <Input
       id={id}
       aria-label={ariaLabel}
       type="number"
       value={value == null ? '' : String(value)}
+      placeholder={placeholder}
       onChange={(event) => onChange(numberFromInput(event.target.value))}
     />
   );
@@ -95,15 +129,20 @@ function CheckboxWidget({
   label,
   value,
   onChange,
+  initial,
 }: {
   label: string;
   value: unknown;
   onChange: (value: unknown) => void;
+  /** The zod default displayed while the value is absent (#149 widget-display). */
+  initial?: unknown;
 }) {
   return (
     <Checkbox
       aria-label={label}
-      checked={Boolean(value)}
+      // widget-display: an absent key renders its default checked-state —
+      // display-only, the touch materializes the value either way
+      checked={value === undefined ? Boolean(initial) : Boolean(value)}
       onCheckedChange={(checked) => onChange(Boolean(checked))}
     />
   );
@@ -113,7 +152,7 @@ interface EnumWidgetProps extends ValueWidgetProps {
   options: (string | number)[];
 }
 
-function EnumWidget({ options, value, onChange, id, ariaLabel }: EnumWidgetProps) {
+function EnumWidget({ options, value, onChange, id, ariaLabel, placeholder }: EnumWidgetProps) {
   return (
     <Select
       items={options.map((option) => ({ value: option, label: String(option) }))}
@@ -121,7 +160,7 @@ function EnumWidget({ options, value, onChange, id, ariaLabel }: EnumWidgetProps
       onValueChange={(selected) => onChange(selected)}
     >
       <SelectTrigger id={id} aria-label={ariaLabel}>
-        <SelectValue placeholder="—" />
+        <SelectValue placeholder={placeholder} />
       </SelectTrigger>
       <SelectContent
         // `.dark` re-scope: Base UI portals the popup into document.body,
@@ -214,6 +253,9 @@ function ArrayRows({
   onChange: (value: unknown) => void;
   issues: Record<string, string>;
 }) {
+  // an absent key renders no rows — the common `default([])` displays
+  // naturally; a non-empty array default is not phantom-rendered (its rows
+  // materialize only through the Add button)
   const rows = Array.isArray(value) ? value : [];
 
   return (
@@ -327,6 +369,9 @@ export function RawField({
         data-astroix-raw-field={node.path}
         data-astroix-raw-reason={node.reason}
         value={text}
+        placeholder={
+          value === undefined && node.initial != null ? rawTextFrom(node.initial) : undefined
+        }
         onChange={(event) => handleText(event.target.value)}
         spellCheck={false}
         className="min-h-16 font-mono text-xs"

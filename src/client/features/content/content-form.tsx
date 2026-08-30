@@ -1,6 +1,5 @@
 import { useForm, useStore } from '@tanstack/react-form';
 import { type Dispatch, type SetStateAction, useEffect, useRef, useState } from 'react';
-import { jsonEqual } from '../../../core/entry-writer';
 import type { FormFieldNode, ValidationIssueRecord } from '../../../core/form-tree';
 import { validateDraft } from './api';
 import { RawField } from './field-widgets';
@@ -39,8 +38,19 @@ async function runValidation(
 interface ContentFormProps {
   collection: string;
   fields: FormFieldNode[];
-  /** The entry's parsed data (zod output — defaults already filled) as loaded. */
+  /**
+   * The entry's raw-parse data — the form's one truth-space (#149): the
+   * values hold exactly what the file parses to; zod defaults stay absent
+   * until their field is touched (widgets display them, the write
+   * materializes them).
+   */
   entryData: unknown;
+  /**
+   * The payload's zod projection, display-only: transform outputs the raw
+   * parse cannot produce (image() metadata) still render read-only; the
+   * values never adopt them.
+   */
+  projectionData: unknown;
   /**
    * The draft values seam for #74's write loop (the form-side twin of the
    * body editor's `onChange`): fires on every change with the whole draft.
@@ -51,12 +61,22 @@ interface ContentFormProps {
 
 /**
  * The schema-generated form (spec US10): one TanStack Form over the entry's
- * data, fields rendered from the walked tree. Validation is the advisory
- * loop — debounced POST safeParse against the collection's own schema,
- * issues inline per field — and gates nothing: there is no save to gate
- * (US12; #74's auto-write never checks these issues either).
+ * raw-parse data, fields rendered from the walked tree. The pane remounts
+ * this component on every accepted truth change (keyed by the truth's seq),
+ * so the values never need an external-sync guard — they mount on the truth
+ * and change only through widgets (#149 retired the projection-reset path
+ * the guard carried). Validation is the advisory loop — debounced POST
+ * safeParse against the collection's own schema, issues inline per field —
+ * and gates nothing: there is no save to gate (US12; #74's auto-write never
+ * checks these issues either).
  */
-export function ContentForm({ collection, fields, entryData, onValuesChange }: ContentFormProps) {
+export function ContentForm({
+  collection,
+  fields,
+  entryData,
+  projectionData,
+  onValuesChange,
+}: ContentFormProps) {
   const form = useForm({ defaultValues: entryData as Record<string, unknown> });
   const values = useStore(form.store, (state) => state.values);
   const [issues, setIssues] = useState<Record<string, string>>({});
@@ -66,26 +86,6 @@ export function ContentForm({ collection, fields, entryData, onValuesChange }: C
   useEffect(() => {
     onValuesChangeRef.current = onValuesChange;
   }, [onValuesChange]);
-
-  // external sync, the body editor's guard mirrored (spec #13): a refetched
-  // entryData is accepted when it matches the values (the auto-write's own
-  // echo — rebase only) or the values are clean against the last accepted
-  // truth (an external change under a clean form — reload from disk); a
-  // genuine external change under a dirty form never clobbers — the write
-  // loop's hash guard reconciles on the next write
-  const acceptedRef = useRef(entryData);
-  useEffect(() => {
-    if (entryData === acceptedRef.current) return;
-    const current = form.store.state.values;
-    if (jsonEqual(entryData, current)) {
-      acceptedRef.current = entryData;
-      return;
-    }
-    if (jsonEqual(current, acceptedRef.current)) {
-      acceptedRef.current = entryData;
-      form.reset(entryData as Record<string, unknown>, { keepDefaultValues: true });
-    }
-  }, [entryData, form]);
 
   // only the latest run may land issues
   const runToken = useRef(0);
@@ -141,6 +141,7 @@ export function ContentForm({ collection, fields, entryData, onValuesChange }: C
             form={form}
             issues={issues}
             onFlushValidation={flushValidation}
+            projectionData={projectionData}
           />
         ))
       )}

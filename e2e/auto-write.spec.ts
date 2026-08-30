@@ -262,3 +262,68 @@ test('UI: a write racing an external edit reloads the form from disk (banner, ty
     });
   }
 });
+
+// #149's main-side repair, pinned: the idle post-banner user. The 409's own
+// invalidation (and under #133 the deferred content-synced push) refetches
+// the collections payload while the form sits clean on the disk truth — the
+// pane must NOT reset onto the payload's zod projection (the projection\raw
+// delta would auto-write `tone`/`priority`/`featured` into the file and
+// re-serialize `date`/`tags` with no user action at all). One truth-space:
+// the signal re-reads the file, finds the loop's truth, and nothing writes.
+test('UI: an idle user post-409 writes nothing — the file keeps the external edit', async ({
+  page,
+}) => {
+  const pane = await openEntry(page, '2024/post');
+  const original = readFileSync(POST, 'utf8');
+  try {
+    // arm the write exactly as the racing test does: one typed char under a
+    // dirty form, the external write landing inside the debounce window
+    const title = pane.locator('[data-astroix-form-field="title"] input');
+    await title.click();
+    await page.keyboard.insertText('T');
+    const external = original.replace('title: Nested post', 'title: External edit');
+    writeFileSync(POST, external);
+
+    await expect(pane.locator('[data-astroix-write-status]')).toHaveAttribute(
+      'data-astroix-write-status',
+      'stale',
+      { timeout: 10_000 },
+    );
+    // the banner's reload won: the form shows the disk truth
+    await expect(title).toHaveValue('External edit');
+
+    // the idle window: no typing, past every push/refetch path — the 1 s
+    // render grace, the loop's own invalidation, the ssr-walk refetch
+    await page.waitForTimeout(4_000);
+
+    // byte-stability is the claim: the external edit's bytes, untouched —
+    // no zod normalization, no materialized defaults, no write at all
+    expect(readFileSync(POST, 'utf8')).toBe(external);
+    // and no write happened: the banner is still the loop's last word
+    await expect(pane.locator('[data-astroix-write-status]')).toHaveAttribute(
+      'data-astroix-write-status',
+      'stale',
+    );
+  } finally {
+    await restoreEntry(POST, original, { absent: ['External edit'] });
+  }
+});
+
+// the mount emission's no-op contract: the halves' mount reports the truth
+// they mounted on, and that draft equals the baseline — nothing schedules a
+// write. Guards the truth-gated mount (#149): a ref the emission reads
+// before it is seeded would turn every idle open into an empty-body write.
+test('UI: opening an entry and idling writes nothing — the mount emission is a no-op', async ({
+  page,
+}) => {
+  const pane = await openEntry(page, '2024/post');
+  const original = readFileSync(POST, 'utf8');
+  try {
+    // past the write debounce and the payload echo's refetch
+    await page.waitForTimeout(1_500);
+    expect(readFileSync(POST, 'utf8')).toBe(original);
+    await expectSettled(pane);
+  } finally {
+    await restoreEntry(POST, original);
+  }
+});

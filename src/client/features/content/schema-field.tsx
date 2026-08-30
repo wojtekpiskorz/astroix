@@ -32,10 +32,32 @@ interface SchemaFieldProps {
   issues: Record<string, string>;
   /** Blur flush: validation runs immediately, ahead of the debounce. */
   onFlushValidation: () => void;
+  /**
+   * The payload's zod projection (#149, display-only): image() widgets read
+   * their resolved metadata from it — the raw parse carries only the file's
+   * path string, and the values never adopt the projection.
+   */
+  projectionData: unknown;
+}
+
+/** Reads a dotted path out of a plain-object tree (the image display lookup). */
+function pickPath(source: unknown, path: string): unknown {
+  let current: unknown = source;
+  for (const key of path.split('.')) {
+    if (typeof current !== 'object' || current === null) return undefined;
+    current = (current as Record<string, unknown>)[key];
+  }
+  return current;
 }
 
 /** Renders one walked schema node with its widget — recursion happens at groups. */
-export function SchemaField({ node, form, issues, onFlushValidation }: SchemaFieldProps) {
+export function SchemaField({
+  node,
+  form,
+  issues,
+  onFlushValidation,
+  projectionData,
+}: SchemaFieldProps) {
   if (node.kind === 'group') {
     return (
       <FieldSet data-astroix-form-field={node.path} className="gap-3">
@@ -50,6 +72,7 @@ export function SchemaField({ node, form, issues, onFlushValidation }: SchemaFie
             form={form}
             issues={issues}
             onFlushValidation={onFlushValidation}
+            projectionData={projectionData}
           />
         ))}
       </FieldSet>
@@ -76,6 +99,7 @@ export function SchemaField({ node, form, issues, onFlushValidation }: SchemaFie
               onChange={field.handleChange}
               issues={issues}
               id={hasLabelControl(node) ? fieldId : undefined}
+              display={node.kind === 'image' ? pickPath(projectionData, node.path) : undefined}
             />
             <FieldError data-astroix-field-issue={node.path}>{issues[node.path]}</FieldError>
           </Field>
