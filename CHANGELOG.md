@@ -1,5 +1,18 @@
 # @wojciechpiskorz/astroix
 
+## 0.0.19
+
+### Patch Changes
+
+- 0e344f3: Fix e2e pack lane late-write race: settle index.astro before the spec's bare restore (same family as #114), and heal planted pack-fixture dirt at boot behind ASTROIX_E2E_PACK_PORT — the quiet-settle is lifted from entry-restore.ts into a shared settle-writes.ts seam.
+- 57e8146: e2e: the loop spec's `__astroixLoopMarker` read gets its own wait budget (`expect.poll`) instead of an immediate read after the CSS assertion — the un-budgeted sample transiently missed under `retries: 0` (issue #135).
+
+## 0.0.18
+
+### Patch Changes
+
+- 4b3c7a8: Move `shadcn` from `dependencies` to `devDependencies` — consumers no longer install the shadcn CLI tree (`ts-morph`, `execa`, `@modelcontextprotocol/sdk`, …). Nothing imports it at runtime; the documented workflow uses `bunx shadcn@latest add`.
+
 ## 0.0.17
 
 ### Patch Changes

@@ -1,6 +1,6 @@
 {
   "name": "@wojciechpiskorz/astroix",
-  "version": "0.0.17",
+  "version": "0.0.19",
   "description": "Dev-only Astro 7 integration — a visual builder for Content Collections content and repo-mapped CSS",
   "type": "module",
   "license": "MIT",
@@ -79,7 +79,6 @@
     "codemirror": "^6.0.2",
     "lucide-react": "^1.34.0",
     "postcss": "^8.5.26",
-    "shadcn": "^4.19.0",
     "tailwind-merge": "^3.6.0",
     "tw-animate-css": "^1.4.0",
     "yaml": "^2.9.0",
@@ -99,6 +98,7 @@
     "publint": "^0.3.24",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
+    "shadcn": "^4.19.0",
     "tsup": "^8.5.1",
     "typescript": "~5.9.3",
     "vite": "^8.2.2",
