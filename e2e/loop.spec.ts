@@ -79,9 +79,9 @@ test('the full CSS editing loop', async ({ page }) => {
       timeout: 10_000,
     });
     // the marker read carries its own budget: an immediate read after the
-    // CSS swap transiently missed under retries: 0 (#135). toBeTruthy is
-    // "still stamped" — the value is a performance.now() stamp (> 0), a
-    // wiped undefined keeps polling.
+    // CSS swap transiently missed under retries: 0 (#135) — a real reload
+    // leaves the stamp undefined forever, so the poll can only rescue a
+    // sampling miss, never a genuine one.
     await expect
       .poll(
         () =>
@@ -94,7 +94,7 @@ test('the full CSS editing loop', async ({ page }) => {
             ),
         { timeout: 10_000, intervals: [200, 500, 1000] },
       )
-      .toBeTruthy();
+      .toBeDefined();
   } finally {
     writeFileSync(filePath, original);
   }
