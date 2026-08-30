@@ -19,7 +19,10 @@ const corePaginatePath = join(process.cwd(), 'node_modules/astro/dist/core/rende
 const coreGeneratorPath = join(process.cwd(), 'node_modules/astro/dist/core/routing/generator.js');
 const CORE_PAGINATE_URL = pathToFileURL(corePaginatePath).href;
 const CORE_GENERATOR_URL = pathToFileURL(coreGeneratorPath).href;
-const coreAvailable = existsSync(corePaginatePath);
+// probe the package, not the dist file: astro installed + dist file moved is
+// the pin's own failure case (the import then rejects ERR_MODULE_NOT_FOUND
+// and the tests fail loud), not a skip condition
+const coreAvailable = existsSync(join(process.cwd(), 'node_modules/astro/package.json'));
 
 /** Core's factory as this test calls it — the return value is the paginate utility. */
 type CoreFactory = (

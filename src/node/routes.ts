@@ -67,8 +67,8 @@ export function isProjectPageRoute(route: IntegrationResolvedRoute): boolean {
  * `current`, and preserves already-enumerated `renders` by pattern — a
  * re-capture with unchanged routes leaves the served payload byte-identical
  * (no push), and a stale `renders` can only keep a candidate alive through
- * the ms-scale window until the identity-checked pass re-verifies it, never
- * fire the marker wrongly (unknown never fires, #119's silent-never-wrong).
+ * the ms-scale window until the next pass re-verifies it, never fire the
+ * marker wrongly (unknown never fires, #119's silent-never-wrong).
  */
 export function captureRoutes(
   state: RoutesState,
