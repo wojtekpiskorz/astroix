@@ -40,7 +40,7 @@ describe('content store — active entry semantics (#71)', () => {
   it('an armed reverse navigation is verified by the next resolution: a match keeps the pick', () => {
     const store = useContentStore.getState();
     store.selectEntry(post);
-    store.armReverseVerify(post, '/blog/2024/post');
+    store.armReverseVerify('/blog/2024/post');
     useContentStore.getState().applyCanvasResolution(post, POST_LOAD);
     const state = useContentStore.getState();
     expect(state.pendingVerify).toBeNull();
@@ -50,7 +50,7 @@ describe('content store — active entry semantics (#71)', () => {
   it('a verification miss keeps the manual pick — the form-only fallback', () => {
     const store = useContentStore.getState();
     store.selectEntry(post);
-    store.armReverseVerify(post, '/blog/2024/post');
+    store.armReverseVerify('/blog/2024/post');
     // forward resolution stays silent (ambiguity the pre-checks missed)
     useContentStore.getState().applyCanvasResolution(null, POST_LOAD);
     // StrictMode's second effect pass replays the same load seq as a plain
@@ -64,7 +64,7 @@ describe('content store — active entry semantics (#71)', () => {
   it('the arm is consumed per load — a later load adopts plainly', () => {
     const store = useContentStore.getState();
     store.selectEntry(post);
-    store.armReverseVerify(post, '/blog/2024/post');
+    store.armReverseVerify('/blog/2024/post');
     useContentStore.getState().applyCanvasResolution(null, POST_LOAD);
     useContentStore.getState().applyCanvasResolution(home, HOME_LOAD);
     expect(useContentStore.getState().activeEntry).toEqual(home);
@@ -81,7 +81,7 @@ describe('content store — a stale arm never eats a plain navigation (#140)', (
   it('a load for a URL other than the armed target adopts the resolution — silence clears', () => {
     const store = useContentStore.getState();
     store.selectEntry(post);
-    store.armReverseVerify(post, '/blog/2024/post');
+    store.armReverseVerify('/blog/2024/post');
     useContentStore.getState().applyCanvasResolution(null, HOME_LOAD);
     const state = useContentStore.getState();
     expect(state.pendingVerify).toBeNull();
@@ -91,7 +91,7 @@ describe('content store — a stale arm never eats a plain navigation (#140)', (
   it('a superseding load that resolves an entry adopts it as the active entry', () => {
     const store = useContentStore.getState();
     store.selectEntry(post);
-    store.armReverseVerify(post, '/blog/2024/post');
+    store.armReverseVerify('/blog/2024/post');
     useContentStore.getState().applyCanvasResolution(home, HOME_LOAD);
     expect(useContentStore.getState().activeEntry).toEqual(home);
   });
@@ -99,7 +99,7 @@ describe('content store — a stale arm never eats a plain navigation (#140)', (
   it('the target matches on pathname — query and fragment are not part of the identity', () => {
     const store = useContentStore.getState();
     store.selectEntry(post);
-    store.armReverseVerify(post, '/blog/2024/post');
+    store.armReverseVerify('/blog/2024/post');
     useContentStore.getState().applyCanvasResolution(post, {
       ...POST_LOAD,
       url: `${POST_LOAD.url}&x=1`,

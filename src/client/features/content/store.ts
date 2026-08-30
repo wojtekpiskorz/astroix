@@ -2,22 +2,19 @@ import { create } from 'zustand';
 import type { ActiveEntry } from '../../../core/route-resolver';
 import type { CanvasLoad } from '../../store';
 
-/**
- * The armed reverse navigation (#71, #140): the entry it opens and the URL
- * whose load verifies it. Consumed by the next canvas resolution — a
- * forward match confirms the navigation, a miss keeps the clicked entry
- * (the form-only fallback).
- */
-interface PendingVerify {
-  entry: ActiveEntry;
-  targetUrl: string;
-}
-
 interface ContentState {
   /** The entry open in the content editor (glossary: active entry). */
   activeEntry: ActiveEntry | null;
-  /** The reverse navigation awaiting its verifying load. */
-  pendingVerify: PendingVerify | null;
+  /**
+   * The URL whose load verifies the armed reverse navigation (#71, #140),
+   * null when none is armed. The load that consumes the arm must match its
+   * pathname; a load for any other URL means the armed navigation was
+   * superseded before its load event fired — that load is a plain
+   * navigation and adopts its resolution, so a stale arm can never eat the
+   * selection clear. The pick itself lives in `activeEntry`: a verifying
+   * match reselects it, a miss keeps it (the form-only fallback).
+   */
+  pendingVerify: string | null;
   /**
    * The canvas load the last resolution applied. Each load resolves at
    * most once: the tracker effect re-runs on remounts and refetches, but a
@@ -35,7 +32,7 @@ interface ContentState {
   /** Toggles one tree folder between collapsed and open. */
   toggleFolder: (key: string) => void;
   /** Arms the forward-match verification for a reverse navigation to `targetUrl`. */
-  armReverseVerify: (entry: ActiveEntry, targetUrl: string) => void;
+  armReverseVerify: (targetUrl: string) => void;
   /**
    * A canvas resolution (URL → entry) lands here, tagged with its load.
    * A new load seq is applied exactly once: plain navigations adopt the
@@ -71,12 +68,12 @@ export const useContentStore = create<ContentState>()((set) => ({
       if (!collapsed.delete(key)) collapsed.add(key);
       return { collapsedFolders: collapsed };
     }),
-  armReverseVerify: (entry, targetUrl) => set({ pendingVerify: { entry, targetUrl } }),
+  armReverseVerify: (targetUrl) => set({ pendingVerify: targetUrl }),
   applyCanvasResolution: (resolved, load) =>
     set((state) => {
       if (load.seq <= state.appliedLoadSeq) return state;
       if (state.pendingVerify !== null) {
-        if (!samePathname(state.pendingVerify.targetUrl, load.url)) {
+        if (!samePathname(state.pendingVerify, load.url)) {
           return { pendingVerify: null, activeEntry: resolved, appliedLoadSeq: load.seq };
         }
         // the manual pick stays: on a successful forward match it equals

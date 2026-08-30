@@ -181,7 +181,7 @@ export function ContentSidebar() {
     // different entries or no candidate at all stays silent
     const url = pickNavigableCandidate(entryId, routes, toCollectionsIndex(collections));
     if (url === null) return;
-    armReverseVerify({ collection, entryId }, url);
+    armReverseVerify(url);
     requestCanvasNav(url);
   };
 
