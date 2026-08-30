@@ -1,9 +1,14 @@
-import { join, sep } from 'node:path';
+import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { IntegrationResolvedRoute, PaginateFunction } from 'astro';
 import { createServerModuleRunner, type ViteDevServer } from 'vite';
+import {
+  createContentSignalClassifier,
+  createContentSyncPusher,
+  createLoaderCommitClassifier,
+  pushToChrome,
+} from './content-signal';
 import { generatePaginateFunction } from './paginate';
-import { toRelative } from './rest';
 import { applyRenders, isProjectPageRoute, type RoutesState } from './routes';
 
 /**
@@ -40,6 +45,16 @@ import { applyRenders, isProjectPageRoute, type RoutesState } from './routes';
  * premise, the marker never fires on unknown). The served endpoint never
  * awaits any of this; completion pushes `astroix:routes-changed` when the
  * payload actually moved.
+ *
+ * This subscription is also where `astroix:content-synced` is pushed
+ * (#133): astro's own content event rides the ssr environment's hot channel
+ * and never reaches the client chrome (verified live on astro@7.2.7), so
+ * the chrome's collections/schema caches have no other external-edit
+ * invalidation. Both the shared srcDir content signal and the loader's
+ * data-store write (the post-commit half — the loader debounces the store
+ * write 500 ms) schedule the deferred push; the deferral keeps the chrome's
+ * refetch from racing the canvas's post-commit full-reload render (see
+ * createContentSyncPusher).
  */
 
 const DEBOUNCE_MS = 400;
@@ -72,9 +87,9 @@ export function registerRouteEnumeration(
   server: ViteDevServer,
   options: { root: string; srcDir: string; routes: RoutesState },
 ): void {
-  // astro hands srcDir as a URL with a trailing slash — strip it or the
-  // prefix check below never matches (same normalization as watch-sync)
-  const srcDir = options.srcDir.split(sep).join('/').replace(/\/+$/, '');
+  const isContentSignal = createContentSignalClassifier(options);
+  const isLoaderCommit = createLoaderCommitClassifier(options.root);
+  const pushContentSynced = createContentSyncPusher(server);
   const results = new Map<string, readonly string[]>();
   let timer: ReturnType<typeof setTimeout> | null = null;
   let running = false;
@@ -82,11 +97,7 @@ export function registerRouteEnumeration(
   let contentFollowups = 0;
 
   const push = (): void => {
-    // no connected client holds a stale ROUTES_KEY — a boot-time send has
-    // no audience (and vite accumulates a send listener per early send,
-    // which trips its EventEmitter warning)
-    if (server.ws.clients.size === 0) return;
-    server.ws.send('astroix:routes-changed', {});
+    pushToChrome(server, 'astroix:routes-changed');
   };
 
   const schedule = (delay = DEBOUNCE_MS): void => {
@@ -105,20 +116,20 @@ export function registerRouteEnumeration(
     schedule();
   };
 
-  // The content signal: a srcDir file event that is neither a captured
-  // route entrypoint (the fresh runner already reads those as transformed)
-  // nor css is treated as content moving — the pass re-runs now and twice
-  // more to out-wait the loader's data commit. add/unlink matter as much
-  // as change (entries are created and deleted, not only edited).
+  // The content signal (shared classification, content-signal.ts): a srcDir
+  // file event that is neither a captured route entrypoint (the fresh
+  // runner already reads those as transformed) nor css is treated as
+  // content moving — the pass re-runs now and twice more to out-wait the
+  // loader's data commit. Both that signal and the loader's store write
+  // push `astroix:content-synced` (see the module doc); the store write
+  // re-arms nothing — the enumeration cadence is #119's, unchanged.
   const onFileEvent = (file: string): void => {
-    // the prefix check runs in absolute space (srcDir is absolute — a
-    // relative path would never match); the entrypoint check in relative
-    // space (entrypoints are root-relative)
-    const norm = file.split(sep).join('/');
-    if (!norm.startsWith(`${srcDir}/`)) return;
-    if (norm.endsWith('.css')) return;
-    const rel = toRelative(options.root, file);
-    if (options.routes.captured.some((route) => route.entrypoint === rel)) return;
+    if (isLoaderCommit(file)) {
+      pushContentSynced();
+      return;
+    }
+    if (!isContentSignal(file)) return;
+    pushContentSynced();
     contentFollowups = CONTENT_FOLLOWUPS;
     schedule();
   };

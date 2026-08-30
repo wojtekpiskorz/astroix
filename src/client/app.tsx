@@ -38,8 +38,13 @@ export function App() {
       void queryClient.invalidateQueries({ queryKey: INDEX_PAYLOAD_KEY });
     };
     // content freshness, core-first (spec #13): Astro's own sync signal —
-    // our writes echo through it (the form/body guards rebase), external
-    // edits flow in clean or reconcile through the write loop's hash guard
+    // kept for the day core mirrors it to the client environment; today it
+    // rides the ssr hot channel and never fires here (#133's verified
+    // diagnosis), the astroix push below is the half that does. Our writes
+    // echo through it (the write loop's signal reconcile re-reads the file
+    // and finds its own truth), external edits flow in as the raw truth
+    // under a clean draft or reconcile through the hash guard under a
+    // dirty one (#149)
     const contentHandler = (): void => {
       void queryClient.invalidateQueries({ queryKey: COLLECTIONS_KEY });
       void queryClient.invalidateQueries({ queryKey: SCHEMA_KEY });
@@ -52,10 +57,12 @@ export function App() {
     };
     hot.on('astroix:file-changed', handler);
     hot.on('astro:content-changed', contentHandler);
+    hot.on('astroix:content-synced', contentHandler);
     hot.on('astroix:routes-changed', routesHandler);
     return () => {
       hot.off('astroix:file-changed', handler);
       hot.off('astro:content-changed', contentHandler);
+      hot.off('astroix:content-synced', contentHandler);
       hot.off('astroix:routes-changed', routesHandler);
     };
   }, [queryClient]);

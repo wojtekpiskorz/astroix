@@ -1,8 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { jsonEqual, serializeEntry, splitEntryFile } from './entry-writer';
+import {
+  jsonEqual,
+  parseEntryDraft,
+  sameDraft,
+  serializeEntry,
+  splitEntryFile,
+} from './entry-writer';
 
-// The fixture entry as the chrome holds it: zod output — the date an ISO
-// string, schema defaults filled — while the file's own bytes stay authored.
+// A mechanical fixture, not the chrome's truth-space (that is the raw parse,
+// parseEntryDraft below): the ISO date and the schema-default `tone` stay in
+// the values deliberately — they exercise the serializer's JSON-twin node
+// equality, which must hold for any draft an edit can produce.
 const POST_RAW = `---\ntitle: Nested post\ndate: 2024-06-01\ntags: [nested]\n# author comment\nauthor: "Quoted Name"\n---\nFixture post with a nested-path id (\`2024/post\`) for route resolution.\n`;
 const POST_BASELINE = {
   data: {
@@ -47,6 +55,48 @@ describe('splitEntryFile', () => {
     const split = splitEntryFile('just a body\n');
     expect(split.frontmatter).toBeNull();
     expect(split.body).toBe('just a body\n');
+  });
+});
+
+describe('parseEntryDraft', () => {
+  it('parses the raw truth: file scalars in JSON space, defaults absent, body trimmed', () => {
+    const draft = parseEntryDraft(POST_RAW);
+    expect(draft).toEqual({
+      data: { title: 'Nested post', date: '2024-06-01', tags: ['nested'], author: 'Quoted Name' },
+      body: 'Fixture post with a nested-path id (`2024/post`) for route resolution.',
+    });
+  });
+
+  it('reads an empty frontmatter block as empty data', () => {
+    expect(parseEntryDraft('---\n---\nbody\n')).toEqual({ data: {}, body: 'body' });
+  });
+
+  it('passes a file without frontmatter through as an empty-draft body', () => {
+    expect(parseEntryDraft('just a body\n')).toEqual({ data: {}, body: 'just a body' });
+  });
+
+  it('round-trips dates through JSON — the space serializeEntry compares nodes in', () => {
+    // a YAML timestamp the yaml package would resolve richly lands as its
+    // JSON twin, so both diff sides of a mount write share one space
+    const draft = parseEntryDraft('---\ndate: 2024-06-01T10:00:00Z\n---\nx\n');
+    expect(draft?.data).toEqual({ date: '2024-06-01T10:00:00Z' });
+  });
+
+  it('returns null on a frontmatter the Document API cannot parse', () => {
+    expect(parseEntryDraft('---\na: [\n---\n')).toBeNull();
+  });
+});
+
+describe('sameDraft', () => {
+  it('equals on deep-equal data and the same body', () => {
+    const a = { data: { tags: ['x'] }, body: 'b' };
+    expect(sameDraft(a, { data: { tags: ['x'] }, body: 'b' })).toBe(true);
+  });
+
+  it('differs on data or body alone', () => {
+    const a = { data: { n: 1 }, body: 'b' };
+    expect(sameDraft(a, { data: { n: 2 }, body: 'b' })).toBe(false);
+    expect(sameDraft(a, { data: { n: 1 }, body: 'c' })).toBe(false);
   });
 });
 

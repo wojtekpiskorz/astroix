@@ -160,17 +160,24 @@ test('the pane renders the generated form over the active entry', async ({ page 
 
   const title = pane.locator('[data-astroix-form-field="title"] input');
   await expect(title).toHaveValue('Nested post');
-  await expect(pane.locator('[data-astroix-form-field="priority"] input')).toHaveValue('0');
+  // #149's widget-display: zod defaults render as placeholders — visible,
+  // but the value stays absent until the field is touched (touch
+  // materializes → dirty → written)
+  const priority = pane.locator('[data-astroix-form-field="priority"] input');
+  await expect(priority).toHaveValue('');
+  await expect(priority).toHaveAttribute('placeholder', '0');
   await expect(
     pane.locator('[data-astroix-form-field="featured"] [role="checkbox"]'),
   ).toHaveAttribute('aria-checked', 'false');
   await expect(pane.locator('[data-astroix-form-field="tags.0"] input')).toHaveValue('nested');
   await expect(pane.locator('[data-astroix-form-field="meta.source"] input')).toHaveValue('');
+  // the enum's default rides the same placeholder seam (the value is absent)
   await expect(pane.locator('[data-astroix-form-field="tone"] [role="combobox"]')).toContainText(
     'bold',
   );
 
-  // the raw fields: the date's zod output as YAML, the union's reason marked
+  // the raw fields: the date as the file holds it (raw truth, #149), the
+  // union's reason marked
   const date = pane.locator('[data-astroix-raw-field="date"]');
   await expect(date).toHaveValue(/2024-06-01/);
   await expect(date).toHaveAttribute('data-astroix-raw-reason', 'date');
