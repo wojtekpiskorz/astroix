@@ -29,7 +29,7 @@ Requires [bun](https://bun.sh) and Node >= 22.12.
 bun install                        # also in e2e/fixture/
 bun run check && bun run typecheck # Biome + tsc
 bun run test                       # vitest (unit)
-bun run test:e2e                   # Playwright (boots e2e/fixture on :4312)
+bun run test:e2e                   # Playwright (boots e2e/fixture on :4314)
 bun run build                      # tsup (node) + vite (chrome bundle) → dist
 ```
 

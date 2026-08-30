@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
+import { PACK_PORT } from './ports';
 
 /**
  * npm-pack smoke lane (ADR-0001): the exact shipped artifact, not the
@@ -9,9 +10,9 @@ import { expect, test } from '@playwright/test';
  * per-lane override via the shared ports module — #120). Catches
  * `files`/`exports`/package-shape regressions source mode can never see.
  */
-import { PACK_PORT } from './ports';
-
-const BASE_URL = `http://localhost:${PACK_PORT}`;
+// This file drives the pack lane's server, not the config-wide baseURL
+// (that one belongs to the main fixture) — same ports module either way.
+test.use({ baseURL: `http://localhost:${PACK_PORT}` });
 const FIXTURE = join('e2e', 'pack-fixture');
 
 test('chrome loads from the shipped artifact (prebuilt mode)', async ({ page }) => {
@@ -20,7 +21,7 @@ test('chrome loads from the shipped artifact (prebuilt mode)', async ({ page }) 
     if (request.url().includes('/src/client')) chromeSourceRequests.push(request.url());
   });
 
-  await page.goto(`${BASE_URL}/`);
+  await page.goto('/');
   // the chrome mounting at all proves the artifact executed; source mode is
   // structurally impossible here (the tarball ships no src/client)
   await expect(page.getByText('Select: off')).toBeVisible({ timeout: 15_000 });
@@ -36,7 +37,7 @@ test('minimal loop against the artifact: select → list → edit → canvas ref
   page,
 }) => {
   test.setTimeout(60_000);
-  await page.goto(`${BASE_URL}/`);
+  await page.goto('/');
   const canvas = page.frameLocator('#astroix-canvas');
   await expect(canvas.locator('.hero-title')).toHaveCSS('color', 'rgb(30, 41, 59)');
 

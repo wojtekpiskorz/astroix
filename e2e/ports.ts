@@ -5,5 +5,7 @@
  * and the specs must read the same numbers: a spec hardcoding a port drifts
  * from the webServer it drives.
  */
-export const MAIN_PORT = Number(process.env.ASTROIX_E2E_PORT ?? 4314);
-export const PACK_PORT = Number(process.env.ASTROIX_E2E_PACK_PORT ?? 4313);
+// `||`, not `??`: an empty-string export must fall through to the default the
+// same way the `${VAR:-default}` dev scripts treat it — `Number('')` is 0.
+export const MAIN_PORT = Number(process.env.ASTROIX_E2E_PORT || 4314);
+export const PACK_PORT = Number(process.env.ASTROIX_E2E_PACK_PORT || 4313);
