@@ -13,6 +13,17 @@ Issues and specs for this repo live as GitHub issues. Use the `gh` CLI for all o
 
 Infer the repo from `git remote -v`; `gh` does this automatically when run inside a clone.
 
+## Lane close-out: findings become issues
+
+Before a lane's session ends, everything it discovered that outlives the merged PR lands in the tracker — the repo, not session memory, is the durable home, and the queue always holds a next ticket to pick up.
+
+- **What files as an issue**: deferred decisions surfaced on the PR thread, follow-up work declined for scope, discovered defects (with diagnosis intel), research threads worth opening. If a finding needs an owner ruling, the issue says so explicitly.
+- **Shape**: research → `ready-for-agent` with questions + deliverable; follow-up work blocked on unknowns → `needs-triage` with a native blocked-by edge on the research issue; fully specified small work → `ready-for-agent`. Use the standard issue sections (Problem Statement / Solution / Testing Decisions).
+- **Blocking**: the native issue-dependency edge is canonical — `blocked_by` per the Wayfinding operations below.
+- **What stays out**: facts already captured in `docs/`, the ticket that closed, or the PR discussion itself; those get links, not duplicates.
+
+Precedent: 2026-08-30 post-#115 grilling — the marker-semantics ruling spawned #118 (research) → #119 (blocked task), #120 (per-lane e2e ports from the #114 diagnosis family).
+
 ## Pull requests as a triage surface
 
 **PRs as a request surface: no.** _(Set to `yes` if this repo treats external PRs as feature requests; `/triage` reads this flag.)_

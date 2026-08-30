@@ -131,6 +131,8 @@ The agent session working the PR owns the findings on a three-tier scale:
 
 Issues live in GitHub Issues; use the `gh` CLI. See `docs/agents/issue-tracker.md`.
 
+Lane close-out files its findings as issues before the session ends — discovered facts, deferred calls, and follow-ups never live only in memory: the queue always holds a next ticket to pick up. See "Lane close-out" in `docs/agents/issue-tracker.md`.
+
 ### Triage labels
 
 Canonical five: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
