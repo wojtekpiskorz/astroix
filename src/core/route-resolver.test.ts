@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import type { RouteInfo, RouteSegmentPart } from './route-resolver';
-import { hasCandidateRoutes, pickNavigableCandidate, resolveActiveEntry } from './route-resolver';
+import {
+  hasCandidateRoutes,
+  pickNavigableCandidate,
+  resolveActiveEntry,
+  routeRendersId,
+} from './route-resolver';
 
 const staticPart = (content: string): RouteSegmentPart => ({
   content,
@@ -8,14 +13,22 @@ const staticPart = (content: string): RouteSegmentPart => ({
   spread: false,
 });
 
-/** Test-side projection of an `astro:routes:resolved` page route from its pattern string. */
-function page(pattern: string): RouteInfo {
+/**
+ * Test-side projection of an `astro:routes:resolved` page route from its
+ * pattern string. Default `rendering: 'prerendered'` with no `renders` is
+ * the unknown-degrade state — the pre-#119 shape premise; render-aware
+ * cases pass the enumeration truth explicitly.
+ */
+function page(
+  pattern: string,
+  fields: Partial<Pick<RouteInfo, 'rendering' | 'renders'>> = {},
+): RouteInfo {
   const params: string[] = [];
   const segments = pattern
     .split('/')
     .filter((part) => part !== '')
     .map((text) => partFor(text, params));
-  return { pattern, segments, params };
+  return { pattern, segments, params, rendering: 'prerendered', ...fields };
 }
 
 function partFor(text: string, params: string[]): RouteSegmentPart[] {
@@ -34,7 +47,7 @@ function partFor(text: string, params: string[]): RouteSegmentPart[] {
 }
 
 function routes(...patterns: string[]): RouteInfo[] {
-  return patterns.map(page);
+  return patterns.map((pattern) => page(pattern));
 }
 
 describe('resolveActiveEntry — forward (canvas URL → entry)', () => {
@@ -127,12 +140,18 @@ describe('resolveActiveEntry — forward (canvas URL → entry)', () => {
         [staticPart('v-'), { content: 'id', dynamic: true, spread: false }],
       ],
       params: ['id'],
+      rendering: 'prerendered',
     };
     expect(resolveActiveEntry([embedded], '/pages/v-5', { pages: ['5'] })).toBeNull();
   });
 
   it('segments Astro never emits (empty parts) are ignored, valid routes still resolve', () => {
-    const empty: RouteInfo = { pattern: '/weird', segments: [[]], params: [] };
+    const empty: RouteInfo = {
+      pattern: '/weird',
+      segments: [[]],
+      params: [],
+      rendering: 'prerendered',
+    };
     const hit = resolveActiveEntry([empty, ...routes('/blog/[slug]')], '/blog/hello', {
       blog: ['hello'],
     });
@@ -146,6 +165,7 @@ describe('resolveActiveEntry — forward (canvas URL → entry)', () => {
       pattern: '/[...slug]/edit',
       segments: [[{ content: 'slug', dynamic: true, spread: true }], [staticPart('edit')]],
       params: ['...slug'],
+      rendering: 'prerendered',
     };
     expect(resolveActiveEntry([midRest], '/foo/edit', { pages: ['foo/edit'] })).toBeNull();
     expect(resolveActiveEntry([midRest], '/foo/edit', { pages: ['foo'] })).toBeNull();
@@ -323,5 +343,96 @@ describe('hasCandidateRoutes — the unrouted marker predicate (#111)', () => {
 
   it('an empty route set is unrouted', () => {
     expect(hasCandidateRoutes('hello', [])).toBe(false);
+  });
+});
+
+describe('routeRendersId — the rendering-truth predicate (#119)', () => {
+  it('on-demand renders any param — its getStaticPaths is dead code in dev', () => {
+    expect(routeRendersId(page('/ondemand/[slug]', { rendering: 'on-demand' }), 'anything')).toBe(
+      true,
+    );
+  });
+
+  it('prerendered + known renders is a membership test', () => {
+    const route = page('/blog/[slug]', { renders: ['hello-builder'] });
+    expect(routeRendersId(route, 'hello-builder')).toBe(true);
+    expect(routeRendersId(route, 'showcase')).toBe(false);
+  });
+
+  it('prerendered with empty renders is knowably dead', () => {
+    expect(routeRendersId(page('/blog/[slug]', { renders: [] }), 'hello')).toBe(false);
+  });
+
+  it('unknown (renders absent) degrades to the shape premise — true', () => {
+    expect(routeRendersId(page('/blog/[slug]'), 'anything')).toBe(true);
+  });
+});
+
+describe('render-aware resolution (#119 — enumeration truth in the payload)', () => {
+  it('forward: a prerendered-known route only hits URLs its getStaticPaths enumerated — the would-404 param misses', () => {
+    const routeset = [page('/blog/[slug]', { renders: ['hello-builder', '2024/post'] })];
+    expect(
+      resolveActiveEntry(routeset, '/blog/hello-builder', { blog: ['hello-builder'] }),
+    ).toEqual({ collection: 'blog', entryId: 'hello-builder' });
+    expect(resolveActiveEntry(routeset, '/blog/showcase', { blog: ['showcase'] })).toBeNull();
+  });
+
+  it('forward: an on-demand route resolves any param', () => {
+    const routeset = [page('/ondemand/[slug]', { rendering: 'on-demand' })];
+    expect(resolveActiveEntry(routeset, '/ondemand/anything', { blog: ['anything'] })).toEqual({
+      collection: 'blog',
+      entryId: 'anything',
+    });
+  });
+
+  it('forward: unknown keeps the shape premise — the pre-#119 behavior', () => {
+    expect(
+      resolveActiveEntry([page('/blog/[slug]')], '/blog/showcase', { blog: ['showcase'] }),
+    ).toEqual({ collection: 'blog', entryId: 'showcase' });
+  });
+
+  it('reverse: a candidate the route does not render is dropped — the click stays silent, never a 404', () => {
+    const routeset = [page('/blog/[slug]', { renders: ['hello-builder'] })];
+    expect(
+      pickNavigableCandidate('showcase', routeset, {
+        blog: ['showcase'],
+        gallery: ['showcase'],
+      }),
+    ).toBeNull();
+  });
+
+  it('reverse: a plurality navigates through the candidate that actually renders the id', () => {
+    // /blog/[slug] renders hello-builder; the catch-all does not — only the
+    // segment-param candidate survives, no plurality to reconcile
+    const routeset = [
+      page('/blog/[slug]', { renders: ['hello-builder'] }),
+      page('/blog/[...slug]', { renders: ['2024/post'] }),
+    ];
+    expect(
+      pickNavigableCandidate('hello-builder', routeset, { blog: ['hello-builder', '2024/post'] }),
+    ).toBe('/blog/hello-builder');
+    expect(
+      pickNavigableCandidate('2024/post', routeset, { blog: ['hello-builder', '2024/post'] }),
+    ).toBe('/blog/2024/post');
+  });
+
+  it('reverse: an on-demand route is always a navigable candidate', () => {
+    expect(
+      pickNavigableCandidate('anything', [page('/ondemand/[slug]', { rendering: 'on-demand' })], {
+        blog: ['anything'],
+      }),
+    ).toBe('/ondemand/anything');
+  });
+
+  it('marker source: the marker fires only on positively-unrouted entries — unknown never fires', () => {
+    const enumerated = [page('/blog/[slug]', { renders: ['hello-builder'] })];
+    expect(hasCandidateRoutes('hello-builder', enumerated)).toBe(true);
+    expect(hasCandidateRoutes('showcase', enumerated)).toBe(false);
+    // same shape, no enumeration truth — the shape premise keeps the marker off
+    expect(hasCandidateRoutes('showcase', [page('/blog/[slug]')])).toBe(true);
+    // a knowably-dead route ([]) leaves nothing
+    expect(hasCandidateRoutes('hello-builder', [page('/blog/[slug]', { renders: [] })])).toBe(
+      false,
+    );
   });
 });

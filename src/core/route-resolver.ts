@@ -4,10 +4,13 @@
  * A pure heuristic over Astro route patterns × content-collection entry ids:
  * nothing instruments entries at runtime (`data-astro-source-*` is a stub on
  * astro@7.2.7 and only reaches components anyway), so pattern shape is the
- * only mapping there is. Doctrine: a unique hit — or a plurality whose every
- * candidate resolves to the same entry (#109) — selects, taking the most
- * specific pattern; any other ambiguity or no match selects nothing — the
- * heuristic never picks wrong, it picks nothing.
+ * mapping — refined, since #119, by what each route actually renders: the
+ * routes payload carries per-route rendering truth from `getStaticPaths`
+ * enumeration (`rendering` + `renders`), and the shape premise survives only
+ * where that truth is unknown. Doctrine: a unique hit — or a plurality whose
+ * every candidate resolves to the same entry (#109) — selects, taking the
+ * most specific pattern; any other ambiguity or no match selects nothing —
+ * the heuristic never picks wrong, it picks nothing.
  *
  * Core-first (owner ruling on PR #77): the route arrives with Astro's own
  * parse — `segments` (`RoutePart[][]`, `{content, dynamic, spread}`) and
@@ -40,6 +43,18 @@ export interface RouteInfo {
   segments: ReadonlyArray<ReadonlyArray<RouteSegmentPart>>;
   /** Param names as Astro reports them (`...slug` for a rest param); resolution reads `segments` — `params` rides through for the routes payload's consumers (#68). */
   params: ReadonlyArray<string>;
+  /**
+   * Per-route rendering mode (#119), always present — free and synchronous
+   * from the hook's `isPrerendered`.
+   */
+  rendering: 'prerendered' | 'on-demand';
+  /**
+   * The param values the route actually renders — present only on
+   * prerendered single-param routes, only when `getStaticPaths` enumeration
+   * positively succeeded. Absent = unknown (pending / failed / timed out):
+   * consumers degrade to the shape premise. `[]` = knowably renders nothing.
+   */
+  renders?: ReadonlyArray<string>;
 }
 
 /** The entry a canvas URL plausibly renders — the chrome's active entry. */
@@ -63,6 +78,8 @@ interface SingleParamRoute {
   segments: FlatSegment[];
   /** Position of the one param among `segments` — the invariant `kind` carries. */
   paramAt: number;
+  /** The source `RouteInfo` — rendering truth (`routeRendersId`) reads straight off it. */
+  source: RouteInfo;
 }
 
 /** A route flattened from Astro's parse: zero params, or exactly one (single or rest) — anything else stays silent. */
@@ -99,14 +116,15 @@ export function resolveActiveEntry(
 
 /**
  * Reverse resolution (entry id → the canvas URL to navigate): every
- * single-param pattern the id could fill, minus URLs a static route renders
- * (forward resolution would stay silent there, so the candidate could not
- * re-verify). Plurality is benign only when every candidate forward-resolves
- * to the same entry — the pick then takes the most specific pattern: a
- * single-segment param before a catch-all, then the shallowest pattern, then
- * route input order (the stable sort keeps it). Zero candidates, or a
- * candidate that does not forward-resolve to this entry — null; the
- * heuristic never picks wrong.
+ * single-param pattern the route actually renders for the id (`routeRendersId`
+ * gates the candidate set since #119 — clicks stop steering the canvas to
+ * 404s), minus URLs a static route renders (forward resolution would stay
+ * silent there, so the candidate could not re-verify). Plurality is benign
+ * only when every candidate forward-resolves to the same entry — the pick
+ * then takes the most specific pattern: a single-segment param before a
+ * catch-all, then the shallowest pattern, then route input order (the stable
+ * sort keeps it). Zero candidates, or a candidate that does not
+ * forward-resolve to this entry — null; the heuristic never picks wrong.
  */
 export function pickNavigableCandidate(
   entryId: string,
@@ -127,10 +145,27 @@ export function pickNavigableCandidate(
 /**
  * Whether any single-param pattern could render this entry — the sidebar's
  * unrouted marker (#111): zero candidates means no route follows the id.
- * Plurality and specificity are the picker's concern, not this predicate's.
+ * Since #119 candidates are render-aware (`routeRendersId` gates them), so
+ * the marker fires only when positively no route renders the entry — an
+ * enumeration gap (unknown) keeps a shape candidate and keeps the marker
+ * off. Plurality and specificity are the picker's concern, not this
+ * predicate's.
  */
 export function hasCandidateRoutes(entryId: string, routes: ReadonlyArray<RouteInfo>): boolean {
   return rankedCandidates(entryId, routes).length > 0;
+}
+
+/**
+ * A route renders the id iff on-demand (any param — its `getStaticPaths` is
+ * dead code, dev serves every param), or enumeration positively includes the
+ * id (`[]` = knowably renders nothing). Unknown (`renders` absent) degrades
+ * to the shape premise — today's behavior — so a payload gap can keep a
+ * candidate, never invent one. The marker and both resolution directions
+ * gate on this predicate (#119).
+ */
+export function routeRendersId(route: RouteInfo, entryId: string): boolean {
+  if (route.rendering === 'on-demand') return true;
+  return route.renders === undefined || route.renders.includes(entryId);
 }
 
 function rankedCandidates(entryId: string, routes: ReadonlyArray<RouteInfo>): RankedCandidate[] {
@@ -138,6 +173,7 @@ function rankedCandidates(entryId: string, routes: ReadonlyArray<RouteInfo>): Ra
   for (const route of routes) {
     const flat = flattenRoute(route);
     if (flat === null || flat.kind !== 'single-param') continue;
+    if (!routeRendersId(flat.source, entryId)) continue;
     const url = buildCandidateUrl(flat, entryId);
     if (url === null) continue;
     if (isStaticPage(routes, toUrlSegments(url))) continue;
@@ -178,6 +214,9 @@ function entryHitsFor(
     if (flat === null || flat.kind !== 'single-param') continue;
     const entryId = captureParamValue(flat, urlSegments);
     if (entryId === null) continue;
+    // prerendered-known routes only render their enumerated params — a URL
+    // outside that space 404s in dev, so the id never counts as a hit (#119)
+    if (!routeRendersId(flat.source, entryId)) continue;
     for (const collection of collectionsWithEntry(entryId, collections)) {
       hits.set(`${collection}\u0000${entryId}`, { collection, entryId });
     }
@@ -210,7 +249,7 @@ function flattenRoute(route: RouteInfo): FlatRoute | null {
   }
   return paramAt === -1
     ? { kind: 'static', segments }
-    : { kind: 'single-param', segments, paramAt };
+    : { kind: 'single-param', segments, paramAt, source: route };
 }
 
 /** A single-part segment is static text, a `[param]`, or a `[...rest]`; embedded params (multi-part segments) stay silent. */

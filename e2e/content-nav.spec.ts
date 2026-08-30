@@ -250,19 +250,73 @@ test('folders collapse on toggle and the choice survives a tab roundtrip', async
   await expect(page.locator('[data-astroix-entry="2024/post"]')).toBeVisible();
 });
 
-// The marker's ruled semantics: zero candidate routes → dimmed marker
-// (#111, grilling Q4). Against the real fixture payload NO entry qualifies —
-// every flat id fills /blog/[slug], /blog/[...slug] and /_server-islands/[name]
-// (3 candidates), so the silence of showcase/scratch/index clicks is
-// ambiguity, not unroutedness. The ticket's "marker on showcase, scratch,
-// index" expectation does not hold against the shipped fixture; surfaced to
-// the owner on the PR — this spec pins the real behavior instead.
-test('no fixture entry has zero candidate routes — the marker stays absent', async ({ page }) => {
+// The marker's ruled semantics (#111, grilling Q4), re-pinned to the real
+// enumeration truth (#119): an entry is unrouted iff no route actually
+// renders it — `routeRendersId` gates every candidate. Against the fixture
+// payload: gallery/showcase, notes/scratch and both `index` entries render
+// through no route (marked); every blog id renders through /blog/[slug]
+// and/or /blog/[...slug] (clean). The enumeration lands in the background
+// after the sync projection — the assertions wait out its WS push.
+test('entries no route renders carry the marker; rendered entries stay clean (#119)', async ({
+  page,
+}) => {
   await page.goto('/');
   await page.getByRole('tab', { name: 'Content' }).click();
   await expect(page.locator('[data-astroix-entries="ready"]')).toBeVisible();
 
-  await expect(page.locator('[data-astroix-entry-unrouted]')).toHaveCount(0);
+  // four marked rows once the enumeration truth lands (pre-#119 this was
+  // zero — every flat id filled /blog/[slug] + /blog/[...slug], 2 shape
+  // candidates post-#112, so the silence of showcase/scratch/index clicks
+  // read as ambiguity, not unroutedness)
+  await expect(page.locator('[data-astroix-entry-unrouted]')).toHaveCount(4);
+  const marked: Array<[collection: string, id: string]> = [
+    ['gallery', 'showcase'],
+    ['notes', 'scratch'],
+    ['notes', 'index'],
+    ['homepage', 'index'],
+  ];
+  for (const [collection, id] of marked) {
+    const entry = page.locator(
+      `[data-astroix-collection="${collection}"] [data-astroix-entry="${id}"]`,
+    );
+    await expect(entry).toHaveAttribute('data-astroix-entry-unrouted', 'true');
+    await expect(entry).toHaveAttribute('title', 'no route renders this entry');
+  }
+
+  // every blog id renders through at least the catch-all — no marker
+  for (const id of ['hello-builder', '2024/post', '2025/release-notes']) {
+    await expect(
+      page.locator(`[data-astroix-collection="blog"] [data-astroix-entry="${id}"]`),
+    ).not.toHaveAttribute('data-astroix-entry-unrouted', 'true');
+  }
+});
+
+// #119's navigation fix: a candidate the route does not actually render is
+// dropped, so the unrouted click opens the form and the canvas stays where
+// it was — pre-#119 the shape plurality navigated to /blog/showcase, a 404.
+test('an unrouted entry click opens the form without navigating — no 404', async ({ page }) => {
+  await page.goto('/');
+  const canvas = page.frameLocator('#astroix-canvas');
+  await expect(canvas.locator('.hero-title')).toBeVisible();
+
+  await page.getByRole('tab', { name: 'Content' }).click();
+  await expect(page.locator('[data-astroix-entries="ready"]')).toBeVisible();
+
+  // the enumeration truth is this spec's precondition — the marker means
+  // pickNavigableCandidate will find zero render-aware candidates
+  const showcase = page.locator(
+    '[data-astroix-collection="gallery"] [data-astroix-entry="showcase"]',
+  );
+  await expect(showcase).toHaveAttribute('data-astroix-entry-unrouted', 'true');
+
+  await showcase.click();
+  await expect(showcase).toHaveAttribute('data-active', 'true');
+  await expect(page.locator('[data-astroix-content-pane="form"] code')).toHaveText(
+    'gallery/showcase',
+  );
+
+  // the canvas never left the home page — no 404 landing
+  await expect(canvas.locator('.hero-title')).toBeVisible();
 });
 
 // Marker mechanics under a controlled routes payload: intercepting the

@@ -8,5 +8,6 @@ declare module '*.css?inline' {
 declare module 'vite/types/customEvent' {
   interface CustomEventMap {
     'astroix:file-changed': { file: string };
+    'astroix:routes-changed': Record<string, never>;
   }
 }
