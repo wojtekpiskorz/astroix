@@ -64,3 +64,31 @@ test('rule list: no matching rules → explicit empty state', async ({ page }) =
 
   await expect(page.locator('[data-astroix-rules="empty"]')).toBeVisible();
 });
+
+// The #141 flake, pinned deterministically: a full canvas reload swaps the
+// iframe's document (the live-preview full-reload family); the select
+// handlers must re-attach to the new document, or its clicks pass through
+// unselected — the store keeps the pre-reload selection, so the pin clicks
+// a different element and requires its rules to render.
+test('select mode survives a canvas reload — clicks in the new document still select (#141)', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await page.getByText('Select: off').click();
+  const canvas = page.frameLocator('#astroix-canvas');
+  await canvas.locator('.hero-title').click();
+  await expect(page.locator('[data-astroix-rule]')).toHaveCount(4);
+
+  // the document swap: a reload is a new document with none of the old one's
+  // listeners
+  await page.locator('#astroix-canvas').evaluate((frame: HTMLIFrameElement) => {
+    frame.contentWindow?.location.reload();
+  });
+  await expect(canvas.locator('.hero-title')).toBeVisible();
+
+  // the new document's click selects its own target — a stale list still
+  // showing the pre-reload selection's rows is exactly the #141 failure
+  await canvas.locator('.hero-lead').click();
+  await expect(page.locator('[data-astroix-selection]')).toContainText('hero-lead');
+  await expect(page.locator('[data-astroix-rule]')).toHaveCount(1);
+});

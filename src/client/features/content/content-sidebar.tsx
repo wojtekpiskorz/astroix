@@ -147,6 +147,7 @@ export function ContentSidebar() {
     applyCanvasResolution(
       resolveActiveEntry(routes, canvasLoad.url, toCollectionsIndex(collections)),
       canvasLoad.seq,
+      canvasLoad.url,
     );
   }, [canvasLoad, collections, routes, applyCanvasResolution]);
 
@@ -181,7 +182,7 @@ export function ContentSidebar() {
     // different entries or no candidate at all stays silent
     const url = pickNavigableCandidate(entryId, routes, toCollectionsIndex(collections));
     if (url === null) return;
-    armReverseVerify({ collection, entryId });
+    armReverseVerify({ collection, entryId }, url);
     requestCanvasNav(url);
   };
 
