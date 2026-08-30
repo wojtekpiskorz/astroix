@@ -12,12 +12,15 @@ export interface RoutesState {
  * Projects hook routes to the `RouteInfo` contract of `src/core/route-resolver`
  * (single source of truth per the core-first ruling on PR #77): page routes
  * only — the resolver's contract filters out `endpoint`/`redirect`/`fallback`
- * types at the payload — with Astro's own `segments` parse carried along,
- * deep-copied so no live core object is held between hook runs.
+ * types and Astro-core `internal`-origin routes (e.g. the dev server-islands
+ * route `/_server-islands/[name]`, which would otherwise resolve as a
+ * same-shape candidate and navigate to a 404, #109) — with Astro's own
+ * `segments` parse carried along, deep-copied so no live core object is held
+ * between hook runs.
  */
 export function toRouteInfos(routes: readonly IntegrationResolvedRoute[]): RouteInfo[] {
   return routes.flatMap((route) => {
-    if (route.type !== 'page') return [];
+    if (route.type !== 'page' || route.origin === 'internal') return [];
     return [
       {
         pattern: route.pattern,

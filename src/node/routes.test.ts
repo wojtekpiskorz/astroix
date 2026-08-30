@@ -37,4 +37,19 @@ describe('toRouteInfos', () => {
     ];
     expect(toRouteInfos(routes).map((info) => info.pattern)).toEqual(['/blog/[...slug]']);
   });
+
+  it('drops Astro-core internal-origin routes — the dev server-islands route is not a page (#109)', () => {
+    // astro core unshifts `/_server-islands/[name]` (origin 'internal') into
+    // the manifest — a same-shape single-param candidate that would navigate
+    // the canvas to a 404
+    const routes = [
+      hookRoute({ pattern: '/_server-islands/[name]', origin: 'internal' }),
+      hookRoute({ pattern: '/blog/[slug]', origin: 'project' }),
+      hookRoute({ pattern: '/injected/[slug]', origin: 'external' }),
+    ];
+    expect(toRouteInfos(routes).map((info) => info.pattern)).toEqual([
+      '/blog/[slug]',
+      '/injected/[slug]',
+    ]);
+  });
 });

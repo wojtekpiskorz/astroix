@@ -110,6 +110,10 @@ test('GET /__astroix/routes serves the hook-captured route array', async ({ page
     [{ content: 'blog', dynamic: false, spread: false }],
     [{ content: '...slug', dynamic: true, spread: true }],
   ]);
+
+  // Astro-core internal routes stay out of the payload (#109): the dev
+  // server-islands route is a same-shape candidate that would navigate to a 404
+  expect(routes.some((route) => route.pattern.startsWith('/_server-islands'))).toBe(false);
 });
 
 test('the fixture dynamic route renders a nested-id entry through the chrome canvas', async ({
