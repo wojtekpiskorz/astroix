@@ -78,13 +78,23 @@ test('the full CSS editing loop', async ({ page }) => {
     await expect(canvas.locator('.hero-title')).toHaveCSS('color', 'rgb(185, 28, 28)', {
       timeout: 10_000,
     });
-    const marker = await canvas
-      .locator('.hero-title')
-      .evaluate(
-        (el) =>
-          (el.ownerDocument.defaultView as { __astroixLoopMarker?: number }).__astroixLoopMarker,
-      );
-    expect(marker).toBeDefined();
+    // the marker read carries its own budget: an immediate read after the
+    // CSS swap transiently missed under retries: 0 (#135) — a real reload
+    // leaves the stamp undefined forever, so the poll can only rescue a
+    // sampling miss, never a genuine one.
+    await expect
+      .poll(
+        () =>
+          canvas
+            .locator('.hero-title')
+            .evaluate(
+              (el) =>
+                (el.ownerDocument.defaultView as { __astroixLoopMarker?: number })
+                  .__astroixLoopMarker,
+            ),
+        { timeout: 10_000, intervals: [200, 500, 1000] },
+      )
+      .toBeDefined();
   } finally {
     writeFileSync(filePath, original);
   }
