@@ -46,6 +46,7 @@
     "check:artifact": "node scripts/check-chrome-artifact.mjs",
     "check:publint": "publint",
     "smoke": "node scripts/smoke.mjs",
+    "prepare-local": "node scripts/prepare-local-link.mjs",
     "crap": "bun scripts/crap.mjs",
     "crap:ci": "bun scripts/crap.mjs --ci",
     "preflight": "bun scripts/crap.mjs --preflight",

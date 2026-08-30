@@ -44,6 +44,8 @@ jobs:
           node-version: 24
       - run: bun install --frozen-lockfile
       - run: bun run build
+      # stage the publish-shaped local link before the fixture resolves it (#123)
+      - run: bun run prepare-local
       - run: bun install --cwd=e2e/fixture --frozen-lockfile
       - run: bunx playwright install --with-deps chromium
       - run: bun run test:e2e

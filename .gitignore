@@ -12,6 +12,9 @@ dist/
 # astro dev artifacts (when dogfooding inside this repo)
 .astro/
 
+# publish-shaped local link the e2e fixture installs from (#123)
+.astroix-local/
+
 # tests
 coverage/
 crap-table.md

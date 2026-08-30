@@ -1,0 +1,116 @@
+import { execSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { cpSync, existsSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+// Publish-shaped local link (#123): the e2e fixture consumes the integration
+// through `.astroix-local/` — a staging dir holding ONLY the publish surface
+// (dist, package.json, README, LICENSE) — instead of `file:../..`. The `file:`
+// protocol copies the linked directory verbatim, so pointing it at the repo
+// root copied the whole checkout into node_modules, where the nested
+// e2e/fixture/node_modules chained again through bun's `.old-*` replacement
+// artifacts (10 levels, 316M). This gate runs before the fixture dev server
+// boots: build if stale, sync the surface, refresh the installed copy, and
+// verify the link stayed publish-shaped.
+
+const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+const staging = join(root, '.astroix-local');
+const fixture = join(root, 'e2e', 'fixture');
+const installed = join(fixture, 'node_modules', '@wojciechpiskorz', 'astroix');
+
+// exactly what `files: ["dist"]` + the npm defaults allow into a tarball
+const PUBLISH_SURFACE = ['dist', 'package.json', 'README.md', 'LICENSE'];
+// dist is the load-bearing surface for the freshness comparison; the staging
+// package.json is byte-identical to the root one, so dist bytes decide
+const BUILD_INPUTS = ['tsup.config.ts', 'vite.chrome.config.ts', 'package.json'];
+const BUILD_OUTPUTS = ['dist/index.js', 'dist/chrome.js'];
+
+const run = (command, cwd) => execSync(command, { cwd, stdio: 'inherit' });
+
+function walkFiles(dir) {
+  if (!existsSync(dir)) return [];
+  const entries = readdirSync(dir, { withFileTypes: true });
+  const files = [];
+  for (const entry of entries) {
+    const path = join(dir, entry.name);
+    // bun installs a directory `file:` dep as per-file symlinks into the
+    // staging dir — classify through the link (statSync follows it), never
+    // by the dirent type, or every linked file looks like neither file nor
+    // dir and the installed tree hashes as empty.
+    const stats = statSync(path);
+    if (stats.isDirectory()) files.push(...walkFiles(path));
+    else if (stats.isFile()) files.push(path);
+  }
+  return files;
+}
+
+/** Content digest of a tree: sorted relative paths + bytes, mtimes ignored. */
+function treeHash(dir) {
+  if (!existsSync(dir)) return null;
+  const hash = createHash('sha256');
+  for (const path of walkFiles(dir).sort()) {
+    hash.update(path.slice(dir.length + 1));
+    hash.update(readFileSync(path));
+  }
+  return hash.digest('hex');
+}
+
+/** A publish-shaped copy carries dist + manifest and never the repo itself. */
+function assertPublishShape(dir, label) {
+  const forbidden = ['src', 'e2e'].filter((name) => existsSync(join(dir, name)));
+  if (
+    forbidden.length > 0 ||
+    !existsSync(join(dir, 'package.json')) ||
+    !existsSync(join(dir, 'dist'))
+  ) {
+    throw new Error(
+      `[astroix] ${label} at ${dir} is not publish-shaped` +
+        (forbidden.length > 0
+          ? ` (contains ${forbidden.join(', ')})`
+          : ' (missing package.json/dist)') +
+        ' — the local link regressed to a full-repo copy; see scripts/prepare-local-link.mjs (#123).',
+    );
+  }
+}
+
+// 1. Build gate: dist must exist and postdate every build input, so a stale
+// dist can never silently serve the fixture (the link copies at install
+// time — freshness is decided here, before the copy is made).
+// statSync throws loudly when src/ or a build config is missing
+const inputMtimes = walkFiles(join(root, 'src'))
+  .concat(BUILD_INPUTS.map((name) => join(root, name)))
+  .map((path) => statSync(path).mtimeMs);
+const outputMtimes = BUILD_OUTPUTS.map((name) => {
+  const path = join(root, name);
+  return existsSync(path) ? statSync(path).mtimeMs : 0;
+});
+if (Math.max(...inputMtimes) > Math.min(...outputMtimes)) {
+  console.log('[astroix] dist is stale — rebuilding (bun run build)');
+  run('bun run build', root);
+}
+
+// 2. Sync the publish surface into the staging dir (always: a full re-copy
+// of ~2 MB beats reasoning about partial staleness between dist and meta).
+rmSync(staging, { recursive: true, force: true });
+for (const name of PUBLISH_SURFACE) {
+  cpSync(join(root, name), join(staging, name), { recursive: true });
+}
+assertPublishShape(staging, 'staging dir');
+
+// 3. Refresh the installed copy. bun 1.3 materializes a directory `file:` dep
+// as per-file symlinks into the staging dir (a re-sync is already live) — but
+// the digest stays content-based so a plain-copy layout (other bun versions,
+// copyfile backend) refreshes too: `bun install` re-links/re-copies and needs
+// none of the lockfile gymnastics the tarball lane has
+// (prepare-pack-fixture.mjs), so a plain install suffices.
+const stagedDist = treeHash(join(staging, 'dist'));
+const installedDist = treeHash(join(installed, 'dist'));
+if (stagedDist !== installedDist) {
+  console.log('[astroix] staged dist differs from the installed copy — bun install in e2e/fixture');
+  run('bun install', fixture);
+}
+
+// 4. Guard: whatever sits in the fixture's node_modules must be
+// publish-shaped — this is what fails loudly if the link ever regresses.
+assertPublishShape(installed, 'installed fixture copy');

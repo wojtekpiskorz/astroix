@@ -12,9 +12,10 @@ test('fixture dev server renders the hero from the content collection', async ({
 });
 
 test('dev server boots clean with the astroix integration registered', async ({ page }) => {
-  // astro.config.mjs imports the local package via file:../.. and registers
-  // astroix(); a broken link or a failing integration would kill boot before
-  // the webServer became ready. The chrome assertions live in builder.spec.ts.
+  // astro.config.mjs imports the local package via the publish-shaped staging
+  // dir (.astroix-local, #123) and registers astroix(); a broken link or a
+  // failing integration would kill boot before the webServer became ready.
+  // The chrome assertions live in builder.spec.ts.
   const response = await page.goto(CANVAS_URL);
   expect(response?.status()).toBe(200);
 });
