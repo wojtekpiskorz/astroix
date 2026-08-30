@@ -232,6 +232,7 @@ test('IDE edit reflects live in the open chrome editor (file→chrome sync)', as
   await page.goto('/');
   await page.getByText('Select: off').click();
   await page.frameLocator('#astroix-canvas').locator('.hero-title').click();
+  await page.locator('[data-astroix-rule]', { hasText: 'home.css' }).first().click();
   const editor = page.locator('[data-astroix-editor="view"]');
   await expect(editor.locator('.cm-content')).toContainText('font-weight: 800');
   const original = readFileSync(HOME_CSS, 'utf8');
