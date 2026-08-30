@@ -2,6 +2,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
 import { PACK_PORT } from './ports';
+import { settleWrites } from './settle-writes';
 
 /**
  * npm-pack smoke lane (ADR-0001): the exact shipped artifact, not the
@@ -82,6 +83,12 @@ test('minimal loop against the artifact: select → list → edit → canvas ref
       timeout: 10_000,
     });
   } finally {
+    // #128: the rule editor carries the same armed-debounce/echo-re-arm
+    // window as the content loop (#114) — a bare writeFileSync could be
+    // overtaken by a late splice with no later restore on this tracked page.
+    // The settle oracle is the page alone: the pack fixture has no content
+    // collections, so no data-store mirrors the write to watch.
+    await settleWrites([filePath]);
     writeFileSync(filePath, original);
   }
 });
