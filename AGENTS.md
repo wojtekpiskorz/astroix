@@ -60,6 +60,7 @@ Rationale and trade-offs live in `docs/adr/0002-chrome-module-architecture.md`; 
 
 - **Unit (vitest + happy-dom)**: pure modules only. The CSS indexer/matcher and splice-writer are pure functions over fixtures — test behavior (matched rules, output bytes), never index internals.
 - **E2E (Playwright)**: the only source of truth for selector-engine behavior (`[data-astro-cid-*]` under the default `attribute` scopedStyleStrategy — `:where(...)` only when configured; verified vs locked astro@7.2.7, wayfinder T2) and full builder loops.
+- On any red e2e run, local or CI: capture the full error output and keep `test-results/` before any cleanup — #129's one unexplained red went undiagnosed because truncation ate the error text.
 - Author specs by exploring with Playwright MCP locally, then commit deterministic specs for CI.
 
 ## Crap4ts risk layer
