@@ -133,6 +133,36 @@ test('a shared URL with the param boots the canvas at the carried position', asy
   await expect.poll(() => new URL(page.url()).searchParams.get('canvas')).toBe('/blog/2024/post');
 });
 
+test('a Canvas re-render after navigation never reloads the iframe', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('tab', { name: 'Content' }).click();
+  await expect(page.locator('[data-astroix-entries="ready"]')).toBeVisible();
+  await page.locator('[data-astroix-entry="2024/post"]').click();
+
+  // advisory round 1: with the chrome URL carrying the position, a re-derived
+  // boot src drifts on the next Canvas render (the select-mode subscription
+  // flip is that render). The drift is masked today by the compiler's prop
+  // memoization (verified green against the unfixed code) — CANVAS_BOOT_SRC
+  // makes the no-reload invariant hold by construction; this guards it.
+  const canvasTitle = page.frameLocator('#astroix-canvas').locator('.blog-title');
+  await expect(canvasTitle).toBeVisible();
+  await canvasTitle.evaluate((el) => {
+    const win = el.ownerDocument.defaultView as { __astroixCanvasLoadedAt?: number };
+    win.__astroixCanvasLoadedAt = performance.now();
+  });
+
+  await page.getByRole('tab', { name: 'CSS' }).click();
+  await page.getByText('Select: off').click();
+  await expect(page.getByText('Select: on')).toBeVisible();
+  expect(
+    await canvasTitle.evaluate(
+      (el) =>
+        (el.ownerDocument.defaultView as { __astroixCanvasLoadedAt?: number })
+          .__astroixCanvasLoadedAt,
+    ),
+  ).toBeDefined();
+});
+
 test('dev toolbar is hidden inside the canvas iframe', async ({ page }) => {
   await page.goto('/');
   const canvas = page.frameLocator('#astroix-canvas');

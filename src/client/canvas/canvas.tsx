@@ -42,6 +42,15 @@ function canvasSrc(): string {
   return canvasHref(carried ?? window.location.href);
 }
 
+// boot-only: parsed once at module load, before any render (the
+// SIDEBAR_OPEN_AT_BOOT idiom). The mirror below rewrites the chrome URL on
+// every canvas load, so re-deriving the src mid-render drifts the computed
+// value after any navigation — today the React Compiler's prop memoization
+// masks the drift (verified: no reload with a per-render derivation), but
+// boot precedence is boot semantics: the param is read exactly once, by
+// construction rather than compiler grace.
+const CANVAS_BOOT_SRC = canvasSrc();
+
 export function Canvas() {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   // gated by the active vertical (issue #70): suspended while the Content
@@ -118,7 +127,7 @@ export function Canvas() {
       <iframe
         id="astroix-canvas"
         ref={iframeRef}
-        src={canvasSrc()}
+        src={CANVAS_BOOT_SRC}
         title="astroix canvas"
         className="h-full w-full border-0"
         // same-origin: the location is readable, and every navigation —
