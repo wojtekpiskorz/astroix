@@ -11,10 +11,10 @@ import { generatePaginateFunction } from './paginate';
 // dist file directly by URL — a file-URL import bypasses the package exports
 // map by design (that resolution is bare-specifier-only), reaching the very
 // code the dev server runs. If the vendored copy and core ever drift, this
-// fails. Skipped only where astro's dist tree is genuinely absent — never in
-// CI, where the check job installs devDeps. (Paths anchor on `process.cwd()`
-// — the vitest root — because import.meta.url is not a file URL under the
-// happy-dom environment.)
+// fails. Skipped only where astro itself is absent (never in CI, where the
+// check job installs devDeps); a moved dist file is a failure, not a skip.
+// (Paths anchor on `process.cwd()` — the vitest root — because
+// import.meta.url is not a file URL under the happy-dom environment.)
 const corePaginatePath = join(process.cwd(), 'node_modules/astro/dist/core/render/paginate.js');
 const coreGeneratorPath = join(process.cwd(), 'node_modules/astro/dist/core/routing/generator.js');
 const CORE_PAGINATE_URL = pathToFileURL(corePaginatePath).href;
