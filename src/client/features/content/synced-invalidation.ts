@@ -1,9 +1,14 @@
 import type { QueryClient } from '@tanstack/react-query';
+import type { CustomEventMap } from 'vite/types/customEvent';
 import { useChromeStore } from '../../store';
 import { COLLECTIONS_KEY, SCHEMA_KEY } from './api';
 
-/** Which watcher leg a `astroix:content-synced` push carries (content-signal.ts names the sender's half). */
-export type ContentSyncLeg = 'srcdir' | 'loader';
+/**
+ * Which watcher leg a `astroix:content-synced` push carries — derived from
+ * the wire declaration in `vite-env.d.ts`, the single source (the sender's
+ * half is `ContentSyncLeg` in `src/node/content-signal.ts`).
+ */
+export type ContentSyncLeg = CustomEventMap['astroix:content-synced']['leg'];
 
 /**
  * The bounded wait for a canvas load that never comes (#155): the reload
