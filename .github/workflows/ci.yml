@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   check:
-    name: check (biome · tsc · vitest · artifact)
+    name: check (biome · tsc · vitest · artifact · dist-graph)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -27,6 +27,8 @@ jobs:
       # build both outputs and gate the prebuilt chrome shape (ADR-0001)
       - run: bun run build
       - run: bun run check:artifact
+      # the node-side dist graph must stay inside builtins + dependencies + peers (#138)
+      - run: bun run check:dist-graph
       # the published manifest/exports must be consumer-clean (needs the build)
       - run: bun run check:publint
 
