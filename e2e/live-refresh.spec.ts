@@ -8,14 +8,12 @@ import { SRC_PORT } from './ports';
 /**
  * Live-refresh lane: every push-driven flow — external IDE edits, the
  * collections list picking up content changes, the write loop's echo —
- * rides the vite hot channel (`astroix:file-changed` /
- * `astroix:content-synced` pushes from the node side), and only a
- * source-served chrome subscribes to it: the prebuilt bundle
- * dead-code-eliminates the `import.meta.hot` subscriptions because the
- * property is statically dead in a lib build. These tests moved here from
- * the main lane when #150's mode detection stopped leaking source mode
- * into it; the prebuilt gap is a real consumer-facing hole tracked in
- * #166.
+ * rides the node-side pushes (`astroix:file-changed` /
+ * `astroix:content-synced`) bridged to window CustomEvents (#166),
+ * identical in both delivery arms. These tests moved here from the main
+ * lane when #150's mode detection stopped leaking source mode into it;
+ * the prebuilt half of the contract is pinned on the pack lane
+ * (e2e/pack.spec.ts) against the exact shipped artifact.
  */
 test.use({ baseURL: `http://localhost:${SRC_PORT}` });
 test.describe.configure({ mode: 'serial' });

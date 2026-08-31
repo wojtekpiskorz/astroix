@@ -5,7 +5,6 @@ import { Canvas, reflectCanvasPosition } from './canvas/canvas';
 import { ROUTES_KEY } from './features/content/api';
 import { ContentEditorPane } from './features/content/content-editor-pane';
 import {
-  type ContentSyncLeg,
   invalidateContentCaches,
   invalidateOnContentSynced,
 } from './features/content/synced-invalidation';
@@ -34,11 +33,13 @@ const SIDEBAR_OPEN_AT_BOOT = initialSidebarOpen();
 
 export function App() {
   // file→chrome sync (spec #13): any pushed source change makes the payload
-  // stale (ranges/lines moved) — refetch on every event, editor or not
+  // stale (ranges/lines moved) — refetch on every event, editor or not.
+  // The subscriptions ride window CustomEvents (#166): `import.meta.hot`
+  // inside the chrome is dead-code-eliminated from the lib bundle, so the
+  // virtual chrome module bridges the node-side hot channel to window events
+  // — one bridge, identical in both delivery arms (ADR-0001)
   const queryClient = useQueryClient();
   useEffect(() => {
-    const hot = import.meta.hot;
-    if (!hot) return;
     const handler = (): void => {
       void queryClient.invalidateQueries({ queryKey: INDEX_PAYLOAD_KEY });
     };
@@ -58,7 +59,10 @@ export function App() {
     // the reload), the loader leg waits for the canvas's next load so its
     // refetch cannot race the post-commit full-reload render
     // (synced-invalidation.ts owns the sequencing)
-    const syncedHandler = ({ leg }: { leg: ContentSyncLeg }): void => {
+    const syncedHandler = (event: WindowEventMap['astroix:content-synced']): void => {
+      const leg = event.detail?.leg;
+      // a payload-less push cannot sequence — ignore it, never throw
+      if (leg === undefined) return;
       invalidateOnContentSynced(queryClient, leg);
     };
     // routes freshness (#119): the background getStaticPaths pass fills
@@ -67,15 +71,15 @@ export function App() {
     const routesHandler = (): void => {
       void queryClient.invalidateQueries({ queryKey: ROUTES_KEY });
     };
-    hot.on('astroix:file-changed', handler);
-    hot.on('astro:content-changed', contentHandler);
-    hot.on('astroix:content-synced', syncedHandler);
-    hot.on('astroix:routes-changed', routesHandler);
+    window.addEventListener('astroix:file-changed', handler);
+    window.addEventListener('astro:content-changed', contentHandler);
+    window.addEventListener('astroix:content-synced', syncedHandler);
+    window.addEventListener('astroix:routes-changed', routesHandler);
     return () => {
-      hot.off('astroix:file-changed', handler);
-      hot.off('astro:content-changed', contentHandler);
-      hot.off('astroix:content-synced', syncedHandler);
-      hot.off('astroix:routes-changed', routesHandler);
+      window.removeEventListener('astroix:file-changed', handler);
+      window.removeEventListener('astro:content-changed', contentHandler);
+      window.removeEventListener('astroix:content-synced', syncedHandler);
+      window.removeEventListener('astroix:routes-changed', routesHandler);
     };
   }, [queryClient]);
 

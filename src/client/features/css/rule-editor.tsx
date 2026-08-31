@@ -121,12 +121,17 @@ export function RuleEditor({ spec }: { spec: EditorSpec }) {
     })();
 
     // file→chrome sync (spec #13): the node watcher pushes
-    // `astroix:file-changed` over the Vite WS. Our own writes echo back as
-    // no-ops (content compare); a genuinely external change replaces the doc
-    // when it is clean — while dirty, the pending write reconciles (and the
-    // expected-hash guard turns a race into a reload, never a corruption).
-    const onFileSync = (payload: { file: string }): void => {
-      if (payload.file !== spec.file || view === null || cancelled) return;
+    // `astroix:file-changed`, bridged from the hot channel to a window
+    // CustomEvent by the virtual chrome module (#166) — `import.meta.hot`
+    // here is dead-code-eliminated from the lib bundle, window events are
+    // not. Our own writes echo back as no-ops (content compare); a genuinely
+    // external change replaces the doc when it is clean — while dirty, the
+    // pending write reconciles (and the expected-hash guard turns a race
+    // into a reload, never a corruption).
+    const onFileSync = (event: WindowEventMap['astroix:file-changed']): void => {
+      // a payload-less push names no file — ignore it, never throw
+      const file = event.detail?.file;
+      if (file === undefined || file !== spec.file || view === null || cancelled) return;
       void (async () => {
         const contents = await fetchFileContents(spec.file);
         if (contents === null || cancelled) return;
@@ -139,14 +144,12 @@ export function RuleEditor({ spec }: { spec: EditorSpec }) {
         // dirty doc: the debounce will write (hash-guarded) — never clobber
       })();
     };
-    if (import.meta.hot) {
-      import.meta.hot.on('astroix:file-changed', onFileSync);
-    }
+    window.addEventListener('astroix:file-changed', onFileSync);
 
     return () => {
       cancelled = true;
       if (timer !== undefined) clearTimeout(timer);
-      if (import.meta.hot) import.meta.hot.off('astroix:file-changed', onFileSync);
+      window.removeEventListener('astroix:file-changed', onFileSync);
       view?.destroy();
     };
     // mounts once per file (keyed); spec identity is stable while open
