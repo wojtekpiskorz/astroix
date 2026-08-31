@@ -21,8 +21,12 @@ export function mountChrome(mode: ChromeMode): void {
   host.dataset.astroixChromeMode = mode;
   // the chrome's seat at the hot channel: announces itself so the node-side
   // shield can route Astro's sync `full-reload`s around it — the chrome is a
-  // stateful SPA, the canvas reloads in its place (spec #13/#74)
-  import.meta.hot?.send('astroix:chrome', {});
+  // stateful SPA, the canvas reloads in its place (spec #13/#74). The
+  // announce dispatches a window CustomEvent (#166): `import.meta.hot` here
+  // is dead-code-eliminated from the lib bundle; the hot→window bridge in
+  // the virtual chrome module (registered before this call in both delivery
+  // arms) carries it to `hot.send`
+  window.dispatchEvent(new CustomEvent('astroix:chrome'));
   // createRoot(shadowRoot) is the documented React pattern for shadow DOM;
   // events delegated at the root work inside the boundary (stack #4). The
   // chrome stylesheet is adopted on both documents (see styles.ts).

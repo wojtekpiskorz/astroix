@@ -12,6 +12,36 @@ import { type RoutesState, routesHandlers } from './routes';
 import { chromeArtifactPath, clientEntryPath } from './source-mode';
 import { registerFileSync } from './watch-sync';
 
+/**
+ * The hot→window bridge (#166): `import.meta.hot` usage inside the chrome is
+ * dead-code-eliminated by the lib build, so the chrome's push subscriptions
+ * and its `astroix:chrome` announce ride window CustomEvents — those survive
+ * bundling by construction. This translator is prepended to the virtual
+ * chrome module in BOTH delivery arms (ADR-0001, which owns the rationale
+ * and the one-code-path guarantee): served as module source, its literal
+ * `import.meta.hot` is what makes Vite inject the hot context into the
+ * module. It forwards the node-side push events (payload as `detail`) to
+ * the window events the chrome subscribes to, and routes the announce
+ * entry.tsx dispatches on `window` back onto the hot channel for the
+ * reload shield. Prepend, never append: static imports are hoisted, so
+ * the module body — bridge first — runs before `mountChrome()` (source
+ * arm) and before the self-mounting bundle's top-level call (prebuilt
+ * arm); the announce listener must exist by then.
+ */
+const HOT_TO_WINDOW_BRIDGE = `// astroix hot→window bridge (#166): node pushes → window CustomEvents,
+// the chrome's 'astroix:chrome' announce → hot.send (reload shield).
+if (import.meta.hot) {
+  const hot = import.meta.hot;
+  const forward = (event) =>
+    hot.on(event, (payload) => window.dispatchEvent(new CustomEvent(event, { detail: payload })));
+  forward('astroix:file-changed');
+  forward('astroix:content-synced');
+  forward('astroix:routes-changed');
+  forward('astro:content-changed');
+  window.addEventListener('astroix:chrome', () => hot.send('astroix:chrome', {}));
+}
+`;
+
 export const VIRTUAL_CHROME_ID = 'virtual:astroix/chrome';
 
 export interface AstroixPluginOptions {
@@ -83,8 +113,9 @@ export function astroixVitePlugin(options: AstroixPluginOptions): Plugin {
         // ADR-0001 source mode: the chrome loads from this checkout's source,
         // so the host dev server transforms it (fast-refresh, Tailwind). The
         // mode discriminator rides the mount call so each e2e lane can pin
-        // the delivery mode it boots (#150).
-        return `import { mountChrome } from '/@fs${clientEntryPath}';\nmountChrome('source');\n`;
+        // the delivery mode it boots (#150). The bridge goes first — its
+        // announce listener must exist before mountChrome() dispatches.
+        return `${HOT_TO_WINDOW_BRIDGE}import { mountChrome } from '/@fs${clientEntryPath}';\nmountChrome('source');\n`;
       }
       // ADR-0001 prebuilt mode: serve the shipped bundle — a self-contained
       // ESM with react, the compiled CSS and CodeMirror inside, so foreign
@@ -95,7 +126,10 @@ export function astroixVitePlugin(options: AstroixPluginOptions): Plugin {
           'astroix: prebuilt chrome bundle is missing from the package build (expected dist/chrome.js)',
         );
       }
-      return readFileSync(chromeArtifactPath, 'utf8');
+      // The artifact self-mounts at the top level (chrome.tsx calls
+      // mountChrome() in module scope) — the bridge precedes it so the
+      // announce listener exists before the dispatch fires.
+      return HOT_TO_WINDOW_BRIDGE + readFileSync(chromeArtifactPath, 'utf8');
     },
   };
 }
