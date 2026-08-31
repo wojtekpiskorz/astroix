@@ -2,7 +2,9 @@ import { spawn } from 'node:child_process';
 import {
   cpSync,
   existsSync,
+  lstatSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   rmSync,
@@ -21,16 +23,27 @@ import postcss from 'postcss';
 import { createServerModuleRunner } from 'vite';
 import { WebSocket, WebSocketServer } from 'ws';
 
+process.env.ASTRO_DISABLE_UPDATE_CHECK = 'true';
+
 const ROOT = resolve(import.meta.dirname, '../..');
 const FIXTURE = join(import.meta.dirname, 'plain-project');
 const SERVER_SYMBOL = Symbol.for('astroix.runtime-spine.vite-server');
 const ORIGINAL_COLOR = 'rgb(10, 20, 30)';
 const EDITED_COLOR = 'rgb(40, 50, 60)';
+const COMMAND_TIMEOUT_MS = 20_000;
+const TEARDOWN_TIMEOUT_MS = 10_000;
 const assertions = [];
 const metrics = {};
 const require = createRequire(import.meta.url);
 const astroPackageDir = dirname(require.resolve('astro/package.json'));
 const vitePackagePath = require.resolve('vite/package.json');
+
+class ProofTeardownError extends AggregateError {
+  constructor(errors, retainedPath) {
+    super(errors, `proof teardown failed; temporary project retained at ${retainedPath}`);
+    this.retainedPath = retainedPath;
+  }
+}
 
 function check(name, condition, detail = '') {
   assertions.push({ name, pass: Boolean(condition), detail });
@@ -63,12 +76,92 @@ async function waitFor(read, accept, label, timeoutMs = 20_000) {
   throw new Error(`timed out waiting for ${label}; last=${JSON.stringify(last)}`);
 }
 
+async function bounded(operation, label, timeoutMs = TEARDOWN_TIMEOUT_MS) {
+  let timer;
+  try {
+    return await Promise.race([
+      operation,
+      new Promise((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`${label} timed out after ${timeoutMs} ms`)),
+          timeoutMs,
+        );
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function captureCleanup(errors, label, operation) {
+  try {
+    await bounded(operation(), label);
+  } catch (error) {
+    errors.push(
+      new Error(`${label} failed: ${error instanceof Error ? error.message : String(error)}`, {
+        cause: error,
+      }),
+    );
+  }
+}
+
+function throwWithCleanup(workError, cleanupErrors, retainedPath) {
+  if (cleanupErrors.length > 0) {
+    const errors = workError === undefined ? cleanupErrors : [workError, ...cleanupErrors];
+    throw new ProofTeardownError(errors, retainedPath);
+  }
+  if (workError !== undefined) throw workError;
+}
+
+function errorText(error) {
+  return error instanceof Error ? (error.stack ?? error.message) : String(error);
+}
+
+function reportFailure(error) {
+  console.error(errorText(error));
+  if (error instanceof ProofTeardownError) {
+    for (const [index, cause] of error.errors.entries()) {
+      console.error(`TEARDOWN CAUSE ${index + 1}/${error.errors.length}: ${errorText(cause)}`);
+    }
+  }
+}
+
 function readJsonLines(file) {
   if (!existsSync(file)) return [];
   return readFileSync(file, 'utf8')
     .split('\n')
     .filter(Boolean)
     .map((line) => JSON.parse(line));
+}
+
+function temporaryTreeSignature(root) {
+  const entries = [];
+  const visit = (directory, prefix = '') => {
+    for (const name of readdirSync(directory).sort()) {
+      const path = join(directory, name);
+      const stat = lstatSync(path);
+      const relativePath = join(prefix, name);
+      entries.push(`${relativePath}:${stat.mode}:${stat.size}:${Math.trunc(stat.mtimeMs)}`);
+      if (stat.isDirectory()) visit(path, relativePath);
+    }
+  };
+  visit(root);
+  return entries.join('\n');
+}
+
+async function waitForTemporaryProjectQuiescence(temp) {
+  let previous;
+  let stableIntervals = 0;
+  await waitFor(
+    () => temporaryTreeSignature(temp),
+    (signature) => {
+      stableIntervals = signature === previous ? stableIntervals + 1 : 0;
+      previous = signature;
+      return stableIntervals >= 5;
+    },
+    'temporary project filesystem quiescence after resource teardown',
+    3_000,
+  );
 }
 
 function copyProject(parent, name) {
@@ -119,25 +212,33 @@ async function startProgrammaticAstro(project, hookLog, configFile) {
   delete globalThis[SERVER_SYMBOL];
   const { default: dev } = await astroPrivate('dist/core/dev/dev.js');
   const startedAt = performance.now();
-  const devServer = await dev({
-    root: project,
-    configFile,
-    logLevel: 'silent',
-    server: { host: '127.0.0.1', port: 0 },
-  });
-  const viteServer = globalThis[SERVER_SYMBOL];
-  check('project instrumentation exposed the Vite server', viteServer !== undefined);
-  const address = devServer.address;
-  check(
-    'programmatic Astro bound an ephemeral TCP port',
-    typeof address === 'object' && address !== null && address.port > 0,
-  );
-  return {
-    devServer,
-    viteServer,
-    origin: `http://127.0.0.1:${address.port}`,
-    bootMs: performance.now() - startedAt,
-  };
+  let devServer;
+  try {
+    devServer = await dev({
+      root: project,
+      configFile,
+      logLevel: 'silent',
+      server: { host: '127.0.0.1', port: 0 },
+    });
+    const viteServer = globalThis[SERVER_SYMBOL];
+    check('project instrumentation exposed the Vite server', viteServer !== undefined);
+    const address = devServer.address;
+    check(
+      'programmatic Astro bound an ephemeral TCP port',
+      typeof address === 'object' && address !== null && address.port > 0,
+    );
+    return {
+      devServer,
+      viteServer,
+      origin: `http://127.0.0.1:${address.port}`,
+      bootMs: performance.now() - startedAt,
+    };
+  } catch (workError) {
+    if (devServer === undefined) throw workError;
+    const cleanupErrors = [];
+    await captureCleanup(cleanupErrors, 'post-start Astro server cleanup', () => devServer.stop());
+    throwWithCleanup(workError, cleanupErrors, project);
+  }
 }
 
 function rewriteCanvasPath(url) {
@@ -215,11 +316,25 @@ async function startProxy(upstreamPort) {
     server.listen(0, '127.0.0.1', resolvePromise);
   });
   const address = server.address();
-  check(
-    'standalone proxy bound an ephemeral TCP port',
-    typeof address === 'object' && address !== null && address.port > 0,
-  );
-  return { server, origin: `http://127.0.0.1:${address.port}`, upgradedSockets };
+  const resource = {
+    server,
+    origin:
+      typeof address === 'object' && address !== null ? `http://127.0.0.1:${address.port}` : null,
+    upgradedSockets,
+  };
+  try {
+    check(
+      'standalone proxy bound an ephemeral TCP port',
+      typeof address === 'object' && address !== null && address.port > 0,
+    );
+    return resource;
+  } catch (workError) {
+    const cleanupErrors = [];
+    await captureCleanup(cleanupErrors, 'post-start proxy cleanup', () =>
+      closeHttpServer(resource.server, resource.upgradedSockets),
+    );
+    throwWithCleanup(workError, cleanupErrors, 'proxy has no project path');
+  }
 }
 
 function closeHttpServer(server, upgradedSockets = new Set()) {
@@ -230,6 +345,12 @@ function closeHttpServer(server, upgradedSockets = new Set()) {
   });
 }
 
+function renderedScopedCss(html) {
+  return html.match(
+    /<style[^>]*data-vite-dev-id="[^"]*home\.astro\?astro&amp;type=style&amp;index=0[^"]*"[^>]*>([\s\S]*?)<\/style>/,
+  )?.[1];
+}
+
 async function outsidePayload(origin, project) {
   const realProject = realpathSync(project);
   const sourceFile = realpathSync(join(project, 'site/pages/home.astro'));
@@ -238,15 +359,12 @@ async function outsidePayload(origin, project) {
   check('compiler exposed the scoped style block', block !== undefined);
   const moduleUrl = `/${relative(realProject, sourceFile).split(sep).join('/')}?astro&type=style&index=0&lang.css`;
   const html = await fetch(`${origin}/lab/home/`).then((response) => response.text());
-  const compiledStyle = html.match(
-    /<style[^>]*data-vite-dev-id="[^"]*home\.astro\?astro&amp;type=style&amp;index=0[^"]*"[^>]*>([\s\S]*?)<\/style>/,
-  );
+  const compiledCss = renderedScopedCss(html);
   check(
     'outside pipeline observed Astro compiled scoped CSS in dev HTML',
-    compiledStyle?.[1] !== undefined,
+    compiledCss !== undefined,
     html.slice(0, 500),
   );
-  const compiledCss = compiledStyle[1];
   const sourceOffset = source.indexOf(block.content);
   check('style block bytes map back to the Astro source', sourceOffset >= 0);
   const records = [];
@@ -288,6 +406,8 @@ async function cssomRule(page, selectorFragment = '.hero-title') {
 
 async function exerciseBrowser(proxyOrigin, sourceFile) {
   const browser = await chromium.launch({ headless: true });
+  let original;
+  let sourceEdited = false;
   try {
     const page = await browser.newPage();
     console.log('RUN browser-app-load');
@@ -327,27 +447,29 @@ async function exerciseBrowser(proxyOrigin, sourceFile) {
     await frame.goto(`${proxyOrigin}/lab/__astroix/canvas/home/`, { waitUntil: 'commit' });
     await frame.waitForSelector('.hero-title');
     const loadsBeforeEdit = await frame.evaluate(() => window.__runtimeSpineLoads);
-    const original = readFileSync(sourceFile, 'utf8');
+    original = readFileSync(sourceFile, 'utf8');
     writeFileSync(sourceFile, original.replace(ORIGINAL_COLOR, EDITED_COLOR));
-    try {
-      await waitFor(
-        () => frame.locator('.hero-title').evaluate((element) => getComputedStyle(element).color),
-        (color) => color === EDITED_COLOR,
-        'same-origin canvas CSS HMR',
-      );
-      equal(
-        'CSS HMR updates without a canvas document reload',
-        await frame.evaluate(() => window.__runtimeSpineLoads),
-        loadsBeforeEdit,
-      );
-      return { page, frame, browser, original };
-    } catch (error) {
-      writeFileSync(sourceFile, original);
-      throw error;
+    sourceEdited = true;
+    await waitFor(
+      () => frame.locator('.hero-title').evaluate((element) => getComputedStyle(element).color),
+      (color) => color === EDITED_COLOR,
+      'same-origin canvas CSS HMR',
+    );
+    equal(
+      'CSS HMR updates without a canvas document reload',
+      await frame.evaluate(() => window.__runtimeSpineLoads),
+      loadsBeforeEdit,
+    );
+    return { page, frame, browser, original };
+  } catch (workError) {
+    const cleanupErrors = [];
+    if (sourceEdited) {
+      await captureCleanup(cleanupErrors, 'failed browser source restoration', async () => {
+        writeFileSync(sourceFile, original);
+      });
     }
-  } catch (error) {
-    await browser.close();
-    throw error;
+    await captureCleanup(cleanupErrors, 'failed browser close', () => browser.close());
+    throwWithCleanup(workError, cleanupErrors, dirname(sourceFile));
   }
 }
 
@@ -424,6 +546,10 @@ function endpointRecords(payload, project) {
 async function readOracle(origin, project) {
   const pageResponse = await fetch(`${origin}/lab/home/?builder=0`);
   if (!pageResponse.ok) throw new Error(`reference page failed: ${pageResponse.status}`);
+  const html = await pageResponse.text();
+  const renderedCss = renderedScopedCss(html);
+  if (renderedCss === undefined)
+    throw new Error('reference page did not contain rendered scoped CSS');
   const records = await waitFor(
     async () => {
       const response = await fetch(`${origin}/__astroix/index`);
@@ -434,7 +560,7 @@ async function readOracle(origin, project) {
       payload.some((record) => record.selector === '.hero-title' && record.effectiveSelector),
     'current integration effective selector endpoint',
   );
-  return { records };
+  return { records, renderedCss };
 }
 
 async function exerciseOracle(parent, sourceImportUrl, expectedBefore, expectedAfter) {
@@ -445,13 +571,19 @@ async function exerciseOracle(parent, sourceImportUrl, expectedBefore, expectedA
     `import baseConfig from './astro.config.mjs';\nimport astroix from ${JSON.stringify(sourceImportUrl)};\nexport default { ...baseConfig, integrations: [...(baseConfig.integrations ?? []), astroix()] };\n`,
   );
   const hookLog = join(parent, 'reference-hooks.jsonl');
-  const server = await startProgrammaticAstro(project, hookLog, 'astro.reference.config.mjs');
-  const browser = await chromium.launch({ headless: true });
-  const page = await browser.newPage();
   const sourceFile = join(project, 'site/pages/home.astro');
-  const original = readFileSync(sourceFile, 'utf8');
+  let server;
+  let browser;
+  let original;
+  let sourceEdited = false;
+  let workError;
   try {
+    server = await startProgrammaticAstro(project, hookLog, 'astro.reference.config.mjs');
+    browser = await chromium.launch({ headless: true });
+    const page = await browser.newPage();
+    original = readFileSync(sourceFile, 'utf8');
     await page.goto(`${server.origin}/lab/home/?builder=0`, { waitUntil: 'commit' });
+    await page.waitForSelector('.hero-title');
     const before = await readOracle(server.origin, project);
     const beforeRecord = targetRecord(before);
     const beforeMatches = await page
@@ -464,10 +596,14 @@ async function exerciseOracle(parent, sourceImportUrl, expectedBefore, expectedA
     const beforeCssom = await cssomRule(page);
 
     writeFileSync(sourceFile, original.replace(ORIGINAL_COLOR, EDITED_COLOR));
-    await waitFor(
-      async () => targetRecord(await readOracle(server.origin, project)).sourceBytes,
-      (bytes) => bytes.includes(EDITED_COLOR),
-      'current integration invalidation after source edit',
+    sourceEdited = true;
+    const after = await waitFor(
+      () => readOracle(server.origin, project),
+      (oracle) => {
+        const hero = oracle.records.find((record) => record.selector === '.hero-title');
+        return hero?.sourceBytes.includes(EDITED_COLOR) && oracle.renderedCss.includes('#28323c');
+      },
+      'current integration source and rendered CSS invalidation',
     );
     const afterCssom = await waitFor(
       async () => {
@@ -478,7 +614,6 @@ async function exerciseOracle(parent, sourceImportUrl, expectedBefore, expectedA
       (css) => css?.includes(EDITED_COLOR),
       'current integration browser CSS invalidation',
     );
-    const after = await readOracle(server.origin, project);
     const afterRecord = targetRecord(after);
     const afterMatches = await page
       .locator(afterRecord.effectiveSelector)
@@ -507,6 +642,16 @@ async function exerciseOracle(parent, sourceImportUrl, expectedBefore, expectedA
       targetRecord(expectedAfter).sourceBytes,
       afterRecord.sourceBytes,
     );
+    equal(
+      'outside and current integration compiled output bytes before edit',
+      expectedBefore.compiledCss,
+      before.renderedCss,
+    );
+    equal(
+      'outside and current integration compiled output bytes after edit',
+      expectedAfter.compiledCss,
+      after.renderedCss,
+    );
     equal('current integration selector matches the expected DOM node before edit', beforeMatches, [
       'H1.hero-title',
     ]);
@@ -521,29 +666,200 @@ async function exerciseOracle(parent, sourceImportUrl, expectedBefore, expectedA
       'current browser emits invalidated scoped CSS bytes after edit',
       afterCssom?.includes(EDITED_COLOR),
     );
-  } finally {
-    writeFileSync(sourceFile, original);
-    await browser.close();
-    await server.devServer.stop();
+  } catch (error) {
+    workError = error;
   }
+  const cleanupErrors = [];
+  if (sourceEdited) {
+    await captureCleanup(cleanupErrors, 'oracle source restoration', async () => {
+      writeFileSync(sourceFile, original);
+    });
+  }
+  if (browser !== undefined)
+    await captureCleanup(cleanupErrors, 'oracle browser close', () => browser.close());
+  if (server !== undefined)
+    await captureCleanup(cleanupErrors, 'oracle Astro server stop', () => server.devServer.stop());
+  throwWithCleanup(workError, cleanupErrors, project);
 }
 
 async function commandOutput(command, args, options = {}) {
-  const child = spawn(command, args, { ...options, stdio: ['ignore', 'pipe', 'pipe'] });
+  const { timeoutMs = COMMAND_TIMEOUT_MS, ...spawnOptions } = options;
+  const child = spawn(command, args, {
+    ...spawnOptions,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
   let stdout = '';
   let stderr = '';
   child.stdout.on('data', (chunk) => (stdout += chunk));
   child.stderr.on('data', (chunk) => (stderr += chunk));
   const exitCode = await new Promise((resolvePromise, reject) => {
-    child.once('error', reject);
-    child.once('exit', resolvePromise);
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill('SIGKILL');
+    }, timeoutMs);
+    child.once('error', (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    child.once('close', (code) => {
+      clearTimeout(timer);
+      if (timedOut) {
+        reject(
+          new Error(
+            `${command} ${args.join(' ')} timed out after ${timeoutMs} ms; stdout=${JSON.stringify(stdout)} stderr=${JSON.stringify(stderr)}`,
+          ),
+        );
+        return;
+      }
+      resolvePromise(code);
+    });
   });
   return { exitCode, stdout, stderr };
 }
 
-async function exerciseManagedCli(parent) {
-  const project = copyProject(parent, 'managed-cli');
-  const hookLog = join(parent, 'managed-cli-hooks.jsonl');
+function median(values) {
+  const sorted = [...values].sort((left, right) => left - right);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0
+    ? Math.round((sorted[middle - 1] + sorted[middle]) / 2)
+    : sorted[middle];
+}
+
+async function sampleSteadyRss(pid) {
+  const intervalMs = 300;
+  const maxSamples = 15;
+  const windowSize = 5;
+  const tolerancePercent = 2;
+  const minimumToleranceKiB = 4096;
+  const samplesKiB = [];
+  for (let index = 0; index < maxSamples; index += 1) {
+    const sample = await commandOutput('ps', ['-o', 'rss=', '-p', String(pid)], {
+      timeoutMs: 2_000,
+    });
+    const rssKiB = Number(sample.stdout.trim());
+    if (sample.exitCode !== 0 || !Number.isFinite(rssKiB) || rssKiB <= 0) {
+      throw new Error(
+        `managed process RSS sample failed at ${index + 1}: ${JSON.stringify(sample)}`,
+      );
+    }
+    samplesKiB.push(rssKiB);
+    if (samplesKiB.length >= windowSize) {
+      const windowKiB = samplesKiB.slice(-windowSize);
+      const windowMedianKiB = median(windowKiB);
+      const toleranceKiB = Math.max(
+        minimumToleranceKiB,
+        Math.ceil(windowMedianKiB * (tolerancePercent / 100)),
+      );
+      if (Math.max(...windowKiB) - Math.min(...windowKiB) <= toleranceKiB) {
+        return {
+          intervalMs,
+          maxSamples,
+          windowSize,
+          tolerancePercent,
+          minimumToleranceKiB,
+          samplesKiB,
+          convergedWindowKiB: windowKiB,
+          toleranceKiB,
+          steadyStateRssKiB: windowMedianKiB,
+        };
+      }
+    }
+    await Bun.sleep(intervalMs);
+  }
+  throw new Error(
+    `managed process RSS did not converge: samplesKiB=${JSON.stringify(samplesKiB)} criterion=last ${windowSize} samples span <= max(${minimumToleranceKiB} KiB, ${tolerancePercent}% of window median)`,
+  );
+}
+
+function spawnManagedForeground(astroBin, spawnOptions) {
+  const child = spawn(process.execPath, [astroBin, 'dev', '--port', '0', '--host', '127.0.0.1'], {
+    ...spawnOptions,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  const resource = {
+    child,
+    stdout: '',
+    stderr: '',
+    spawnError: undefined,
+    closeResult: undefined,
+    closePromise: undefined,
+  };
+  child.stdout.on('data', (chunk) => (resource.stdout += chunk));
+  child.stderr.on('data', (chunk) => (resource.stderr += chunk));
+  child.on('error', (error) => (resource.spawnError = error));
+  resource.closePromise = new Promise((resolvePromise) => {
+    child.once('close', (code, signal) => {
+      resource.closeResult = { code, signal };
+      resolvePromise(resource.closeResult);
+    });
+  });
+  return resource;
+}
+
+function managedOutput(resource) {
+  return `${resource.stdout}\n${resource.stderr}`;
+}
+
+async function waitForManagedUrl(resource, timeoutMs = 20_000) {
+  const deadline = performance.now() + timeoutMs;
+  while (performance.now() < deadline) {
+    if (resource.spawnError !== undefined) throw resource.spawnError;
+    const output = managedOutput(resource);
+    const url = output.match(/http:\/\/(?:127\.0\.0\.1|localhost):(\d+)(?:\/[^\s]*)?/)?.[0];
+    if (url !== undefined) return new URL(url);
+    if (resource.closeResult !== undefined) {
+      throw new Error(
+        `managed foreground child exited before reporting its URL: ${JSON.stringify({ ...resource.closeResult, output })}`,
+      );
+    }
+    await Bun.sleep(100);
+  }
+  throw new Error(
+    `timed out waiting for managed foreground child URL; output=${JSON.stringify(managedOutput(resource))}`,
+  );
+}
+
+async function pidIsAlive(pid) {
+  return (await commandOutput('ps', ['-p', String(pid)], { timeoutMs: 2_000 })).exitCode === 0;
+}
+
+async function waitForPidExit(pid, label, timeoutMs) {
+  await waitFor(
+    () => pidIsAlive(pid),
+    (alive) => !alive,
+    label,
+    timeoutMs,
+  );
+}
+
+async function stopManagedForeground(resource) {
+  const pid = resource.child.pid;
+  let escalated = false;
+  if (pid !== undefined && (await pidIsAlive(pid))) {
+    if (!resource.child.kill('SIGTERM')) {
+      throw new Error(`failed to send SIGTERM to managed foreground child ${pid}`);
+    }
+    try {
+      await waitForPidExit(pid, 'managed foreground child graceful exit', 5_000);
+    } catch (gracefulError) {
+      escalated = true;
+      if ((await pidIsAlive(pid)) && !resource.child.kill('SIGKILL')) {
+        throw new AggregateError(
+          [gracefulError],
+          `failed to send SIGKILL to managed foreground child ${pid}`,
+        );
+      }
+      await waitForPidExit(pid, 'managed foreground child forced exit', 3_000);
+    }
+  }
+  await bounded(resource.closePromise, 'managed foreground child close event', 2_000);
+  return { escalated };
+}
+
+async function exerciseManagedForeground(parent) {
+  const project = copyProject(parent, 'managed-foreground');
+  const hookLog = join(parent, 'managed-foreground-hooks.jsonl');
   const astroBin = join(astroPackageDir, 'bin/astro.mjs');
   const startedAt = performance.now();
   const spawnOptions = {
@@ -551,30 +867,64 @@ async function exerciseManagedCli(parent) {
     env: {
       ...process.env,
       ASTROIX_RUNTIME_SPINE_HOOK_LOG: hookLog,
+      ASTRO_DEV_BACKGROUND: '1',
       ASTRO_TELEMETRY_DISABLED: '1',
       NO_COLOR: '1',
     },
   };
-  let daemonPid = null;
+  let managedChild;
+  let workError;
   try {
-    const start = await commandOutput(
-      process.execPath,
-      [astroBin, 'dev', '--background', '--port', '0', '--host', '127.0.0.1'],
-      spawnOptions,
+    managedChild = spawnManagedForeground(astroBin, spawnOptions);
+    const childPid = managedChild.child.pid;
+    check(
+      'managed foreground astro dev child has a process id',
+      childPid !== undefined && childPid > 0,
+      String(childPid),
     );
-    check('managed astro dev --port 0 command exited cleanly', start.exitCode === 0, start.stderr);
-    const output = `${start.stdout}\n${start.stderr}`;
-    const port = Number(output.match(/http:\/\/(?:127\.0\.0\.1|localhost):(\d+)/)?.[1] ?? 0);
-    daemonPid = Number(output.match(/pid (\d+)/)?.[1] ?? 0);
-    check('managed astro dev --port 0 reported an ephemeral port', port > 0, output);
-    check('managed astro dev reported its daemon pid', daemonPid > 0, output);
-    metrics.managedCliBootMs = Math.round(performance.now() - startedAt);
-    const response = await fetch(`http://127.0.0.1:${port}/lab/home/`);
-    check('managed astro dev --port 0 served the plain project', response.ok);
-    await Bun.sleep(500);
-    const rss = await commandOutput('ps', ['-o', 'rss=', '-p', String(daemonPid)]);
-    check('managed process RSS was readable', rss.exitCode === 0 && Number(rss.stdout.trim()) > 0);
-    metrics.managedCliSteadyRssKiB = Number(rss.stdout.trim());
+    const listeningUrl = await waitForManagedUrl(managedChild);
+    const boundPort = Number(listeningUrl.port);
+    check(
+      'managed foreground astro dev reported an actual bound port',
+      boundPort > 0,
+      String(boundPort),
+    );
+    const configured = await waitFor(
+      () => readJsonLines(hookLog).findLast((entry) => entry.hook === 'astro:config:setup'),
+      Boolean,
+      'managed foreground configured server port observation',
+    );
+    equal(
+      'managed foreground astro dev preserved configured server port 0',
+      configured.serverPort,
+      0,
+    );
+    const listening = await waitFor(
+      () =>
+        readJsonLines(hookLog).findLast((entry) => entry.hook === 'runtime-spine:server-listening'),
+      Boolean,
+      'managed foreground actual bound port observation',
+    );
+    equal(
+      'managed foreground observer actual port matches the CLI URL',
+      listening.actualPort,
+      boundPort,
+    );
+    metrics.managedConfiguredPort = configured.serverPort;
+    metrics.managedBoundPort = boundPort;
+    if (process.env.ASTROIX_RUNTIME_SPINE_FORCE_FAILURE === 'managed-start') {
+      throw new Error('forced failure after managed foreground child start');
+    }
+    metrics.managedForegroundBootMs = Math.round(performance.now() - startedAt);
+    const response = await fetch(`${listeningUrl.origin}/lab/home/`);
+    check('managed foreground astro dev served the plain project', response.ok);
+    const rss = await bounded(sampleSteadyRss(childPid), 'managed process RSS convergence', 15_000);
+    metrics.managedForegroundSteadyRssKiB = rss.steadyStateRssKiB;
+    metrics.managedForegroundRssSampling = rss;
+    check(
+      'managed process RSS reached the bounded steady-state criterion',
+      rss.convergedWindowKiB.length === rss.windowSize,
+    );
     const watcher = await waitFor(
       () =>
         readJsonLines(hookLog).findLast((entry) => entry.hook === 'runtime-spine:watcher-snapshot'),
@@ -584,17 +934,30 @@ async function exerciseManagedCli(parent) {
     metrics.watchedDirectories = watcher.watchedDirectories;
     metrics.watchedEntries = watcher.watchedEntries;
     metrics.watcherListeners = watcher.watcherListeners;
-    const shutdownAt = performance.now();
-    const stop = await commandOutput(process.execPath, [astroBin, 'dev', 'stop'], spawnOptions);
-    metrics.managedCliShutdownMs = Math.round(performance.now() - shutdownAt);
-    check('managed astro dev process shut down through the CLI', stop.exitCode === 0, stop.stderr);
-    daemonPid = null;
-  } finally {
-    if (daemonPid)
-      await commandOutput(process.execPath, [astroBin, 'dev', 'stop'], spawnOptions).catch(
-        () => {},
-      );
+  } catch (error) {
+    workError = error;
   }
+  const cleanupErrors = [];
+  if (managedChild !== undefined) {
+    const shutdownAt = performance.now();
+    try {
+      const shutdown = await stopManagedForeground(managedChild);
+      metrics.managedForegroundShutdownMs = Math.round(performance.now() - shutdownAt);
+      metrics.managedForegroundShutdownEscalated = shutdown.escalated;
+      check('managed foreground astro dev child shut down', true);
+      managedChild = undefined;
+    } catch (error) {
+      cleanupErrors.push(
+        new Error(
+          `managed foreground child teardown failed: ${error instanceof Error ? error.message : String(error)}`,
+          {
+            cause: error,
+          },
+        ),
+      );
+    }
+  }
+  throwWithCleanup(workError, cleanupErrors, project);
 }
 
 async function main() {
@@ -607,6 +970,7 @@ async function main() {
   let programmatic;
   let proxy;
   let browserExercise;
+  let workError;
   try {
     console.log('RUN outside-config');
     const config = await loadConfigOutside(plain, outsideHookLog);
@@ -635,6 +999,9 @@ async function main() {
     programmatic = await startProgrammaticAstro(plain, programmaticHookLog);
     metrics.programmaticBootMs = Math.round(programmatic.bootMs);
     proxy = await startProxy(Number(new URL(programmatic.origin).port));
+    if (process.env.ASTROIX_RUNTIME_SPINE_FORCE_FAILURE === 'plain-start') {
+      throw new Error('forced failure after plain server and proxy start');
+    }
     console.log('RUN rendered-css-primer');
     await fetch(`${programmatic.origin}/lab/home/`);
     console.log('RUN outside-payload-before');
@@ -687,11 +1054,11 @@ async function main() {
       (color) => color === ORIGINAL_COLOR,
       'source restoration through HMR',
     );
-    await browserExercise.browser.close();
+    await bounded(browserExercise.browser.close(), 'plain browser close');
     browserExercise = null;
-    await closeHttpServer(proxy.server, proxy.upgradedSockets);
+    await bounded(closeHttpServer(proxy.server, proxy.upgradedSockets), 'plain proxy close');
     proxy = null;
-    await programmatic.devServer.stop();
+    await bounded(programmatic.devServer.stop(), 'plain Astro server stop');
     programmatic = null;
 
     console.log('RUN current-integration-oracle');
@@ -701,8 +1068,8 @@ async function main() {
       beforeOutside,
       afterOutside,
     );
-    console.log('RUN managed-cli-metrics');
-    await exerciseManagedCli(temp);
+    console.log('RUN managed-foreground-metrics');
+    await exerciseManagedForeground(temp);
 
     const astroVersion = JSON.parse(
       readFileSync(join(astroPackageDir, 'package.json'), 'utf8'),
@@ -712,21 +1079,40 @@ async function main() {
     metrics.viteVersion = viteVersion;
     equal('exact Astro version', astroVersion, '7.2.7');
     equal('exact Vite version', viteVersion, '8.2.2');
-
-    console.log('PASS runtime-spine proof');
-    for (const assertion of assertions) console.log(`PASS ${assertion.name}`);
-    console.log(`METRICS ${JSON.stringify(metrics)}`);
-  } finally {
-    if (browserExercise) {
-      writeFileSync(join(plain, 'site/pages/home.astro'), browserExercise.original);
-      await browserExercise.browser.close().catch(() => {});
-    }
-    if (proxy) await closeHttpServer(proxy.server, proxy.upgradedSockets).catch(() => {});
-    if (programmatic) await programmatic.devServer.stop().catch(() => {});
-    delete process.env.ASTROIX_RUNTIME_SPINE_HOOK_LOG;
-    if (temp.startsWith(`${canonicalTmp}${sep}astroix-runtime-spine-`))
-      rmSync(temp, { recursive: true, force: true });
+  } catch (error) {
+    workError = error;
   }
+  const cleanupErrors = [];
+  if (browserExercise != null) {
+    await captureCleanup(cleanupErrors, 'main source restoration', async () => {
+      writeFileSync(join(plain, 'site/pages/home.astro'), browserExercise.original);
+    });
+    await captureCleanup(cleanupErrors, 'main browser close', () =>
+      browserExercise.browser.close(),
+    );
+  }
+  if (proxy != null)
+    await captureCleanup(cleanupErrors, 'main proxy close', () =>
+      closeHttpServer(proxy.server, proxy.upgradedSockets),
+    );
+  if (programmatic != null)
+    await captureCleanup(cleanupErrors, 'main Astro server stop', () =>
+      programmatic.devServer.stop(),
+    );
+  delete process.env.ASTROIX_RUNTIME_SPINE_HOOK_LOG;
+  if (cleanupErrors.length === 0 && !(workError instanceof ProofTeardownError)) {
+    await captureCleanup(cleanupErrors, 'temporary project quiescence', () =>
+      waitForTemporaryProjectQuiescence(temp),
+    );
+  }
+  if (cleanupErrors.length > 0) throwWithCleanup(workError, cleanupErrors, temp);
+  if (workError instanceof ProofTeardownError) throw workError;
+  if (temp.startsWith(`${canonicalTmp}${sep}astroix-runtime-spine-`))
+    rmSync(temp, { recursive: true, force: true });
+  if (workError !== undefined) throw workError;
+  console.log('PASS runtime-spine proof');
+  for (const assertion of assertions) console.log(`PASS ${assertion.name}`);
+  console.log(`METRICS ${JSON.stringify(metrics)}`);
 }
 
 main().catch((error) => {
@@ -735,6 +1121,6 @@ main().catch((error) => {
     console.error(
       `${assertion.pass ? 'PASS' : 'FAIL'} ${assertion.name}${assertion.detail ? ` | ${assertion.detail}` : ''}`,
     );
-  console.error(error instanceof Error ? error.stack : error);
+  reportFailure(error);
   process.exitCode = 1;
 });

@@ -32,6 +32,7 @@ function proofObserver() {
           command,
           base: config.base,
           srcDir: fileURLToPath(config.srcDir),
+          serverPort: config.server.port,
         });
         updateConfig({
           vite: {
@@ -41,6 +42,12 @@ function proofObserver() {
                 configureServer(server) {
                   globalThis[SERVER_SYMBOL] = server;
                   server.httpServer?.once('listening', () => {
+                    const address = server.httpServer?.address();
+                    appendObservation({
+                      hook: 'runtime-spine:server-listening',
+                      actualPort:
+                        typeof address === 'object' && address !== null ? address.port : null,
+                    });
                     setTimeout(() => {
                       appendObservation({
                         hook: 'runtime-spine:watcher-snapshot',
