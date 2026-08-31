@@ -6,7 +6,7 @@ The ubiquitous language of this project. Use these terms (and these exact spelli
 | --- | --- |
 | **Astroix** | The product and the application: a standalone app that manages local Astro projects — supervisor + registry + builder UI (content and CSS verticals) over a per-project-vhost canvas. |
 | **supervisor** | The app's Node process: serves the fixed-port origin the UI lives on, composes each registered project's dev pipeline, spawns and supervises its managed dev server, owns the registry and the UI-state push channel. |
-| **registry** | The persisted list of registered projects (data + storage), owned by the supervisor — user-global JSON under `~/.astroix/`, never inside a managed project. |
+| **registry** | The persisted list of registered projects (data + storage), owned by the supervisor — user-global JSON under `~/.astroix/`, never inside a project's repo. |
 | **registered project** | One registry entry: path (the identity anchor) + mutable display name defaulting to the directory name. |
 | **managed dev server** | The `astro dev` process the supervisor spawns and supervises for a project. |
 | **per-project vhost** | The `<project>.localhost` host on the supervisor's fixed port, reverse-proxied to that project's managed dev server — the canvas origin. |
