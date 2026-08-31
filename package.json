@@ -1,6 +1,6 @@
 {
   "name": "@wojciechpiskorz/astroix",
-  "version": "0.0.27",
+  "version": "0.0.28",
   "description": "Dev-only Astro 7 integration — a visual builder for Content Collections content and repo-mapped CSS",
   "type": "module",
   "license": "MIT",
