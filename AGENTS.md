@@ -47,13 +47,13 @@ Package manager is **npm** — decided 2026-08-31 on research #190, ratified #18
 - React 19 + React Compiler: no manual memoization. TanStack (Form/Query) where applicable; zustand for client-only UI state.
 - Plain async/TS. No Effect — decision recorded in `docs/stack.md`.
 
-## Chrome architecture (ADR-0002 — living checklist)
+## App UI architecture (ADR-0002 — living checklist)
 
 Rationale and trade-offs live in `docs/adr/0002-chrome-module-architecture.md`; this checklist is what every PR is held to, maintained as the layout evolves.
 
 - Imports flow strictly downward: app shell (`app.tsx`, `sidebar.tsx`, `chrome.tsx`, `entry.tsx` + bootstrap helpers like `react-guard.ts`, `styles.ts`) → `features/<vertical>/` → shared modules (`canvas/`, `editor/`) → `components/ui/` → `lib/`; `src/core` is importable from anywhere, and the app store (`src/client/store.ts`) serves every layer except `components/ui/` and `lib/`. No sideways (feature ↔ feature, shared ↔ shared), no upward, no cycles.
 - Vertical UI lands in its feature folder — components + its zustand store + its `api.ts`; a feature never imports another feature.
-- Server/watcher-derived data goes through TanStack Query, colocated in the owning module's `api.ts` (feature or shared — `editor/` owns its own file hooks), query keys `['astroix', <resource>, …]`; chrome-only UI state goes zustand (per-feature store; cross-vertical state like `selection` lives in the small app store at `src/client/store.ts`, importable from anywhere like `src/core`).
+- Server/watcher-derived data goes through TanStack Query, colocated in the owning module's `api.ts` (feature or shared — `editor/` owns its own file hooks), query keys `['astroix', <resource>, …]`; app-only UI state goes zustand (per-feature store; cross-vertical state like `selection` lives in the small app store at `src/client/store.ts`, importable from anywhere like `src/core`).
 - `components/ui/` is shadcn-generated and domain-deaf — extend by regeneration, never by hand-editing toward domain needs.
 - Code with one consumer stays in the feature that needs it; a shared module beyond ui/lib is born only when 2+ verticals need it (a prospective need counts only if the owner rules it does), and stays as small as its job — first fire: `editor/write-status-badge.tsx` (WriteStatusBadge + WriteStatus) at the auto-write second consumer (#74, PR #107); the write loops stay feature-local. `lib/` stays helpers-only.
 - One exported component per file, lowercase-dash name matching the component (`rule-list.tsx` ← `RuleList`); extract on multi-use, ~300 lines, or two distinct concerns in one file — the line count is a signal, not a gate. One exported component per file applies to domain components; a cohesive primitive/widget set may live in one file named after the set (`*-widgets.tsx`, e.g. `value-widgets.tsx`, `field-widgets.tsx`) — the set name, not the count, is the unit.
@@ -71,7 +71,7 @@ Static and deterministic, upstream of the advisory AI review (wayfinder #55). En
 
 - **Metric honesty**: full CRAP (CC² × (1−cov)³ + CC) only in `src/core`, where per-function unit coverage is real; `src/node` + `src/client` are a CC-only watchlist.
 - **Stops**: preflight is a full-src ratchet — CRAP ≥ 30 (src/core) / CC ≥ 15 (src/node + src/client) evaluated over all of src/ against the baseline on every run, so coverage regressions from test-weakening PRs fail too (#62); the pre-commit hook warns at CC ≥ 10 on staged functions and never blocks. The generated `src/client/components/ui/` tier is watch-only: rows visible, never gated.
-- **Baseline ratchet** (`crap-baseline.json`): calibrated once 2026-08-28; entries only tighten or drop — after refactoring a pinned function, `bun run crap --update-baseline`. New violations fail preflight: refactor them, the baseline never absorbs them.
+- **Baseline ratchet** (`crap-baseline.json`): calibrated once 2026-08-28; entries only tighten or drop — after refactoring a pinned function, `npm run crap --update-baseline`. New violations fail preflight: refactor them, the baseline never absorbs them.
 - **CI** recomputes the table from scratch (`bun run crap:ci` in `ai-review.yml`) and feeds it to the advisory reviewer prompt; local runs are advisory.
 
 ## PR & release
@@ -79,7 +79,7 @@ Static and deterministic, upstream of the advisory AI review (wayfinder #55). En
 - Every PR touching code needs a changeset (patch by default). *(Retires in restructure lane #192 — pre-alpha distribution went git-based with no npm publish, so the publish layer and the changeset PR rule go together; #188 distribution-ruling amendment. Existing changesets, including this transition's, stay valid.)*
 - Conventional-commit titles (`feat:`, `fix:`, `docs:`, `chore:`).
 - Keep PRs surgical: every changed line should trace to the task.
-- Run `bun run preflight` before `gh pr create` — the CRAP gate is a full-src baseline ratchet.
+- Run `npm run preflight` before `gh pr create` — the CRAP gate is a full-src baseline ratchet.
 - Release-loop ops for agent sessions (approve ritual, merge conventions, brownout ladder, publish verification) live in `docs/agents/release-loop.md`.
 
 ## Parallel sessions & worktrees
@@ -105,8 +105,8 @@ Ask first:
 Never:
 
 - Support Astro < 7, Vite < 8, or zod 3. Out of scope by spec; close such issues as wontfix with a pointer to `docs/spec.md`.
-- Break the dev-only guarantee: astroix must not exist in production builds.
-- Invest in mobile or narrow-viewport chrome affordances — the chrome is desktop-only per `docs/adr/0003-chrome-viewport-scope-desktop-only.md`; revisiting that is an owner ruling, not a PR decision.
+- Write to a registered project's repo beyond the content/CSS files the user explicitly edits, or add an astroix dependency (any astro.config / package.json change) to a registered project — the two hard invariants of the pivot (#183, ADR-0004).
+- Invest in mobile or narrow-viewport app affordances — the app is desktop-only per `docs/adr/0003-chrome-viewport-scope-desktop-only.md`; revisiting that is an owner ruling, not a PR decision.
 - Force-push (`main` is protected).
 - Weaken, skip, or regenerate tests to make a failing suite pass.
 

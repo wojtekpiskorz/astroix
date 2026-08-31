@@ -11,7 +11,7 @@ Pochodzenie: grilling stackowy 2026-08-26; decyzja 1 (toolchain) przepisana na p
 | PM / runner | **npm** (decyzja #190, ratyfikowana #187; mechanika migracji = lane czarterowy #188) |
 | Runtime / CI | **Node 24 LTS**, `engines: >=22.12` |
 | Język / format pakietu | **TypeScript strict, ESM-only**, `moduleResolution: bundler` |
-| Kształt repo | **jeden pakiet** (`astroix`), czysty podział wewn.: core / node / client |
+| Kształt repo | **npm workspaces** (przez pivot, #188): prywatny root + `packages/app` + `packages/core`; `src/node` (integracja) usuwa lane czarterowy |
 | Host compat | **`astro ^7` · `vite ^8` · zod 4 only** — nowe projekty, nie legacy |
 | UI chrome | **React 19 + React Compiler 1.0**, `createRoot(shadowRoot)` |
 | Styling | **Tailwind 4 + shadcn/ui na primitives Base UI**, motywy shadcn |
