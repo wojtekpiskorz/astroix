@@ -32,6 +32,7 @@ const ORIGINAL_COLOR = 'rgb(10, 20, 30)';
 const EDITED_COLOR = 'rgb(40, 50, 60)';
 const COMMAND_TIMEOUT_MS = 20_000;
 const TEARDOWN_TIMEOUT_MS = 10_000;
+const PARENT_NODE_EXECUTABLE = process.execPath;
 const assertions = [];
 const metrics = {};
 const require = createRequire(import.meta.url);
@@ -61,6 +62,10 @@ function equal(name, actual, expected) {
   );
 }
 
+function delay(milliseconds) {
+  return new Promise((resolvePromise) => setTimeout(resolvePromise, milliseconds));
+}
+
 async function waitFor(read, accept, label, timeoutMs = 20_000) {
   const deadline = performance.now() + timeoutMs;
   let last;
@@ -71,7 +76,7 @@ async function waitFor(read, accept, label, timeoutMs = 20_000) {
     } catch (error) {
       last = error instanceof Error ? error.message : String(error);
     }
-    await Bun.sleep(100);
+    await delay(100);
   }
   throw new Error(`timed out waiting for ${label}; last=${JSON.stringify(last)}`);
 }
@@ -774,11 +779,15 @@ function median(values) {
 
 async function sampleSteadyRss(pid) {
   const intervalMs = 300;
-  const maxSamples = 15;
+  const minimumSamples = 21;
+  const minimumObservationMs = 6_000;
+  const maxSamples = 40;
   const windowSize = 5;
   const tolerancePercent = 2;
   const minimumToleranceKiB = 4096;
   const samplesKiB = [];
+  const sampleElapsedMs = [];
+  const startedAt = performance.now();
   for (let index = 0; index < maxSamples; index += 1) {
     const sample = await commandOutput('ps', ['-o', 'rss=', '-p', String(pid)], {
       timeoutMs: 2_000,
@@ -790,7 +799,13 @@ async function sampleSteadyRss(pid) {
       );
     }
     samplesKiB.push(rssKiB);
-    if (samplesKiB.length >= windowSize) {
+    const elapsedMs = Math.round(performance.now() - startedAt);
+    sampleElapsedMs.push(elapsedMs);
+    if (
+      samplesKiB.length >= minimumSamples &&
+      elapsedMs >= minimumObservationMs &&
+      samplesKiB.length >= windowSize
+    ) {
       const windowKiB = samplesKiB.slice(-windowSize);
       const windowMedianKiB = median(windowKiB);
       const toleranceKiB = Math.max(
@@ -800,29 +815,38 @@ async function sampleSteadyRss(pid) {
       if (Math.max(...windowKiB) - Math.min(...windowKiB) <= toleranceKiB) {
         return {
           intervalMs,
+          minimumSamples,
+          minimumObservationMs,
           maxSamples,
           windowSize,
           tolerancePercent,
           minimumToleranceKiB,
           samplesKiB,
+          sampleElapsedMs,
+          acceptedAtSample: samplesKiB.length,
+          acceptedElapsedMs: elapsedMs,
           convergedWindowKiB: windowKiB,
           toleranceKiB,
           steadyStateRssKiB: windowMedianKiB,
         };
       }
     }
-    await Bun.sleep(intervalMs);
+    await delay(intervalMs);
   }
   throw new Error(
-    `managed process RSS did not converge: samplesKiB=${JSON.stringify(samplesKiB)} criterion=last ${windowSize} samples span <= max(${minimumToleranceKiB} KiB, ${tolerancePercent}% of window median)`,
+    `managed process RSS did not converge: samplesKiB=${JSON.stringify(samplesKiB)} sampleElapsedMs=${JSON.stringify(sampleElapsedMs)} criterion=after at least ${minimumSamples} samples and ${minimumObservationMs} ms, last ${windowSize} samples span <= max(${minimumToleranceKiB} KiB, ${tolerancePercent}% of window median), at most ${maxSamples} samples`,
   );
 }
 
 function spawnManagedForeground(astroBin, spawnOptions) {
-  const child = spawn(process.execPath, [astroBin, 'dev', '--port', '0', '--host', '127.0.0.1'], {
-    ...spawnOptions,
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
+  const child = spawn(
+    PARENT_NODE_EXECUTABLE,
+    [astroBin, 'dev', '--port', '0', '--host', '127.0.0.1'],
+    {
+      ...spawnOptions,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    },
+  );
   const resource = {
     child,
     stdout: '',
@@ -859,7 +883,7 @@ async function waitForManagedUrl(resource, timeoutMs = 20_000) {
         `managed foreground child exited before reporting its URL: ${JSON.stringify({ ...resource.closeResult, output })}`,
       );
     }
-    await Bun.sleep(100);
+    await delay(100);
   }
   throw new Error(
     `timed out waiting for managed foreground child URL; output=${JSON.stringify(managedOutput(resource))}`,
@@ -946,6 +970,12 @@ async function exerciseManagedForeground(parent) {
       childPid !== undefined && childPid > 0,
       String(childPid),
     );
+    equal(
+      'managed foreground astro dev child uses the exact parent Node executable',
+      managedChild.child.spawnfile,
+      PARENT_NODE_EXECUTABLE,
+    );
+    metrics.managedChildNodeExecutable = managedChild.child.spawnfile;
     const listeningUrl = await waitForManagedUrl(managedChild);
     const boundPort = Number(listeningUrl.port);
     check(
@@ -982,7 +1012,7 @@ async function exerciseManagedForeground(parent) {
     metrics.managedForegroundBootMs = Math.round(performance.now() - startedAt);
     const response = await fetch(`${listeningUrl.origin}/lab/home/`);
     check('managed foreground astro dev served the plain project', response.ok);
-    const rss = await bounded(sampleSteadyRss(childPid), 'managed process RSS convergence', 15_000);
+    const rss = await bounded(sampleSteadyRss(childPid), 'managed process RSS convergence', 25_000);
     metrics.managedForegroundSteadyRssKiB = rss.steadyStateRssKiB;
     metrics.managedForegroundRssSampling = rss;
     check(
@@ -1025,6 +1055,24 @@ async function exerciseManagedForeground(parent) {
 }
 
 async function main() {
+  equal('proof parent runtime release is Node', process.release.name, 'node');
+  check(
+    'proof parent runtime is not Bun',
+    process.versions.bun === undefined,
+    `process.versions.bun=${String(process.versions.bun)}`,
+  );
+  check(
+    'proof parent Node version is observable',
+    typeof process.versions.node === 'string' && process.versions.node.length > 0,
+    String(process.versions.node),
+  );
+  check(
+    'proof parent Node executable is observable',
+    existsSync(PARENT_NODE_EXECUTABLE),
+    PARENT_NODE_EXECUTABLE,
+  );
+  metrics.parentNodeVersion = process.versions.node;
+  metrics.parentNodeExecutable = PARENT_NODE_EXECUTABLE;
   check('plain-project fixture exists', existsSync(join(FIXTURE, 'astro.config.mjs')));
   const canonicalTmp = realpathSync(tmpdir());
   const temp = mkdtempSync(join(canonicalTmp, 'astroix-runtime-spine-'));
