@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Astroix is a dev-only Astro 7 integration — a visual builder with a chrome over a same-origin iframe canvas for editing Content Collections content and repo-mapped CSS. **Scaffold stage:** toolchain, CI and the e2e fixture are in place; `docs/` remains the source of truth for behavior.
+Astroix is a standalone application that manages local Astro 7 projects — a Node supervisor with a project registry, a builder UI (Content + CSS verticals), and a per-project-vhost canvas — bound by two hard invariants: **zero repo writes to managed projects** (only the content/CSS files the user explicitly edits) and **no astroix dependency ever enters a managed project** (spec v2, ADR-0004; pivot ratified 2026-08-31, map #179 / #187). The former dev-only integration is deprecated on npm (#185); its source (`src/node`) is removed by the execution charter. **Pivot-ratification stage:** the docs set is rewritten for the app; layout, toolchain mechanics and CI are finalized by the execution charter (#188) — `docs/` remains the source of truth for behavior.
 
 ## Read the docs first
 
@@ -12,20 +12,22 @@ When your work touches an architectural decision, these files win over your prio
 
 ## Commands
 
-- `bun install` — install dependencies (also in `e2e/fixture/`, which is its own package).
-- `bun run check` — Biome lint + format check; `bun run check:write` autofixes.
-- `bun run typecheck` — `tsc --noEmit`.
-- `bun run test` — unit tests (vitest + happy-dom); `bun run test:watch` for watch mode.
-- `bun run test:e2e` — Playwright e2e; boots the fixture dev server on `http://localhost:4314` (npm-pack lane on :4313; source-mode lane on :4311; the owner's manual smoke owns :4312 — lanes never share servers). Parallel local lanes override the trio via `ASTROIX_E2E_PORT` / `ASTROIX_E2E_PACK_PORT` / `ASTROIX_E2E_SRC_PORT` (#120); 4314/4313/4311 stay canonical for CI.
-- `bun run crap` — crap4ts risk report: CC per function, CRAP + Uncle-Bob bands where coverage is real (src/core); `--calibrate` (one-time, already done) / `--update-baseline` manage the ratchet baseline.
-- `bun run preflight` — full-src CRAP ratchet (every run evaluates all of src/ against the baseline; owner ruling, issue #62); the agent runs it before `gh pr create`.
-- `bun run hooks` — once per clone: wires `git config core.hooksPath scripts/hooks` (pre-commit: biome blocks on staged lint/format errors; the typecheck blocks when the staged set touches `.ts`/`.tsx`; the crap4ts CC scan warns). Not a postinstall on purpose — this package is published and must not touch consumers' git config.
-- `bun run check:publint` — publint over the published manifest (needs `bun run build`; CI gates it after the artifact check).
-- `bun run build` — tsup (node side) + vite build (the prebuilt chrome bundle `dist/chrome.js`) — chrome delivery is hybrid per `docs/adr/0001` (source-served in our dev checkout, prebuilt for consumers).
+- `npm install` — install dependencies (also in `e2e/fixture/`, which is its own package).
+- `npm run check` — Biome lint + format check; `npm run check:write` autofixes.
+- `npm run typecheck` — `tsc --noEmit`.
+- `npm run test` — unit tests (vitest + happy-dom); `npm run test:watch` for watch mode.
+- `npm run test:e2e` — Playwright e2e; boots the fixture dev server on `http://localhost:4314` (npm-pack lane on :4313; source-mode lane on :4311; the owner's manual smoke owns :4312 — lanes never share servers). Parallel local lanes override the trio via `ASTROIX_E2E_PORT` / `ASTROIX_E2E_PACK_PORT` / `ASTROIX_E2E_SRC_PORT` (#120); 4314/4313/4311 stay canonical for CI. The fate of these integration-era lanes is settled by the charter (#188).
+- `npm run crap` — crap4ts risk report: CC per function, CRAP + Uncle-Bob bands where coverage is real (src/core); `--calibrate` (one-time, already done) / `--update-baseline` manage the ratchet baseline.
+- `npm run preflight` — full-src CRAP ratchet (every run evaluates all of src/ against the baseline; owner ruling, issue #62); the agent runs it before `gh pr create`.
+- `npm run hooks` — once per clone: wires `git config core.hooksPath scripts/hooks` (pre-commit: biome blocks on staged lint/format errors; the typecheck blocks when the staged set touches `.ts`/`.tsx`; the crap4ts CC scan warns). Not a postinstall on purpose — this package is published and must not touch consumers' git config.
+- `npm run check:publint` — publint over the published manifest (needs `npm run build`; CI gates it after the artifact check).
+- `npm run build` — tsup (node side) + vite build (the prebuilt chrome bundle `dist/chrome.js`) — the legacy integration build; its hybrid delivery rationale is retired by the pivot (ADR-0004).
 
-Package manager is **bun**. Run bun; never npm/pnpm/yarn.
+Package manager is **npm** — decided 2026-08-31 on research #190, ratified #187; run npm, never bun/pnpm/yarn. The **mechanical migration is a charter lane (#188), not yet landed**: until it does, a few scripts still invoke bun internally where they do today (`crap`/`preflight` shell out to `bun`, `ci:publish` uses `bun run`/`bunx`) — that is the recorded transition state, not a re-opening of the decision; the migration checklist lives in `docs/stack.md` decision 1.
 
 ## Repo layout
+
+> **Deferred to the charter (#188):** this Repo-layout paragraph still describes the pre-pivot repository (the deprecated integration package, its ADR-0001 hybrid chrome delivery, `src/node`) and is deliberately left as-is until the pivot execution charter (#188) rewrites it for the app monorepo. Pointers inside it to the deleted ADR-0001 are historical.
 
 - `src/core/` — pure modules (indexer, matcher, splice-writer); no IO, unit-tested over fixtures
 - `src/node/` — the integration: Vite plugin, middleware, watcher, REST endpoints (built by tsup → `dist/`)
@@ -74,7 +76,7 @@ Static and deterministic, upstream of the advisory AI review (wayfinder #55). En
 
 ## PR & release
 
-- Every PR touching code needs a changeset (patch by default).
+- Every PR touching code needs a changeset (patch by default). *(Retires in restructure lane #192 — pre-alpha distribution went git-based with no npm publish, so the publish layer and the changeset PR rule go together; #188 distribution-ruling amendment. Existing changesets, including this transition's, stay valid.)*
 - Conventional-commit titles (`feat:`, `fix:`, `docs:`, `chore:`).
 - Keep PRs surgical: every changed line should trace to the task.
 - Run `bun run preflight` before `gh pr create` — the CRAP gate is a full-src baseline ratchet.
