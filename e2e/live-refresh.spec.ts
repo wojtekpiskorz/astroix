@@ -24,6 +24,12 @@ test.describe.configure({ mode: 'serial' });
 // precedent)
 test.slow();
 
+// Houses the chrome-boot gate inside entry-pane's openEntry above slow()'s
+// 90 s ceiling — the source lane boots the chrome from sources, the heavier
+// cold transform (#150), so the gate's 105 s envelope must stay reachable
+// with its named-error guarantee (#158 / #129).
+test.setTimeout(150_000);
+
 const FIXTURE = join('e2e', 'src-fixture');
 const POST = join(FIXTURE, 'src', 'content', 'blog', '2024', 'post.md');
 const HOME_CSS = join(FIXTURE, 'src', 'pages', 'home.css');

@@ -24,6 +24,15 @@ test.describe.configure({ mode: 'serial' });
 // every test waits out the host's content sync at least once — genuinely slow
 test.slow();
 
+// Houses the chrome-boot gate inside entry-pane's openEntry, which runs
+// before every test's interactions: its cold-boot envelope (105 s) exceeds
+// slow()'s 90 s, and an unhoused stall would die as a generic test timeout —
+// the exact error shape the gate exists to replace (#158 / #129). Only the
+// run's first test can meet the cold transform (the server is warm for the
+// rest), but the housing follows the gate, not the theory of which test
+// needs it.
+test.setTimeout(150_000);
+
 const POST = join('e2e', 'fixture', 'src', 'content', 'blog', '2024', 'post.md');
 const SHOWCASE = join('e2e', 'fixture', 'src', 'content', 'gallery', 'showcase.md');
 const SCRATCH = join('e2e', 'fixture', 'src', 'content', 'notes', 'scratch.md');

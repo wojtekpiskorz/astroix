@@ -2,6 +2,7 @@ import { execSync } from 'node:child_process';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
+import { expectVisibleWithBootRecovery } from './boot-gate';
 
 // Serial: the build test mutates fixture build output. (The chrome-source
 // hot-swap tests moved to source-mode.spec.ts with the source lane — this
@@ -115,6 +116,10 @@ test('the chrome URL carries the canvas position and updates without reloads', a
 });
 
 test('a chrome refresh restores the canvas from the carried position', async ({ page }) => {
+  // houses the post-reload cold-boot budget below: the default 30 s test
+  // timeout would cut that budget off and re-produce the exact wrong error
+  // shape this test guards against (#158 / #129)
+  test.setTimeout(120_000);
   await page.goto('/');
   await page.getByRole('tab', { name: 'Content' }).click();
   await expect(page.locator('[data-astroix-entries="ready"]')).toBeVisible();
@@ -125,7 +130,22 @@ test('a chrome refresh restores the canvas from the carried position', async ({ 
   // and the reactive resolution re-arms the matching entry over the restored load
   await page.reload();
   const canvas = page.frameLocator('#astroix-canvas');
-  await expect(canvas.locator('.blog-title')).toBeVisible();
+  // cold-boot gate, not a hot-path assertion (#158, of #129's boot-contention
+  // family — RUN 5 in that issue's body: chrome up, iframe still empty at the
+  // 5 s budget end; also observed >60 s once under load): the reload
+  // re-parses the chrome module and re-boots the full canvas page at the
+  // carried position. The helper's budget bounds the wait and its reload hop
+  // recovers a request-scoped stall; the carried position rides the URL, so
+  // the reload keeps testing exactly this behavior. A page that never lands
+  // fails at the budget with the named error. If #155's canvas-load marker
+  // lands, keying this wait on it beats the blanket budget — rebase-
+  // coordinate then.
+  await expectVisibleWithBootRecovery(
+    page,
+    canvas.locator('.blog-title'),
+    'canvas cold boot: the reloaded page never landed in the iframe',
+    75_000,
+  );
   await page.getByRole('tab', { name: 'Content' }).click();
   await expect(page.locator('[data-astroix-entry="2024/post"]')).toHaveAttribute(
     'data-active',
