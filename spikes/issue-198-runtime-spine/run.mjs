@@ -118,12 +118,24 @@ function errorText(error) {
 }
 
 function reportFailure(error) {
-  console.error(errorText(error));
-  if (error instanceof ProofTeardownError) {
-    for (const [index, cause] of error.errors.entries()) {
-      console.error(`TEARDOWN CAUSE ${index + 1}/${error.errors.length}: ${errorText(cause)}`);
+  const seen = new Set();
+  const report = (current, label) => {
+    if (current !== null && typeof current === 'object') {
+      if (seen.has(current)) {
+        console.error(`${label}: [already reported]`);
+        return;
+      }
+      seen.add(current);
     }
-  }
+    console.error(`${label}: ${errorText(current)}`);
+    const children = [];
+    if (current instanceof AggregateError) children.push(...current.errors);
+    if (current instanceof Error && current.cause !== undefined) children.push(current.cause);
+    for (const [index, child] of children.entries()) {
+      report(child, `${label}.${index + 1}`);
+    }
+  };
+  report(error, 'ERROR');
 }
 
 function readJsonLines(file) {
@@ -249,7 +261,7 @@ function rewriteCanvasPath(url) {
   return `${parsed.pathname}${parsed.search}`;
 }
 
-async function startProxy(upstreamPort) {
+async function startProxy(upstreamPort, retainedPath) {
   const upgradedSockets = new Set();
   const websocketServer = new WebSocketServer({ noServer: true });
   const server = createServer((req, res) => {
@@ -327,13 +339,30 @@ async function startProxy(upstreamPort) {
       'standalone proxy bound an ephemeral TCP port',
       typeof address === 'object' && address !== null && address.port > 0,
     );
+    if (process.env.ASTROIX_RUNTIME_SPINE_FORCE_FAILURE === 'proxy-cleanup-report') {
+      throw new Error('forced failure after proxy start for recursive cleanup reporting');
+    }
     return resource;
   } catch (workError) {
     const cleanupErrors = [];
     await captureCleanup(cleanupErrors, 'post-start proxy cleanup', () =>
       closeHttpServer(resource.server, resource.upgradedSockets),
     );
-    throwWithCleanup(workError, cleanupErrors, 'proxy has no project path');
+    if (process.env.ASTROIX_RUNTIME_SPINE_FORCE_FAILURE === 'proxy-cleanup-report') {
+      cleanupErrors.push(
+        new AggregateError(
+          [
+            new Error('forced proxy cleanup leaf'),
+            new AggregateError(
+              [new Error('forced nested proxy cleanup leaf')],
+              'forced nested proxy cleanup aggregate',
+            ),
+          ],
+          'forced proxy cleanup aggregate after the proxy was safely closed',
+        ),
+      );
+    }
+    throwWithCleanup(workError, cleanupErrors, retainedPath);
   }
 }
 
@@ -785,15 +814,15 @@ function spawnManagedForeground(astroBin, spawnOptions) {
     closeResult: undefined,
     closePromise: undefined,
   };
-  child.stdout.on('data', (chunk) => (resource.stdout += chunk));
-  child.stderr.on('data', (chunk) => (resource.stderr += chunk));
-  child.on('error', (error) => (resource.spawnError = error));
   resource.closePromise = new Promise((resolvePromise) => {
     child.once('close', (code, signal) => {
       resource.closeResult = { code, signal };
       resolvePromise(resource.closeResult);
     });
   });
+  child.stdout.on('data', (chunk) => (resource.stdout += chunk));
+  child.stderr.on('data', (chunk) => (resource.stderr += chunk));
+  child.on('error', (error) => (resource.spawnError = error));
   return resource;
 }
 
@@ -820,40 +849,58 @@ async function waitForManagedUrl(resource, timeoutMs = 20_000) {
   );
 }
 
-async function pidIsAlive(pid) {
-  return (await commandOutput('ps', ['-p', String(pid)], { timeoutMs: 2_000 })).exitCode === 0;
-}
-
-async function waitForPidExit(pid, label, timeoutMs) {
-  await waitFor(
-    () => pidIsAlive(pid),
-    (alive) => !alive,
-    label,
-    timeoutMs,
+function managedChildProcessExited(resource) {
+  return (
+    resource.closeResult !== undefined ||
+    resource.child.exitCode !== null ||
+    resource.child.signalCode !== null
   );
 }
 
+async function waitForManagedChildClose(resource, label, timeoutMs) {
+  if (resource.closeResult !== undefined) return resource.closeResult;
+  return bounded(resource.closePromise, label, timeoutMs);
+}
+
 async function stopManagedForeground(resource) {
-  const pid = resource.child.pid;
   let escalated = false;
-  if (pid !== undefined && (await pidIsAlive(pid))) {
-    if (!resource.child.kill('SIGTERM')) {
-      throw new Error(`failed to send SIGTERM to managed foreground child ${pid}`);
+  if (!managedChildProcessExited(resource)) {
+    const gracefulSignalled = resource.child.kill('SIGTERM');
+    if (!gracefulSignalled && !managedChildProcessExited(resource)) {
+      throw new Error('failed to send SIGTERM to the owned managed foreground child');
     }
     try {
-      await waitForPidExit(pid, 'managed foreground child graceful exit', 5_000);
+      await waitForManagedChildClose(
+        resource,
+        'managed foreground child graceful close event',
+        5_000,
+      );
     } catch (gracefulError) {
-      escalated = true;
-      if ((await pidIsAlive(pid)) && !resource.child.kill('SIGKILL')) {
+      if (!managedChildProcessExited(resource)) {
+        escalated = true;
+        const forcedSignalled = resource.child.kill('SIGKILL');
+        if (!forcedSignalled && !managedChildProcessExited(resource)) {
+          throw new AggregateError(
+            [gracefulError],
+            'failed to send SIGKILL to the owned managed foreground child',
+          );
+        }
+      }
+      try {
+        await waitForManagedChildClose(
+          resource,
+          'managed foreground child forced close event',
+          3_000,
+        );
+      } catch (forcedError) {
         throw new AggregateError(
-          [gracefulError],
-          `failed to send SIGKILL to managed foreground child ${pid}`,
+          [gracefulError, forcedError],
+          'managed foreground child did not close after SIGTERM and SIGKILL',
         );
       }
-      await waitForPidExit(pid, 'managed foreground child forced exit', 3_000);
     }
   }
-  await bounded(resource.closePromise, 'managed foreground child close event', 2_000);
+  await waitForManagedChildClose(resource, 'managed foreground child close event', 2_000);
   return { escalated };
 }
 
@@ -998,7 +1045,7 @@ async function main() {
     console.log('RUN plain-server-and-browser');
     programmatic = await startProgrammaticAstro(plain, programmaticHookLog);
     metrics.programmaticBootMs = Math.round(programmatic.bootMs);
-    proxy = await startProxy(Number(new URL(programmatic.origin).port));
+    proxy = await startProxy(Number(new URL(programmatic.origin).port), temp);
     if (process.env.ASTROIX_RUNTIME_SPINE_FORCE_FAILURE === 'plain-start') {
       throw new Error('forced failure after plain server and proxy start');
     }
