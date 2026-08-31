@@ -22,6 +22,37 @@ export interface AstroixPluginOptions {
 }
 
 /**
+ * The chrome-payload guard (#171): vite's dev send inlines a module's
+ * transform sourcemap as a base64 `sourceMappingURL` data URL whenever the
+ * final map carries mappings. For the prebuilt chrome bundle that map is
+ * dead weight — it maps the dev-transformed output back onto the shipped
+ * bundle, not onto any source a developer can read — and it more than
+ * triples the boot payload (measured on the fixture: 7.85 MB served vs
+ * 2.2 MB of code, 72% inline map). The boot-stall family rides that window
+ * client-side: a CPU-starved renderer holds the oversized response in
+ * socket backpressure for as long as it is starved (frozen-renderer repro:
+ * a 25 s stop made the module request take 25.7 s server-side
+ * start-to-finish, canvas visible at 26.2 s, next fresh page 1.8 s — the
+ * exact #158/#129 signature). The version-less `{ mappings: '' }` map is
+ * vite's own "no map" sentinel: the sourcemap chain combiner short-circuits
+ * on it, and dev `send` only appends a data URL when `map.mappings` is
+ * truthy — do NOT add `version`, a versioned partial map is parsed as a
+ * real one and crashes the combiner (caught live in the fixture lane). A
+ * separate `enforce: 'post'` plugin so the transform runs after
+ * import-analysis, whose freshly generated map would otherwise win.
+ */
+export function chromePayloadGuardPlugin(): Plugin {
+  return {
+    name: 'astroix:chrome-payload',
+    enforce: 'post',
+    transform(code, id) {
+      if (id !== VIRTUAL_CHROME_ID) return null;
+      return { code, map: { mappings: '' } };
+    },
+  };
+}
+
+/**
  * The astroix Vite plugin: default-on chrome over every top-level dev URL.
  * The middleware is registered in the body of `configureServer` (pre-internal)
  * because Astro's dev handler lives in a post-hook and never calls `next()` —

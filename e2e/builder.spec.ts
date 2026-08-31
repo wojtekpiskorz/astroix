@@ -30,6 +30,24 @@ test('builder chrome renders the shell and wraps the page by default', async ({ 
   await expect(canvas.locator('.hero-title')).toHaveText('Astroix fixture');
 });
 
+test('the prebuilt chrome module serves without the inline dev sourcemap (#171)', async ({
+  page,
+}) => {
+  await page.goto('/');
+  const response = await page.request.get('/virtual:astroix/chrome');
+  expect(response.status()).toBe(200);
+  const body = await response.text();
+  // vite dev inlines a module's transform sourcemap as a base64 data URL
+  // unless the final map is empty — for the prebuilt bundle that map is
+  // unreadable dead weight (it maps back onto the shipped bundle) and it
+  // tripled the boot payload (7.85 MB served vs 2.2 MB of code), widening
+  // the renderer-starvation window the #158/#129 boot-stall family rides.
+  // The payload guard (src/node/vite-plugin.ts) returns an empty-mappings
+  // map; this pins the property against vite upgrades re-inlining it.
+  expect(body).not.toContain('sourceMappingURL=data:');
+  expect(body.length).toBeLessThan(3_000_000);
+});
+
 test('Tailwind styles work inside the shadow tree (dual adoption)', async ({ page }) => {
   await page.goto('/');
   const header = page.locator('[data-astroix-header]');
