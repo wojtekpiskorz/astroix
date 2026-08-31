@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Astroix is a standalone application that manages local Astro 7 projects — a Node supervisor with a project registry, a builder UI (Content + CSS verticals), and a per-project-vhost canvas — bound by two hard invariants: **zero repo writes to managed projects** (only the content/CSS files the user explicitly edits) and **no astroix dependency ever enters a managed project** (spec v2, ADR-0004; pivot ratified 2026-08-31, map #179 / #187). The former dev-only integration is deprecated on npm (#185); its source (`src/node`) is removed by the execution charter. **Pivot-ratification stage:** the docs set is rewritten for the app; layout, toolchain mechanics and CI are finalized by the execution charter (#188) — `docs/` remains the source of truth for behavior.
+Astroix is a standalone application that manages local Astro 7 projects — a Node supervisor with a project registry, a builder UI (Content + CSS verticals), and a per-project-vhost canvas — bound by two hard invariants: **zero repo writes to registered projects** (only the content/CSS files the user explicitly edits) and **no astroix dependency ever enters a registered project** (spec v2, ADR-0004; pivot ratified 2026-08-31, map #179 / #187). The former dev-only integration is deprecated on npm (#185); its source (`src/node`) is removed by the execution charter. **Pivot-ratification stage:** the docs set is rewritten for the app; layout, toolchain mechanics and CI are finalized by the execution charter (#188) — `docs/` remains the source of truth for behavior.
 
 ## Read the docs first
 

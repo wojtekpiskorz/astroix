@@ -1,5 +1,7 @@
 # Astroix — Core Reuse Map
 
+> **Status po pivotcie (ADR-0004, mapa #179):** ten dokument opisuje świat integracji — m.in. sekcje oparte o ADR-0001 (skasowany) i middleware dev servera projektu. Jego przepisanie pod supervisor (lub emerytura) należy do lane'u L3 (#193); do tego czasu czytany jako inwentarz mechanizmów, nie jako aktualna architektura.
+
 Pochodzenie: trzy researchy agentowe (26.08.2026), zweryfikowane przeciw `withastro/astro@main` (Astro 7.2, Vite 8/Rolldown, zod 4.3) i docs.astro.build/vite.dev. Zasada: **jeśli core Astro/Vite już to robi — nie piszemy tego**. Statusy: ✅ core (używamy wprost) · 🟡 częściowo (core pomaga, reszta nasza) · 🔨 sami (brak odpowiednika).
 
 ## 1. Chrome: serwowanie i HMR

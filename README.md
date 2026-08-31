@@ -1,8 +1,8 @@
 # Astroix
 
-A visual builder for Astro projects — a dev-only integration where an AI agent does ~90% of the work, and you finish the last 10% (content tweaks, CSS polish) in a GUI instead of hunting through an unfamiliar codebase.
+A visual builder for Astro projects — a standalone application where an AI agent does ~90% of the work, and you finish the last 10% (content tweaks, CSS polish) in a GUI instead of hunting through an unfamiliar codebase. Astroix manages local Astro projects from the outside: a supervisor runs their dev servers behind per-project local hostnames, and the builder UI edits the real repo files (repo-mapping, never a parallel world). It writes only the content/CSS files you explicitly edit — never config or dependencies.
 
-**Status: scaffold.** The package structure, toolchain, CI, and the e2e fixture are in place; feature implementation is starting. Docs remain the source of truth.
+**Status: pivot in progress.** Astroix is being rebuilt as that standalone app (ADR-0004, map #179; the former dev-only Astro integration is deprecated on npm). The docs set is ratified; execution runs in the charter lanes (#188) — toolchain → monorepo → supervisor → app UI → e2e/pre-alpha. Until the pre-alpha ships, this repo is the product surface.
 
 ## What it will do
 
@@ -23,21 +23,23 @@ Targets the latest Astro major only (`astro ^7`, Vite 8, zod 4) — built for ne
 
 ## Development
 
-Requires [bun](https://bun.sh) and Node >= 22.12.
+Requires Node >= 22.12 and npm.
 
 ```sh
-bun install                        # also in e2e/fixture/
-bun run check && bun run typecheck # Biome + tsc
-bun run test                       # vitest (unit)
-bun run test:e2e                   # Playwright (boots e2e/fixture on :4314)
-bun run build                      # tsup (node) + vite (chrome bundle) → dist
+npm install                       # also in e2e/fixture/
+npm run check && npm run typecheck # Biome + tsc
+npm run test                      # vitest (unit)
+npm run test:e2e                  # Playwright (boots e2e/fixture on :4314)
+npm run build                     # tsup (node side) + vite build
 ```
+
+*(Transition state: a few scripts still shell out to bun internally until the toolchain-migration lane lands — the invocation is `npm run <script>` either way; recorded in AGENTS.md.)*
 
 ### Dogfood loop
 
-The e2e fixture consumes the local package through `.astroix-local/` — a gitignored staging dir holding only the publish surface (`dist`, `package.json`, `README`, `LICENSE`), linked as `file:../../.astroix-local` (#123: a `file:` link to the repo root copies the whole checkout, nesting `node_modules` recursively). `bun run prepare-local` (run automatically before the fixture dev server boots) rebuilds `dist` when stale, re-syncs the staging dir, and refreshes the installed copy — so `bun run dev` in `e2e/fixture/` always serves the current build. A root `bun run dev` (tsup watch) plus a fixture dev server still works for iteration; re-run the fixture's dev script (or `bun run prepare-local`) to pick up each fresh build.
+Post-pivot dogfood is the app against the `e2e/fixture` project and real Astro projects (#185). The integration-era staging loop (`.astroix-local/`, `prepare-local`) retires with the restructure lane (L2, #192) — it served the deprecated integration's fixture consumption and is not part of the app.
 
-### Ports
+### Ports *(integration-era e2e lanes; retire in L2, #192)*
 
 The owner's manual smoke owns `:4312` (`bun run smoke`); the e2e lanes never touch it — Playwright boots the main lane on `:4314` (`ASTROIX_E2E_PORT` in the fixture's dev script) and the npm-pack lane on `:4313` (`ASTROIX_E2E_PACK_PORT`); both ports stay canonical for CI, while parallel local lanes override the pair per worktree (#120) so sibling checkouts never race for — or adopt — each other's dev servers. Both lanes always boot their own servers (`reuseExistingServer: false`), and the fixture dev script runs astro with `--ignore-lock` — astro's per-project single-server guard would otherwise refuse the e2e instance while the owner's smoke server runs; both paths own their lifecycle externally (the smoke script pre-checks its port, Playwright kills its own servers).
 
