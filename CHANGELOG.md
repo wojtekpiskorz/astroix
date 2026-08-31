@@ -1,5 +1,12 @@
 # @wojciechpiskorz/astroix
 
+## 0.0.29
+
+### Patch Changes
+
+- d18ef7c: Fix live-refresh in the prebuilt chrome: `import.meta.hot` usage was dead-code-eliminated from the lib bundle, silently killing every push flow and the reload-shield announce (#166). Live refresh and reload protection now work identically from the installed package: client subscriptions moved to window CustomEvents and a hot→window translator rides the virtual chrome module in both delivery arms, carrying the node-side pushes to the chrome and the shield announce back to the dev server.
+- 7860369: Fix the dev-server chrome boot payload: vite dev was inlining the prebuilt chrome module's transform sourcemap as a base64 data URL, tripling the served bytes (7.85 MB vs 2.2 MB of code, 72% unreadable map). The chrome-payload guard drops it, cutting every cold boot's wire bytes ~3.5x and shrinking the client-side starvation window the e2e boot-stall family rides (#171, of #129/#158); an e2e assertion pins the property. A stall-lab repro kit lands under e2e/stall-lab/ with the investigation ledger.
+
 ## 0.0.28
 
 ### Patch Changes
