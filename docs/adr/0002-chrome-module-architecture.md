@@ -25,7 +25,7 @@ Two state systems with a one-line rule: **server/watcher-derived data is TanStac
 
 ## Files
 
-One exported component per file, filename lowercase-dash matching the component (`rule-list.tsx` ← `RuleList`) — consistent with the shadcn `ui/` and the existing style. Private helpers stay next to their component; helpers used across modules go to `lib/`. A file earns extraction when any of these holds: its component is used by 2+ parents, it passes ~300 lines, or it carries two distinct concerns. The number is a signal, not a gate — a cohesive 320-line file stays; a 200-line file holding two concerns splits.
+One exported component per file, filename lowercase-dash matching the component (`rule-list.tsx` ← `RuleList`) — consistent with the shadcn `ui/` and the existing style. Private helpers stay next to their component; helpers used across modules go to `lib/`. A file earns extraction when any of these holds: its component is used by 2+ parents, it passes ~300 lines, or it carries two distinct concerns. The number is a signal, not a gate — a cohesive 320-line file stays; a 200-line file holding two concerns splits. One exported component per file applies to domain components; a cohesive primitive/widget set may live in one file named after the set (`*-widgets.tsx`, e.g. `value-widgets.tsx`, `field-widgets.tsx`) — the set name, not the count, is the unit.
 
 ## Considered Options
 
