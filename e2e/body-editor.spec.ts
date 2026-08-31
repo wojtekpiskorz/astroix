@@ -28,7 +28,6 @@ test.afterEach(async () => {
 // the draft lives in the pane's refs, not DOM state, so these specs assert
 // the committed doc through the stashed view like editor.spec.ts.
 
-/** The stashed-view handle as exercised in editor.spec.ts — the same change path as typing. */
 // evaluate callbacks serialize alone — the view extraction inlines in each
 // (the editor.spec.ts pattern); outer-scope helpers don't carry over
 async function openBodyEditor(page: Page): Promise<Locator> {

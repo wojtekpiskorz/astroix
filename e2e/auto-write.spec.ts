@@ -134,16 +134,3 @@ test('REST: the write endpoint refuses a stale hash and hands back disk truth', 
     writeFileSync(POST, original);
   }
 });
-
-// #149's main-side repair, pinned: the idle post-banner user. The 409's own
-// invalidation (and under #133 the deferred content-synced push) refetches
-// the collections payload while the form sits clean on the disk truth — the
-// pane must NOT reset onto the payload's zod projection (the delta between
-// the projection and the raw file would auto-write `tone`/`priority`/
-// `featured` into the file and re-serialize `date`/`tags` with no user
-// action at all). One truth-space: the signal re-reads the file, finds the
-// loop's truth, and nothing writes.
-// the mount emission's no-op contract: the halves' mount reports the truth
-// they mounted on, and that draft equals the baseline — nothing schedules a
-// write. Guards the truth-gated mount (#149): a ref the emission reads
-// before it is seeded would turn every idle open into an empty-body write.
