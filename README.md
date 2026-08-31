@@ -41,11 +41,11 @@ Post-pivot dogfood is the app against the `e2e/fixture` project and real Astro p
 
 ### Ports *(integration-era e2e lanes; retire in L2, #192)*
 
-The owner's manual smoke owns `:4312` (`bun run smoke`); the e2e lanes never touch it — Playwright boots the main lane on `:4314` (`ASTROIX_E2E_PORT` in the fixture's dev script) and the npm-pack lane on `:4313` (`ASTROIX_E2E_PACK_PORT`); both ports stay canonical for CI, while parallel local lanes override the pair per worktree (#120) so sibling checkouts never race for — or adopt — each other's dev servers. Both lanes always boot their own servers (`reuseExistingServer: false`), and the fixture dev script runs astro with `--ignore-lock` — astro's per-project single-server guard would otherwise refuse the e2e instance while the owner's smoke server runs; both paths own their lifecycle externally (the smoke script pre-checks its port, Playwright kills its own servers).
+The owner's manual smoke owns `:4312` (`npm run smoke`); the e2e lanes never touch it — Playwright boots the main lane on `:4314` (`ASTROIX_E2E_PORT` in the fixture's dev script) and the npm-pack lane on `:4313` (`ASTROIX_E2E_PACK_PORT`); both ports stay canonical for CI, while parallel local lanes override the pair per worktree (#120) so sibling checkouts never race for — or adopt — each other's dev servers. Both lanes always boot their own servers (`reuseExistingServer: false`), and the fixture dev script runs astro with `--ignore-lock` — astro's per-project single-server guard would otherwise refuse the e2e instance while the owner's smoke server runs; both paths own their lifecycle externally (the smoke script pre-checks its port, Playwright kills its own servers).
 
-### Definition of done (POC)
+### Definition of done *(integration-era POC loop; the app's DoD is chartered in L5, #195)*
 
-The executable DoD is `e2e/loop.spec.ts` (the full CSS editing loop: chrome → select → rule list → CodeMirror edit → bytes on disk + canvas reflection), green in CI. The human half — the owner's manual smoke through the real chrome — is [`docs/manual-smoke.md`](docs/manual-smoke.md); `bun run smoke` prepares and boots the environment in one command.
+The executable DoD is `e2e/loop.spec.ts` (the full CSS editing loop: builder UI → select → rule list → CodeMirror edit → bytes on disk + canvas reflection), green in CI. The human half — the owner's manual smoke through the real builder — is [`docs/manual-smoke.md`](docs/manual-smoke.md); `npm run smoke` prepares and boots the environment in one command.
 
 ## License
 
