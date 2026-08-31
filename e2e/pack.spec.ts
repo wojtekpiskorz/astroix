@@ -169,11 +169,11 @@ test.describe('#166 push flows in the prebuilt chrome', () => {
       .poll(() => customFrames.join('\n'), { timeout: 10_000 })
       .toContain('"astroix:chrome"');
 
-    // a document-scope marker: a chrome reload destroys it, a spared chrome
-    // keeps it — the discriminator the shield assertion turns on
-    await page.evaluate(() => {
-      (window as { __astroixShieldProbe?: string }).__astroixShieldProbe = 'alive';
-    });
+    // the discriminator is realm identity, not a clock: a chrome reload
+    // mints a new document realm (new performance.timeOrigin), while the
+    // same-document replaceStates the canvas-load signal triggers (#110)
+    // leave it untouched — a sleep here would only ever under-wait
+    const bootTimeOrigin = await page.evaluate(() => performance.timeOrigin);
 
     const original = readFileSync(PACK_PAGE, 'utf8');
     try {
@@ -186,14 +186,12 @@ test.describe('#166 push flows in the prebuilt chrome', () => {
       await expect(canvas.locator('.hero-title')).toHaveText('Pack reloaded', {
         timeout: 15_000,
       });
-      // the same broadcast must NOT have reloaded the chrome: the marker
-      // survived past the canvas's reload settling
-      await page.waitForTimeout(1_000);
+      // the same broadcast must NOT have reloaded the chrome: its realm is
+      // still the one that armed the probe — a reload would have replaced it
       expect(
-        await page.evaluate(
-          () => (window as { __astroixShieldProbe?: string }).__astroixShieldProbe,
-        ),
-      ).toBe('alive');
+        await page.evaluate(() => performance.timeOrigin),
+        'the chrome document reloaded — the shield did not spare it',
+      ).toBe(bootTimeOrigin);
     } finally {
       writeFileSync(PACK_PAGE, original);
     }

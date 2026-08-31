@@ -17,16 +17,16 @@ import { registerFileSync } from './watch-sync';
  * dead-code-eliminated by the lib build, so the chrome's push subscriptions
  * and its `astroix:chrome` announce ride window CustomEvents — those survive
  * bundling by construction. This translator is prepended to the virtual
- * chrome module in BOTH delivery arms (ADR-0001): served as module source,
- * its literal `import.meta.hot` is what makes Vite inject the hot context
- * into the module. It forwards the node-side push events (payload as
- * `detail`) to the window events the chrome subscribes to, and routes the
- * announce entry.tsx dispatches on `window` back onto the hot channel for
- * the reload shield. Prepend, never append: static imports are hoisted, so
- * the module body — bridge first — runs before `mountChrome()` (source arm)
- * and before the self-mounting bundle's top-level call (prebuilt arm); the
- * announce listener must exist by then. One code path, identical semantics
- * in both modes.
+ * chrome module in BOTH delivery arms (ADR-0001, which owns the rationale
+ * and the one-code-path guarantee): served as module source, its literal
+ * `import.meta.hot` is what makes Vite inject the hot context into the
+ * module. It forwards the node-side push events (payload as `detail`) to
+ * the window events the chrome subscribes to, and routes the announce
+ * entry.tsx dispatches on `window` back onto the hot channel for the
+ * reload shield. Prepend, never append: static imports are hoisted, so
+ * the module body — bridge first — runs before `mountChrome()` (source
+ * arm) and before the self-mounting bundle's top-level call (prebuilt
+ * arm); the announce listener must exist by then.
  */
 const HOT_TO_WINDOW_BRIDGE = `// astroix hot→window bridge (#166): node pushes → window CustomEvents,
 // the chrome's 'astroix:chrome' announce → hot.send (reload shield).

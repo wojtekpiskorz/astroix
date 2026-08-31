@@ -35,11 +35,14 @@ declare module 'vite/types/customEvent' {
  * below from the hot channel, `detail` = the wire payload (`undefined` when
  * a push carries none — consumers guard, never throw). Identical in both
  * delivery arms (ADR-0001); the payloads share their types with the wire
- * map above, one source.
+ * map above, one source. `'astroix:chrome'` is the reverse direction — the
+ * announce entry.tsx dispatches, which the bridge carries back to the hot
+ * channel for the reload shield.
  */
 interface WindowEventMap {
   'astroix:file-changed': CustomEvent<AstroixFileChangedPayload | undefined>;
   'astroix:content-synced': CustomEvent<AstroixContentSyncedPayload | undefined>;
   'astroix:routes-changed': CustomEvent<Record<string, never> | undefined>;
   'astro:content-changed': CustomEvent<unknown>;
+  'astroix:chrome': CustomEvent<undefined>;
 }
