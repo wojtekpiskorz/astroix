@@ -7,7 +7,7 @@ import type { Plugin as VitePlugin } from 'vite';
 import { captureRoutes, type RoutesState } from './routes';
 import { clientEntryPath, isSourceMode } from './source-mode';
 import { hostRegistersTailwind } from './tailwind-guard';
-import { astroixVitePlugin } from './vite-plugin';
+import { astroixVitePlugin, chromePayloadGuardPlugin } from './vite-plugin';
 
 /**
  * Canvas script injected into every dev page (the chrome document itself is
@@ -50,9 +50,11 @@ function astroix(): AstroIntegration {
         if (command !== 'dev') return;
 
         // The resolved config turns dir strings into URLs (trailing slash included) —
-        // the plugin wants clean paths.
+        // the plugin wants clean paths. The payload guard rides along as its
+        // own post plugin (see vite-plugin.ts) so its transform runs last.
         const plugins: VitePlugin[] = [
           astroixVitePlugin({ srcDir: fileURLToPath(config.srcDir), routes: routesState }),
+          chromePayloadGuardPlugin(),
         ];
         // The chrome sources live outside the host root and are served via
         // /@fs, which has two consequences fixed below: (a) deps discovered
