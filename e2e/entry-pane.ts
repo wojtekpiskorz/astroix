@@ -27,8 +27,9 @@ export async function openEntry(page: Page, entry: string): Promise<Locator> {
   // cold-boot budget with a boot-naming error instead (the helper's reload
   // hop recovers a request-scoped stall; a genuinely hung boot still fails
   // named). It extends — never replaces — the entries-ready wait below
-  // (mount vs data). Consumer files house this envelope above their slow()
-  // ceilings.
+  // (mount vs data). Consumer files house this envelope with a file-level
+  // test.setTimeout at or above 105 s — never combined with test.slow(),
+  // whose annotation silently triples any declared timeout.
   await expectVisibleWithBootRecovery(
     page,
     page.locator('#astroix-canvas'),
