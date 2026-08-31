@@ -31,9 +31,10 @@ export interface AstroixPluginOptions {
  * 2.2 MB of code, 72% inline map). The boot-stall family rides that window
  * client-side: a CPU-starved renderer holds the oversized response in
  * socket backpressure for as long as it is starved (frozen-renderer repro:
- * a 25 s stop made the module request take 25.7 s server-side
- * start-to-finish, canvas visible at 26.2 s, next fresh page 1.8 s — the
- * exact #158/#129 signature). The version-less `{ mappings: '' }` map is
+ * a 25 s stop made the module request take 25.7 s by the server-side
+ * finish trace, 25.8 s browser-observed — the same event from both ends —
+ * canvas visible at 26.2 s, next fresh page 1.8 s — the exact #158/#129
+ * signature). The version-less `{ mappings: '' }` map is
  * vite's own "no map" sentinel: the sourcemap chain combiner short-circuits
  * on it, and dev `send` only appends a data URL when `map.mappings` is
  * truthy — do NOT add `version`, a versioned partial map is parsed as a
