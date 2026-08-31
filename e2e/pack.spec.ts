@@ -24,7 +24,12 @@ test('chrome loads from the shipped artifact (prebuilt mode)', async ({ page }) 
 
   await page.goto('/');
   // the chrome mounting at all proves the artifact executed; source mode is
-  // structurally impossible here (the tarball ships no src/client)
+  // structurally impossible here (the tarball ships no src/client) — pinned
+  // on the discriminator too, so every lane asserts its delivery mode (#150)
+  await expect(page.locator('#astroix-root')).toHaveAttribute(
+    'data-astroix-chrome-mode',
+    'prebuilt',
+  );
   await expect(page.getByText('Select: off')).toBeVisible({ timeout: 15_000 });
   await expect(page.locator('#astroix-canvas')).toBeVisible();
   await expect(page.frameLocator('#astroix-canvas').locator('.hero-title')).toHaveText(

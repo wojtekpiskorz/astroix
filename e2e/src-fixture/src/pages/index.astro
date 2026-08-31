@@ -1,0 +1,27 @@
+---
+import { getEntry } from 'astro:content';
+import './home.css';
+
+const home = await getEntry('homepage', 'index');
+const { title, lead, cta } = home!.data;
+---
+
+<section class="hero">
+  <h1 class="hero-title">{title}</h1>
+  <p class="hero-lead">{lead}</p>
+  {
+    cta && (
+      <a class="hero-cta" href={cta.href}>
+        {cta.label}
+      </a>
+    )
+  }
+</section>
+
+<style>
+  /* scoped demo target: emits .hero-title[data-astro-cid-*] under the default
+     `attribute` scopedStyleStrategy — the selector-engine case (T2) */
+  .hero-title {
+    color: #1e293b;
+  }
+</style>

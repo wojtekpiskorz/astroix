@@ -7,11 +7,18 @@ import { chromeSheet } from './styles';
 
 const queryClient = new QueryClient();
 
-export function mountChrome(): void {
+/** How the chrome reached the document (ADR-0001) — pinned for the e2e lanes. */
+export type ChromeMode = 'source' | 'prebuilt';
+
+export function mountChrome(mode: ChromeMode): void {
   const host = document.getElementById('astroix-root');
   if (host === null) {
     throw new Error('astroix: #astroix-root is missing from the chrome document');
   }
+  // the mode discriminator: each lane asserts the delivery mode it boots, so
+  // a staging regression (source mode silently gone, #150) fails a spec
+  // instead of living on undetected
+  host.dataset.astroixChromeMode = mode;
   // the chrome's seat at the hot channel: announces itself so the node-side
   // shield can route Astro's sync `full-reload`s around it — the chrome is a
   // stateful SPA, the canvas reloads in its place (spec #13/#74)

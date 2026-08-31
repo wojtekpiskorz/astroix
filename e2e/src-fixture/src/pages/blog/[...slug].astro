@@ -1,0 +1,20 @@
+---
+import { getCollection, render } from 'astro:content';
+
+export async function getStaticPaths() {
+  const posts = await getCollection('blog');
+  return posts.map((post) => ({ params: { slug: post.id }, props: { post } }));
+}
+
+const { post } = Astro.props;
+const { title, date } = post.data;
+const { Content } = await render(post);
+---
+
+<article class="blog-post">
+  <h1 class="blog-title">{title}</h1>
+  <time class="blog-date" datetime={date.toISOString()}>{date.toISOString().slice(0, 10)}</time>
+  <div class="blog-body">
+    <Content />
+  </div>
+</article>

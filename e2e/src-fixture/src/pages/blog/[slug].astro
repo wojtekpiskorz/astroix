@@ -1,0 +1,27 @@
+---
+import { getCollection, render } from 'astro:content';
+
+// Route-plurality fixture for route resolution (#71 → #109): a single-segment
+// param beside the catch-all — every flat blog id (e.g. `hello-builder`)
+// fills two patterns that render the same entry, so entry→canvas navigation
+// takes the segment-param spelling; nested ids (`2024/post`) still resolve
+// through [...slug] alone.
+export async function getStaticPaths() {
+  const posts = await getCollection('blog');
+  return posts
+    .filter((post) => !post.id.includes('/'))
+    .map((post) => ({ params: { slug: post.id }, props: { post } }));
+}
+
+const { post } = Astro.props;
+const { title, date } = post.data;
+const { Content } = await render(post);
+---
+
+<article class="blog-post">
+  <h1 class="blog-title">{title}</h1>
+  <time class="blog-date" datetime={date.toISOString()}>{date.toISOString().slice(0, 10)}</time>
+  <div class="blog-body">
+    <Content />
+  </div>
+</article>

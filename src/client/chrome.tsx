@@ -4,4 +4,4 @@ import { mountChrome } from './entry';
 // ESM — react/react-dom, the Tailwind-compiled CSS and CodeMirror bundled in,
 // zero bare imports for the consumer's Vite to resolve. Source mode uses
 // entry.tsx directly instead.
-mountChrome();
+mountChrome('prebuilt');

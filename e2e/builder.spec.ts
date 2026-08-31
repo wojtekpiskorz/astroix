@@ -1,16 +1,25 @@
 import { execSync } from 'node:child_process';
-import { readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
 
-// Serial: several tests edit chrome sources on disk (restoring in finally);
-// the build test mutates fixture build output.
+// Serial: the build test mutates fixture build output. (The chrome-source
+// hot-swap tests moved to source-mode.spec.ts with the source lane — this
+// lane boots the publish-shaped artifact, where chrome sources have no
+// live runtime; #150.)
 test.describe.configure({ mode: 'serial' });
 
 test('builder chrome renders the shell and wraps the page by default', async ({ page }) => {
   await page.goto('/');
   await expect(page.locator('#astroix-root')).toBeVisible();
   await expect(page.locator('#astroix-canvas')).toBeVisible();
+
+  // the main lane is publish-shaped since #123: the chrome must boot the
+  // prebuilt bundle here (source mode lives in its own lane — source-mode.spec)
+  await expect(page.locator('#astroix-root')).toHaveAttribute(
+    'data-astroix-chrome-mode',
+    'prebuilt',
+  );
 
   // shell inside the shadow tree: header + sidebar + canvas area
   await expect(page.getByText('Select: off')).toBeVisible();
@@ -203,66 +212,6 @@ test('select mode on: hover outline, click selects and highlights', async ({ pag
   await page.getByText('Select: on').click();
   await expect(page.getByText('Select: off')).toBeVisible();
   expect(await canvas.locator('.astroix-selected').count()).toBe(0);
-});
-
-test('chrome components hot-swap without a document reload', async ({ page }) => {
-  await page.goto('/');
-  const badge = page.locator('[data-astroix-header] strong');
-  // the badge is uppercased by CSS; textContent stays lowercase
-  await expect(badge).toHaveText('astroix');
-  await page.evaluate(() => {
-    (window as { __astroixLoadedAt?: number }).__astroixLoadedAt = performance.now();
-  });
-
-  const sourcePath = join('src', 'client', 'features', 'css', 'chrome-header.tsx');
-  const original = readFileSync(sourcePath, 'utf8');
-  try {
-    writeFileSync(sourcePath, original.replace('astroix</strong>', 'astroix-hmr</strong>'));
-    await expect(badge).toHaveText('astroix-hmr', { timeout: 15_000 });
-
-    const marker = await page.evaluate(
-      () => (window as { __astroixLoadedAt?: number }).__astroixLoadedAt,
-    );
-    expect(marker).toBeDefined();
-  } finally {
-    writeFileSync(sourcePath, original);
-  }
-});
-
-test('chrome css hot-swaps in both adoption contexts without a canvas reload', async ({ page }) => {
-  await page.goto('/');
-  await page.evaluate(() => {
-    (window as { __astroixLoadedAt?: number }).__astroixLoadedAt = performance.now();
-  });
-  const canvasTitle = page.frameLocator('#astroix-canvas').locator('.hero-title');
-  await canvasTitle.evaluate((el) => {
-    const win = el.ownerDocument.defaultView as { __astroixCanvasLoadedAt?: number };
-    win.__astroixCanvasLoadedAt = performance.now();
-  });
-
-  const cssPath = join('src', 'client', 'chrome.css');
-  const original = readFileSync(cssPath, 'utf8');
-  const strong = page.locator('[data-astroix-header] strong');
-  try {
-    writeFileSync(
-      cssPath,
-      `${original}\n[data-astroix-header] strong { text-transform: lowercase; }\n`,
-    );
-    await expect(strong).toHaveCSS('text-transform', 'lowercase', { timeout: 15_000 });
-
-    const topMarker = await page.evaluate(
-      () => (window as { __astroixLoadedAt?: number }).__astroixLoadedAt,
-    );
-    const canvasMarker = await canvasTitle.evaluate(
-      (el) =>
-        (el.ownerDocument.defaultView as { __astroixCanvasLoadedAt?: number })
-          .__astroixCanvasLoadedAt,
-    );
-    expect(topMarker).toBeDefined();
-    expect(canvasMarker).toBeDefined();
-  } finally {
-    writeFileSync(cssPath, original);
-  }
 });
 
 test('dev-only guarantee: the fixture production build contains no astroix bytes', () => {

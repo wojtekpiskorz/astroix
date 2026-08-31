@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { expect, type Locator, type Page, test } from '@playwright/test';
+import { expect, test } from '@playwright/test';
+import { type CmView, expectSettled, openEntry } from './entry-pane';
 import { restoreEntry } from './entry-restore';
 
 // The content auto-write loop (issue #74, spec Impl #9): draft pause →
@@ -12,6 +13,11 @@ import { restoreEntry } from './entry-restore';
 // the next test then opens on a settled server, where the write path is
 // deterministic. The disk bytes are the asserted outcome; the status chip is
 // secondary (never error/stale at rest).
+//
+// The push-driven half of the loop (the write's echo through the hot
+// channel, the stale banner, the mount-emission guard) lives in
+// live-refresh.spec.ts on the source lane since #150 — this lane boots the
+// prebuilt chrome, whose bundle has no hot subscriptions.
 
 test.describe.configure({ mode: 'serial' });
 
@@ -21,83 +27,6 @@ test.slow();
 const POST = join('e2e', 'fixture', 'src', 'content', 'blog', '2024', 'post.md');
 const SHOWCASE = join('e2e', 'fixture', 'src', 'content', 'gallery', 'showcase.md');
 const SCRATCH = join('e2e', 'fixture', 'src', 'content', 'notes', 'scratch.md');
-
-/** The stashed CM6 view handle (body-editor.spec's CmView, body-append slice). */
-interface CmView {
-  state: { doc: { toString: () => string; length: number } };
-  dispatch: (spec: { selection?: { anchor: number } }) => void;
-  focus: () => void;
-}
-
-async function openEntry(page: Page, entry: string): Promise<Locator> {
-  await page.goto('/');
-  await page.getByRole('tab', { name: 'Content' }).click();
-  await expect(page.locator('[data-astroix-entries="ready"]')).toBeVisible({ timeout: 10_000 });
-  await page.locator(`[data-astroix-entry="${entry}"]`).click();
-  const pane = page.locator('[data-astroix-content-pane="form"]');
-  await expect(pane).toBeVisible();
-  // the loop's raw baseline must be loaded before any edit can schedule
-  await expect(pane.locator('[data-astroix-write-status]')).toHaveAttribute(
-    'data-astroix-write-status',
-    'idle',
-    { timeout: 10_000 },
-  );
-  return pane;
-}
-
-/** The loop came to rest without conflict or failure. */
-async function expectSettled(pane: Locator): Promise<void> {
-  await expect(pane.locator('[data-astroix-write-status]')).toHaveAttribute(
-    'data-astroix-write-status',
-    /(idle|saved)/,
-    { timeout: 15_000 },
-  );
-}
-
-test('the full loop: a form edit lands on disk byte-surgically and reloads the canvas', async ({
-  page,
-}) => {
-  const pane = await openEntry(page, '2024/post');
-  const original = readFileSync(POST, 'utf8');
-  try {
-    await pane.locator('[data-astroix-form-field="title"] input').fill('Renamed post');
-    await expect(pane.locator('[data-astroix-write-status]')).toHaveAttribute(
-      'data-astroix-write-status',
-      'saved',
-      { timeout: 10_000 },
-    );
-
-    // byte-surgical: the edited line spliced, the raw date node untouched,
-    // the body's leading blank line untouched — the Document API's one
-    // normalization respaces the flow array (`[nested]` → `[ nested ]`)
-    expect(readFileSync(POST, 'utf8')).toBe(
-      [
-        '---',
-        'title: Renamed post',
-        'date: 2024-06-01',
-        'tags: [ nested ]',
-        '---',
-        '',
-        'Fixture post with a nested-path id (`2024/post`) for route resolution.',
-        '',
-      ].join('\n'),
-    );
-
-    // live preview: Astro's own content sync reloads the canvas (US14) — the
-    // entry click navigated it to the catch-all route (single candidate)
-    const canvas = page.frameLocator('#astroix-canvas');
-    await expect(canvas.locator('.blog-title')).toHaveText('Renamed post', { timeout: 15_000 });
-
-    // the echo never fights the form: the refetched payload is our own write
-    // coming back, the field keeps the value, no second write cycle starts
-    await expect(pane.locator('[data-astroix-form-field="title"] input')).toHaveValue(
-      'Renamed post',
-    );
-    await expectSettled(pane);
-  } finally {
-    await restoreEntry(POST, original, { absent: ['Renamed post'] });
-  }
-});
 
 test('a body edit writes below the closing delimiter with the frontmatter verbatim', async ({
   page,
@@ -203,130 +132,5 @@ test('REST: the write endpoint refuses a stale hash and hands back disk truth', 
     expect(readFileSync(POST, 'utf8')).toBe(original);
   } finally {
     writeFileSync(POST, original);
-  }
-});
-
-test('UI: a write racing an external edit reloads the form from disk (banner, typed edit dropped)', async ({
-  page,
-}) => {
-  const pane = await openEntry(page, '2024/post');
-  const original = readFileSync(POST, 'utf8');
-  try {
-    // the typed edit keeps arming the debounce (~300ms per pause); the
-    // external write lands mid-typing — under the dirty form, before the
-    // POST — so the chrome's write carries a stale hash into changed disk
-    const title = pane.locator('[data-astroix-form-field="title"] input');
-    // one typed char arms the 300ms debounce; the external write lands well
-    // inside that window, under a now-dirty form
-    await title.click();
-    await page.keyboard.insertText('T');
-    writeFileSync(POST, original.replace('title: Nested post', 'title: External edit'));
-
-    await expect(pane.locator('[data-astroix-write-status]')).toHaveAttribute(
-      'data-astroix-write-status',
-      'stale',
-      { timeout: 10_000 },
-    );
-    // Impl #10: the disk won — the form reloaded from it, the typed edit
-    // was dropped, and the 409's contents never landed as our write
-    await expect(pane.locator('[data-astroix-form-field="title"] input')).toHaveValue(
-      'External edit',
-    );
-    expect(readFileSync(POST, 'utf8')).toBe(
-      original.replace('title: Nested post', 'title: External edit'),
-    );
-
-    // the reload's body half: typing after the banner must land once, with
-    // the file's leading blank line still single — the phantom-blank-line
-    // and compounding class (the 409 truth is payload-projected; the write
-    // re-anchors the trimmed draft in the raw slice's whitespace)
-    const editor = pane.locator('[data-astroix-body-editor="view"]');
-    await editor.locator('.cm-content').evaluate((el) => {
-      const view = (el.closest('.cm-editor') as (HTMLElement & { __astroixView?: CmView }) | null)
-        ?.__astroixView;
-      if (view === undefined) throw new Error('editor view not stashed');
-      view.dispatch({ selection: { anchor: view.state.doc.length } });
-      view.focus();
-    });
-    await page.keyboard.insertText(' Typed after the 409.');
-    await expect
-      .poll(() => readFileSync(POST, 'utf8'), { timeout: 15_000 })
-      .toBe(
-        original
-          .replace('title: Nested post', 'title: External edit')
-          .replace('for route resolution.\n', 'for route resolution. Typed after the 409.\n'),
-      );
-  } finally {
-    await restoreEntry(POST, original, {
-      absent: ['External edit', ' Typed after the 409.'],
-    });
-  }
-});
-
-// #149's main-side repair, pinned: the idle post-banner user. The 409's own
-// invalidation (and under #133 the content-synced push's canvas-load-sequenced
-// invalidation) refetches
-// the collections payload while the form sits clean on the disk truth — the
-// pane must NOT reset onto the payload's zod projection (the delta between
-// the projection and the raw file would auto-write `tone`/`priority`/
-// `featured` into the file and re-serialize `date`/`tags` with no user
-// action at all). One truth-space: the signal re-reads the file, finds the
-// loop's truth, and nothing writes.
-test('UI: an idle user post-409 writes nothing — the file keeps the external edit', async ({
-  page,
-}) => {
-  const pane = await openEntry(page, '2024/post');
-  const original = readFileSync(POST, 'utf8');
-  try {
-    // arm the write exactly as the racing test does: one typed char under a
-    // dirty form, the external write landing inside the debounce window
-    const title = pane.locator('[data-astroix-form-field="title"] input');
-    await title.click();
-    await page.keyboard.insertText('T');
-    const external = original.replace('title: Nested post', 'title: External edit');
-    writeFileSync(POST, external);
-
-    await expect(pane.locator('[data-astroix-write-status]')).toHaveAttribute(
-      'data-astroix-write-status',
-      'stale',
-      { timeout: 10_000 },
-    );
-    // the banner's reload won: the form shows the disk truth
-    await expect(title).toHaveValue('External edit');
-
-    // the idle window: no typing, past every push/refetch path — the
-    // loader leg's canvas-load-sequenced invalidation (3 s fallback bound,
-    // #155), the loop's own invalidation, the ssr-walk refetch
-    await page.waitForTimeout(4_000);
-
-    // byte-stability is the claim: the external edit's bytes, untouched —
-    // no zod normalization, no materialized defaults, no write at all
-    expect(readFileSync(POST, 'utf8')).toBe(external);
-    // and no write happened: the banner is still the loop's last word
-    await expect(pane.locator('[data-astroix-write-status]')).toHaveAttribute(
-      'data-astroix-write-status',
-      'stale',
-    );
-  } finally {
-    await restoreEntry(POST, original, { absent: ['External edit'] });
-  }
-});
-
-// the mount emission's no-op contract: the halves' mount reports the truth
-// they mounted on, and that draft equals the baseline — nothing schedules a
-// write. Guards the truth-gated mount (#149): a ref the emission reads
-// before it is seeded would turn every idle open into an empty-body write.
-test('UI: opening an entry and idling writes nothing — the mount emission is a no-op', async ({
-  page,
-}) => {
-  const pane = await openEntry(page, '2024/post');
-  const original = readFileSync(POST, 'utf8');
-  try {
-    // past the write debounce and the payload echo's refetch
-    await page.waitForTimeout(1_500);
-    expect(readFileSync(POST, 'utf8')).toBe(original);
-    await expectSettled(pane);
-  } finally {
-    await restoreEntry(POST, original);
   }
 });
