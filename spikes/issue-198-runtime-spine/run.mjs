@@ -348,7 +348,10 @@ async function startProxy(upstreamPort, retainedPath) {
     await captureCleanup(cleanupErrors, 'post-start proxy cleanup', () =>
       closeHttpServer(resource.server, resource.upgradedSockets),
     );
-    if (process.env.ASTROIX_RUNTIME_SPINE_FORCE_FAILURE === 'proxy-cleanup-report') {
+    if (
+      cleanupErrors.length === 0 &&
+      process.env.ASTROIX_RUNTIME_SPINE_FORCE_FAILURE === 'proxy-cleanup-report'
+    ) {
       cleanupErrors.push(
         new AggregateError(
           [
@@ -422,6 +425,14 @@ function targetRecord(payload) {
   return record;
 }
 
+function matchedNodeLabels(locator) {
+  return locator.evaluateAll((nodes) =>
+    nodes.map(
+      (node) => `${node.tagName}.${node.classList.contains('hero-title') ? 'hero-title' : ''}`,
+    ),
+  );
+}
+
 async function cssomRule(page, selectorFragment = '.hero-title') {
   return page.evaluate((fragment) => {
     for (const sheet of document.styleSheets) {
@@ -433,7 +444,7 @@ async function cssomRule(page, selectorFragment = '.hero-title') {
   }, selectorFragment);
 }
 
-async function exerciseBrowser(proxyOrigin, sourceFile) {
+async function exerciseBrowser(proxyOrigin, sourceFile, beforeEffectiveSelector) {
   const browser = await chromium.launch({ headless: true });
   let original;
   let sourceEdited = false;
@@ -475,6 +486,7 @@ async function exerciseBrowser(proxyOrigin, sourceFile) {
     console.log('RUN browser-hmr');
     await frame.goto(`${proxyOrigin}/lab/__astroix/canvas/home/`, { waitUntil: 'commit' });
     await frame.waitForSelector('.hero-title');
+    const beforeMatches = await matchedNodeLabels(frame.locator(beforeEffectiveSelector));
     const loadsBeforeEdit = await frame.evaluate(() => window.__runtimeSpineLoads);
     original = readFileSync(sourceFile, 'utf8');
     writeFileSync(sourceFile, original.replace(ORIGINAL_COLOR, EDITED_COLOR));
@@ -489,7 +501,7 @@ async function exerciseBrowser(proxyOrigin, sourceFile) {
       await frame.evaluate(() => window.__runtimeSpineLoads),
       loadsBeforeEdit,
     );
-    return { page, frame, browser, original };
+    return { page, frame, browser, original, beforeMatches };
   } catch (workError) {
     const cleanupErrors = [];
     if (sourceEdited) {
@@ -592,7 +604,14 @@ async function readOracle(origin, project) {
   return { records, renderedCss };
 }
 
-async function exerciseOracle(parent, sourceImportUrl, expectedBefore, expectedAfter) {
+async function exerciseOracle(
+  parent,
+  sourceImportUrl,
+  expectedBefore,
+  expectedAfter,
+  outsideMatchesBefore,
+  outsideMatchesAfter,
+) {
   const project = copyProject(parent, 'reference');
   const referenceConfig = join(project, 'astro.reference.config.mjs');
   writeFileSync(
@@ -615,13 +634,7 @@ async function exerciseOracle(parent, sourceImportUrl, expectedBefore, expectedA
     await page.waitForSelector('.hero-title');
     const before = await readOracle(server.origin, project);
     const beforeRecord = targetRecord(before);
-    const beforeMatches = await page
-      .locator(beforeRecord.effectiveSelector)
-      .evaluateAll((nodes) =>
-        nodes.map(
-          (node) => `${node.tagName}.${node.classList.contains('hero-title') ? 'hero-title' : ''}`,
-        ),
-      );
+    const beforeMatches = await matchedNodeLabels(page.locator(beforeRecord.effectiveSelector));
     const beforeCssom = await cssomRule(page);
 
     writeFileSync(sourceFile, original.replace(ORIGINAL_COLOR, EDITED_COLOR));
@@ -644,13 +657,7 @@ async function exerciseOracle(parent, sourceImportUrl, expectedBefore, expectedA
       'current integration browser CSS invalidation',
     );
     const afterRecord = targetRecord(after);
-    const afterMatches = await page
-      .locator(afterRecord.effectiveSelector)
-      .evaluateAll((nodes) =>
-        nodes.map(
-          (node) => `${node.tagName}.${node.classList.contains('hero-title') ? 'hero-title' : ''}`,
-        ),
-      );
+    const afterMatches = await matchedNodeLabels(page.locator(afterRecord.effectiveSelector));
     equal(
       'outside and current integration effective selector before edit',
       targetRecord(expectedBefore).effectiveSelector,
@@ -680,6 +687,16 @@ async function exerciseOracle(parent, sourceImportUrl, expectedBefore, expectedA
       'outside and current integration compiled output bytes after edit',
       expectedAfter.compiledCss,
       after.renderedCss,
+    );
+    equal(
+      'outside and current integration matched nodes before edit',
+      outsideMatchesBefore,
+      beforeMatches,
+    );
+    equal(
+      'outside and current integration matched nodes after edit',
+      outsideMatchesAfter,
+      afterMatches,
     );
     equal('current integration selector matches the expected DOM node before edit', beforeMatches, [
       'H1.hero-title',
@@ -1054,12 +1071,23 @@ async function main() {
     console.log('RUN outside-payload-before');
     const sourceFile = join(plain, 'site/pages/home.astro');
     const beforeOutside = await outsidePayload(programmatic.origin, plain);
+    const beforeOutsideRecord = targetRecord(beforeOutside);
     check(
       'outside pipeline reproduced a :where scoped selector',
-      targetRecord(beforeOutside).effectiveSelector?.includes(':where('),
+      beforeOutsideRecord.effectiveSelector?.includes(':where('),
     );
 
-    browserExercise = await exerciseBrowser(proxy.origin, sourceFile);
+    browserExercise = await exerciseBrowser(
+      proxy.origin,
+      sourceFile,
+      beforeOutsideRecord.effectiveSelector,
+    );
+    const outsideMatchesBefore = browserExercise.beforeMatches;
+    equal(
+      'outside effective selector matches the concrete canvas node before edit',
+      outsideMatchesBefore,
+      ['H1.hero-title'],
+    );
     console.log('RUN outside-payload-after');
     await fetch(`${programmatic.origin}/lab/home/`);
     const afterOutside = await waitFor(
@@ -1067,16 +1095,14 @@ async function main() {
       (payload) => targetRecord(payload).sourceBytes.includes(EDITED_COLOR),
       'outside payload invalidation after source edit',
     );
-    const outsideMatched = await browserExercise.frame
-      .locator(targetRecord(afterOutside).effectiveSelector)
-      .evaluateAll((nodes) =>
-        nodes.map(
-          (node) => `${node.tagName}.${node.classList.contains('hero-title') ? 'hero-title' : ''}`,
-        ),
-      );
-    equal('outside effective selector matches the concrete canvas node', outsideMatched, [
-      'H1.hero-title',
-    ]);
+    const outsideMatchesAfter = await matchedNodeLabels(
+      browserExercise.frame.locator(targetRecord(afterOutside).effectiveSelector),
+    );
+    equal(
+      'outside effective selector matches the concrete canvas node after edit',
+      outsideMatchesAfter,
+      ['H1.hero-title'],
+    );
     check(
       'outside compiled CSS bytes changed after invalidation',
       beforeOutside.compiledCss !== afterOutside.compiledCss,
@@ -1114,6 +1140,8 @@ async function main() {
       pathToFileURL(join(ROOT, 'src/index.ts')).href,
       beforeOutside,
       afterOutside,
+      outsideMatchesBefore,
+      outsideMatchesAfter,
     );
     console.log('RUN managed-foreground-metrics');
     await exerciseManagedForeground(temp);
