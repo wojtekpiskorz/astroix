@@ -1,0 +1,20 @@
+---
+import { subtitle } from '@fixture/message';
+---
+
+<main>
+  <h1 class="hero-title">Runtime spine</h1>
+  <p data-alias>{subtitle}</p>
+  <a href="/lab/articles/first/">Read first article</a>
+</main>
+
+<style>
+  .hero-title {
+    color: rgb(10, 20, 30);
+  }
+</style>
+
+<script is:inline>
+  window.__runtimeSpineLoads = Number(sessionStorage.getItem('runtime-spine-loads') ?? 0) + 1;
+  sessionStorage.setItem('runtime-spine-loads', String(window.__runtimeSpineLoads));
+</script>
