@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, type Locator, type Page, test } from '@playwright/test';
-import type { CmView } from './entry-pane';
+import { type CmView, openEntry } from './entry-pane';
 import { restoreEntry } from './entry-restore';
 
 // Since #74 every doc edit persists through the auto-write loop — the
@@ -30,14 +30,19 @@ test.afterEach(async () => {
 
 // evaluate callbacks serialize alone — the view extraction inlines in each
 // (the editor.spec.ts pattern); outer-scope helpers don't carry over
+
+// Houses the chrome-boot gate inside entry-pane's openEntry that
+// openBodyEditor below rides (105 s envelope) — file-level literal, no
+// test.slow() (its annotation silently triples declared timeouts).
+test.setTimeout(150_000);
+
 async function openBodyEditor(page: Page): Promise<Locator> {
-  await page.goto('/');
-  await page.getByRole('tab', { name: 'Content' }).click();
-  // the pane is selection-driven since #71 (at `/` route resolution is
-  // silent) — open the payload-order entry the pane used to pick itself
-  await expect(page.locator('[data-astroix-entries="ready"]')).toBeVisible({ timeout: 10_000 });
-  await page.locator('[data-astroix-entry="2024/post"]').click();
-  const editor = page.locator('[data-astroix-body-editor="view"]');
+  // the gated open from entry-pane plus this spec's subject — the pane-wait
+  // copy it replaced had drifted past the boot gate (round-5 finding,
+  // #158); the pane's idle baseline is the right precondition for typing
+  // through the loop
+  const pane = await openEntry(page, '2024/post');
+  const editor = pane.locator('[data-astroix-body-editor="view"]');
   await expect(editor).toBeVisible();
   return editor;
 }

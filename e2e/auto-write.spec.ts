@@ -21,8 +21,14 @@ import { restoreEntry } from './entry-restore';
 
 test.describe.configure({ mode: 'serial' });
 
-// every test waits out the host's content sync at least once — genuinely slow
-test.slow();
+// Houses the chrome-boot gate inside entry-pane's openEntry, which runs
+// before every test's interactions: its cold-boot envelope (105 s) must
+// stay reachable with its named-error failure (#158 / #129). This file
+// deliberately declares no test.slow(): the slow annotation is applied
+// after any inherited timeout and triples it silently (a 150 s setTimeout
+// would really be 450 s) — the literal setTimeout is the single mechanism,
+// subsuming the 90 s slow() used to buy.
+test.setTimeout(150_000);
 
 const POST = join('e2e', 'fixture', 'src', 'content', 'blog', '2024', 'post.md');
 const SHOWCASE = join('e2e', 'fixture', 'src', 'content', 'gallery', 'showcase.md');
