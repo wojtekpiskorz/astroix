@@ -43,6 +43,19 @@ server squatted 4373 mid-lane; all valid attempts below ran clean-verified).
   window. Valuable as a mechanism demonstration (a frozen loop reproduces
   the family observable exactly), invalid as family evidence. This is why
   the landed sidecar defaults pause sampling off.
+- pristine batch (6 planned, 1 effective) — the first pristine iteration
+  exposed a bug in the then-uncommitted payload guard instead of hunting
+  (the pack lane's prepare rebuilt dist from the edited src, so the guard
+  was live: a `version: 3` partial map crashed vite's sourcemap combiner
+  with "Cannot read properties of undefined (reading 'length')" — fixed to
+  the version-less `{ mappings: '' }` sentinel and re-verified live:
+  2,201,736 B served, no data-URL map, no errors, chrome boots). The
+  remaining iterations were lost to a harness mishap: the io-burst
+  generator's tar/stat children survived their parent's kill and
+  accumulated across iterations, driving the machine to load ~300
+  (spotlight joined in) — iteration 2+ never ran. No further pristine
+  attempts were made; the time-box closed with the elimination chain plus
+  the deterministic mechanism repro as the deliverable.
 - Earlier-lane probe data: the previous (stopped-early) agent's 12
   browser-load loops on :4373 showed implausibly fast 0.4 s "cold boots" —
   consistent with the same port collision answering their loads; treat as
