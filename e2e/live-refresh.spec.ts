@@ -20,14 +20,12 @@ import { SRC_PORT } from './ports';
 test.use({ baseURL: `http://localhost:${SRC_PORT}` });
 test.describe.configure({ mode: 'serial' });
 
-// every test waits out the host's content sync at least once (auto-write
-// precedent)
-test.slow();
-
-// Houses the chrome-boot gate inside entry-pane's openEntry above slow()'s
-// 90 s ceiling — the source lane boots the chrome from sources, the heavier
-// cold transform (#150), so the gate's 105 s envelope must stay reachable
-// with its named-error guarantee (#158 / #129).
+// Houses the chrome-boot gate inside entry-pane's openEntry — the source
+// lane boots the chrome from sources, the heavier cold transform (#150), so
+// the gate's 105 s envelope must stay reachable with its named-error
+// guarantee (#158 / #129). No test.slow() here: the slow annotation triples
+// any inherited timeout silently; the literal setTimeout is the single
+// mechanism, subsuming the 90 s slow() used to buy.
 test.setTimeout(150_000);
 
 const FIXTURE = join('e2e', 'src-fixture');
