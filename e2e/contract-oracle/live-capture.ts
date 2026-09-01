@@ -1,4 +1,5 @@
 import { spawnSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { chromium } from '@playwright/test';
 import {
@@ -64,6 +65,13 @@ export const CORPUS_FILES = {
  * repo root both capture and spec run from), with a trailing newline. The
  * frozen corpus must be bytes `npm run check` accepts unchanged — hand-
  * rolled pretty-printing drifts from the formatter on short arrays.
+ *
+ * Regeneration rule: a Biome (or any formatter) version bump re-churns the
+ * whole corpus as an unrelated diff — regenerate via
+ * `node e2e/contract-oracle/capture.mjs` and expect a whole-corpus diff;
+ * that is the documented trigger, not an accident. The freeze spec compares
+ * frozen bytes against the same pinned formatter, so both sides move
+ * together only when the pin itself moves.
  */
 export function serializeFixture(value: unknown): string {
   const raw = JSON.stringify(value, null, 2);
@@ -76,6 +84,21 @@ export function serializeFixture(value: unknown): string {
     throw new Error(`biome format failed over captured bytes: ${String(result.stderr)}`);
   }
   return result.stdout.endsWith('\n') ? result.stdout : `${result.stdout}\n`;
+}
+
+/**
+ * Whether the chromium executable Playwright resolves is actually installed.
+ * The browserless check job of the no-E2E interval (ADR-0010, #283) has no
+ * `playwright install` — the freeze tests skip on this probe there instead
+ * of dying inside `chromium.launch()`, and auto-unskip once the CI companion
+ * installs the browser (nothing here gates on a bespoke env var: the probe
+ * reads Playwright's own registry path, so PLAYWRIGHT_BROWSERS_PATH and
+ * every other real installation layout are honored). The full-chrome
+ * executable is a faithful proxy for the headless shell `launch()` uses —
+ * both entries carry the same registry revision and install together.
+ */
+export function chromiumExecutableExists(): boolean {
+  return existsSync(chromium.executablePath());
 }
 
 /** The raw-truth reads the corpus pins: the zod-defaults gap and the schema-less passthrough. */

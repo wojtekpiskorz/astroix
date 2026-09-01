@@ -1,8 +1,13 @@
 // Where-strategy oracle prep (#216, lane B1): a second disposable copy of
 // the canonical fixture — same canonical bytes, generated config carrying
 // `scopedStyleStrategy: 'where'` — because the where-compiled form of scoped
-// selectors (`.hero-title:where([data-astro-cid-*])`) is a frozen contract
-// cell (#216 AC-2) the default attribute-strategy oracle cannot produce.
+// selectors (`.hero-title:where(.astro-<hash>)` — the scoped CLASS, carrying
+// the same path-derived hash the attribute strategy's `data-astro-cid-*`
+// form uses) is a frozen contract cell (#216 AC-2) the default
+// attribute-strategy oracle cannot produce. The frozen truth is
+// css-index.where.json, enforced by CID_FORM in the schema and the capture
+// guard in live-capture.ts; on any conflict, trust the corpus and the
+// guards, never a comment — regenerate instead of "correcting" toward prose.
 // Reuses the shared oracle machinery from scripts/oracle.mjs verbatim; the
 // only difference from the main prep is the generated astro.config.mjs and
 // the output dir (gitignored via this folder's .gitignore).

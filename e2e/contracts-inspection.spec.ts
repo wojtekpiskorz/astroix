@@ -15,6 +15,7 @@ import {
   assertNoForbiddenArtifacts,
   CORPUS_FILES,
   captureInspectionCorpus,
+  chromiumExecutableExists,
   serializeFixture,
 } from './contract-oracle/live-capture.ts';
 import { MAIN_PORT, WHERE_PORT, withOracleServer } from './contract-oracle/oracle-server.ts';
@@ -205,6 +206,16 @@ test('the freeze comparison is order- and identity-sensitive (mutation negatives
 test('freeze: the main oracle still produces the frozen inspection corpus byte-for-byte', {
   tag: '@oracle-boot',
 }, async () => {
+  // The browserless check job of the no-E2E interval installs no browsers
+  // (#283): probe Playwright's own executable path and skip (with reason)
+  // rather than die inside chromium.launch(). The CI companion's
+  // `playwright install` is the tracked prerequisite — once it lands, this
+  // guard auto-unskips. The serverless legs of this suite (schema
+  // validation, negatives, mutation sensitivity) keep running everywhere.
+  test.skip(
+    !chromiumExecutableExists(),
+    'chromium not installed — CI browser install is the tracked prerequisite',
+  );
   test.setTimeout(240_000);
   await withOracleServer('main', MAIN_PORT, async (handle) => {
     const corpus = await captureInspectionCorpus({
@@ -231,6 +242,11 @@ test('freeze: the main oracle still produces the frozen inspection corpus byte-f
 test('freeze: the where-strategy oracle still produces the frozen scoped selector form', {
   tag: '@oracle-boot',
 }, async () => {
+  // Same browserless-CI skip-guard as the main freeze leg above.
+  test.skip(
+    !chromiumExecutableExists(),
+    'chromium not installed — CI browser install is the tracked prerequisite',
+  );
   test.setTimeout(240_000);
   await withOracleServer('where', WHERE_PORT, async (handle) => {
     const { cssIndex } = await captureInspectionCorpus({
