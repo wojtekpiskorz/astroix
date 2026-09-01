@@ -34,13 +34,18 @@ jobs:
       - run: npm run check:dist-graph
       # the published manifest/exports must be consumer-clean (needs the build)
       - run: npm run check:publint
-      # plain-fixture build smoke — the only e2e during the no-E2E interval
-      # (serverless: fixture install + build, no browser, no oracle prep)
+      # plain-fixture build smoke + the frozen behavior-contract suite
+      # (B1, #284): the freeze legs boot chromium + disposable oracles.
+      # The suite's skip-guard probes the executable, so this install is
+      # what turns the freeze on in CI (#285).
       - run: npm ci
         working-directory: e2e/fixture
+      - run: npx playwright install --with-deps chromium
       - run: npm run test:e2e
 
   # No-E2E interval (ADR-0010, amended 2026-09-01 — owner ruling on #197):
-  # the legacy-chrome e2e lane is deleted until the web-host slices land.
-  # CI states the interval and never presents it as passing product E2E;
-  # the one serverless plain-fixture build smoke runs in the check job.
+  # no product E2E lane exists until the web-host slices land, and CI never
+  # presents the interval as passing product E2E. What the check job runs
+  # instead is not product E2E: the serverless plain-fixture build smoke and
+  # the frozen behavior-contract suite (B1, #284) — capture evidence over
+  # the retired implementation as oracle, not regression lanes for a product.
