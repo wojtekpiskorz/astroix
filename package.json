@@ -16,7 +16,7 @@
     "css"
   ],
   "engines": {
-    "node": ">=24"
+    "node": ">=22.12"
   },
   "packageManager": "npm@11.6.2",
   "workspaces": [
