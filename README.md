@@ -29,13 +29,13 @@ Certified against exact Astro/Vite pairs (first: `astro@7.2.10` + `vite@8.2.2`, 
 
 ## Development
 
-The repository is mid-migration to npm workspaces + Node 24 (chartered, ADR-0010); until that lane lands, the checkout still runs on bun and still contains the integration-era code as a retirement-bound migration oracle.
+The repository runs on npm workspaces + Node 24 (migrated by charter lane A2, ADR-0010) and still contains the integration-era code as a retirement-bound migration oracle.
 
 ```sh
-bun install                        # also in e2e/fixture/
-bun run check && bun run typecheck # Biome + tsc
-bun run test                       # vitest (unit)
-bun run test:e2e                   # Playwright (integration-era oracle lanes)
+npm install                        # also in e2e/fixture/
+npm run check && npm run typecheck # Biome + tsc
+npm run test                       # vitest (unit)
+npm run test:e2e                   # Playwright (integration-era oracle lanes)
 ```
 
 Target workspace shape: `packages/core`, `packages/protocol`, `packages/runtime`, `packages/app-shell`, `apps/web`, `apps/desktop`, with `e2e/fixture` a plain Astro project. See `docs/stack.md` and `AGENTS.md`.
