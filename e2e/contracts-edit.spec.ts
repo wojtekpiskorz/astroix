@@ -203,14 +203,12 @@ test('freeze: the main oracle still produces the frozen edit corpus byte-for-byt
 }, async () => {
   skipWithoutChromium();
   test.setTimeout(240_000);
-  await withOracleServer('main', MAIN_PORT, async (handle) => {
-    const corpus = await captureEditCorpus({ base: handle.base, root: handle.dir });
-    // an emptied manifest would freeze nothing, greenly
-    expect(EDIT_CORPUS_MANIFEST.length, 'the edit manifest must be non-empty').toBeGreaterThan(0);
-    for (const { file, leg } of EDIT_CORPUS_MANIFEST) {
-      expect(serializeFixture(corpus[leg]), `${file} drifted from the frozen corpus`).toBe(
-        frozenText(file),
-      );
-    }
-  });
+  const corpus = await captureEditCorpus(MAIN_PORT);
+  // an emptied manifest would freeze nothing, greenly
+  expect(EDIT_CORPUS_MANIFEST.length, 'the edit manifest must be non-empty').toBeGreaterThan(0);
+  for (const { file, leg } of EDIT_CORPUS_MANIFEST) {
+    expect(serializeFixture(corpus[leg]), `${file} drifted from the frozen corpus`).toBe(
+      frozenText(file),
+    );
+  }
 });

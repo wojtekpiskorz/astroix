@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
-import { writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { copyFileSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { chromium } from '@playwright/test';
 import {
   type EntryDraft,
@@ -22,6 +22,7 @@ import { EDIT_CONTRACT_VERSION } from '../behavior-contracts/schema/edit-contrac
 import type { CssIndexFixture } from '../behavior-contracts/schema/inspection-contract.ts';
 import { CID_FORM } from '../behavior-contracts/schema/inspection-contract.ts';
 import { getJson, poll } from './live-capture.ts';
+import { withOracleServer } from './oracle-server.ts';
 
 /**
  * The live edit-contract capture (#217, lane B2): drives a booted disposable
@@ -224,7 +225,19 @@ function preservedLines(before: string, after: string): string[] {
 
 // --- the capture: one boot, eight legs, fixed order ---
 
-export async function captureEditCorpus(options: EditCaptureOptions): Promise<EditCorpus> {
+export type EditCorpusPhase1 = {
+  corpus: Omit<EditCorpus, 'cssScopedSplice'>;
+  scopedDraft: {
+    file: string;
+    baseline: CssScopedSpliceFixture['baseline'];
+    indexBefore: CssScopedSpliceFixture['indexBefore'];
+    edit: CssScopedSpliceFixture['edit'];
+    response: CssScopedSpliceFixture['response'];
+    after: CssScopedSpliceFixture['after'];
+  };
+};
+
+async function captureEditCorpusPhase1(options: EditCaptureOptions): Promise<EditCorpusPhase1> {
   const { base, root } = options;
   const browser = await chromium.launch();
   try {
@@ -324,66 +337,6 @@ export async function captureEditCorpus(options: EditCaptureOptions): Promise<Ed
     // positionally-joined but stale compiled selector still carries the cid
     // form while naming the pre-edit selector; only the renamed text proves
     // the module re-served.
-    const styleModuleUrl = `/${INDEX_ASTRO}?astro&type=style&index=${scopedBefore.styleBlockIndex}&lang.css`;
-    // the refetch rides INSIDE the poll loop (idempotent GET): a slow
-    // runner's first transform can outlive a one-shot trigger, so every
-    // iteration re-arms it; the budget is CI-realistic for a full module
-    // re-transform on a 2-core runner (local runs finish in well under 20s)
-    let scopedAfterRecords: Awaited<ReturnType<typeof readIndex>>;
-    try {
-      scopedAfterRecords = await poll(
-        'the renamed scoped selector re-joined with its cid',
-        async () => {
-          // CI/linux truth (diagnosed 2026-09-01): fetching the style module
-          // URL alone never re-transforms it there — vite serves the stale
-          // cached transform forever. Fetching the PAGE drives the module
-          // graph the way a user reload does (the pipeline re-transforms
-          // index.astro and its style module); the style-URL fetch stays as
-          // a second arm. Both are idempotent GETs per 250ms iteration.
-          await Promise.all([fetch(`${base}${styleModuleUrl}`), fetch(`${base}/`)]);
-          return readIndex(base);
-        },
-        (records) =>
-          records.some(
-            (record) =>
-              record.scoped &&
-              record.file === INDEX_ASTRO &&
-              record.selector === RENAMED_SELECTOR &&
-              record.effectiveSelector?.startsWith(RENAMED_SELECTOR) === true &&
-              record.effectiveSelector.includes(CID_FORM.attribute),
-          ),
-        60_000,
-      );
-    } catch (error) {
-      // timeout diagnostics: WHERE is the staleness — static index, module
-      // transform, or the join between them?
-      const moduleBody = await fetch(`${base}${styleModuleUrl}`).then((response) =>
-        response.text(),
-      );
-      const current = await readIndex(base);
-      const scopedNow = current.filter((record) => record.file === INDEX_ASTRO);
-      console.error(
-        `[astroix] style-join poll timed out — module bytes contain RENAMED selector: ${moduleBody.includes(RENAMED_SELECTOR)}; module bytes contain cid form: ${moduleBody.includes(CID_FORM.attribute)}; index.astro records: ${JSON.stringify(
-          scopedNow.map((record) => ({
-            selector: record.selector,
-            effectiveSelector: record.effectiveSelector,
-            scoped: record.scoped,
-          })),
-        )}`,
-      );
-      throw error;
-    }
-    const scopedAfter = scopedAfterRecords.find(
-      (record) =>
-        record.scoped &&
-        record.file === INDEX_ASTRO &&
-        record.selector === RENAMED_SELECTOR &&
-        record.effectiveSelector?.startsWith(RENAMED_SELECTOR) === true,
-    );
-    guard(
-      scopedAfter !== undefined,
-      'the renamed scoped record is joined on the recompiled module',
-    );
     const astroAfter = await readDisk(base, INDEX_ASTRO);
 
     // --- leg 3: css-conflict — a stale expected hash over a raced disk ---
@@ -645,7 +598,20 @@ export async function captureEditCorpus(options: EditCaptureOptions): Promise<Ed
     guard(diskAfter.contents === diskBefore.contents, 'no negative request touched the disk');
 
     await page.close();
-    return {
+    const scopedDraft: EditCorpusPhase1['scopedDraft'] = {
+      file: INDEX_ASTRO,
+      baseline: astroBaseline,
+      indexBefore: scopedBefore,
+      edit: {
+        range: renameRange,
+        replaced: scopedBefore.selector,
+        replacement: RENAMED_SELECTOR,
+        expectedHash: astroBaseline.hash,
+      },
+      response: scopedResponse as CssScopedSpliceFixture['response'],
+      after: astroAfter,
+    };
+    const corpus: Omit<EditCorpus, 'cssScopedSplice'> = {
       cssSplice: envelope('css-splice', {
         file: HOME_CSS,
         baseline: cssBaseline,
@@ -658,20 +624,6 @@ export async function captureEditCorpus(options: EditCaptureOptions): Promise<Ed
         response: spliceResponse as CssSpliceFixture['response'],
         after: cssAfter,
         indexAfter: cssIndexAfter.filter((record) => record.file === HOME_CSS),
-      }),
-      cssScopedSplice: envelope('css-scoped-splice', {
-        file: INDEX_ASTRO,
-        baseline: astroBaseline,
-        indexBefore: scopedBefore,
-        edit: {
-          range: renameRange,
-          replaced: scopedBefore.selector,
-          replacement: RENAMED_SELECTOR,
-          expectedHash: astroBaseline.hash,
-        },
-        response: scopedResponse as CssScopedSpliceFixture['response'],
-        after: astroAfter,
-        indexAfter: scopedAfter,
       }),
       cssConflict: envelope('edit-conflict', {
         surface: 'css-splice',
@@ -737,9 +689,97 @@ export async function captureEditCorpus(options: EditCaptureOptions): Promise<Ed
         cases: negativeCases,
       }),
     };
+    return { corpus, scopedDraft };
   } finally {
     await browser.close();
   }
+}
+
+/**
+ * Boot 2: a fresh project load. The scoped style module compiles from the
+ * WRITTEN disk bytes, so the served join reflects the edit by construction —
+ * the deterministic contract for what a fresh ProjectRun (the replacement's
+ * disposable plane) must serve for these bytes. The live in-place re-join
+ * proved watcher-fragile on linux CI (the module transform never
+ * re-served; diagnosed in #287) and is deliberately NOT the frozen
+ * transition: reload is.
+ */
+async function captureEditCorpusPhase2(
+  phase1: EditCorpusPhase1,
+  base: string,
+): Promise<EditCorpus> {
+  const browser = await chromium.launch();
+  try {
+    const page = await browser.newPage();
+    await page.goto(base, { waitUntil: 'load' });
+    // the style module enters the client graph as the page loads (B1's
+    // seam); the join fills in moments after the load event — poll for it
+    // with the same coherence predicate (renamed source AND renamed+cid
+    // compiled form), loud on timeout
+    const records = await poll(
+      'the renamed scoped record joined on the freshly loaded module',
+      () => readIndex(base),
+      (current) =>
+        current.some(
+          (record) =>
+            record.scoped &&
+            record.file === INDEX_ASTRO &&
+            record.selector === RENAMED_SELECTOR &&
+            record.effectiveSelector?.startsWith(RENAMED_SELECTOR) === true &&
+            record.effectiveSelector.includes(CID_FORM.attribute),
+        ),
+      30_000,
+    );
+    const scopedAfter = records.find(
+      (record) =>
+        record.scoped &&
+        record.file === INDEX_ASTRO &&
+        record.selector === RENAMED_SELECTOR &&
+        record.effectiveSelector?.startsWith(RENAMED_SELECTOR) === true,
+    );
+    guard(
+      scopedAfter !== undefined,
+      'the renamed scoped record is joined on the freshly loaded module',
+    );
+    await page.close();
+    return {
+      ...phase1.corpus,
+      cssScopedSplice: envelope('css-scoped-splice', {
+        file: phase1.scopedDraft.file,
+        baseline: phase1.scopedDraft.baseline,
+        indexBefore: phase1.scopedDraft.indexBefore,
+        edit: phase1.scopedDraft.edit,
+        response: phase1.scopedDraft.response as CssScopedSpliceFixture['response'],
+        after: phase1.scopedDraft.after,
+        indexAfter: scopedAfter,
+      }),
+    };
+  } finally {
+    await browser.close();
+  }
+}
+
+/** The edit corpus over two oracle boots: writes on the first, the scoped
+ * after-join read on a fresh second load. One code path on every platform. */
+export async function captureEditCorpus(port: number): Promise<EditCorpus> {
+  let oracleRoot = '';
+  const phase1 = await withOracleServer('main', port, ({ base, dir }) => {
+    oracleRoot = dir;
+    return captureEditCorpusPhase1({ base, root: dir });
+  });
+  // boot-2 boots the WRITTEN oracle — but phase 1 deliberately left invalid
+  // content on disk (the validation-never-gates proof), and Astro's boot-time
+  // content sync refuses it. Boot 2 reads only the scoped CSS join, so the
+  // content files are restored to canonical bytes first; index.astro keeps
+  // the rename (the state the join must reflect) and home.css keeps its
+  // splice (CSS never gates the boot).
+  const canonical = join(dirname(oracleRoot), 'fixture');
+  for (const file of [POST_MD, HELLO_MD]) {
+    copyFileSync(join(canonical, file), join(oracleRoot, file));
+  }
+  return withOracleServer('main', port, ({ base }) => captureEditCorpusPhase2(phase1, base), {
+    prepare: false, // boot-2 must see boot-1's written bytes — no regeneration
+  });
 }
 
 /** Posts one negative request and freezes its 400 answer verbatim. */

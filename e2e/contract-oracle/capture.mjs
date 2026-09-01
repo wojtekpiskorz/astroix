@@ -41,7 +41,7 @@ const main = await withOracleServer('main', MAIN_PORT, async (handle) => ({
     root: handle.dir,
     strategy: 'attribute',
   }),
-  edit: await captureEditCorpus({ base: handle.base, root: handle.dir }),
+  edit: await captureEditCorpus(MAIN_PORT),
 }));
 const where = await withOracleServer('where', WHERE_PORT, (handle) =>
   captureInspectionCorpus({ base: handle.base, root: handle.dir, strategy: 'where' }),
