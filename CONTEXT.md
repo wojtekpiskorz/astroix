@@ -64,8 +64,8 @@ Rewritten for the Electron parent-app rewrite (lane A1, [#210](https://github.co
 | **index payload** | The join of the static index (edit-truth) with effective selectors from the module graph, served to the app shell for matching. |
 | **splice-writer** | The pure module applying rule edits as text-splices into source files, preserving formatting. |
 | **rule** | One CSS rule from the repo, with its source location. |
-| **nearest home** | Destination heuristic for a NEW rule: the file that styles the closest styled ancestor/sibling. |
-| **overrides file** | Fallback destination (per-route CSS loaded last in the cascade), when no home exists. |
+| **nearest home** | Destination heuristic for a NEW rule: the file that styles the closest styled ancestor/sibling. Deferred beyond the pre-alpha with all new-rule placement ([#203](https://github.com/wojtekpiskorz/astroix/issues/203)). |
+| **overrides file** | Fallback destination (per-route CSS loaded last in the cascade), when no home exists. Deferred beyond the pre-alpha with all override/new-rule placement ([#203](https://github.com/wojtekpiskorz/astroix/issues/203)). |
 | **entry** | A Content Collections item (`.md`/`.mdx` with frontmatter); `entry.data` is parsed frontmatter. |
 | **active entry** | The entry open in the content editor; set manually (list click) or reactively (route resolution from the canvas URL). |
 | **route resolution** | Matching the canvas URL against route patterns and entry ids to find the entry rendered there, and back (entry → canvas); a unique hit — or a plurality whose candidates all resolve to the same entry — selects; other ambiguity/no-match stays silent; a pure core module. |
