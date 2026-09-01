@@ -254,7 +254,7 @@ test('select mode on: hover outline, click selects and highlights', async ({ pag
 
 test('dev-only guarantee: the fixture production build contains no astroix bytes', () => {
   const fixtureDist = join('e2e', 'fixture', 'dist');
-  execSync('bunx astro build', { cwd: 'e2e/fixture', stdio: 'pipe' });
+  execSync('npm run build', { cwd: 'e2e/fixture', stdio: 'pipe' });
 
   const files: string[] = [];
   const collect = (dir: string): void => {
