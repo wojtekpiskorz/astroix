@@ -106,13 +106,16 @@ async function killGroup(pid: number, stderrTail: () => string): Promise<void> {
   kill('SIGKILL');
 }
 
-/** Boot an oracle and run `use` against its base URL — the server never outlives the call. */
+/** Boot an oracle and run `use` against its base URL — the server never outlives the call.
+ * `prepare: false` boots the EXISTING dir as-is (no regeneration) — for
+ * two-phase captures whose boot-2 must see boot-1's written bytes. */
 export async function withOracleServer<T>(
   kind: OracleKind,
   port: number,
   use: (handle: { base: string; dir: string }) => Promise<T>,
+  { prepare = true }: { prepare?: boolean } = {},
 ): Promise<T> {
-  const dir = await prepareOracle(kind);
+  const dir = prepare ? await prepareOracle(kind) : ORACLE_DIRS[kind];
   const base = `http://localhost:${port}`;
   const child = spawn('npm', ['run', 'dev'], {
     cwd: dir,

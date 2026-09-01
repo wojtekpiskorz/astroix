@@ -1,0 +1,117 @@
+{
+  "contractVersion": "1.0.0",
+  "kind": "edit-negatives",
+  "disk": {
+    "file": "src/pages/home.css",
+    "before": {
+      "contents": ".hero {\n  display: grid;\n  gap: 1.5rem;\n  padding: 4rem 2rem;\n  font-family: system-ui, sans-serif;\n}\n\n.hero-title {\n  margin: 0;\n  font-size: 3.5rem;\n  letter-spacing: -0.02em;\n}\n\n/* second place styling the same element in the same file — the multi-range\n   case for the rule list */\n.hero-title {\n  font-weight: 800;\n}\n\n/* badge case: @media rules are surfaced, not evaluated */\n@media (max-width: 640px) {\n  .hero-title {\n    font-size: 2rem;\n  }\n}\n\n.hero-lead {\n  margin: 0;\n  font-size: 1.25rem;\n  color: #475569;\n}\n\n.hero-cta {\n  justify-self: start;\n  padding: 0.5rem 1rem;\n  border-radius: 0.5rem;\n  background: #0f172a;\n  color: #fff;\n  text-decoration: none;\n}\n",
+      "hash": "6a9fafdb3f22c348b9284ddfccbcac5edbe6b2bc9074fa3995ec5f97f706928a"
+    },
+    "after": {
+      "contents": ".hero {\n  display: grid;\n  gap: 1.5rem;\n  padding: 4rem 2rem;\n  font-family: system-ui, sans-serif;\n}\n\n.hero-title {\n  margin: 0;\n  font-size: 3.5rem;\n  letter-spacing: -0.02em;\n}\n\n/* second place styling the same element in the same file — the multi-range\n   case for the rule list */\n.hero-title {\n  font-weight: 800;\n}\n\n/* badge case: @media rules are surfaced, not evaluated */\n@media (max-width: 640px) {\n  .hero-title {\n    font-size: 2rem;\n  }\n}\n\n.hero-lead {\n  margin: 0;\n  font-size: 1.25rem;\n  color: #475569;\n}\n\n.hero-cta {\n  justify-self: start;\n  padding: 0.5rem 1rem;\n  border-radius: 0.5rem;\n  background: #0f172a;\n  color: #fff;\n  text-decoration: none;\n}\n",
+      "hash": "6a9fafdb3f22c348b9284ddfccbcac5edbe6b2bc9074fa3995ec5f97f706928a"
+    }
+  },
+  "cases": [
+    {
+      "surface": "css-splice",
+      "request": {
+        "file": "src/pages/home.css",
+        "range": {
+          "start": 10,
+          "end": 5
+        },
+        "replacement": "x",
+        "expected": "6a9fafdb3f22c348b9284ddfccbcac5edbe6b2bc9074fa3995ec5f97f706928a"
+      },
+      "response": {
+        "status": 400,
+        "body": {
+          "error": "Invalid splice range [10, 5) for content of length 672"
+        }
+      }
+    },
+    {
+      "surface": "css-splice",
+      "request": {
+        "file": "src/pages/home.css",
+        "range": {
+          "start": 0,
+          "end": 1000671
+        },
+        "replacement": "x",
+        "expected": "6a9fafdb3f22c348b9284ddfccbcac5edbe6b2bc9074fa3995ec5f97f706928a"
+      },
+      "response": {
+        "status": 400,
+        "body": {
+          "error": "Invalid splice range [0, 1000671) for content of length 672"
+        }
+      }
+    },
+    {
+      "surface": "css-splice",
+      "request": {
+        "file": "src/pages/home.css",
+        "range": {
+          "start": 0,
+          "end": 1
+        },
+        "expected": "6a9fafdb3f22c348b9284ddfccbcac5edbe6b2bc9074fa3995ec5f97f706928a"
+      },
+      "response": {
+        "status": 400,
+        "body": {
+          "error": "expected { file, range: { start, end }, replacement }"
+        }
+      }
+    },
+    {
+      "surface": "css-splice",
+      "request": {
+        "file": "../outside.css",
+        "range": {
+          "start": 0,
+          "end": 1
+        },
+        "replacement": "x"
+      },
+      "response": {
+        "status": 400,
+        "body": {
+          "error": "file is outside the project root: ../outside.css"
+        }
+      }
+    },
+    {
+      "surface": "css-splice",
+      "request": {
+        "file": "src/pages/nope.css",
+        "range": {
+          "start": 0,
+          "end": 1
+        },
+        "replacement": "x"
+      },
+      "response": {
+        "status": 400,
+        "body": {
+          "error": "file is missing: src/pages/nope.css"
+        }
+      }
+    },
+    {
+      "surface": "content-write",
+      "request": {
+        "file": "src/content/blog/hello-builder.md",
+        "expected": "6a9fafdb3f22c348b9284ddfccbcac5edbe6b2bc9074fa3995ec5f97f706928a"
+      },
+      "response": {
+        "status": 400,
+        "body": {
+          "error": "expected { file, contents }"
+        }
+      }
+    }
+  ]
+}

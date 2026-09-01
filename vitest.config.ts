@@ -49,6 +49,11 @@ export default defineConfig({
       'src/**/*.test.{ts,tsx}',
       'packages/core/src/**/*.test.{ts,tsx}',
       'packages/app-shell/src/**/*.test.{ts,tsx}',
+      // Behavior-contract schema validators (#217, directive from B1's
+      // review): the schemas are pure zod over frozen fixtures — the unit
+      // doctrine's home, no browser needed. The corpus bytes stay owned by
+      // the freeze specs; these tests own the validators.
+      'e2e/behavior-contracts/schema/**/*.test.ts',
     ],
     coverage: {
       // The CRAP coverage term is honest only where per-function unit coverage

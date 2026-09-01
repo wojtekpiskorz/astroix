@@ -1,0 +1,33 @@
+{
+  "contractVersion": "1.0.0",
+  "kind": "content-write",
+  "file": "src/content/blog/2024/post.md",
+  "baseline": {
+    "contents": "---\ntitle: Nested post\ndate: 2024-06-01\ntags: [nested]\n# author comment\nauthor: \"Quoted Name\"\n---\n\nFixture post with a nested-path id (`2024/post`) for route resolution.\n",
+    "hash": "38c289d10171541012e3c02646d301f7d6eb4406af4dc82eab99f20668639fd6"
+  },
+  "draft": {
+    "data": {
+      "title": "Nested post (edited)",
+      "date": "2024-06-01",
+      "tags": ["nested"],
+      "author": "Quoted Name"
+    },
+    "body": "Fixture post with a nested-path id (`2024/post`) for route resolution."
+  },
+  "written": {
+    "contents": "---\ntitle: Nested post (edited)\ndate: 2024-06-01\ntags: [ nested ]\n# author comment\nauthor: \"Quoted Name\"\n---\n\nFixture post with a nested-path id (`2024/post`) for route resolution.\n",
+    "expectedHash": "38c289d10171541012e3c02646d301f7d6eb4406af4dc82eab99f20668639fd6"
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "ok": true
+    }
+  },
+  "after": {
+    "contents": "---\ntitle: Nested post (edited)\ndate: 2024-06-01\ntags: [ nested ]\n# author comment\nauthor: \"Quoted Name\"\n---\n\nFixture post with a nested-path id (`2024/post`) for route resolution.\n",
+    "hash": "78a0ee80eecfcfc2b7830d6520c3085001b2116334e905b5ba3ed93d7ad94f27"
+  },
+  "preserved": ["date: 2024-06-01", "# author comment", "author: \"Quoted Name\""]
+}

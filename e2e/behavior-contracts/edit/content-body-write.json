@@ -1,0 +1,32 @@
+{
+  "contractVersion": "1.0.0",
+  "kind": "content-body-write",
+  "file": "src/content/blog/hello-builder.md",
+  "baseline": {
+    "contents": "---\ntitle: Hello builder\ndate: 2026-08-26\ntags: [meta]\n---\n\nFirst fixture post — flat id.\n",
+    "hash": "d4af6352e344a7ada16cc81378cf7f230c5ccac105de6c238753606a2443f41d"
+  },
+  "draft": {
+    "data": {
+      "title": "Hello builder",
+      "date": "2026-08-26",
+      "tags": ["meta"]
+    },
+    "body": "First fixture post — flat id. Body typed in the builder."
+  },
+  "written": {
+    "contents": "---\ntitle: Hello builder\ndate: 2026-08-26\ntags: [meta]\n---\n\nFirst fixture post — flat id. Body typed in the builder.\n",
+    "expectedHash": "d4af6352e344a7ada16cc81378cf7f230c5ccac105de6c238753606a2443f41d"
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "ok": true
+    }
+  },
+  "after": {
+    "contents": "---\ntitle: Hello builder\ndate: 2026-08-26\ntags: [meta]\n---\n\nFirst fixture post — flat id. Body typed in the builder.\n",
+    "hash": "667a0a07651ea4752882226f716104148871f870b09b71a11fec77c2c95efb27"
+  },
+  "preservedPrefix": "---\ntitle: Hello builder\ndate: 2026-08-26\ntags: [meta]\n---"
+}

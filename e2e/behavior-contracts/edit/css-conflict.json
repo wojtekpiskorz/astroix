@@ -1,0 +1,34 @@
+{
+  "contractVersion": "1.0.0",
+  "kind": "edit-conflict",
+  "surface": "css-splice",
+  "file": "src/pages/home.css",
+  "baseline": {
+    "contents": ".hero {\n  display: grid;\n  gap: 1rem;\n  padding: 4rem 2rem;\n  font-family: system-ui, sans-serif;\n}\n\n.hero-title {\n  margin: 0;\n  font-size: 3.5rem;\n  letter-spacing: -0.02em;\n}\n\n/* second place styling the same element in the same file — the multi-range\n   case for the rule list */\n.hero-title {\n  font-weight: 800;\n}\n\n/* badge case: @media rules are surfaced, not evaluated */\n@media (max-width: 640px) {\n  .hero-title {\n    font-size: 2rem;\n  }\n}\n\n.hero-lead {\n  margin: 0;\n  font-size: 1.25rem;\n  color: #475569;\n}\n\n.hero-cta {\n  justify-self: start;\n  padding: 0.5rem 1rem;\n  border-radius: 0.5rem;\n  background: #0f172a;\n  color: #fff;\n  text-decoration: none;\n}\n",
+    "hash": "ba00d2ae0f23e0175857c8c3f26fcf3aaee1607a4fb4e0be27271133ce0e7b4a"
+  },
+  "interference": {
+    "contents": ".hero {\n  display: grid;\n  gap: 1.5rem;\n  padding: 4rem 2rem;\n  font-family: system-ui, sans-serif;\n}\n\n.hero-title {\n  margin: 0;\n  font-size: 3.5rem;\n  letter-spacing: -0.02em;\n}\n\n/* second place styling the same element in the same file — the multi-range\n   case for the rule list */\n.hero-title {\n  font-weight: 800;\n}\n\n/* badge case: @media rules are surfaced, not evaluated */\n@media (max-width: 640px) {\n  .hero-title {\n    font-size: 2rem;\n  }\n}\n\n.hero-lead {\n  margin: 0;\n  font-size: 1.25rem;\n  color: #475569;\n}\n\n.hero-cta {\n  justify-self: start;\n  padding: 0.5rem 1rem;\n  border-radius: 0.5rem;\n  background: #0f172a;\n  color: #fff;\n  text-decoration: none;\n}\n",
+    "hash": "6a9fafdb3f22c348b9284ddfccbcac5edbe6b2bc9074fa3995ec5f97f706928a"
+  },
+  "attempt": {
+    "range": {
+      "start": 582,
+      "end": 604
+    },
+    "replaced": "border-radius: 0.5rem;",
+    "replacement": "border-radius: 0.25rem;",
+    "expectedHash": "ba00d2ae0f23e0175857c8c3f26fcf3aaee1607a4fb4e0be27271133ce0e7b4a"
+  },
+  "response": {
+    "status": 409,
+    "body": {
+      "error": "file changed on disk",
+      "contents": ".hero {\n  display: grid;\n  gap: 1.5rem;\n  padding: 4rem 2rem;\n  font-family: system-ui, sans-serif;\n}\n\n.hero-title {\n  margin: 0;\n  font-size: 3.5rem;\n  letter-spacing: -0.02em;\n}\n\n/* second place styling the same element in the same file — the multi-range\n   case for the rule list */\n.hero-title {\n  font-weight: 800;\n}\n\n/* badge case: @media rules are surfaced, not evaluated */\n@media (max-width: 640px) {\n  .hero-title {\n    font-size: 2rem;\n  }\n}\n\n.hero-lead {\n  margin: 0;\n  font-size: 1.25rem;\n  color: #475569;\n}\n\n.hero-cta {\n  justify-self: start;\n  padding: 0.5rem 1rem;\n  border-radius: 0.5rem;\n  background: #0f172a;\n  color: #fff;\n  text-decoration: none;\n}\n"
+    }
+  },
+  "retained": {
+    "contents": ".hero {\n  display: grid;\n  gap: 1.5rem;\n  padding: 4rem 2rem;\n  font-family: system-ui, sans-serif;\n}\n\n.hero-title {\n  margin: 0;\n  font-size: 3.5rem;\n  letter-spacing: -0.02em;\n}\n\n/* second place styling the same element in the same file — the multi-range\n   case for the rule list */\n.hero-title {\n  font-weight: 800;\n}\n\n/* badge case: @media rules are surfaced, not evaluated */\n@media (max-width: 640px) {\n  .hero-title {\n    font-size: 2rem;\n  }\n}\n\n.hero-lead {\n  margin: 0;\n  font-size: 1.25rem;\n  color: #475569;\n}\n\n.hero-cta {\n  justify-self: start;\n  padding: 0.5rem 1rem;\n  border-radius: 0.5rem;\n  background: #0f172a;\n  color: #fff;\n  text-decoration: none;\n}\n",
+    "hash": "6a9fafdb3f22c348b9284ddfccbcac5edbe6b2bc9074fa3995ec5f97f706928a"
+  }
+}

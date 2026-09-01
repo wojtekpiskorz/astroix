@@ -45,6 +45,8 @@ import { defineConfig } from 'astro/config';
 export default defineConfig({
   scopedStyleStrategy: 'where',
   integrations: [astroix()],
+  // polling watch — same rationale as ASTROIX_ORACLE_CONFIG (#287)
+  vite: { server: { watch: { usePolling: true, interval: 250 } } },
 });
 `;
 

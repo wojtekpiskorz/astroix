@@ -18,6 +18,7 @@
     "src",
     "packages",
     "e2e/*.spec.ts",
+    "e2e/behavior-contracts/schema/*.test.ts",
     "playwright.config.ts",
     "tsup.config.ts",
     "vite.chrome.config.ts",

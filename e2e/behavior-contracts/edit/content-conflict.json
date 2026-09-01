@@ -1,0 +1,29 @@
+{
+  "contractVersion": "1.0.0",
+  "kind": "edit-conflict",
+  "surface": "content-write",
+  "file": "src/content/blog/hello-builder.md",
+  "baseline": {
+    "contents": "---\ntitle: Hello builder\ndate: 2026-08-26\ntags: [meta]\n---\n\nFirst fixture post — flat id. Body typed in the builder.\n",
+    "hash": "667a0a07651ea4752882226f716104148871f870b09b71a11fec77c2c95efb27"
+  },
+  "interference": {
+    "contents": "---\ntitle: Hello builder (external)\ndate: 2026-08-26\ntags: [meta]\n---\n\nFirst fixture post — flat id. Body typed in the builder.\n",
+    "hash": "328a67bd3cd4d87b49225d88e63ffff83bb51d71a5f9c2c80c90645f67c61a90"
+  },
+  "attempt": {
+    "contents": "---\ntitle: Hello builder\ndate: 2026-08-26\ntags: [meta]\n---\n\nFirst fixture post — flat id. Body typed in the builder. Body typed in the builder.\n",
+    "expectedHash": "667a0a07651ea4752882226f716104148871f870b09b71a11fec77c2c95efb27"
+  },
+  "response": {
+    "status": 409,
+    "body": {
+      "error": "file changed on disk",
+      "contents": "---\ntitle: Hello builder (external)\ndate: 2026-08-26\ntags: [meta]\n---\n\nFirst fixture post — flat id. Body typed in the builder.\n"
+    }
+  },
+  "retained": {
+    "contents": "---\ntitle: Hello builder (external)\ndate: 2026-08-26\ntags: [meta]\n---\n\nFirst fixture post — flat id. Body typed in the builder.\n",
+    "hash": "328a67bd3cd4d87b49225d88e63ffff83bb51d71a5f9c2c80c90645f67c61a90"
+  }
+}

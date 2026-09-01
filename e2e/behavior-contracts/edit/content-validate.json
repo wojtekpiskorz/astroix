@@ -1,0 +1,68 @@
+{
+  "contractVersion": "1.0.0",
+  "kind": "content-validate",
+  "collection": "blog",
+  "valid": {
+    "draft": {
+      "title": "Nested post",
+      "date": "2024-06-01T00:00:00.000Z",
+      "tags": ["nested"],
+      "tone": "bold",
+      "priority": 0,
+      "featured": false
+    },
+    "response": {
+      "ok": true,
+      "issues": []
+    }
+  },
+  "invalid": {
+    "draft": {
+      "title": "ab",
+      "date": "2024-06-01T00:00:00.000Z",
+      "tags": ["ok", 42],
+      "tone": "loud"
+    },
+    "response": {
+      "ok": false,
+      "issues": [
+        {
+          "path": "title",
+          "code": "too_small",
+          "message": "Too small: expected string to have >=3 characters"
+        },
+        {
+          "path": "tags.1",
+          "code": "invalid_type",
+          "message": "Invalid input: expected string, received number"
+        },
+        {
+          "path": "tone",
+          "code": "invalid_value",
+          "message": "Invalid option: expected one of \"bold\"|\"calm\""
+        }
+      ]
+    }
+  },
+  "advisoryWrite": {
+    "file": "src/content/blog/2024/post.md",
+    "baseline": {
+      "contents": "---\ntitle: Nested post (edited)\ndate: 2024-06-01\ntags: [ nested ]\n# author comment\nauthor: \"Quoted Name\"\n---\n\nFixture post with a nested-path id (`2024/post`) for route resolution.\n",
+      "hash": "78a0ee80eecfcfc2b7830d6520c3085001b2116334e905b5ba3ed93d7ad94f27"
+    },
+    "written": {
+      "contents": "---\ntitle: ab\ndate: 2024-06-01\ntags: [ nested ]\n# author comment\nauthor: \"Quoted Name\"\n---\n\nFixture post with a nested-path id (`2024/post`) for route resolution.\n",
+      "expectedHash": "78a0ee80eecfcfc2b7830d6520c3085001b2116334e905b5ba3ed93d7ad94f27"
+    },
+    "response": {
+      "status": 200,
+      "body": {
+        "ok": true
+      }
+    },
+    "after": {
+      "contents": "---\ntitle: ab\ndate: 2024-06-01\ntags: [ nested ]\n# author comment\nauthor: \"Quoted Name\"\n---\n\nFixture post with a nested-path id (`2024/post`) for route resolution.\n",
+      "hash": "b71669711085b038633fe24404aa8a13d67350d2442dc1321a99c1dc0daeaefc"
+    }
+  }
+}
