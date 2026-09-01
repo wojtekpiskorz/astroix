@@ -52,6 +52,10 @@ const SRC_ROOT = join(ROOT, 'src');
 // (packages/core, #212). Future workspace packages join this list in the PR
 // that lands them, together with their coverage-tier decision in crap.ts.
 const RISK_ROOTS = [SRC_ROOT, join(ROOT, 'packages/core')];
+// the same roots as repo-relative path prefixes — isRiskScope derives from
+// these so the scope is stated once (advisory round 2 on #270: a second
+// hand-kept copy silently yields zero risk rows when the two drift)
+const RISK_ROOT_PREFIXES = RISK_ROOTS.map((abs) => `${relative(ROOT, abs)}/`);
 const BASELINE_PATH = join(ROOT, 'crap-baseline.json');
 const COVERAGE_JSON = join(ROOT, 'coverage', 'coverage-final.json');
 
@@ -81,10 +85,10 @@ function mergeBaseSha() {
   throw new Error('no merge-base against origin/main or main — run preflight on a branch off main');
 }
 
-/** Risk scope: product TS/TSX under src/ and packages/core/ — test bodies are the coverage, not the risk. */
+/** Risk scope: product TS/TSX under the risk roots — test bodies are the coverage, not the risk. */
 function isRiskScope(relPath) {
   return (
-    (relPath.startsWith('src/') || relPath.startsWith('packages/core/')) &&
+    RISK_ROOT_PREFIXES.some((prefix) => relPath.startsWith(prefix)) &&
     (relPath.endsWith('.ts') || relPath.endsWith('.tsx')) &&
     !relPath.endsWith('.test.ts') &&
     !relPath.endsWith('.test.tsx') &&
