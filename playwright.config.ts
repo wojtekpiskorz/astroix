@@ -1,74 +1,23 @@
 import { defineConfig, devices } from '@playwright/test';
-import { ORACLE_MAIN, ORACLE_PACK, ORACLE_SRC } from './e2e/oracle.mjs';
-import { MAIN_PORT, PACK_PORT, SRC_PORT } from './e2e/ports';
 
-// The e2e lanes own their ports: main :4314, npm-pack :4313, source-mode
-// :4311 (canonical for CI). Parallel local lanes override the trio via
-// ASTROIX_E2E_PORT / ASTROIX_E2E_PACK_PORT / ASTROIX_E2E_SRC_PORT (#120) so
-// sibling worktrees never share a server. The owner's manual smoke lives on
-// :4312 — structural separation, never shared servers (PR #36 debugged a
-// "broken" suite that was actually playwright adopting the owner's orphaned
-// smoke server with a stale dist).
-//
-// Since #213 every lane boots a disposable oracle copy (#213, ADR-0010):
-// the canonical e2e/fixture is plain Astro (no Astroix import, no
-// dependency), and the integration-era specs run against generated copies
-// (e2e/oracle.mjs) whose config registers astroix() through the staged
-// local links. The prep scripts regenerate each copy per run — cleanup is
-// rm-and-regenerate, never git.
-
+// No-E2E interval (ADR-0010, amended 2026-09-01 by owner ruling on #197):
+// the legacy-chrome regression suite was deleted with the interval's start
+// at the plain-fixture conversion (#213), not at retirement. During the
+// interval the only spec is the serverless plain-fixture build smoke; the
+// B-lane behavior-contract capture suites (over the disposable oracles,
+// e2e/oracle.mjs) and the web-host lanes rebuild product E2E here. Port
+// ownership rules (e2e/ports.ts, #120) survive for the capture suites.
 export default defineConfig({
   testDir: 'e2e',
-  // The whole suite shares one dev server; several specs edit fixture sources
-  // (restoring in finally) and those writes invalidate astro style modules,
-  // which can briefly null the module-graph join other specs read. One
-  // worker, serial files — determinism over wall-clock.
   fullyParallel: false,
   workers: 1,
   forbidOnly: !!process.env.CI,
-  retries: process.env.CI ? 2 : 0,
+  retries: 0,
   reporter: process.env.CI ? 'github' : 'list',
-  use: {
-    baseURL: `http://localhost:${MAIN_PORT}`,
-  },
   projects: [
     {
       name: 'chromium',
       use: { ...devices['Desktop Chrome'] },
-    },
-  ],
-  webServer: [
-    {
-      // main lane: the publish-shaped staging (.astroix-local, #123) feeds a
-      // disposable oracle copy of the canonical plain fixture — the chrome
-      // boots the prebuilt bundle here (source mode lives in its own lane).
-      // The prep owns the fixture install on a cold checkout, hence the
-      // doubled budget.
-      command: `node scripts/prepare-local-link.mjs && cd ${ORACLE_MAIN} && ASTROIX_E2E_PORT=${MAIN_PORT} npm run dev`,
-      url: `http://localhost:${MAIN_PORT}`,
-      // CI parity — no zombie adoption, ever; the boot cost is seconds.
-      reuseExistingServer: false,
-      timeout: 120_000,
-    },
-    {
-      // npm-pack smoke lane (ADR-0001): build + pack the repo, install the
-      // tarball into the pack oracle, boot it. Managed as a webServer so
-      // playwright owns the lifecycle and the generous cold-install timeout.
-      command: `node scripts/prepare-pack-fixture.mjs && cd ${ORACLE_PACK} && ASTROIX_E2E_PACK_PORT=${PACK_PORT} npm run dev`,
-      url: `http://localhost:${PACK_PORT}`,
-      reuseExistingServer: false,
-      timeout: 240_000,
-    },
-    {
-      // source-mode lane (ADR-0001, #150): the src oracle links the src-ful
-      // staging (.astroix-local-src — dist copy + src symlink), so the chrome
-      // boots from this checkout's source with fast-refresh — the HMR promise
-      // of ADR-0001, covered nowhere else since the main lane went
-      // publish-shaped (#123).
-      command: `node scripts/prepare-src-link.mjs && cd ${ORACLE_SRC} && ASTROIX_E2E_SRC_PORT=${SRC_PORT} npm run dev`,
-      url: `http://localhost:${SRC_PORT}`,
-      reuseExistingServer: false,
-      timeout: 120_000,
     },
   ],
 });

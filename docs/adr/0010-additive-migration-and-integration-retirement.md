@@ -38,7 +38,7 @@ Deployment-oriented: `packages/core` (pure editing-domain behavior), `packages/p
 ### Gate meanings
 
 - **Retirement gate**: deletion is permitted only after reusable behavior and UI value have moved, the canonical fixture is plain, quality gates cover the new paths, and all remaining tests are non-empty. The gate deletes the integration runtime, injected chrome, the remaining old client, the delivery lanes (including ADR-0001's three e2e lanes), staging scripts, npm artifact checks, Changesets, publishing workflows, and old release-loop instructions; the root becomes private.
-- **No-E2E interval**: between retirement and the first web-host slice there is explicitly no product E2E lane; CI states that and never presents the interval as a passing E2E.
+- **No-E2E interval**: there is explicitly no product E2E lane; CI states that and never presents the interval as a passing E2E. *Amended 2026-09-01 (owner ruling on [#197](https://github.com/wojtekpiskorz/astroix/issues/197)): the interval starts at the plain-fixture conversion (#213), not at retirement — the legacy-chrome regression suite was deleted then. The capture substrate survives it: the plain canonical fixture, the disposable-oracle machinery, Playwright, and one serverless plain-fixture build smoke. The interval ends when the first web-host slice (#240) brings product E2E back.*
 - **Web checkpoint**: the complete replacement is proved against the extracted behavior contracts (behavior contracts, security negatives, zero injection, repeated switching, deterministic cleanup).
 - **Pre-alpha qualification gate**: the packaged Electron host — Service Worker bypass, native lifecycle, security controls, cleanup — plus the final manual smoke (ADR-0008; `docs/manual-smoke.md`).
 
