@@ -43,7 +43,13 @@ if (!existsSync(CORE_SRC) || coreModules.length === 0 || untested.length > 0) {
 export default defineConfig({
   test: {
     environment: 'happy-dom',
-    include: ['src/**/*.test.{ts,tsx}', 'packages/core/src/**/*.test.{ts,tsx}'],
+    // packages/app-shell tests run here but stay OUT of coverage.include —
+    // the UI foundation is a CC-only watchlist tier (metric honesty, #218)
+    include: [
+      'src/**/*.test.{ts,tsx}',
+      'packages/core/src/**/*.test.{ts,tsx}',
+      'packages/app-shell/src/**/*.test.{ts,tsx}',
+    ],
     coverage: {
       // The CRAP coverage term is honest only where per-function unit coverage
       // is real: the pure editing modules (packages/core since #212, plus the

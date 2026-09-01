@@ -1,13 +1,4 @@
-import { cn } from '#lib/utils.ts';
-
-function Skeleton({ className, ...props }: React.ComponentProps<'div'>) {
-  return (
-    <div
-      data-slot="skeleton"
-      className={cn('animate-pulse rounded-md bg-muted', className)}
-      {...props}
-    />
-  );
-}
-
-export { Skeleton };
+// Compatibility re-export (#218, ADR-0010): the generated primitive moved to
+// packages/app-shell; the integration chrome keeps importing this path (via
+// the #components/* alias) until the retirement gate deletes it.
+export * from '../../../../packages/app-shell/src/components/ui/skeleton';

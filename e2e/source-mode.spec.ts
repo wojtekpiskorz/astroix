@@ -79,7 +79,9 @@ test('chrome css hot-swaps in both adoption contexts without a canvas reload', a
     win.__astroixCanvasLoadedAt = performance.now();
   });
 
-  const cssPath = join('src', 'client', 'chrome.css');
+  // the theme entry moved to packages/app-shell (#218); the hot-swap writes
+  // target it there — styles.ts accepts the same module path
+  const cssPath = join('packages', 'app-shell', 'src', 'chrome.css');
   const original = readFileSync(cssPath, 'utf8');
   const strong = page.locator('[data-astroix-header] strong');
   try {

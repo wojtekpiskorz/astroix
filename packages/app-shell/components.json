@@ -5,7 +5,7 @@
   "tsx": true,
   "tailwind": {
     "config": "",
-    "css": "src/client/chrome.css",
+    "css": "./src/chrome.css",
     "baseColor": "neutral",
     "cssVariables": true,
     "prefix": ""

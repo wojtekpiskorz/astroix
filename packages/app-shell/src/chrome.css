@@ -1,12 +1,17 @@
 /*
  * T1 zero-build delivery (issue #2), load-bearing for the shadow DOM chrome:
- * `source(none)` disables Tailwind's auto source detection and `@source "./"`
- * re-scopes it to the chrome's own sources (the chrome never scans the host
- * project or node_modules). The compiled sheet is adopted on BOTH the document
- * and the shadow root through one constructed stylesheet (styles.ts).
+ * `source(none)` disables Tailwind's auto source detection and the explicit
+ * `@source` lines re-scope it to known sources (the sheet never scans the
+ * host project or node_modules). `./` is the foundation package itself
+ * (#218); the second line reaches the integration chrome that still
+ * consumes this theme through styles.ts — it dies at the retirement gate
+ * (ADR-0010), leaving `./` (plus what the Electron app-shell renderer adds)
+ * as the sources. The compiled sheet is adopted on BOTH the document and
+ * the shadow root through one constructed stylesheet (styles.ts).
  */
 @import "tailwindcss" source(none);
 @source "./";
+@source "../../../src/client/";
 
 /*
  * shadcn foundation, style base-nova (issue #44): the canonical template
