@@ -62,7 +62,7 @@ writeOracleMeta(oraclePack, {
   },
 });
 
-// 3. A same-named file: tarball does not re-install on its own: npm's
+// 3. A same-named `file:` tarball does not re-install on its own: npm's
 // lockfile pins the recorded resolution and its cache serves the old
 // extraction — drop both the installed package and the lock so the fresh
 // artifact always lands; both are no-ops on a clean CI checkout.
