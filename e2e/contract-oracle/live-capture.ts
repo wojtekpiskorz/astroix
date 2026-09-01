@@ -167,7 +167,8 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function poll<T>(
+/** Poll until a read satisfies `ready` — the deterministic settlement every capture leg settles through. */
+export async function poll<T>(
   description: string,
   read: () => Promise<T>,
   ready: (value: T) => boolean,
@@ -181,7 +182,7 @@ async function poll<T>(
   }
 }
 
-async function getJson<T>(baseUrl: string, path: string): Promise<T> {
+export async function getJson<T>(baseUrl: string, path: string): Promise<T> {
   const response = await fetch(`${baseUrl}${path}`);
   if (!response.ok) throw new Error(`GET ${path} answered HTTP ${response.status}`);
   return (await response.json()) as T;

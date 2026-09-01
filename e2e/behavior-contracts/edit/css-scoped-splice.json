@@ -1,0 +1,54 @@
+{
+  "contractVersion": "1.0.0",
+  "kind": "css-scoped-splice",
+  "file": "src/pages/index.astro",
+  "baseline": {
+    "contents": "---\nimport { getEntry } from 'astro:content';\nimport './home.css';\n\nconst home = await getEntry('homepage', 'index');\nconst { title, lead, cta } = home!.data;\n---\n\n<section class=\"hero\">\n  <h1 class=\"hero-title\">{title}</h1>\n  <p class=\"hero-lead\">{lead}</p>\n  {\n    cta && (\n      <a class=\"hero-cta\" href={cta.href}>\n        {cta.label}\n      </a>\n    )\n  }\n</section>\n\n<style>\n  /* scoped demo target: emits .hero-title[data-astro-cid-*] under the default\n     `attribute` scopedStyleStrategy — the selector-engine case (T2) */\n  .hero-title {\n    color: #1e293b;\n  }\n</style>\n",
+    "hash": "ba7bc580bdd58bb9a45630993d95f6dce8596d2dd97d1a9e51ca0ab043cd92f0"
+  },
+  "indexBefore": {
+    "selector": ".hero-title",
+    "file": "src/pages/index.astro",
+    "range": {
+      "start": 533,
+      "end": 570
+    },
+    "media": null,
+    "scoped": true,
+    "styleBlockIndex": 0,
+    "line": 24,
+    "effectiveSelector": ".hero-title[data-astro-cid-lcdefpme]"
+  },
+  "edit": {
+    "range": {
+      "start": 533,
+      "end": 544
+    },
+    "replaced": ".hero-title",
+    "replacement": ".hero-headline",
+    "expectedHash": "ba7bc580bdd58bb9a45630993d95f6dce8596d2dd97d1a9e51ca0ab043cd92f0"
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "ok": true
+    }
+  },
+  "after": {
+    "contents": "---\nimport { getEntry } from 'astro:content';\nimport './home.css';\n\nconst home = await getEntry('homepage', 'index');\nconst { title, lead, cta } = home!.data;\n---\n\n<section class=\"hero\">\n  <h1 class=\"hero-title\">{title}</h1>\n  <p class=\"hero-lead\">{lead}</p>\n  {\n    cta && (\n      <a class=\"hero-cta\" href={cta.href}>\n        {cta.label}\n      </a>\n    )\n  }\n</section>\n\n<style>\n  /* scoped demo target: emits .hero-title[data-astro-cid-*] under the default\n     `attribute` scopedStyleStrategy — the selector-engine case (T2) */\n  .hero-headline {\n    color: #1e293b;\n  }\n</style>\n",
+    "hash": "a96bcd8e8856f7cec9665b2515d549e6a54586842047632446ec603e9aac1057"
+  },
+  "indexAfter": {
+    "selector": ".hero-headline",
+    "file": "src/pages/index.astro",
+    "range": {
+      "start": 533,
+      "end": 573
+    },
+    "media": null,
+    "scoped": true,
+    "styleBlockIndex": 0,
+    "line": 24,
+    "effectiveSelector": ".hero-headline[data-astro-cid-lcdefpme]"
+  }
+}

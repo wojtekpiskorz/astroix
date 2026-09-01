@@ -1,0 +1,108 @@
+{
+  "contractVersion": "1.0.0",
+  "kind": "css-splice",
+  "file": "src/pages/home.css",
+  "baseline": {
+    "contents": ".hero {\n  display: grid;\n  gap: 1rem;\n  padding: 4rem 2rem;\n  font-family: system-ui, sans-serif;\n}\n\n.hero-title {\n  margin: 0;\n  font-size: 3rem;\n  letter-spacing: -0.02em;\n}\n\n/* second place styling the same element in the same file — the multi-range\n   case for the rule list */\n.hero-title {\n  font-weight: 800;\n}\n\n/* badge case: @media rules are surfaced, not evaluated */\n@media (max-width: 640px) {\n  .hero-title {\n    font-size: 2rem;\n  }\n}\n\n.hero-lead {\n  margin: 0;\n  font-size: 1.25rem;\n  color: #475569;\n}\n\n.hero-cta {\n  justify-self: start;\n  padding: 0.5rem 1rem;\n  border-radius: 0.5rem;\n  background: #0f172a;\n  color: #fff;\n  text-decoration: none;\n}\n",
+    "hash": "df19937269462650b4deb9523cce55cb0708353db7a58c43bab76735973827ed"
+  },
+  "edit": {
+    "range": {
+      "start": 130,
+      "end": 146
+    },
+    "replaced": "font-size: 3rem;",
+    "replacement": "font-size: 3.5rem;",
+    "expectedHash": "df19937269462650b4deb9523cce55cb0708353db7a58c43bab76735973827ed"
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "ok": true
+    }
+  },
+  "after": {
+    "contents": ".hero {\n  display: grid;\n  gap: 1rem;\n  padding: 4rem 2rem;\n  font-family: system-ui, sans-serif;\n}\n\n.hero-title {\n  margin: 0;\n  font-size: 3.5rem;\n  letter-spacing: -0.02em;\n}\n\n/* second place styling the same element in the same file — the multi-range\n   case for the rule list */\n.hero-title {\n  font-weight: 800;\n}\n\n/* badge case: @media rules are surfaced, not evaluated */\n@media (max-width: 640px) {\n  .hero-title {\n    font-size: 2rem;\n  }\n}\n\n.hero-lead {\n  margin: 0;\n  font-size: 1.25rem;\n  color: #475569;\n}\n\n.hero-cta {\n  justify-self: start;\n  padding: 0.5rem 1rem;\n  border-radius: 0.5rem;\n  background: #0f172a;\n  color: #fff;\n  text-decoration: none;\n}\n",
+    "hash": "ba00d2ae0f23e0175857c8c3f26fcf3aaee1607a4fb4e0be27271133ce0e7b4a"
+  },
+  "indexAfter": [
+    {
+      "selector": ".hero",
+      "file": "src/pages/home.css",
+      "range": {
+        "start": 0,
+        "end": 99
+      },
+      "media": null,
+      "scoped": false,
+      "styleBlockIndex": null,
+      "line": 1,
+      "effectiveSelector": null
+    },
+    {
+      "selector": ".hero-title",
+      "file": "src/pages/home.css",
+      "range": {
+        "start": 101,
+        "end": 177
+      },
+      "media": null,
+      "scoped": false,
+      "styleBlockIndex": null,
+      "line": 8,
+      "effectiveSelector": null
+    },
+    {
+      "selector": ".hero-title",
+      "file": "src/pages/home.css",
+      "range": {
+        "start": 284,
+        "end": 319
+      },
+      "media": null,
+      "scoped": false,
+      "styleBlockIndex": null,
+      "line": 16,
+      "effectiveSelector": null
+    },
+    {
+      "selector": ".hero-title",
+      "file": "src/pages/home.css",
+      "range": {
+        "start": 410,
+        "end": 448
+      },
+      "media": "(max-width: 640px)",
+      "scoped": false,
+      "styleBlockIndex": null,
+      "line": 22,
+      "effectiveSelector": null
+    },
+    {
+      "selector": ".hero-lead",
+      "file": "src/pages/home.css",
+      "range": {
+        "start": 452,
+        "end": 519
+      },
+      "media": null,
+      "scoped": false,
+      "styleBlockIndex": null,
+      "line": 27,
+      "effectiveSelector": null
+    },
+    {
+      "selector": ".hero-cta",
+      "file": "src/pages/home.css",
+      "range": {
+        "start": 521,
+        "end": 669
+      },
+      "media": null,
+      "scoped": false,
+      "styleBlockIndex": null,
+      "line": 33,
+      "effectiveSelector": null
+    }
+  ]
+}

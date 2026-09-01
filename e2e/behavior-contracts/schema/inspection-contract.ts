@@ -32,9 +32,10 @@ const contractVersion = z.string().regex(/^\d+\.\d+\.\d+$/, 'contractVersion mus
 
 /**
  * A project-relative posix path — the confinement shape every file field
- * carries (AC-4: no absolute paths, no traversal, no scheme).
+ * carries (AC-4: no absolute paths, no traversal, no scheme). Shared with
+ * the edit-contract schema (#217) — one home for the confinement shape.
  */
-const projectRelativeFile = z
+export const projectRelativeFile = z
   .string()
   .min(1)
   .refine(
@@ -49,9 +50,10 @@ const projectRelativeFile = z
 
 /**
  * Character offsets of a rule in its source file, end-exclusive — the
- * splice-writer's edit window. Start must precede end.
+ * splice-writer's edit window. Start must precede end. Shared with the
+ * edit-contract schema (#217) — one home for the splice-window shape.
  */
-const sourceRange = z
+export const sourceRange = z
   .object({ start: z.number().int().nonnegative(), end: z.number().int().nonnegative() })
   .refine((range) => range.start < range.end, { message: 'range.start must precede range.end' });
 
@@ -65,8 +67,12 @@ const pathnameUrl = z
 
 // --- CSS index payload (the module-graph hybrid join) ---
 
-/** One served index-payload record: an edit-truth rule plus its join result. */
-const cssIndexRecord = z.object({
+/**
+ * One served index-payload record: an edit-truth rule plus its join result.
+ * Exported for the edit-contract schema (#217), whose post-edit legs freeze
+ * these records verbatim — the served shape stays defined in one place.
+ */
+export const cssIndexRecord = z.object({
   /** Selector text verbatim from source — source space, no cid synthesis. */
   selector: z.string().min(1),
   file: projectRelativeFile,
