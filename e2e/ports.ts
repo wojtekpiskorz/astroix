@@ -18,3 +18,9 @@
 export const MAIN_PORT = Number(process.env.ASTROIX_E2E_PORT || 4314);
 export const PACK_PORT = Number(process.env.ASTROIX_E2E_PACK_PORT || 4313);
 export const SRC_PORT = Number(process.env.ASTROIX_E2E_SRC_PORT || 4311);
+// The where-strategy inspection-contract oracle (#216, lane B1): the second
+// boot the B1 capture suite drives, so it lives beside the pair above — off
+// the canonical trio and every manual dogfood default alike. Same `||`-not-
+// `??` rule as the trio; consumers are e2e/contract-oracle/oracle-server.ts
+// (re-export) and the where oracle's generated dev script.
+export const WHERE_PORT = Number(process.env.ASTROIX_E2E_WHERE_PORT || 4395);

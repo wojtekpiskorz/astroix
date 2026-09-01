@@ -1,0 +1,98 @@
+{
+  "contractVersion": "1.0.0",
+  "kind": "css-index",
+  "scopedStyleStrategy": "where",
+  "records": [
+    {
+      "selector": ".hero",
+      "file": "src/pages/home.css",
+      "range": {
+        "start": 0,
+        "end": 99
+      },
+      "media": null,
+      "scoped": false,
+      "styleBlockIndex": null,
+      "line": 1,
+      "effectiveSelector": null
+    },
+    {
+      "selector": ".hero-title",
+      "file": "src/pages/home.css",
+      "range": {
+        "start": 101,
+        "end": 175
+      },
+      "media": null,
+      "scoped": false,
+      "styleBlockIndex": null,
+      "line": 8,
+      "effectiveSelector": null
+    },
+    {
+      "selector": ".hero-title",
+      "file": "src/pages/home.css",
+      "range": {
+        "start": 282,
+        "end": 317
+      },
+      "media": null,
+      "scoped": false,
+      "styleBlockIndex": null,
+      "line": 16,
+      "effectiveSelector": null
+    },
+    {
+      "selector": ".hero-title",
+      "file": "src/pages/home.css",
+      "range": {
+        "start": 408,
+        "end": 446
+      },
+      "media": "(max-width: 640px)",
+      "scoped": false,
+      "styleBlockIndex": null,
+      "line": 22,
+      "effectiveSelector": null
+    },
+    {
+      "selector": ".hero-lead",
+      "file": "src/pages/home.css",
+      "range": {
+        "start": 450,
+        "end": 517
+      },
+      "media": null,
+      "scoped": false,
+      "styleBlockIndex": null,
+      "line": 27,
+      "effectiveSelector": null
+    },
+    {
+      "selector": ".hero-cta",
+      "file": "src/pages/home.css",
+      "range": {
+        "start": 519,
+        "end": 667
+      },
+      "media": null,
+      "scoped": false,
+      "styleBlockIndex": null,
+      "line": 33,
+      "effectiveSelector": null
+    },
+    {
+      "selector": ".hero-title",
+      "file": "src/pages/index.astro",
+      "range": {
+        "start": 533,
+        "end": 570
+      },
+      "media": null,
+      "scoped": true,
+      "styleBlockIndex": 0,
+      "line": 24,
+      "effectiveSelector": ".hero-title:where(.astro-lcdefpme)"
+    }
+  ]
+}

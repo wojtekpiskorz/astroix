@@ -1,0 +1,56 @@
+{
+  "contractVersion": "1.0.0",
+  "kind": "routes",
+  "routes": [
+    {
+      "pattern": "/blog/[slug]",
+      "segments": [
+        [
+          {
+            "content": "blog",
+            "dynamic": false,
+            "spread": false
+          }
+        ],
+        [
+          {
+            "content": "slug",
+            "dynamic": true,
+            "spread": false
+          }
+        ]
+      ],
+      "params": ["slug"],
+      "rendering": "prerendered",
+      "renders": ["hello-builder"]
+    },
+    {
+      "pattern": "/blog/[...slug]",
+      "segments": [
+        [
+          {
+            "content": "blog",
+            "dynamic": false,
+            "spread": false
+          }
+        ],
+        [
+          {
+            "content": "...slug",
+            "dynamic": true,
+            "spread": true
+          }
+        ]
+      ],
+      "params": ["...slug"],
+      "rendering": "prerendered",
+      "renders": ["2024/post", "2025/release-notes", "hello-builder"]
+    },
+    {
+      "pattern": "/",
+      "segments": [],
+      "params": [],
+      "rendering": "prerendered"
+    }
+  ]
+}
