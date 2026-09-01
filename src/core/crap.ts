@@ -15,8 +15,9 @@ import type { FunctionComplexity } from './complexity';
  * CC, per crap4clj/PHPUnit) is computed only where per-function coverage is
  * real — the covered core tier (`packages/core` since #212, plus the `src/core`
  * CRAP tooling layer and compatibility shims), covered by unit tests through
- * vitest's istanbul-format JSON. `src/node` and `src/client` land on a CC-only
- * watchlist: their truth is e2e coverage, which stays fog on the map. A
+ * vitest's istanbul-format JSON. `src/node`, `src/client`, and the UI
+ * foundation package `packages/app-shell` (#218 — its truth is e2e coverage,
+ * not per-function unit tests) land on a CC-only watchlist. A
  * watchlist row has `coverage === null` and `crap === null`, and its gate
  * metric is CC.
  *
@@ -115,9 +116,12 @@ function isCoreFile(relPath: string): boolean {
   return relPath.startsWith('src/core/') || relPath.startsWith('packages/core/');
 }
 
-/** The shadcn-generated tier: regenerated per ADR-0002, never hand-edited — visible in reports, never gated (owner ruling 2026-08-28, #62). */
+/** The shadcn-generated tier: regenerated per ADR-0002, never hand-edited — visible in reports, never gated (owner ruling 2026-08-28, #62). The set moved to packages/app-shell (#218); the src/client prefix stays for the compatibility window (one-line re-export shims hold no functions, an accidental regeneration at the legacy path must not start gating). */
 export function isWatchOnlyFile(relPath: string): boolean {
-  return relPath.startsWith('src/client/components/ui/');
+  return (
+    relPath.startsWith('packages/app-shell/src/components/ui/') ||
+    relPath.startsWith('src/client/components/ui/')
+  );
 }
 
 /**

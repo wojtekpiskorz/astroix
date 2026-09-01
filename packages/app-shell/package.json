@@ -1,0 +1,34 @@
+{
+  "name": "@wojciechpiskorz/astroix-app-shell",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Domain-deaf renderer UI foundation — shadcn/Base UI primitives, theme tokens, and generic editor infrastructure extracted from the integration chrome (#218, ADR-0002/ADR-0010)",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=24"
+  },
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "imports": {
+    "#components/*": "./src/components/*",
+    "#hooks/*": "./src/hooks/*",
+    "#lib/*": "./src/lib/*"
+  },
+  "sideEffects": false,
+  "dependencies": {
+    "@base-ui/react": "^1.7.0",
+    "@codemirror/lang-markdown": "^6.5.2",
+    "@codemirror/state": "^6.7.1",
+    "@codemirror/view": "^6.43.9",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "codemirror": "^6.0.2",
+    "lucide-react": "^1.34.0",
+    "tailwind-merge": "^3.6.0"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0"
+  }
+}

@@ -12,7 +12,7 @@
       "!dist",
       "!playwright-report",
       "!test-results",
-      "!src/client/chrome.css"
+      "!packages/app-shell/src/chrome.css"
     ]
   },
   "formatter": {
@@ -29,7 +29,7 @@
   },
   "overrides": [
     {
-      "includes": ["src/client/components/ui/**"],
+      "includes": ["packages/app-shell/src/components/ui/**"],
       "linter": {
         "rules": {
           "suspicious": {

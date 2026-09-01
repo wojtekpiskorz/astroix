@@ -1,18 +1,4 @@
-import type * as React from 'react';
-
-import { cn } from '#lib/utils.ts';
-
-function Label({ className, ...props }: React.ComponentProps<'label'>) {
-  return (
-    <label
-      data-slot="label"
-      className={cn(
-        'flex items-center gap-2 text-sm leading-none font-medium select-none group-data-[disabled=true]:pointer-events-none group-data-[disabled=true]:opacity-50 peer-disabled:cursor-not-allowed peer-disabled:opacity-50',
-        className,
-      )}
-      {...props}
-    />
-  );
-}
-
-export { Label };
+// Compatibility re-export (#218, ADR-0010): the generated primitive moved to
+// packages/app-shell; the integration chrome keeps importing this path (via
+// the #components/* alias) until the retirement gate deletes it.
+export * from '../../../../packages/app-shell/src/components/ui/label';
