@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
 import { type CmView, expectSettled, openEntry } from './entry-pane';
 import { restoreEntry } from './entry-restore';
+import { ORACLE_MAIN } from './oracle.mjs';
 
 // The content auto-write loop (issue #74, spec Impl #9): draft pause →
 // serialize → whole-file write → Astro's own sync reloading the canvas; the
@@ -30,9 +31,9 @@ test.describe.configure({ mode: 'serial' });
 // subsuming the 90 s slow() used to buy.
 test.setTimeout(150_000);
 
-const POST = join('e2e', 'fixture', 'src', 'content', 'blog', '2024', 'post.md');
-const SHOWCASE = join('e2e', 'fixture', 'src', 'content', 'gallery', 'showcase.md');
-const SCRATCH = join('e2e', 'fixture', 'src', 'content', 'notes', 'scratch.md');
+const POST = join(ORACLE_MAIN, 'src', 'content', 'blog', '2024', 'post.md');
+const SHOWCASE = join(ORACLE_MAIN, 'src', 'content', 'gallery', 'showcase.md');
+const SCRATCH = join(ORACLE_MAIN, 'src', 'content', 'notes', 'scratch.md');
 
 test('a body edit writes below the closing delimiter with the frontmatter verbatim', async ({
   page,

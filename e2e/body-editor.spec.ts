@@ -3,11 +3,12 @@ import { join } from 'node:path';
 import { expect, type Locator, type Page, test } from '@playwright/test';
 import { type CmView, openEntry } from './entry-pane';
 import { restoreEntry } from './entry-restore';
+import { ORACLE_MAIN } from './oracle.mjs';
 
 // Since #74 every doc edit persists through the auto-write loop — the
 // editing tests restore the fixture entry so the specs that follow read
 // pristine bytes.
-const POST = join('e2e', 'fixture', 'src', 'content', 'blog', '2024', 'post.md');
+const POST = join(ORACLE_MAIN, 'src', 'content', 'blog', '2024', 'post.md');
 // captured before any test runs: the spec opens on pristine bytes, and the
 // hook below restores them even when an assertion fails mid-edit
 const ORIGINAL_POST = readFileSync(POST, 'utf8');

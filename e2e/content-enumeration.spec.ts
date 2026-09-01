@@ -1,6 +1,7 @@
 import { existsSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
+import { ORACLE_MAIN } from './oracle.mjs';
 
 // #119's invalidation contract, pinned end-to-end: a content change must
 // reach `renders` without a restart. The chain the spec walks: the srcDir
@@ -29,7 +30,7 @@ async function catchAllRenders(page: import('@playwright/test').Page): Promise<s
 test('a content change re-enumerates renders without a restart — add and remove converge', async ({
   page,
 }) => {
-  const entryPath = join('e2e', 'fixture', 'src', 'content', 'blog', 'new-entry.md');
+  const entryPath = join(ORACLE_MAIN, 'src', 'content', 'blog', 'new-entry.md');
   if (existsSync(entryPath)) {
     throw new Error('stale probe entry already on disk — restore it before re-running');
   }
