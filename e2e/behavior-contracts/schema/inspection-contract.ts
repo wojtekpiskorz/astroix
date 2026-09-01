@@ -94,7 +94,7 @@ const cssIndexRecord = z.object({
  * truth, `[data-astro-cid-*]` under the default `attribute` strategy,
  * `:where(...)` only when configured).
  */
-const scopedStyleStrategy = z.enum(['attribute', 'where']);
+export const scopedStyleStrategy = z.enum(['attribute', 'where']);
 
 /**
  * The compiled cid token each strategy's scoped selectors carry, as observed

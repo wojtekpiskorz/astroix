@@ -16,7 +16,10 @@ import type {
   RouteResolutionFixture,
   RoutesFixture,
 } from '../behavior-contracts/schema/inspection-contract.ts';
-import { CONTRACT_VERSION } from '../behavior-contracts/schema/inspection-contract.ts';
+import {
+  CONTRACT_VERSION,
+  type scopedStyleStrategy,
+} from '../behavior-contracts/schema/inspection-contract.ts';
 
 /**
  * The live inspection capture (#216, lane B1): drives a booted disposable
@@ -30,7 +33,8 @@ import { CONTRACT_VERSION } from '../behavior-contracts/schema/inspection-contra
  * comparison is over one pipeline, never two.
  */
 
-export type CaptureStrategy = 'attribute' | 'where';
+// derived from the schema's enum — the single home for the strategy union
+export type CaptureStrategy = (typeof scopedStyleStrategy.options)[number];
 
 export interface CaptureOptions {
   /** The booted oracle's base URL (http://localhost:<port>). */

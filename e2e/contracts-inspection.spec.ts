@@ -222,7 +222,10 @@ test('freeze: the main oracle still produces the frozen inspection corpus byte-f
       root: handle.dir,
       strategy: 'attribute',
     });
-    for (const { file, leg } of CORPUS_MANIFEST.filter((entry) => entry.strategy === 'attribute')) {
+    const attributeLegs = CORPUS_MANIFEST.filter((entry) => entry.strategy === 'attribute');
+    // a strategy whose filter comes back empty would freeze nothing, greenly
+    expect(attributeLegs.length, 'the attribute manifest must be non-empty').toBeGreaterThan(0);
+    for (const { file, leg } of attributeLegs) {
       expect(serializeFixture(corpus[leg]), `${file} drifted from the frozen corpus`).toBe(
         frozenText(file),
       );
@@ -241,7 +244,10 @@ test('freeze: the where-strategy oracle still produces the frozen scoped selecto
       root: handle.dir,
       strategy: 'where',
     });
-    for (const { file, leg } of CORPUS_MANIFEST.filter((entry) => entry.strategy === 'where')) {
+    const whereLegs = CORPUS_MANIFEST.filter((entry) => entry.strategy === 'where');
+    // while the where leg is a single row, a rename could empty this filter
+    expect(whereLegs.length, 'the where manifest must be non-empty').toBeGreaterThan(0);
+    for (const { file, leg } of whereLegs) {
       expect(serializeFixture(corpus[leg]), `${file} drifted from the frozen corpus`).toBe(
         frozenText(file),
       );
