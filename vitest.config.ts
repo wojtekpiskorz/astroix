@@ -10,34 +10,33 @@ const ROOT = dirname(fileURLToPath(import.meta.url));
 // fail, not pass with reduced discovery. The guard runs at config load, so
 // every vitest mode (run, watch, coverage) fails fast when:
 //   - the packages/core/src directory is missing, or
-//   - it holds no test file at all (every test deleted), or
-//   - any inventoried module test file is gone (reduced discovery).
-// The inventory is the explicit record of what moved in #212; a module
-// gaining its first test (collections is types-only today) updates it in the
-// same PR that adds the test. Empty test FILES need no guard here — vitest
-// already fails a matched file that contains no tests.
+//   - a module in packages/core/src has no sibling test file (a deleted
+//     test, a module shipped untested, or the whole test set gone — the
+//     derived invariant covers all three without a hand-maintained list).
+// The invariant is doctrine-consistent, not new doctrine: every pure module
+// in the editing domain is unit-tested over fixtures (AGENTS.md, testing
+// doctrine). Modules without a test file need an explicit exemption here:
+// the barrel and the types-only collections contract, which never had a
+// test on main (#212 inventory note). Empty test FILES need no guard —
+// vitest already fails a matched file that contains no tests.
 const CORE_SRC = join(ROOT, 'packages/core/src');
-const MOVED_CORE_TESTS = [
-  'entry-writer.test.ts',
-  'form-tree.test.ts',
-  'indexer.test.ts',
-  'matcher.test.ts',
-  'route-resolver.test.ts',
-  'splice-writer.test.ts',
-] as const;
+const TEST_EXEMPT_MODULES = new Set(['index.ts', 'collections.ts']);
 
-const coreTests = existsSync(CORE_SRC)
-  ? readdirSync(CORE_SRC).filter((name) => name.endsWith('.test.ts'))
-  : [];
-const missing = MOVED_CORE_TESTS.filter((name) => !coreTests.includes(name));
-if (!existsSync(CORE_SRC) || coreTests.length === 0 || missing.length > 0) {
+const coreFiles = existsSync(CORE_SRC) ? readdirSync(CORE_SRC) : [];
+const coreModules = coreFiles.filter((name) => name.endsWith('.ts') && !name.endsWith('.test.ts'));
+const coreTests = coreFiles.filter((name) => name.endsWith('.test.ts'));
+const untested = coreModules.filter(
+  (name) =>
+    !TEST_EXEMPT_MODULES.has(name) && !coreTests.includes(`${name.replace(/\.ts$/, '')}.test.ts`),
+);
+if (!existsSync(CORE_SRC) || coreModules.length === 0 || untested.length > 0) {
   const detail = !existsSync(CORE_SRC)
     ? 'packages/core/src does not exist'
-    : coreTests.length === 0
-      ? 'no test files found under packages/core/src'
-      : `missing inventoried test files: ${missing.join(', ')}`;
+    : coreModules.length === 0
+      ? 'no modules found under packages/core/src'
+      : `modules without a sibling test file: ${untested.join(', ')}`;
   throw new Error(
-    `vitest config: vacuous packages/core test discovery (${detail}) — discovery must cover the editing-domain tests moved in #212; restore them or update the inventory in vitest.config.ts in the PR that moves them.`,
+    `vitest config: vacuous packages/core test discovery (${detail}) — discovery must cover every editing-domain module moved in #212; restore the tests, or extend the exemption set in vitest.config.ts in the PR that changes the module set`,
   );
 }
 
