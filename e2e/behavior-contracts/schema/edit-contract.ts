@@ -236,7 +236,7 @@ export const cssScopedSpliceFixtureSchema = z
         ctx.addIssue({
           code: 'custom',
           path: [name, 'effectiveSelector'],
-          message: `a joined scoped selector under the attribute strategy must carry ${CID_FORM.attribute}…) — selector identity is not normalizable`,
+          message: `a joined scoped selector under the attribute strategy must carry ${CID_FORM.attribute}… — selector identity is not normalizable`,
         });
       }
     }
@@ -451,13 +451,16 @@ export const contentValidateFixtureSchema = z
         message: 'the advisory proof write lands its posted bytes verbatim',
       });
     }
-    if (write.written.expectedHash !== write.baseline.hash) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['advisoryWrite', 'written', 'expectedHash'],
-        message: 'the advisory proof write hashed the baseline it serialized from',
-      });
-    }
+    // the same real-edit refinement as the other write legs: the proof
+    // write hashed the baseline it serialized from AND changed the bytes
+    refineRealEdit(
+      {
+        baseline: write.baseline,
+        after: write.after,
+        edit: { expectedHash: write.written.expectedHash },
+      },
+      ctx,
+    );
   });
 
 // --- Stale-baseline conflict (the expected-hash guard's rejection) ---
@@ -493,11 +496,15 @@ export const editConflictFixtureSchema = z
   })
   .superRefine((fixture, ctx) => {
     if (fixture.surface === 'css-splice') {
-      if (fixture.attempt.range === undefined || fixture.attempt.replacement === undefined) {
+      if (
+        fixture.attempt.range === undefined ||
+        fixture.attempt.replaced === undefined ||
+        fixture.attempt.replacement === undefined
+      ) {
         ctx.addIssue({
           code: 'custom',
           path: ['attempt'],
-          message: 'a css-splice conflict attempt carries range and replacement',
+          message: 'a css-splice conflict attempt carries range, replaced, and replacement',
         });
       }
     } else if (fixture.attempt.contents === undefined) {

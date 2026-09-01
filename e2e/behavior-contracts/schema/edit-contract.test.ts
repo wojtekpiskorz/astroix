@@ -1,8 +1,13 @@
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import type { CssSpliceFixture, EditConflictFixture } from './edit-contract.ts';
+import type {
+  ContentValidateFixture,
+  CssSpliceFixture,
+  EditConflictFixture,
+} from './edit-contract.ts';
 import { EDIT_CONTRACT_VERSION, editFixtureSchemas } from './edit-contract.ts';
 
 /**
@@ -20,6 +25,41 @@ function frozen(name: string): unknown {
   return JSON.parse(readFileSync(join(EDIT_DIR, name), 'utf8')) as unknown;
 }
 
+function sha256(text: string): string {
+  return createHash('sha256').update(text).digest('hex');
+}
+
+/** One `{ contents, hash }` pair found in a frozen fixture, with its path for the failure text. */
+interface FileBytesPair {
+  path: string;
+  contents: string;
+  hash: string;
+}
+
+/**
+ * Every fileBytes-shaped pair in a fixture — the schema's `fileBytes` is
+ * `{ contents, hash }`, and every hash the corpus freezes must be the
+ * sha256 of the bytes it claims to revise. The walk is structural (no
+ * schema knowledge), so a hand-edited pair anywhere in any fixture fails
+ * here — the browserless check job's only shot at catching it.
+ */
+function collectFileBytes(value: unknown, path: string, found: FileBytesPair[]): void {
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => {
+      collectFileBytes(item, `${path}[${index}]`, found);
+    });
+    return;
+  }
+  if (typeof value !== 'object' || value === null) return;
+  const record = value as Record<string, unknown>;
+  if (typeof record.contents === 'string' && typeof record.hash === 'string') {
+    found.push({ path, contents: record.contents, hash: record.hash });
+  }
+  for (const [key, item] of Object.entries(record)) {
+    collectFileBytes(item, path === '' ? key : `${path}.${key}`, found);
+  }
+}
+
 // the negative-mutation battery here has a Playwright twin over the frozen
 // corpus (e2e/contracts-edit.spec.ts) — new invariants go in BOTH: vitest owns
 // validator truth, the spec owns corpus truth
@@ -35,6 +75,21 @@ describe('the frozen edit corpus validates against the versioned schema', () => 
       expect((frozen(name) as { contractVersion: string }).contractVersion).toBe(
         EDIT_CONTRACT_VERSION,
       );
+    });
+  }
+});
+
+describe('the frozen hash chain is internally consistent', () => {
+  for (const name of Object.keys(editFixtureSchemas)) {
+    it(`${name}: every frozen contents/hash pair hashes true`, () => {
+      const found: FileBytesPair[] = [];
+      collectFileBytes(frozen(name), '', found);
+      // every fixture in the corpus freezes at least one file-bytes pair —
+      // a fixture that lost them all would make this walk vacuously green
+      expect(found.length).toBeGreaterThan(0);
+      for (const pair of found) {
+        expect(sha256(pair.contents), `${name} ${pair.path}`).toBe(pair.hash);
+      }
     });
   }
 });
@@ -78,6 +133,12 @@ describe('the edit schema rejects normalized-away write identity', () => {
     const data = frozen('edit-negatives.json') as { disk: { after: { contents: string } } };
     data.disk.after.contents = `${data.disk.after.contents} `;
     expect(editFixtureSchemas['edit-negatives.json'].safeParse(data).success).toBe(false);
+  });
+
+  it('rejects an advisory proof write that changed no bytes', () => {
+    const data = frozen('content-validate.json') as ContentValidateFixture;
+    data.advisoryWrite.after.contents = data.advisoryWrite.baseline.contents;
+    expect(editFixtureSchemas['content-validate.json'].safeParse(data).success).toBe(false);
   });
 
   it('rejects absolute file paths in the corpus file fields', () => {

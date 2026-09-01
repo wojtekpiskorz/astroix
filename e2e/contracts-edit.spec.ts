@@ -18,7 +18,7 @@ import {
   serializeFixture,
   skipWithoutChromium,
 } from './contract-oracle/live-capture.ts';
-import { MAIN_PORT, withOracleServer } from './contract-oracle/oracle-server.ts';
+import { MAIN_PORT } from './contract-oracle/oracle-server.ts';
 
 /**
  * The edit behavior-contract suite (#217, lane B2): the frozen corpus under

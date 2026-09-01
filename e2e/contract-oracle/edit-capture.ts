@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { copyFileSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import { chromium } from '@playwright/test';
 import {
   type EntryDraft,
@@ -9,6 +9,7 @@ import {
   splitEntryFile,
 } from '../../packages/core/src/entry-writer.ts';
 import { spliceText } from '../../packages/core/src/splice-writer.ts';
+import { canonicalFixture } from '../../scripts/oracle.mjs';
 import type {
   ContentBodyWriteFixture,
   ContentValidateFixture,
@@ -292,19 +293,17 @@ async function captureEditCorpusPhase1(options: EditCaptureOptions): Promise<Edi
           (record) =>
             record.scoped &&
             record.file === INDEX_ASTRO &&
-            record.effectiveSelector !== null &&
-            record.effectiveSelector.includes(CID_FORM.attribute),
+            record.effectiveSelector?.includes(CID_FORM.attribute),
         ),
     );
     const scopedBefore = scopedBeforeRecords.find(
       (record) =>
         record.scoped &&
         record.file === INDEX_ASTRO &&
-        record.effectiveSelector !== null &&
         // coherent join only: the compiled form names the source selector it
         // compiles (the pristine boot serves a fresh module, but the guard
         // keeps a stale positional join out of the corpus by construction)
-        record.effectiveSelector.startsWith(record.selector),
+        record.effectiveSelector?.startsWith(record.selector),
     );
     guard(scopedBefore !== undefined, 'the scoped index.astro record is joined');
     const astroBaseline = await readDisk(base, INDEX_ASTRO);
@@ -521,72 +520,41 @@ async function captureEditCorpusPhase1(options: EditCaptureOptions): Promise<Edi
     // --- leg 8: edit-negatives — the 400 taxonomy, disk proven untouched ---
     const diskBefore = await readDisk(base, HOME_CSS);
     const fileLength = diskBefore.contents.length;
+    // the content-write negative keeps home.css's hash as its `expected`
+    // against hello-builder.md: the 400 fires on the missing-contents shape
+    // before any hash is consulted — frozen behavior, noted in the PR body
     const negativeCases: EditNegativesFixture['cases'] = [
-      {
-        surface: 'css-splice',
-        request: {
-          file: HOME_CSS,
-          range: { start: 10, end: 5 },
-          replacement: 'x',
-          expected: diskBefore.hash,
-        },
-        response: await postNegative(base, '/__astroix/edit', {
-          file: HOME_CSS,
-          range: { start: 10, end: 5 },
-          replacement: 'x',
-          expected: diskBefore.hash,
-        }),
-      },
-      {
-        surface: 'css-splice',
-        request: {
-          file: HOME_CSS,
-          range: { start: 0, end: fileLength + 999_999 },
-          replacement: 'x',
-          expected: diskBefore.hash,
-        },
-        response: await postNegative(base, '/__astroix/edit', {
-          file: HOME_CSS,
-          range: { start: 0, end: fileLength + 999_999 },
-          replacement: 'x',
-          expected: diskBefore.hash,
-        }),
-      },
-      {
-        surface: 'css-splice',
-        request: { file: HOME_CSS, range: { start: 0, end: 1 }, expected: diskBefore.hash },
-        response: await postNegative(base, '/__astroix/edit', {
-          file: HOME_CSS,
-          range: { start: 0, end: 1 },
-          expected: diskBefore.hash,
-        }),
-      },
-      {
-        surface: 'css-splice',
-        request: { file: '../outside.css', range: { start: 0, end: 1 }, replacement: 'x' },
-        response: await postNegative(base, '/__astroix/edit', {
-          file: '../outside.css',
-          range: { start: 0, end: 1 },
-          replacement: 'x',
-        }),
-      },
-      {
-        surface: 'css-splice',
-        request: { file: 'src/pages/nope.css', range: { start: 0, end: 1 }, replacement: 'x' },
-        response: await postNegative(base, '/__astroix/edit', {
-          file: 'src/pages/nope.css',
-          range: { start: 0, end: 1 },
-          replacement: 'x',
-        }),
-      },
-      {
-        surface: 'content-write',
-        request: { file: HELLO_MD, expected: diskBefore.hash },
-        response: await postNegative(base, '/__astroix/content-write', {
-          file: HELLO_MD,
-          expected: diskBefore.hash,
-        }),
-      },
+      await negativeCase(base, 'css-splice', '/__astroix/edit', {
+        file: HOME_CSS,
+        range: { start: 10, end: 5 },
+        replacement: 'x',
+        expected: diskBefore.hash,
+      }),
+      await negativeCase(base, 'css-splice', '/__astroix/edit', {
+        file: HOME_CSS,
+        range: { start: 0, end: fileLength + 999_999 },
+        replacement: 'x',
+        expected: diskBefore.hash,
+      }),
+      await negativeCase(base, 'css-splice', '/__astroix/edit', {
+        file: HOME_CSS,
+        range: { start: 0, end: 1 },
+        expected: diskBefore.hash,
+      }),
+      await negativeCase(base, 'css-splice', '/__astroix/edit', {
+        file: '../outside.css',
+        range: { start: 0, end: 1 },
+        replacement: 'x',
+      }),
+      await negativeCase(base, 'css-splice', '/__astroix/edit', {
+        file: 'src/pages/nope.css',
+        range: { start: 0, end: 1 },
+        replacement: 'x',
+      }),
+      await negativeCase(base, 'content-write', '/__astroix/content-write', {
+        file: HELLO_MD,
+        expected: diskBefore.hash,
+      }),
     ];
     for (const [index, leg] of negativeCases.entries()) {
       guard(
@@ -773,13 +741,28 @@ export async function captureEditCorpus(port: number): Promise<EditCorpus> {
   // content files are restored to canonical bytes first; index.astro keeps
   // the rename (the state the join must reflect) and home.css keeps its
   // splice (CSS never gates the boot).
-  const canonical = join(dirname(oracleRoot), 'fixture');
+  // The canonical fixture dir comes from scripts/oracle.mjs — the one
+  // authority every prep script already reads.
   for (const file of [POST_MD, HELLO_MD]) {
-    copyFileSync(join(canonical, file), join(oracleRoot, file));
+    copyFileSync(join(canonicalFixture, file), join(oracleRoot, file));
   }
   return withOracleServer('main', port, ({ base }) => captureEditCorpusPhase2(phase1, base), {
     prepare: false, // boot-2 must see boot-1's written bytes — no regeneration
   });
+}
+
+/**
+ * One negative leg: posts exactly the request object it freezes, so the
+ * frozen request and the posted body cannot drift apart. `postNegative`
+ * owns the 400-taxonomy guard.
+ */
+async function negativeCase(
+  base: string,
+  surface: EditNegativesFixture['cases'][number]['surface'],
+  path: string,
+  request: EditNegativesFixture['cases'][number]['request'],
+): Promise<EditNegativesFixture['cases'][number]> {
+  return { surface, request, response: await postNegative(base, path, request) };
 }
 
 /** Posts one negative request and freezes its 400 answer verbatim. */

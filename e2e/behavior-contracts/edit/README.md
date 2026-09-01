@@ -45,8 +45,9 @@ the write behavior observed through them is the real endpoint, untouched.
 ## Regeneration
 
 Regenerate with `node e2e/contract-oracle/capture.mjs` from the repo root
-(boots both oracles; needs a chromium install — Playwright's own registry
-path decides; also re-freezes the inspection corpus in the same run).
+(boots the two inspection oracles plus the edit corpus's own two-boot
+pipeline; needs a chromium install — Playwright's own registry path
+decides; also re-freezes the inspection corpus in the same run).
 Legitimate regeneration triggers mirror the inspection corpus's:
 
 - **Write-behavior change** — the legacy oracle or the canonical fixture
