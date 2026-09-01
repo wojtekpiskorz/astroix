@@ -96,7 +96,7 @@ const report = {
     passed: true,
     testCount,
     testFiles,
-    cases: cases.map((name) => ({ name, passed: true })),
+    cases,
   },
   qualification,
   fallbacks: {

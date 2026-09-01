@@ -77,20 +77,43 @@ test('accepts only the exact Node 24.20.0 SQLite contention error shape', () => 
 });
 
 test('the qualification gate rejects any missing or duplicate required case', () => {
-  const completeTap = REQUIRED_QUALIFICATION_CASES.map((name) => `# Subtest: ${name}`).join('\n');
-  assert.deepEqual(assertRequiredCaseSet(completeTap), REQUIRED_QUALIFICATION_CASES);
+  function tapFor(cases, { skipped = false } = {}) {
+    const results = cases.flatMap((name, index) => [
+      `# Subtest: ${name}`,
+      `ok ${index + 1} - ${name}${skipped ? ' # SKIP' : ''}`,
+    ]);
+    return [
+      'TAP version 13',
+      ...results,
+      `1..${cases.length}`,
+      `# tests ${cases.length}`,
+      `# pass ${skipped ? 0 : cases.length}`,
+      '# fail 0',
+      '# cancelled 0',
+      `# skipped ${skipped ? cases.length : 0}`,
+      '# todo 0',
+    ].join('\n');
+  }
 
+  const completeTap = tapFor(REQUIRED_QUALIFICATION_CASES);
+  assert.deepEqual(
+    assertRequiredCaseSet(completeTap),
+    REQUIRED_QUALIFICATION_CASES.map((name) => ({ name, passed: true })),
+  );
+
+  assert.throws(
+    () => assertRequiredCaseSet(tapFor(REQUIRED_QUALIFICATION_CASES.slice(1))),
+    (error) => error?.code === 'ASTROIX_QUALIFICATION_MATRIX_INCOMPLETE',
+  );
   assert.throws(
     () =>
       assertRequiredCaseSet(
-        REQUIRED_QUALIFICATION_CASES.slice(1)
-          .map((name) => `# Subtest: ${name}`)
-          .join('\n'),
+        tapFor([...REQUIRED_QUALIFICATION_CASES, REQUIRED_QUALIFICATION_CASES[0]]),
       ),
     (error) => error?.code === 'ASTROIX_QUALIFICATION_MATRIX_INCOMPLETE',
   );
   assert.throws(
-    () => assertRequiredCaseSet(`${completeTap}\n# Subtest: ${REQUIRED_QUALIFICATION_CASES[0]}`),
+    () => assertRequiredCaseSet(tapFor(REQUIRED_QUALIFICATION_CASES, { skipped: true })),
     (error) => error?.code === 'ASTROIX_QUALIFICATION_MATRIX_INCOMPLETE',
   );
 });

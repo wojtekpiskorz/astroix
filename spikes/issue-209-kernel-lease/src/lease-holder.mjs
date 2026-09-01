@@ -12,10 +12,16 @@ const leases = createKernelLeaseModule({
   onContention(snapshot) {
     sqliteError = snapshot;
     if (config.throwOnContention) throw new Error('proof contention observer failed');
+    if (config.rejectOnContention) {
+      return Promise.reject(new Error('proof contention observer rejected'));
+    }
   },
   onQualified(snapshot) {
     qualification = snapshot;
     if (config.throwOnQualified) throw new Error('proof qualification observer failed');
+    if (config.rejectOnQualified) {
+      return Promise.reject(new Error('proof qualification observer rejected'));
+    }
   },
 });
 

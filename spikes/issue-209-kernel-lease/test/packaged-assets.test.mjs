@@ -1,7 +1,17 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import { chmod, cp, mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
+import {
+  chmod,
+  cp,
+  mkdir,
+  mkdtemp,
+  realpath,
+  rename,
+  rm,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pipeline } from 'node:stream/promises';
@@ -144,5 +154,39 @@ test('an unmanifested runtime file fails the fixed inventory', async () => {
     );
   } finally {
     await rm(fixture.resourcesPath, { recursive: true, force: true });
+  }
+});
+
+test('a bundled Node root symlink cannot escape package resources', async () => {
+  const fixture = await makeResources();
+  const external = await mkdtemp(join(tmpdir(), 'astroix-external-node-'));
+  try {
+    const externalNode = join(external, 'node');
+    await rename(join(fixture.resourcesPath, 'node'), externalNode);
+    await symlink(externalNode, join(fixture.resourcesPath, 'node'), 'dir');
+    await assert.rejects(
+      verifyPackagedAssets({ resourcesPath: fixture.resourcesPath }),
+      (error) => error?.code === 'ASTROIX_BUNDLED_NODE_INTEGRITY_FAILED',
+    );
+  } finally {
+    await rm(fixture.resourcesPath, { recursive: true, force: true });
+    await rm(external, { recursive: true, force: true });
+  }
+});
+
+test('a runtime root symlink cannot escape package resources', async () => {
+  const fixture = await makeResources();
+  const external = await mkdtemp(join(tmpdir(), 'astroix-external-runtime-'));
+  try {
+    const externalRuntime = join(external, 'astroix-runtime');
+    await rename(join(fixture.resourcesPath, 'astroix-runtime'), externalRuntime);
+    await symlink(externalRuntime, join(fixture.resourcesPath, 'astroix-runtime'), 'dir');
+    await assert.rejects(
+      verifyPackagedAssets({ resourcesPath: fixture.resourcesPath }),
+      (error) => error?.code === 'ASTROIX_RUNTIME_INTEGRITY_FAILED',
+    );
+  } finally {
+    await rm(fixture.resourcesPath, { recursive: true, force: true });
+    await rm(external, { recursive: true, force: true });
   }
 });

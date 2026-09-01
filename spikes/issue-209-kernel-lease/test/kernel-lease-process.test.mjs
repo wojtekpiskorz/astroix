@@ -231,6 +231,29 @@ test('instrumentation failures cannot alter lease authority outcomes', () =>
     await shutdown(owner);
   }));
 
+test('asynchronous instrumentation failures cannot terminate lease holders', () =>
+  withPrivateState(async (directory) => {
+    const observed = startHolder(directory, 'registry-writer', {
+      rejectOnQualified: true,
+    });
+    await ready(observed);
+    assert.equal((await acquire(observed)).type, 'acquired');
+    await shutdown(observed);
+
+    const owner = startHolder(directory, 'edit-writer');
+    await ready(owner);
+    assert.equal((await acquire(owner)).type, 'acquired');
+    const contender = startHolder(directory, 'edit-writer', {
+      rejectOnContention: true,
+    });
+    await ready(contender);
+    const contention = await acquire(contender);
+    assert.equal(contention.type, 'denied');
+    assert.equal(contention.error.code, 'ASTROIX_KERNEL_LEASE_UNAVAILABLE');
+    assert.deepEqual(await waitForExit(contender), { code: 73, signal: null });
+    await shutdown(owner);
+  }));
+
 test('different fixed lease names can be held concurrently', () =>
   withPrivateState(async (directory) => {
     const registry = startHolder(directory, 'registry-writer');

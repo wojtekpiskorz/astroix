@@ -28,7 +28,7 @@ function createPublicError(code, message) {
 
 function notifyObserver(observer, snapshot) {
   try {
-    observer(snapshot);
+    void Promise.resolve(observer(snapshot)).catch(() => {});
   } catch {
     // Proof instrumentation never participates in the authority transition.
   }

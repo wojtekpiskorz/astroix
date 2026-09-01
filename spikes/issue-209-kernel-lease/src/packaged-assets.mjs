@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import { readdir, readFile, realpath, stat } from 'node:fs/promises';
+import { lstat, readdir, readFile, realpath, stat } from 'node:fs/promises';
 import { isAbsolute, join, posix, relative, sep } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 
@@ -60,12 +60,14 @@ function validRuntimeFile(file) {
   );
 }
 
-async function readManifest(resourcesPath) {
+function containedBy(root, candidate) {
+  const fromRoot = relative(root, candidate);
+  return fromRoot !== '..' && !fromRoot.startsWith(`..${sep}`) && !isAbsolute(fromRoot);
+}
+
+async function readManifest(runtimeDirectory) {
   try {
-    const raw = await readFile(
-      join(resourcesPath, 'astroix-runtime', 'build-manifest.json'),
-      'utf8',
-    );
+    const raw = await readFile(join(runtimeDirectory, 'build-manifest.json'), 'utf8');
     const manifest = JSON.parse(raw);
     if (
       manifest?.schemaVersion !== 1 ||
@@ -94,8 +96,27 @@ export async function verifyPackagedAssets({ resourcesPath }) {
   if (typeof resourcesPath !== 'string' || resourcesPath.length === 0) {
     throw new TypeError('resourcesPath is required');
   }
-  const manifest = await readManifest(resourcesPath);
-  const runtimeDirectory = join(resourcesPath, 'astroix-runtime');
+  let resourcesRoot;
+  let runtimeDirectory;
+  try {
+    resourcesRoot = await realpath(resourcesPath);
+    const runtimeCandidate = join(resourcesPath, 'astroix-runtime');
+    const runtimeMetadata = await lstat(runtimeCandidate);
+    runtimeDirectory = await realpath(runtimeCandidate);
+    if (
+      runtimeMetadata.isSymbolicLink() ||
+      !runtimeMetadata.isDirectory() ||
+      !containedBy(resourcesRoot, runtimeDirectory)
+    ) {
+      throw new Error('runtime root escaped package resources');
+    }
+  } catch {
+    throw publicError(
+      'ASTROIX_RUNTIME_INTEGRITY_FAILED',
+      'Astroix cannot start because its packaged runtime files failed integrity verification. Reinstall the exact Astroix build.',
+    );
+  }
+  const manifest = await readManifest(runtimeDirectory);
   let actualRuntimeFiles;
   try {
     actualRuntimeFiles = await runtimeFileInventory(runtimeDirectory);
@@ -122,10 +143,17 @@ export async function verifyPackagedAssets({ resourcesPath }) {
     );
   }
 
-  const expectedPath = join(resourcesPath, 'node', 'bin', 'node');
+  const nodeRootCandidate = join(resourcesPath, 'node');
+  const expectedPath = join(nodeRootCandidate, 'bin', 'node');
   let nodePath;
+  let nodeRoot;
+  let nodeRootMetadata;
+  let expectedMetadata;
   let nodeMetadata;
   try {
+    nodeRootMetadata = await lstat(nodeRootCandidate);
+    expectedMetadata = await lstat(expectedPath);
+    nodeRoot = await realpath(nodeRootCandidate);
     nodePath = await realpath(expectedPath);
     nodeMetadata = await stat(nodePath);
   } catch {
@@ -135,9 +163,13 @@ export async function verifyPackagedAssets({ resourcesPath }) {
     );
   }
 
-  const nodeRoot = await realpath(join(resourcesPath, 'node'));
   const fromRoot = relative(nodeRoot, nodePath);
   if (
+    nodeRootMetadata.isSymbolicLink() ||
+    !nodeRootMetadata.isDirectory() ||
+    expectedMetadata.isSymbolicLink() ||
+    !containedBy(resourcesRoot, nodeRoot) ||
+    !containedBy(resourcesRoot, nodePath) ||
     !nodeMetadata.isFile() ||
     (nodeMetadata.mode & 0o111) === 0 ||
     fromRoot === '..' ||
