@@ -1,73 +1,70 @@
 # Astroix — Stack
 
-Pochodzenie: grilling stackowy 2026-08-26. Każda decyzja poparta faktem z researchów agentowych (sierpień 2026) albo bezpośrednim uzasadnieniem produktowym. Premisa: czysty stan, najlepszy stack do TEGO produktu. Zasada nadrzędna od researchu core-reuse: **jeśli core Astro/Vite już to ma, nie piszemy tego** — pełna inwentaryzacja w `docs/core-reuse.md` (m.in.: martwe SSE, martwy prebuild chroma, odczyt contentu przez `runner.import('astro:content')`, żywe CSS route'u z `virtual:astro:dev-css`).
+Technology decisions of record for the Electron parent-app rewrite (lane A1, [#210](https://github.com/wojtekpiskorz/astroix/issues/210), 2026-09-01). Each retained decision keeps its research or product rationale; each replaced decision names its ruling. Governing rulings: runtime/packaging [#207](https://github.com/wojtekpiskorz/astroix/issues/207), migration/toolchain [#190](https://github.com/wojtekpiskorz/astroix/issues/190) + [#200](https://github.com/wojtekpiskorz/astroix/issues/200), runtime topology [#202](https://github.com/wojtekpiskorz/astroix/issues/202), protocol [#204](https://github.com/wojtekpiskorz/astroix/issues/204). Standing rule from the core-reuse research: **if Astro/Vite core already provides it, we do not build it** — inventory by seam class in `docs/core-reuse.md`.
+
+Transitional note: until the isolated npm-migration lane (charter A2) merges, the repository still runs on bun (`package.json` pins `bun@1.3.14`) and still has the integration-era one-package layout. That is a migration state, not a decision; **npm workspaces + Node 24 are the stack of record** from this document on.
 
 ---
 
-## Podsumowanie jednym spojrzeniem
+## Summary
 
-| Warstwa | Wybór |
+| Layer | Choice |
 | --- | --- |
-| PM / runner | **bun** (lokalnie), pinned w `packageManager` |
-| Runtime / CI | **Node 24 LTS**, `engines: >=22.12` |
-| Język / format pakietu | **TypeScript strict, ESM-only**, `moduleResolution: bundler` |
-| Kształt repo | **jeden pakiet** (`astroix`), czysty podział wewn.: core / node / client |
-| Host compat | **`astro ^7` · `vite ^8` · zod 4 only** — nowe projekty, nie legacy |
-| UI chrome | **React 19 + React Compiler 1.0**, `createRoot(shadowRoot)` |
-| Styling | **Tailwind 4 + shadcn/ui na primitives Base UI**, motywy shadcn |
-| Formularze | **TanStack Form** (+ zod) |
-| Data / state chrome | **TanStack Query** (cache, invalidacja po eventach Vite WS `astroix:*`) + **zustand** (UI state) |
-| Transport | **fetch (REST) + custom eventy Vite WS** (`astroix:*`) — patrz core-reuse |
-| Editory | **CodeMirror 6** (markdown, raw CSS) |
-| CSS parsing | **postcss** (czysty CSS) |
+| PM / runner | **npm** (workspaces), never bun/pnpm/yarn — chartered by [#190](https://github.com/wojtekpiskorz/astroix/issues/190), landed by charter lane A2 |
+| Runtime / tooling floor | **Node 24 LTS** for all new repository tooling and runtime packages (bundled stock Node `24.20.0` in the artifact; per-pin lease requalification per [#209](https://github.com/wojtekpiskorz/astroix/issues/209)) |
+| Repo shape | **npm workspaces, deployment-oriented**: `packages/core` · `packages/protocol` · `packages/runtime` · `packages/app-shell` · `apps/web` · `apps/desktop`; `e2e/fixture` a standalone plain Astro project outside the workspaces |
+| Workspace ranges | npm-compatible semver ranges, **never `workspace:*`** ([#200](https://github.com/wojtekpiskorz/astroix/issues/200)) |
+| Desktop host | **Electron 44.1.0**, packaged by exact-pinned **Electron Forge 7.11.2** (Packager + Fuses plugin + ZIP maker) — ADR-0008 |
+| Language / package format | **TypeScript strict, ESM-only**, `moduleResolution: bundler` |
+| Deep runtime seams | `ProjectRegistry` · `SessionSupervisor` · `ProjectRuntime` · `EditAuthority` inside `packages/runtime` — deep modules, not packages ([#200](https://github.com/wojtekpiskorz/astroix/issues/200)) |
+| Kernel leases | stock Node `node:sqlite` `DatabaseSync` (`allowExtension: false`, `BEGIN IMMEDIATE`, lifetime-held) on two fixed files — [#209](https://github.com/wojtekpiskorz/astroix/issues/209) |
+| UI app shell | **React 19 + React Compiler**, `createRoot(shadowRoot)` |
+| Styling | **Tailwind 4 + shadcn/ui on Base UI primitives** (`base-nova`), shadcn themes |
+| Forms | **TanStack Form** (+ zod) |
+| Data / shell state | **TanStack Query** (keys `['astroix', runtimeEpoch, generation, …]`) + **zustand** (UI state) |
+| Transport | **`/__astroix/api/v1/` (fetch, JSON) + same-origin SSE at `/__astroix/events`**; Vite HMR the only transparent WebSocket — protocol v1, [#204](https://github.com/wojtekpiskorz/astroix/issues/204) |
+| Editors | **CodeMirror 6** (markdown, raw CSS) |
+| CSS parsing | **postcss** (plain CSS) |
 | Frontmatter | **`yaml` Document API** (format-preserving) |
-| Unit testy | **vitest + happy-dom** |
-| E2E | **@playwright/test** (CI, źródło prawdy) + **Playwright MCP** (lokalnie) |
+| Unit tests | **vitest + happy-dom** |
+| E2E | **@playwright/test** (CI, source of truth, against the web host) + **Playwright MCP** (locally) |
 | Lint/format | **Biome** |
-| Build artefaktów | node: tsup-class (ESM, peers external) · **chrome: hybryda — prebuilt ESM w paczce, source + HMR z dev-checkoutu (ADR-0001)** |
-| Publikowanie | **GitHub + Actions, changesets od startu**, nazwa `astroix` zajęta wcześnie, dogfood przez `bun link` |
-| Effect | **odrzucony** (uzasadnienie niżej) |
+| Publication | **paused** — npm dormant through the rewrite; pre-alpha delivery is a checksummed unsigned macOS ZIP via GitHub draft releases (ADR-0008); Changesets live only until the retirement lane deletes them (ADR-0010) |
+| Effect | **rejected** (rationale below) |
 
-## Decyzje i uzasadnienia
+## Decisions and rationale
 
-1. **bun jako PM/runner, Node jako engine floor.** Bun nie wycieka do konsumenta (lockfile się nie publikuje); `dist` jest agnostyczne. Ostrożność wobec świeżej bun 1.4 (przepiska na Rusta z 20.08.2026) — pin w `packageManager`, w razie problemów rollback do 1.3. CI na Node 24 LTS, żeby bramki deterministyczne nie zależały od najnowszego runtime'a PM-a. Engine floor `>=22.12` (wymóg Astro 7), nie "najnowszy Node" — engines nie służą do ścigania wersji.
+1. **npm workspaces + Node 24 replace bun + one package.** Ruled by [#190](https://github.com/wojtekpiskorz/astroix/issues/190) (toolchain research) and [#200](https://github.com/wojtekpiskorz/astroix/issues/200) (migration strategy). The integration-era "one package until a second consumer" assumption dies with the public package: the product is a standalone app, so the repo is split along deployment seams from the rewrite on. Bun is not the runner of record; the migration lane converts locks, scripts, hooks, CI, and fixture commands in isolation while the current integration stays green. New tooling and runtime packages require Node 24 LTS. Workspace dependency ranges are npm-compatible semver — `workspace:*` is banned. The retired integration keeps its existing engine metadata only until retirement.
 
-2. **Jeden pakiet.** Core (indeks, splicer — czyste funkcje), node (integration: Vite plugin + middleware + watcher), client (chrome UI). Rozcięcie na workspaces dopiero przy drugim konsumentie (np. CLI). Monorepo od dnia 0 = podatek strukturą.
+2. **Deployment-oriented workspace ownership** ([#200](https://github.com/wojtekpiskorz/astroix/issues/200)): `packages/core` (pure editing-domain behavior), `packages/protocol` (closed wire schemas, `SessionRef`, envelopes, limits, query-key rules), `packages/runtime` (control plane and project plane entry points; `ProjectRegistry`, `SessionSupervisor`, `ProjectRuntime`, `EditAuthority` as deep module seams inside it — none becomes its own package), `packages/app-shell` (renderer UI), `apps/web` (diagnostic and Playwright host), `apps/desktop` (Electron host and packaging). `e2e/fixture` becomes the sole tracked plain Astro project, outside the workspaces; remaining integration-oracle runs use disposable copies. A physical move updates TypeScript, Vitest, coverage, CRAP scope, baseline keys, builds, and CI in the same PR — test counts recorded before and after, and no command may hide a missing workspace with `--if-present`.
 
-3. **Astro 7 only.** Filozofia: narzędzie do nowych projektów i ich maintenance. Zysk: jedna generacja zod (4) do introspekcji, jedno Vite API (8), zero macierzy testowej wstecz. Koszt: świadoma rezygnacja z hostów legacy — zaakceptowana.
+3. **Electron 44.1.0 + Forge 7.11.2, stock Node 24.20.0 bundled** ([#207](https://github.com/wojtekpiskorz/astroix/issues/207), ADR-0008): one macOS `arm64` artifact, minimum macOS 13.5 (the official Node 24 floor). Control-plane and project-plane processes execute with bundled stock Node, never Electron-as-Node (`runAsNode` fuse disabled in release). A dependency that cannot run under the bundled runtime fails before activation with a clear diagnostic and no managed-project mutation — no developer-Node, `nvm`/`fnm`, shell discovery, Rosetta, first-run download, or native-rebuild fallback. Every pin change requires packaged requalification.
 
-4. **React 19 + Compiler.** Werdykt researchu: najniższe ryzyko, najgłębszy ekosystem. Decydujący argument produktowy: content tab to w pełni dynamiczny generator formularzy ze schem zod — React ma najgłębszy ekosystem formowy (TanStack Form + shadcn). Compiler 1.0 stable (od X 2025) usuwa ceremoniał memo/useCallback. Shadow DOM: `createRoot(shadowRoot)` to udokumentowany pattern; eventy delegowane przy korzeniu działają wewnątrz boundary; portale targetujemy do kontenera w shadow root. Bundle ~100–150 kB gzip — irrelewantne dla dev-only. Solid 2.0 odrzucony na faktach (RC framework, pre-1.0 Kobalte, beta solid-query v6). Svelte 5 pozostaje legalnym fallbackiem.
+4. **React 19 + Compiler** (retained): lowest risk, deepest ecosystem. The decisive product argument stays: the Content vertical is a fully dynamic form generator over zod schemas, and React has the deepest form ecosystem (TanStack Form + shadcn). Compiler removes memo ceremony. Shadow DOM via `createRoot(shadowRoot)` remains the documented pattern. Solid 2.0 and Svelte 5 remain rejected on the original facts.
 
-5. **Tailwind 4 + shadcn na Base UI.** StyleX odpada twardym faktem: maintainerzy StyleX odradzają shadow DOM ("inherently incompatible with atomic CSS"); dev-mode injection pisze do `document.head`, publicznego API dla shadow root brak, jedyna droga to nieudokumentowany hack na babel pluginie — a Astroix żyje w dev mode permanentnie. Do tego: pre-1.0, ekosystem "shadcn dla StyleX" w powijkach, agent-fluency 200–300x cieńszy niż TW+shadcn (a agentic-friendly to twarde kryterium). TW4 w shadow DOM — **zweryfikowany mechanizm zero-build** (wayfinder T1, issue #2): `@tailwindcss/vite@4.3.3` (peers `vite ^8`) wstrzyknięty `updateConfig` (guard gdy host już ma własny plugin TW), scope przez własny entry CSS chroma `@import "tailwindcss" source(none); @source "./"` (obowiązkowe — auto-detekcja omija node_modules), import entry z `?inline` i **jedna** constructed stylesheet adoptowana naraz na `document.adoptedStyleSheets` **i** `shadowRoot.adoptedStyleSheets` — dopiero wtedy `@property` działa w shadow tree (samo shadow traci, tailwindcss#15005); `:root`→`:host` rozwiązane upstream (v4 emituje `:root, :host` od beta-9). Dawne „osobny build chromu przez `adoptedStyleSheets`" martwy jako strategia buildu — `adoptedStyleSheets` zostaje jako zero-buildowy krok dostarczania. **Base UI jako warstwa primitives pod shadcn** (oficjalnie wspierana, 1.0 stable XII 2025, 35+ komponentów, wysokie momentum) — trzyma otwarte drzwi do najlepszego fragmentu świata StyleX. Motywy shadcn = szybkie składanie UI.
+5. **Tailwind 4 + shadcn on Base UI** (retained): StyleX stays rejected (maintainer-discouraged in shadow DOM, pre-1.0, thin agent fluency). The verified zero-build shadow-DOM mechanism carries over to the app shell: single constructed stylesheet adopted on both `document` and `shadowRoot` (`@property` requires it), `:root, :host` emitted upstream, entry CSS with `@import "tailwindcss" source(none); @source "./"` (auto-detection would scan `node_modules`).
 
-6. **TanStack wszędzie, gdzie się da** (durable preference właściciela). Form: dynamiczne field-arrays z walidacją zod-first to główna siła TanStack Form. Query: cache + deklaratywna invalidacja po custom eventach Vite WS (`astroix:*`). Router: **nie** — chrome to panel w shadow DOM, nie aplikacja nawigacyjna. zustand na czysto kliencki stan (selekcja, taby, tryby).
+6. **TanStack everywhere it fits** (retained): Form for dynamic zod-first fields; Query for server-derived state with declarative invalidation — now keyed `['astroix', runtimeEpoch, generation, …]` and reset wholesale at session commit; Router still no (the app shell is a panel, not a navigation app). zustand for client-only state (selection, tabs, modes).
 
-7. **fetch + custom eventy Vite WS, nie SSE i nie WebSocket własny.** Cała komunikacja chrome→middleware to request/response (fetch na Vite connect middleware); push watcher→chrome idzie kanałem, który już istnieje: `server.ws.send('astroix:…')` ↔ `import.meta.hot.on('astroix:…')` — działa, bo i chrome (przez `server.transformIndexHtml`) i strony hosta ładują `/@vite/client`; Astro samo shipuje tak `astro:content-changed` i `astro:routes-updated`. Watcher: **`server.watcher` hosta** — jeden subscriber FS w procesie, zero wyścigów z HMR, debounce reindex. Wymog twardy: selekcja elementu przeżywa reindex (re-match po zmianie plików → live update panelu reguł z IDE-zapisu).
+7. **Protocol v1 transport: fetch + SSE, not Vite WS custom events** ([#204](https://github.com/wojtekpiskorz/astroix/issues/204)): the integration rode the host's Vite WebSocket (`server.ws.send('astroix:…')`) — that channel dies with the in-project integration. The app shell talks to the control plane over `/__astroix/api/v1/` request/response and same-origin SSE at `/__astroix/events`; server-to-renderer events are revisioned invalidations and structured diagnostics. Vite HMR remains a separate, transparently proxied WebSocket. Own WebSocket: still rejected — bidirectionality nobody needs.
 
-8. **Vitest + happy-dom (unit), Playwright (prawda), Playwright MCP (interaktywnie).** Research "playwright-for-agents": żadne agentowe narzędzie dużego gracza nie zastępuje `@playwright/test` w CI (LLM w pętli każdego kroku = nondeterminizm). Pattern hybrydowy: CI = klasyczny Playwright; lokalnie = Playwright MCP (ten sam engine, `--caps=testing`) do debugowania i autoryzowania speców przez agenta (agent eksploruje przez MCP → pisze deterministyczny spec → CI odpala).
+8. **vitest + happy-dom (unit), Playwright (truth), Playwright MCP (interactive)** (retained): no agent tool replaces `@playwright/test` in CI. The web host (`apps/web`) is the deterministic full-behavior surface. Electron wiring may use a separately marked instrumented build, never release evidence (ADR-0008).
 
-9. **Biome.** React (brak `.svelte`) odblokowuje Biome: jedno narzędzie, formatter+lint, TS-first, błyskawiczne — co przy workflow agentycznym (iteracje po każdej edycji) jest featą samą w sobie.
+9. **Biome** (retained): one tool for formatter + lint, TS-first, instant — a feature for agentic iteration. No eslint/prettier configs.
 
-10. **Chrome: hybryda prebuilt/source (ADR-0001).** Publikowana paczka shipuje **prebuilt bundel chroma** (pojedynczy ESM: react, Tailwind, CodeMirror w środku) ładowany przez wirtualny moduł — obcy host nigdy nie widzi source'u chroma i nigdy nie rozwiązuje naszego `react` (research T3: source-serving Reacta przez obcy Vite jest niebezpieczny — optymalizator kluczuje po gołym specyfikatorze, host podmienia kopię — i niepraktykowany przez żadne badane narzędzie). Nasz **dev-checkout** (dogfood przez `file:`) serwuje source chroma z wstrzykniętymi `@vitejs/plugin-react` (fast-refresh, `include`-scoped) i `@tailwindcss/vite` (mechanika T1) — kontrolowany host, goły `react` rozwiązuje się do naszego Reacta 19. React/react-dom jako **devDependencies** (bundlowane przy publikacji; konsument nigdy ich nie rozwiązuje). Budowa strony node bez zmian (tsup, ESM, peers external `astro`/`vite`). *(Zmiana 2026-08-26, wayfinder T4 — pierwotnie „chrome z source bez buildu".)*
+10. **Effect: no** (retained rejection): v4 was in RC with the wrong project shape (~90% pure functions and UI); models write excellent plain async/TS and lottery-quality Effect. Small own `Result` in core if needed.
 
-11. **Effect: NIE.** Dwa niezależne powody: (a) v4 w RC (17 modułów "unstable", team: produkcja → v3, a v3 feature-frozen); (b) ważniejsze — kształt projektu jest zły dla Effect: ~90% kodu to czyste funkcje synchroniczne i UI; jedyny kandydat (orkiestracja watch→reindex→serve) to ~10% bazy w skali, gdzie zwykły async wystarcza. Trzeci, zgodny z kryterium agentic-friendly: modele piszą znakomity plain async/TS, idiomatyczny Effect — loteryjnie. Revisit tylko jeśli Astroix urośnie w pipeline-serwer. Typowane błędy w core: mały własny `Result`.
+11. **CodeMirror 6** (markdown + raw CSS), **postcss** (plain CSS), **`yaml` Document API** (format-preserving frontmatter) — all retained, same rationale: modular editing, pure-CSS parsing, comment/order/quoting-preserving serialization consistent with the splice philosophy.
 
-12. **CodeMirror 6** (markdown + raw CSS mode): modularny, framework-agnostic, bez webworkerowego ciężaru Monaco.
+12. **Publication paused; delivery is a packaged artifact.** npm stable and snapshot publication pause in the npm lane (A2) and stay paused: the desktop app gets the private `@wojciechpiskorz/astroix@0.1.0` manifest when its workspace is created; npm stays dormant. Pre-alpha delivery is a tagged, checksummed (SHA-256) unsigned ZIP through access-limited GitHub draft releases — smoke-before-publish on the exact candidate bytes, never a post-smoke rebuild (ADR-0008). Changesets remain only until the retirement lane removes Changesets, publint, npm artifact staging, the integration release workflows, and the obsolete release instructions (ADR-0010).
 
-13. **`yaml` Document API** do frontmattera: edycja kluczy z zachowaniem komentarzy/kolejności/cytowania — spójne z filozofią splicera (diff = jedna linia, nie rozbity blok).
+## Rejected alternatives (current)
 
-14. **GitHub + Actions + changesets + wczesne zajęcie nazwy.** Push: `biome check` → `tsc --noEmit` → `vitest run`. PR: + e2e (Playwright, Node 24). Zajęcie nazwy wykonane 2026-08-26 jako `@wojciechpiskorz/astroix@0.0.1`: unscoped `astroix` okazał się nie-rejestrowalny (npm name-similarity rule vs `astro`; "wolna nazwa" ≠ "rejestrowalna"); z dostępnych opcji (org `@astroix` vs scope osobisty) wybrano scope osobisty. Dogfood: fixture e2e (w repo) przez publish-shaped staging — dep `file:../../.astroix-local`, sync + build gate w `scripts/prepare-local-link.mjs`, CI buduje przed e2e — determinizm; `bun link` zarezerwowany dla zewnętrznego dogfoodu (osobny projekt, alphasy v0.1). *(Zmiana 2026-08-26, wayfinder charting — pierwotnie `bun link` do v0.1.)* *(Zmiana 2026-08-30, #123 — link publish-shaped: dep `file:../../.astroix-local`, staging sync + build gate w `scripts/prepare-local-link.mjs`; `file:../..` kopiował cały repo rekurencyjnie do node_modules.)* Changesets od startu.
+- **bun** — replaced by npm per [#190](https://github.com/wojtekpiskorz/astroix/issues/190); the checkout migrates in the isolated A2 lane.
+- **One-package repo** — replaced by deployment-shaped npm workspaces per [#200](https://github.com/wojtekpiskorz/astroix/issues/200).
+- **Electron `runAsNode` / `ELECTRON_RUN_AS_NODE`** — proof-only; binds execution to Electron fuse/ABI/BoringSSL behavior; rejected for the artifact ([#201](https://github.com/wojtekpiskorz/astroix/issues/201), [#207](https://github.com/wojtekpiskorz/astroix/issues/207)).
+- **Custom Node selection / runtime managers / first-run downloads** — rejected by the packaged-runtime boundary ([#207](https://github.com/wojtekpiskorz/astroix/issues/207)).
+- **`workspace:*` ranges** — npm-incompatible; banned ([#200](https://github.com/wojtekpiskorz/astroix/issues/200)).
+- **Solid 2 / Svelte 5 / StyleX / Effect v4 / own WebSocket / jsdom / Monaco / gray-matter** — rejected on the original facts (above and in git-history stack revisions).
 
-15. **AI PR review — TODO po v1, nie warunek POC.** Zaplanowane: `claude-code-action@v1` → endpoint Z.AI (`ANTHROPIC_BASE_URL=https://api.z.ai/api/anthropic`, klucz z GLM coding plan), advisory-only; fallback: PR-Agent (MIT, self-hosted) z `zai/glm-5.2`. Zasada z dużych repo 2026: AI nigdy nie blokuje merge'a — blokują gate'y deterministyczne.
-
-## Odrzucone alternatywy (skrót)
-
-- **Solid 2** — RC framework + pre-1.0 ecosystem + beta query: trzy ryzyka za dużo na produkt.
-- **Svelte 5** — mocny, legalny fallback komfortu; nie realizował celu exploracji; przegrywa z ekosystemem formowym Reacta dla tego UI.
-- **StyleX** — maintainer-discouraged w shadow DOM + pre-1.0 + słaba agent-fluency.
-- **Effect v4** — RC + zły kształt projektu + anti-agentic.
-- **WebSocket** — dwukierunkowość, której nie potrzebujemy.
-- **jsdom** — happy-dom wygrywa throughputem; prawda o selectorach i tak w Playwright.
-- **Monaco** — ciężar bez zysku dla raw-CSS boxa.
-- **gray-matter/reprint frontmattera** — traci komentarze agenta.
-- **Monorepo day-0, vite-in-vite day-0, PR-gate AI review day-0** — porządne, ale nie teraz.
+Historical rejections with their full rationale (Solid 2 RC-ecosystem, StyleX shadow-DOM discouragement, Effect RC, etc.) remain provenance in git history; the conclusions that still bind are restated above.

@@ -1,52 +1,35 @@
 # Release Loop Ops
 
-The stable release loop (`.github/workflows/release.yml`, changesets/action) runs itself; the agent's part is two actions — approving the bot's workflow runs and merging its PR. Mechanics source of truth: `release.yml`, `ai-review.yml`, `package.json#ci:publish`. Live proofs: #101 (approve + skip), #99 (brownout).
+Rewritten for the Electron parent-app rewrite (lane A1, [#210](https://github.com/wojtekpiskorz/astroix/issues/210); rulings [#200](https://github.com/wojtekpiskorz/astroix/issues/200)/[#207](https://github.com/wojtekpiskorz/astroix/issues/207), ADR-0008/ADR-0010).
 
-## The loop
+## Publication is paused
 
-1. A feature PR carrying changesets merges to `main`. The `release` workflow then does one of two things:
-   - **Non-empty changeset queue** → opens/updates the **Version Packages** PR on `changeset-release/main`.
-   - **Empty queue** (that PR just merged) → `bun run ci:publish` (build → artifact check → publint → `changeset publish`) → npm latest, tag, GitHub Release.
-2. CI on the Version Packages PR is the merge key. The advisory ai-review skips it by **branch guard** (`ai-review.yml`: `!startsWith(head.ref, 'changeset-release/')` — keyed on the branch prefix, not the actor, so a human reopen can't burn a review on generated output).
-3. Merge a green Version Packages PR without re-asking — the owner's standing continuous-minimal-releases directive.
-4. Verify the publish (below).
+**npm publication — stable and snapshot — is paused by the rewrite.** The npm-migration lane (A2) pauses it mechanically; the retirement gate then deletes Changesets, publint, npm artifact staging, the integration release workflows, and these instructions' subject matter. Until then:
 
-## `action_required` runs
+- Do not publish, and do not merge a Version Packages PR expecting a release; the loop below is **dormant provenance**, kept only while the workflow files still exist so no session fumbles the machinery if it fires.
+- Changesets remain only as the every-code-PR-changeset convention; their accumulated queue is never released.
+- The desktop app's workspace will carry the private `@wojciechpiskorz/astroix@0.1.0` manifest (unpublished); npm stays dormant.
 
-PRs opened by the GITHUB_TOKEN bot land with their workflows awaiting approval. Approve per run:
+If a release workflow does fire during the pause, treat it as an incident: approve nothing beyond what CI needs, and file the finding.
 
-```sh
-gh api -X POST repos/wojtekpiskorz/astroix/actions/runs/<id>/approve
-```
+## Pre-alpha delivery (the loop that matters)
 
-- Find ids with `gh run list --branch changeset-release/main`.
-- Approve both runs. The CI one is the merge key; the ai-review one is safe to approve — its guard concludes it `skipped` within seconds, no GLM burn (proven on #101).
+Delivery is the packaged unsigned macOS artifact (ADR-0008), at candidate checkpoints only:
 
-## Merge conventions
+1. Build the exact pinned artifact (Electron 44.1.0 / Forge 7.11.2 / stock Node 24.20.0; hardened fuses; ad-hoc-sealed ZIP) and its build manifest.
+2. Upload to an **access-limited GitHub draft release** for the owner and named inner testers, with the published SHA-256 checksum per asset.
+3. Download the exact candidate asset, verify the checksum, and run the owner manual smoke (`docs/manual-smoke.md`) on the extracted app.
+4. Passing promotes **the same bytes** to the final tag/release — there is never a post-smoke rebuild. Record release evidence (per-step results, checksum, environment) and create the git tag. A discovered defect returns to its own implementation lane and produces a new candidate.
 
-- Version Packages PRs merge **merge-commit style**, never squash.
-- The `changeset-release/main` branch is **never deleted** — it belongs to the loop; the next bot PR reuses it.
+Qualification detail (resource discovery, process topology/cleanup, security settings, launch lifecycle, hostile Service Worker, reproducibility comparison) is ADR-0008's candidate gate — it runs here, not on feature PRs.
 
-## Actions brownouts
+## Dormant npm-loop mechanics (provenance)
 
-GitHub event delivery occasionally browns out (~15–25 min, self-recovering; #99 and #73's lane both recorded it). Symptom: a push landed but no runs appear, and nudges do nothing. Ladder, in order:
+While `.github/workflows/release.yml` and `ci:publish` still exist, for reference only:
 
-1. Empty-commit nudge: `git commit --allow-empty -m "chore: nudge ci"` and push.
-2. Close/reopen the PR.
-3. After recovery: rebase onto the target and force-push — the fresh `synchronize` lands first. Don't burn cycles re-running old SHAs; their events are gone.
+- `action_required` bot runs: approve per run with `gh api -X POST repos/wojtekpiskorz/astroix/actions/runs/<id>/approve`; find ids with `gh run list --branch changeset-release/main`.
+- Version Packages PRs merged merge-commit style, never squash; the `changeset-release/main` branch is never deleted while the loop exists.
+- Actions brownouts (~15–25 min, self-recovering; #99): empty-commit nudge → close/reopen the PR → after recovery, rebase onto the target and force-push (fresh `synchronize` first; old SHAs' events are gone).
+- The repo setting **Allow GitHub Actions to create and approve pull requests** must stay on for the bot PR to appear.
 
-## Publish verification
-
-The release run fires on the merge push itself, typically done within minutes. Verify all three name the bumped version:
-
-```sh
-npm view @wojciechpiskorz/astroix version
-git ls-remote --tags origin
-gh release list --limit 1
-```
-
-The tag leg reads remote truth on purpose — the tag lands on `origin` minutes before a local clone's refs do, and a stale local tag list reads like a failed publish.
-
-## Prerequisite
-
-The repo setting **Allow GitHub Actions to create and approve pull requests** must stay on — off it, no bot PR is ever opened (recorded in `release.yml`).
+These mechanics are deleted by the retirement lane; do not invest in them.

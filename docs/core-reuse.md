@@ -1,57 +1,96 @@
 # Astroix — Core Reuse Map
 
-Pochodzenie: trzy researchy agentowe (26.08.2026), zweryfikowane przeciw `withastro/astro@main` (Astro 7.2, Vite 8/Rolldown, zod 4.3) i docs.astro.build/vite.dev. Zasada: **jeśli core Astro/Vite już to robi — nie piszemy tego**. Statusy: ✅ core (używamy wprost) · 🟡 częściowo (core pomaga, reszta nasza) · 🔨 sami (brak odpowiednika).
+Rewritten for the Electron parent-app (lane A1, [#210](https://github.com/wojtekpiskorz/astroix/issues/210), 2026-09-01; supersedes the integration-era map in full — git history is provenance). Standing rule: **if Astro/Vite core already provides a mechanism, we do not build it.** Authority: runtime/introspection ruling [#202](https://github.com/wojtekpiskorz/astroix/issues/202), adapter proof [#206](https://github.com/wojtekpiskorz/astroix/issues/206) (certified pair `astro@7.2.10 + vite@8.2.2`).
 
-## 1. Chrome: serwowanie i HMR
+In the parent app there is no host integration to ride: Astroix composes the project's real Astro/Vite itself, in the disposable project plane, through the **`AstroProjectAdapter`** — the single internal module behind which every version-sensitive behavior lives (Astro internal imports, `virtual:astro:*` identifiers, module-runner behavior, module-graph reads, compiled-CSS shapes). The adapter never guesses routes, schemas, or selectors; an unknown shape fails closed. `docs/adr/0005` records the contract; this file inventories the seams by class.
 
-- ✅ **Intercept `?builder=1` na każdym route (w tym 404)**: Vite plugin zarejestrowany w `astro:config:setup` przez `updateConfig({vite:{plugins:[…]}})`, middleware dodany w **ciele** `configureServer` (nie w post-hooku). Uzasadnienie ze źródeł: Astro rejestruje swój `astroDevHandler` w post-hooku i **nigdy nie woła `next()`** — tylko pre-internal middleware łapie wszystko. (`vite-plugin-astro-server/plugin.ts`)
-- 🟡 **Chrome przez wirtualny moduł — hybryda prebuilt/source (ADR-0001)**: middleware zwraca HTML wołający `server.transformIndexHtml(url, rawHtml)` (dostajemy zastrzyk `/@vite/client` + react-preamble) i referencję do **wirtualnego modułu** `/virtual:astroix/chrome` (kanoniczne `resolveId`/`load`). Kolejne requesty modułowe obsługuje Vite niezależnie od tego, kto wyprodukował HTML (oficjalny analog: Vite Backend Integration guide). W **dev-checkout**: source chroma + fast-refresh przez `@vitejs/plugin-react` (v6, Oxc, `include`-scoped) i `@tailwindcss/vite` (T1). W **publikowanej paczce**: prebuilt bundel chroma — obcy host nie widzi source'u ani nie rozwiązuje naszego `react` (T3: niebezpieczne i niepraktykowane).
-- ✅ **Skrypt w iframe (`?builder=0`)**: `injectScript(stage, code)` w `config:setup` (haczyk: działa też na build — guard `if (command === 'dev')`; brak filtrowania per-route/query — skrypt sam sprawdza `location.search`). Stage `page` = moduł przetwarzany przez Vite.
-- ⚠️ `transformIndexHtml` (plugin hook) **nie działa** dla stron Astro (one nie przechodzą przez HTML middleware Vite) — tylko API `server.transformIndexHtml` w naszym middleware.
+## Seam classes
 
-## 2. Transport i eventy
+Every Astro/Vite mechanism the adapter touches belongs to exactly one class. The class decides the compatibility contract:
 
-- ✅ **Push watcher→chrome przez custom eventy Vite WS** (SSE odpada): `server.ws.send('astroix:…', payload)` / per-klient `client.send()`; klient: `import.meta.hot.on('astroix:…')`. Działa, bo i chrome (`transformIndexHtml`) i strony hosta (`headElements`) ładują `/@vite/client`. Astro samo tak shipuje `astro:routes-updated`, `astro:content-changed`. Kierunek odwrotny (klient→server): `import.meta.hot.send` / `server.hot.on` — typowanie przez `CustomEventMap`.
-- 🔨 **`full-reload` tarczy chroma — szew na `server.ws.send`** (#74): sync contentu Astro broadcastuje vite'owy `full-reload` do **każdej** podłączonej strony — także do chroma, którego sesja w pamięci (tab, active entry, brudny draft) zginęłaby przy każdej pauzie zapisu. Core nie daje mechanizmu osłonienia jednego klienta, więc `chrome-reload-shield.ts` patchuje `send` na wraperze WS (`server.ws` === `environments.client.hot`): ogłoszeni przez custom event klienci-chrome są pomijani przy full-reload, reszta (kanwa, taby host-developera) dostaje stockowe zachowanie. **Szew internals**: wraper przyjmuje i payload-obiekt, i formę `(event, data)`; wysyłka tylko do socketów `readyState === 1` (throw na martwym gniecie pipeline sync Astro). Upgrade vite'a, który przestawi ten seam, degraduje do stockowego zachowania (chrome się przeładowuje) — zdiagnozowane od doksa, nie od bisectu.
-- ✅ **CRUD przez Vite connect middleware** (nie Astro app middleware — `addMiddleware` to pipeline aplikacji z `locals`, dev i prod). SSE też by działał, ale WS mamy za darmo. Wzorzec z core: `/_astro/status` (`vite-plugin-dev-status`).
-- ✅ **Watcher**: `server.watcher` (chokidar) — `addWatchFile` tylko dla plików restartujących dev server (ciężkie).
+1. **Public seam** — documented, stable API. Used directly; safe across certified minor versions.
+2. **Certified exact-pair seam** — documented but experimental or newly stabilized; usage is proven only for the exact certified Astro/Vite pair and re-proven for every new pair.
+3. **Fail-closed private seam** — internal or output-shape-coupled. Used only behind the adapter's shape probes: the adapter verifies the exact expected shape and **fails closed** (clear diagnostic, no guessing) when the observed shape differs. No private seam may be reported as a compatibility contract.
 
-## 3. Content
-
-- ✅ **Odczyt kolekcji z middleware**: `createServerModuleRunner(server.environments.ssr)` → `runner.import('astro:content')` → `getCollection()` zwraca entry z **sparsowanym** `entry.data` (frontmatter→obiekt), `entry.body`, `entry.filePath`. Tak samo robi core (`content/utils.ts`). `ssrLoadModule` w Vite 8 jest na liście przyszłych usunięć — nie używać. Haczyk: nie cachować modułu między requestami (core czyści cache po invalidacji). Haczyk 2 (#146): świeży runner **zawsze domknąć** `await runner.close()` po skończonej robocie — konstruktor pina listener `send` na hot channelu ssr (i trzyma cały wyewaluowany graf modułów w pamięci); bez close'a każdy request/przebieg enumeracji leakuje po jednym (dev pika `MaxListenersExceededWarning` od 11.). Uwaga: domknięcie runnera może zresetować `process.setSourceMapsEnabled` — global dev-only, w praktyce nieaktywne (długożywowy runner Astro pina flagę przy pierwszym renderze strony).
-- ✅ **Schemy kolekcji**: `runner.import(contentConfigPath)` → `.collections: Record<string, {schema?, loader?, type?}>`; schema może być funkcją `({image}) => …` — wywołujemy z własnym stubem `image()`. Subskrypcja zmian configu: `globalContentConfigObserver` (`@internal`).
-- ✅ **`astro/zod` = re-export `zod/v4`** — ta sama instancja zoda co projekt: introspekcja przez `.def.*` bez piekła instanceof; do generowania formularzy pomaga `z.toJSONSchema()` (zod 4).
-- ✅ **Świeżość contentu**: obserwować **plik data store** przez `server.watcher` — to dokładnie sygnał "content zsynchronizowany", którego sam core używa (post-sync, bez wyścigów z loaderem). Core wysyła też `astro:content-changed` przez WS.
-- 🔨 **Zapis entry**: core tylko parsuje. Serializer (yaml Document API + reguły slugów mirroringiem `generateIdDefault` z `glob.ts`) i **upload endpoint dla `image()`** — nasze. Odczyt pól obrazkowych darmowy: `entry.data.hero` = `{src, width, height, format}` (dev serwuje przez `/@fs/`).
-- ✅ Preview body: `render(entry)` z core. Bonus: `experimental.contentIntellisense` wystawia manifest kolekcji (`.astro/collections/`).
-
-## 4. CSS: indeks, scoped, splicing
-
-- ✅ **Żywe CSS route'u**: wirtualny moduł **`virtual:astro:dev-css:{route-component}`** — eksport `css` = Set `{id, url, content}` dokładnie tych stylów, które Astro wstrzykuje stronie w dev. Scoped `<style>` to prawdziwy moduł CSS: id `{file}.astro?astro&type=style&index={N}` — obcięcie query = mapowanie na plik `.astro`. Spacer po grafie: per-environment `environment.moduleGraph` (mixowany `server.moduleGraph` w Vite 8 deprecated), referencja `collectCSSWithOrder` z core (~60 linii).
-- ✅ **Hash scoped**: `data-astro-cid-*` = Rust `DefaultHasher` (SipHash-1-3) + własne kodowanie base32-podobne na znormalizowanej nazwie pliku (compiler-rs; xxhash64 to był Go-compiler), stabilny między przeładowaniami; compiler zwraca go w `TransformResult.scope` — nie liczymy. Domyślny `scopedStyleStrategy: "attribute"` emituje gołe `[data-astro-cid-*]`; tryb `:where(...)` dopiero po konfiguracji. *(Zweryfikowano na astro@7.2.7 — wayfinder T2, issue #3.)* Pisanie scoped reguł (faza 2): `transform()` na syntetycznym wrapperze albo ręcznie `:where([data-astro-cid-{scope}])`.
-- ✅ **Pozycje bloków `<style>` dla splicera**: `extractStylesSync(source) → StyleBlock[]` — eksport z **`@astrojs/compiler-binding`** (warstwa napi; `@astrojs/compiler-rs` to façade — kanoniczny dla Astro 7; Go/WASM `@astrojs/compiler` też żyje). *(Zweryfikowano na astro@7.2.7 — wayfinder T2, issue #3.)* Offset przez `source.indexOf(block.content)` (technika z `enhanceCSSError` core). Pułapki: pozycje z `parse()` "incomplete", `metaRanges` z `convertToTSX` w przestrzeni TSX — **nigdy nie splicować z nich**.
-- 🔨 **Statyczny indeks źródeł (prawda edycyjna) — nasz**: dev nie generuje sourcemap CSS (`css.devSourcemap` nigdy nie ustawiane), więc mapowanie reguła→(plik, range) robimy własnym postcss po plikach źródłowych. To jedyny sposób na splicing + jedyny, który widzi `is:inline` (niewidoczne w module graph).
-- 🟡 **Architektura hybrydowa**: statyczny indeks (edycja: plik+range) **×** module graph (żywotność + skompilowane formy scoped selectorów do matchowania `el.matches`).
-
-## 5. Routes, toolbar, misc
-
-- ✅ **Tablica route'ów**: hook **`astro:routes:resolved`** → `IntegrationResolvedRoute[]` (`pattern`, `entrypoint`, `params`, `generate()`, typ) — w dev **re-runs przy każdej zmianie plików route'ów** (idealne pod reindex + nazewnictwo overrides + kojarzenie route↔entry). Runtime: `virtual:astro:routes`, event `astro:routes-updated`.
-- 🟡 **Element→źródło**: brama istnieje (`devToolbar.enabled` ⇄ atrybuty), ale na zablokowanym stacku (astro@7.2.7 + compiler-rs 0.4.0) `annotateSourceFile` to **stub** — `data-astro-source-*` nie jest emitowane wcale; user story 34 (v1) wymaga mechanizmu własnego astroix albo zmiany strategii. *(Zmiana statusu: wayfinder T2, issue #3.)* Dev toolbar chowamy w iframie CSS-em; **nie** wyłączamy `devToolbar.enabled` przez `updateConfig` (działa, ale giną atrybuty; ginie też transport toolbarowy — którego i tak nie używamy).
-- 🟡 **Container API** (`experimental_AstroContainer`): nadal eksperymentalne — tylko przyszłość (podgląd komponentu w izolacji).
-- ✅ Dev-tooling okolice: `astro dev --background` + `stop/status/logs`, `/_astro/status`, structured logging (`--json`) — przydadzą się do orkiestracji w e2e i dla agentów.
-
-## Co w efekcie umiera z naszych planów
-
-| Plan | Los |
+| Seam | Class |
 | --- | --- |
-| Prebuild chroma + watch (stack #10) | **martwe** — chrome z source przez wirtualny moduł, HMR gratis |
-| SSE (stack #7, spec #13) | **martwe** — custom eventy Vite WS (`astroix:*`) |
-| Własna warstwa skanowania/parsowania contentu | **martwa** — `runner.import('astro:content')` |
-| Własne watchowanie .md | **martwe** — obserwacja data store + `astro:content-changed` |
-| Własny wykrywacz "jakie CSS żyją na stronie" | **martwy** — `virtual:astro:dev-css` + module graph |
-| Statyczny indeks postcss + splicer | **zostaje** (prawda edycyjna; sourcemapy w dev nie istnieją; `is:inline`) |
-| Walker zod → formularze | **zostaje** (łatwiejszy: `astro/zod` wspólne, `z.toJSONSchema()`) |
-| Serializer wpisów + upload obrazków | **zostaje** (core tylko parsuje) |
-| tsup na stronę node (integration) | **zostaje** — to publikowany pakiet |
+| `astro/config#getViteConfig()` | Public |
+| Astro integration hooks (`astro:config:setup`, `astro:routes:resolved`, …) | Public |
+| Vite `createServer()` + per-environment module graphs | Public |
+| Vite module runner lifecycle: `import()`, `close()`, `isClosed()` | Public |
+| Vite root-exported `createServerModuleRunner(environment)` | Certified exact-pair (experimental) |
+| Astro internal CSS utility (core CSS collection, ~60-line `collectCSSWithOrder` analog) | Fail-closed private |
+| `virtual:astro:routes` | Fail-closed private |
+| `virtual:astro:dev-css:*` | Fail-closed private |
+| Route and CSS export shapes (module export contracts) | Fail-closed private |
+| SSR hot transport emitter | Fail-closed private |
+| Client-environment module-graph ownership | Fail-closed private |
+| Vite `__vite__css` sentinel | Fail-closed private |
+| Compiler-source ↔ source/compiled rule correlation | Fail-closed private |
+| Astro compiler `TransformResult.scope` (scoped-style hash) | Certified exact-pair (verified against the locked pair) |
+| `@astrojs/compiler-binding` `extractStylesSync` | Certified exact-pair |
 
-Sources (główne): docs.astro.build (integrations reference, container reference), vite.dev (api-plugin, api-hmr, api-javascript, backend-integration, changes/per-environment-apis, changes/ssr-using-modulerunner, announcing-vite8), github.com/withastro/astro (vite-plugin-astro-server/plugin.ts, vite-plugin-dev-status, vite-plugin-app/environment.ts, createAstroServerApp.ts, vite-plugin-css/index.ts, content/*, integrations/hooks.ts, issues #13885), github.com/withastro/compiler + compiler-rs. Pełne listy URL w transkryptach researchów (26.08.2026).
+Certification policy ([#202](https://github.com/wojtekpiskorz/astroix/issues/202), [#206](https://github.com/wojtekpiskorz/astroix/issues/206)): acceptance is driven by **certified exact Astro/Vite pairs** resolved from the managed project's own installation — never by trust in broad semver ranges. The first certified pair is `astro@7.2.10 + vite@8.2.2`. An uncertified pair fails **before project config executes**, reporting the detected pair, the certified pairs, and the rejected contract. A new pair enters the set only after the compatibility fixture and migration oracle pass.
+
+## What we reuse, by concern
+
+### Project composition
+
+- ✅ **External composition via `getViteConfig()`**: the composition inspector loads the project's real Astro configuration from the project installation and composes its Vite config through `astro/config#getViteConfig()` — public seam, proven by the #189/#206 spikes. `configFile: false` is **not** a full-fidelity fallback and may never be reported as equivalent introspection.
+- ⚠️ **Duplicate hooks are accepted**: the managed Astro dev server and the composition inspector both load the real project config, so project integrations execute twice. Explicit, accepted pre-alpha cost, confined to the disposable project plane. Startup evidence must include a non-idempotent integration case with a clear failure diagnostic.
+- ✅ **Managed dev server**: Astroix starts the project's own dev server as an exact child handle (argument array, `shell: false`, canonical cwd, minimal environment without app-private authority material). We never reimplement dev serving — every non-reserved request streams to it (ADR-0005 proxy contract).
+
+### Content
+
+- ✅ **Collection reads through the module runner**: `createServerModuleRunner(server.environments.ssr)` → `runner.import('astro:content')` → `getCollection()` returns entries with parsed `entry.data`, `entry.body`, `entry.filePath` — exactly how core reads content. Certified exact-pair seam (`createServerModuleRunner` is experimental at the certified pin).
+- ✅ **Fresh runner per inspection pass, closed in `finally`**: never cache the runner between passes (core clears its cache on invalidation); never leave it open — the constructor pins a `send` listener on the SSR hot channel and holds the evaluated module graph in memory; leaks surface as `MaxListenersExceededWarning` from the 11th unclosed runner. Runner `close()` may reset `process.setSourceMapsEnabled` — a dev-only global, inactive in practice. `ssrLoadModule` is on Vite 8's removal list: do not use.
+- ✅ **Collection schemas**: `runner.import(contentConfigPath)` → `.collections: Record<string, {schema?, loader?, type?}>`; a schema may be a function `({image}) => …` — invoke with our own `image()` stub. Config-change subscription: `globalContentConfigObserver` (`@internal` — treat as fail-closed private).
+- ✅ **`astro/zod` re-exports `zod/v4`** — the same zod instance the project uses: introspection via `.def.*` without instanceof hell; `z.toJSONSchema()` (zod 4) helps form generation.
+- ✅ **Content freshness**: observe the project's content **data-store file** — the exact "content synced" signal core itself uses (post-sync, no loader races).
+- 🔨 **Entry writes are ours**: core only parses. Serializer (yaml Document API + slug rules mirroring `generateIdDefault`) and image handling stay Astroix's.
+- ✅ **Body preview**: `render(entry)` from core.
+
+### Routes
+
+- ✅ **Route table via the `astro:routes:resolved` hook** — `IntegrationResolvedRoute[]` (`pattern`, `entrypoint`, `params`, `generate()`, type); re-runs in dev when route files change. The runtime `virtual:astro:routes` module and its export shape are a fail-closed private seam behind the adapter.
+- 🔨 **Route resolution** (URL↔entry bridging) stays a pure Astroix module (`packages/core`): route patterns × entry ids, unique-hit-or-silence. No instrumentation of sources.
+
+### CSS: index, scoped, splicing
+
+- ✅ **Live per-route CSS** via `virtual:astro:dev-css:{route-component}` — exports the `css` set (`{id, url, content}`) Astro actually injects in dev. Scoped `<style>` blocks are real CSS modules: id `{file}.astro?astro&type=style&index={N}` — stripping the query maps back to the `.astro` file. Graph walk via per-environment `environment.moduleGraph` (mixed `server.moduleGraph` is deprecated in Vite 8). All of these are fail-closed private seams.
+- ✅ **Scoped hash**: `data-astro-cid-*` comes from the compiler's `TransformResult.scope` — we never compute it. Default `scopedStyleStrategy: "attribute"` emits bare `[data-astro-cid-*]`; `:where(...)` only when the project configures it. Both strategies are certified behavior, proven by #206's matched-node parity.
+- ✅ **`<style>` block positions** via `extractStylesSync(source)` from `@astrojs/compiler-binding`; offset via `source.indexOf(block.content)` (the `enhanceCSSError` technique).
+- 🔨 **Static source index is ours — the edit-truth**: Astro dev generates no CSS sourcemaps (`css.devSourcemap` is never set), so rule→(file, range) mapping is our own postcss pass over source files. It is the only path that supports splicing and the only one that sees `is:inline`.
+- 🟡 **Hybrid architecture**: static index (edit: file+range) × module graph (liveness + compiled scoped-selector forms for `el.matches()`), joined per route and revisioned.
+
+### Liveness and events
+
+- ✅ **Watcher signals**: watch the project through the composition server's watcher (one FS subscriber per process, debounced reindex) — the same discipline core follows; never `addWatchFile` for files that do not restart the server.
+- ✅ **Invalidation convergence** (a certified #206 rule): after content/route/style source changes, inspection results must converge to fresh values; revisions increase monotonically; subscriptions emit revisioned invalidations over the protocol's SSE stream.
+
+## What died with the integration (do not rebuild)
+
+These integration-era mechanisms are dead in the parent app; they are listed so no lane reinvents them. Their full mechanics remain readable in git history.
+
+| Dead mechanism | Why it died |
+| --- | --- |
+| Vite-middleware interception of the host's pages (`configureServer` body registration, `server.transformIndexHtml()` in middleware) | The app shell is served by the control plane on Astroix's own origin (`/__astroix/app/`); the project's pages are never intercepted — they stream through the proxy untouched. |
+| Virtual chrome module + hybrid prebuilt/source chrome delivery (ADR-0001) | Superseded — the renderer ships inside the app (ADR-0008); there is no foreign host to protect against. |
+| `injectScript` iframe script | The canvas needs no injected script: same-origin `iframe.contentDocument` is read directly by the app shell. |
+| Custom Vite WS events (`astroix:*`), the chrome-reload-shield `send` patch, `import.meta.hot` bridges | Replaced by protocol v1 (fetch + SSE) on Astroix's own listener; the HMR WebSocket is only transparently proxied. |
+| `?builder=0`/`?builder=1` entry mechanics | No injection, no query flags: the canvas is the project's natural URL. |
+| Dev-toolbar CSS hiding inside the iframe | The managed dev server runs with its natural toolbar behavior; nothing is hidden from the project. |
+
+## Traps that still bind
+
+- **Never splice from `convertToTSX` `metaRanges`** — positions are in TSX-output space, not source space.
+- **Astro dev generates no CSS sourcemaps** — the static postcss index is the edit-truth; this is why the indexer/splice-writer survive the rewrite unchanged.
+- **Always close fresh runners in `finally`** — see the runner lifecycle above.
+- **Unknown private shapes fail closed** — the adapter reports the expected/observed shape and stops; it never heuristically parses a drifted output. A seam drift is a compatibility event (diagnosed from the diagnostic, not a bisect).
+- **`virtual:astro:*` identifiers, internal imports, and export shapes are pin-sensitive** — every touch goes through the adapter; a direct import anywhere else is a boundary violation.
+
+## Unproved (carried from #206)
+
+Every other Astro/Vite pair; arbitrary third-party integration side effects; CSS preprocessors, CSS Modules, Tailwind-specific output, custom Vite CSS plugins, multiple scoped style blocks, other selector transforms; other content loaders/types/schema factories/plugins; alternative config filenames and unusual config-loading effects; Windows, Linux, Intel macOS, performance budgets, watcher-burst stress, arbitrary crash timing; production builds. The packaged-runtime matrix adds its own qualified-environment floor ([#209](https://github.com/wojtekpiskorz/astroix/issues/209)).
+
+Sources: docs.astro.build and vite.dev (public seams); `withastro/astro` and `withastro/compiler` internals (private seams, verified against the certified pin); proof evidence in [#206](https://github.com/wojtekpiskorz/astroix/issues/206) (`spikes/issue-206-astro-project-adapter`, commit `274beac`) and [#208](https://github.com/wojtekpiskorz/astroix/issues/208) (`docs/research/issue-208-service-worker-origin.md`, commit `de59167`).

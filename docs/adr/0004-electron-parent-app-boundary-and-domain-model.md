@@ -1,0 +1,25 @@
+# Electron parent app: boundary, trust, and zero injection
+
+Status: accepted (2026-08-31, [Grilling: ratify the Electron parent-app boundary and domain model](https://github.com/wojtekpiskorz/astroix/issues/205); recorded by lane A1, [#210](https://github.com/wojtekpiskorz/astroix/issues/210))
+
+## Context
+
+Astroix began as a dev-only Astro integration installed into the managed project. The pivot research ([#179](https://github.com/wojtekpiskorz/astroix/issues/179), superseded planning authority of [#197](https://github.com/wojtekpiskorz/astroix/issues/197)) and the outside-seams matrix ([#180](https://github.com/wojtekpiskorz/astroix/issues/180)) established that app-side composition delivers the same product without any in-project presence. Before chartering implementation lanes, the owner had to fix the product boundary and trust model exactly: what Astroix is, whom it trusts, what it may never do to a managed project, and which terms later tickets use.
+
+## Decision
+
+- **Astroix is a standalone Electron parent app** for existing registered Astro projects — a visual layer over a project controlled by the developer. The destination is a working macOS-first unsigned Electron pre-alpha; web mode (the same control-plane implementation booted without Electron) is the protocol-level test, diagnostic, and development host, never the user-facing completion milestone.
+- **Registered projects are existing projects only.** `Add Existing Project...` is a native Electron action (application menu / neutral trusted launcher before any project is active); Electron main obtains the chosen directory and hands it to the Astroix runtime for normal validation. No scaffolding, no create-new UX. Pre-alpha holds **one supervisor-global active project session**; a switch replaces that session and performs a top-level navigation to the new project's app origin. Simultaneous active projects, per-tab sessions, and multi-window editing are outside this destination.
+- **Developer-trusted projects.** The registered project, its Astro configuration, integrations, dependencies, inline code, and external scripts are developer-trusted executable code — a trust already inherent in starting the project's Astro dev server, whose configuration and integrations execute as Node code. Astroix does not sandbox, filter, or audit them. The **project plane is a failure and lifecycle boundary, not a sandbox** against an intentionally malicious registered project.
+- **Same-origin direct canvas DOM.** The app shell and canvas retain the same-origin direct-DOM contract (`iframe.contentDocument`, `Element.matches()` on effective selectors from Astro's real output). A canvas that navigates to another origin may remain visible, but DOM editing is unavailable until it returns to the project origin.
+- **No privileged renderer bridge.** The app renderer exposes no raw Electron API, no arbitrary filesystem/process/registry-storage access, and no raw IPC — only the product operations Astroix needs.
+- **Zero-injection guarantee** (replaces the integration-era dev-only guarantee): Astroix never adds an Astroix dependency, integration, generated bridge, Astro config mutation, package manifest mutation, or hidden control file to a managed project. Permitted side effects: explicit Content edits initiated through Astroix; explicit mapped-CSS edits initiated through Astroix; ordinary runtime caches produced by Astro and Vite. Registering or removing a project never changes its source files.
+- **Vocabulary** (now in `CONTEXT.md`): `Astroix` redefined as the parent app; `chrome` → `app shell`; `canvas`, `vertical`, `sidebar`, `editor dock`, `workbench row`, `repo-mapping`, and the editing-domain terms retained; `registered project`, `project session`, `managed dev server`, `edit authority` defined; architecture vocabulary (`Astroix runtime`, `control plane`, `project plane`, `project key`) lives in the spec and ADRs; the generic `supervisor` retires from new normative documentation (`SessionSupervisor` survives only as a seam-interface name, ADR-0006).
+
+## Consequences
+
+- The threat model protects against remote and unregistered traffic, DNS rebinding, stale requests, cross-project mistakes, corrupt state, excessive API authority, crashes, and process leaks — and explicitly does not claim protection from a developer-trusted project that can already execute Node code. The mandatory-control detail is ADR-0007.
+- The integration product is not a supported legacy product; ADR-0010 governs its extraction and retirement.
+- ADR-0001 (hybrid chrome delivery) is superseded: with no foreign host there is no source/prebuilt split. ADR-0002 (renderer module architecture) is retained for the app shell with terminology and state/transport amendments. ADR-0003 (desktop-only viewport) is reaffirmed.
+- The exact process topology, origin scheme, and introspection contract were deferred to the runtime ruling — ADR-0005.
+- Product identity for the artifact (name, bundle id, delivery) is ADR-0008.
