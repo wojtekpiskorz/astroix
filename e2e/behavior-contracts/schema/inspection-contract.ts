@@ -103,7 +103,7 @@ export const scopedStyleStrategy = z.enum(['attribute', 'where']);
  * (`.astro-<hash>`, the same path-derived hash) in a zero-specificity
  * `:where()`.
  */
-const CID_FORM: Record<z.infer<typeof scopedStyleStrategy>, string> = {
+export const CID_FORM: Record<z.infer<typeof scopedStyleStrategy>, string> = {
   attribute: '[data-astro-cid-',
   where: ':where(.astro-',
 };

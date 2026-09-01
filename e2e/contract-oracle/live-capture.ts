@@ -17,6 +17,7 @@ import type {
   RoutesFixture,
 } from '../behavior-contracts/schema/inspection-contract.ts';
 import {
+  CID_FORM,
   CONTRACT_VERSION,
   type scopedStyleStrategy,
 } from '../behavior-contracts/schema/inspection-contract.ts';
@@ -264,7 +265,7 @@ export async function captureInspectionCorpus(options: CaptureOptions): Promise<
     // `:where(.astro-<hash>)` (the scoped class, same path-derived hash).
     for (const record of cssIndex) {
       if (!record.scoped || record.effectiveSelector === null) continue;
-      const expected = strategy === 'where' ? ':where(.astro-' : '[data-astro-cid-';
+      const expected = CID_FORM[strategy];
       if (!record.effectiveSelector.includes(expected)) {
         throw new Error(
           `scoped effective selector ${record.effectiveSelector} does not carry the ${strategy} strategy's cid form`,
