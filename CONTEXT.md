@@ -30,12 +30,14 @@ Rewritten for the Electron parent-app rewrite (lane A1, [#210](https://github.co
 | **managed dev server** | The Astro dev process belonging to a project session — started, proxied, and reaped by the runtime; the project's own server, never a reimplementation. |
 | **ProjectRuntime** | The deep, process-neutral seam interface to a project run (`start()` → `ProjectRun`: `ready`/`inspect()`/`subscribe()`/`stop()`/`closed`). Sibling deep seams inside the runtime package: `ProjectRegistry`, `SessionSupervisor`, `EditAuthority` — deep modules, none a package of its own. |
 | **ProjectRun** | One supervised process attempt, including a private staged candidate. |
+| **certified pair** | An exact Astro+Vite version pair accepted for the `AstroProjectAdapter` — first: `astro@7.2.10 + vite@8.2.2` ([#206](https://github.com/wojtekpiskorz/astroix/issues/206)). Astro and Vite resolve from the managed project's own installation; an uncertified pair fails before project config executes; a new pair enters the set only after the compatibility fixture and the migration oracle pass. |
 
 ## Registry and session
 
 | Term | Meaning |
 | --- | --- |
 | **Registered Project** | A persisted reference to one canonical existing Astro project root (identity = `fs.realpath` + the filesystem's own case/identity semantics; aliases resolve to the existing record). |
+| **managed project** | The developer's Astro project under Astroix's supervision — its dev server started and reaped by the project plane, its real files the editing surface. Wider than Registered Project: the zero-injection guarantee and production-build absence bind it whether or not a session is active. |
 | **Project Key** | A random 128-bit lowercase-Base32 DNS-safe routing key allocated when a registry record is created; stable only for that record's lifetime (`http://<project-key>.localhost:<port>/`). Never project identity, never authority. |
 | **project session** | The one committed, authority-bearing active run, identified publicly by its `SessionRef`. |
 | **SessionRef** | The public session identity pair `{ runtimeEpoch, generation }`: a fresh random epoch per control-plane lifetime, a monotonic generation per activation attempt. Correlation and freshness data — not authentication. Carried by every session-scoped command, response, error, query key, and event. |
@@ -79,6 +81,13 @@ Rewritten for the Electron parent-app rewrite (lane A1, [#210](https://github.co
 | **auto-write** | The persist-on-pause write loop (debounce ~300 ms) writing the real repo file; the shared persistence doctrine of both verticals. |
 | **selection** | The currently clicked element in the app shell; it survives reindex (re-matched after file changes). |
 | **reindex** | Recomputing the indexer output after watched file changes; debounced; surfaced as revisioned invalidations over the protocol's event stream. |
+
+## Migration era (transitional — dies with the integration, ADR-0010)
+
+| Term | Meaning |
+| --- | --- |
+| **behavior contract** | An executable contract frozen from integration-era behavior (payloads, selector matches, conflicts, output bytes; lanes B1/B2). The replacement is judged against these, not against the old implementation. |
+| **migration oracle** | The integration-era implementation retained during migration as the source of behavior-contract extraction and reusable-core/UI extraction — a retirement-bound reference (ADR-0010), not the product and not a compatibility contract. |
 
 ## Repo tooling
 

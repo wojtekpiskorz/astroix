@@ -38,7 +38,7 @@ A standalone Electron app. The app shell (sidebar + editor dock + canvas, the re
 - **Content**: GUI over Content Collections — forms generated from zod schemas (custom fields become fields), markdown body editing, auto-write (debounce ~300 ms), inline validation that never blocks saving.
 - **CSS**: selection mode on the canvas. Click an element → the repo rules matching it, each with file and line, winner marked in the cascade → inline editing (property→value rows with color/unit/enum widgets; plus raw mode) → text-splice into the original source file with auto-write debounce → HMR = live preview.
 
-The core principle survives unchanged: **repo-mapping, not a parallel world**. Astroix reads and writes the real repo files where an agent would put them ("nearest home"), so the repo stays coherent for humans and agents alike. Bidirectional sync (a hard requirement): a save in the IDE live-updates both canvas and the open panel of the selected element's rules after reindex; a change in the app writes the local file. Element selection survives reindex.
+The core principle survives unchanged: **repo-mapping, not a parallel world**. Astroix reads and writes the real repo files where an agent would put them, so the repo stays coherent for humans and agents alike. Bidirectional sync (a hard requirement): a save in the IDE live-updates both canvas and the open panel of the selected element's rules after reindex; a change in the app writes the local file. Element selection survives reindex.
 
 ## User Stories
 
@@ -70,6 +70,8 @@ Grouped; the editing contracts carry over from the integration era unchanged in 
 16. As a developer, undo lives in session memory, so experiments are reversible without touching git.
 17. Deferred beyond the pre-alpha ([#203](https://github.com/wojtekpiskorz/astroix/issues/203)): where a new rule or override lands — the integration-era "nearest home" heuristic, its alternatives dropdown, and the per-route overrides fallback loaded last. Existing-rule CSS inspection and exact-byte editing stay in scope unchanged.
 18. Deferred beyond the pre-alpha ([#203](https://github.com/wojtekpiskorz/astroix/issues/203)): element→source-component attribution. Provenance: the integration-era dev-mode source instrumentation was a stub on the locked pair (`annotateSourceFile` emitted no `data-astro-source-*`), and no ruling re-proves the mechanism on the certified pair `astro@7.2.10 + vite@8.2.2` — the CSS vertical's lane owns re-deciding it.
+
+Named drop (never implemented in the integration era, not carried into the rewrite): old story 8 — warn when the selected element's selector is brittle/structural, so CSS may detach after an HTML refactor.
 
 ### Content vertical
 
