@@ -52,7 +52,7 @@ export interface RiskEntry extends FunctionComplexity {
   value: number;
   /** The hard stop this row is gated against, derived with its metric in toRiskEntry. */
   stop: number;
-  /** The generated tier (`src/client/components/ui/`): visible, never gated (stop is Infinity). */
+  /** The generated tier (shadcn `components/ui/` — legacy `src/client/` and `packages/app-shell/src/`): visible, never gated (stop is Infinity). */
   watchOnly: boolean;
   coverage: number | null;
   crap: number | null;
