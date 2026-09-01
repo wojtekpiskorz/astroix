@@ -245,6 +245,27 @@ describe('toRiskEntry', () => {
     });
   });
 
+  it('keeps the generated tier watch-only at its new home: packages/app-shell (#218)', () => {
+    const e = toRiskEntry('packages/app-shell/src/components/ui/sidebar.tsx', fn, undefined);
+    expect(e).toMatchObject({
+      metric: 'cc',
+      value: 5,
+      stop: Number.POSITIVE_INFINITY,
+      watchOnly: true,
+    });
+    expect(evaluateGate([e], {})).toEqual({ violations: [], grandfathered: [], improved: [] });
+  });
+
+  it('gates the rest of packages/app-shell on the watchlist CC stop (#218)', () => {
+    // the generic editor infrastructure is hand-written, not regenerated:
+    // coverage stays out (metric honesty) but the CC stop applies
+    const e = toRiskEntry('packages/app-shell/src/editor/markdown-editor.tsx', fn, {
+      statementMap: {},
+      s: {},
+    });
+    expect(e).toMatchObject({ metric: 'cc', value: 5, stop: 15, watchOnly: false });
+  });
+
   it('marks generated ui/ rows watch-only: visible, never gated', () => {
     const e = toRiskEntry('src/client/components/ui/button.tsx', fn, undefined);
     expect(e).toMatchObject({
