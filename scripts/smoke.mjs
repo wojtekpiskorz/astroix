@@ -28,21 +28,19 @@ const run = (command, options = {}) => execSync(command, { stdio: 'inherit', ...
 if (await isPortOpen(SMOKE_PORT)) {
   console.error(`astroix smoke: port ${SMOKE_PORT} is already occupied — a dev server is there.`);
   console.error('  kill it:   lsof -ti :4312 | xargs kill');
-  console.error(
-    '  tracked servers can also be stopped with: cd e2e/fixture && bunx astro dev stop',
-  );
+  console.error('  tracked servers can also be stopped with: cd e2e/fixture && npx astro dev stop');
   console.error('  or simply keep using the running server.');
   process.exit(1);
 }
 
 console.log('→ installing root dependencies');
-run('bun install');
+run('npm install');
 
 console.log('→ building the package (node dist + chrome bundle)');
-run('bun run build');
+run('npm run build');
 
 console.log('→ staging the publish-shaped local link for the fixture');
-run('bun run prepare-local');
+run('npm run prepare-local');
 
 console.log();
 console.log('Smoke environment ready — the dev server is starting.');
@@ -51,4 +49,4 @@ console.log('  follow:  docs/manual-smoke.md (7 steps)');
 console.log('  stop:    Ctrl+C');
 console.log();
 
-run('bun run dev', { cwd: 'e2e/fixture' });
+run('npm run dev', { cwd: 'e2e/fixture' });

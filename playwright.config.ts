@@ -31,7 +31,7 @@ export default defineConfig({
   ],
   webServer: [
     {
-      command: `ASTROIX_E2E_PORT=${MAIN_PORT} bun run dev`,
+      command: `ASTROIX_E2E_PORT=${MAIN_PORT} npm run dev`,
       cwd: 'e2e/fixture',
       url: `http://localhost:${MAIN_PORT}`,
       // CI parity — no zombie adoption, ever; the boot cost is seconds. The
@@ -44,7 +44,7 @@ export default defineConfig({
       // npm-pack smoke lane (ADR-0001): build + pack the repo, install the
       // tarball into the pack fixture, boot it. Managed as a webServer so
       // playwright owns the lifecycle and the generous cold-install timeout.
-      command: `node ../../scripts/prepare-pack-fixture.mjs && ASTROIX_E2E_PACK_PORT=${PACK_PORT} bun run dev`,
+      command: `node ../../scripts/prepare-pack-fixture.mjs && ASTROIX_E2E_PACK_PORT=${PACK_PORT} npm run dev`,
       cwd: 'e2e/pack-fixture',
       url: `http://localhost:${PACK_PORT}`,
       reuseExistingServer: false,
@@ -56,7 +56,7 @@ export default defineConfig({
       // this checkout's source with fast-refresh — the HMR promise of
       // ADR-0001, covered nowhere else since the main lane went
       // publish-shaped (#123). Its dev script stages the link first.
-      command: `ASTROIX_E2E_SRC_PORT=${SRC_PORT} bun run dev`,
+      command: `ASTROIX_E2E_SRC_PORT=${SRC_PORT} npm run dev`,
       cwd: 'e2e/src-fixture',
       url: `http://localhost:${SRC_PORT}`,
       reuseExistingServer: false,

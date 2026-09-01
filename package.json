@@ -16,9 +16,13 @@
     "css"
   ],
   "engines": {
-    "node": ">=22.12"
+    "node": ">=24"
   },
-  "packageManager": "bun@1.3.14",
+  "packageManager": "npm@11.6.2",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
   "imports": {
     "#components/*": "./src/client/components/*",
     "#hooks/*": "./src/client/hooks/*",
@@ -48,15 +52,15 @@
     "check:publint": "publint",
     "smoke": "node scripts/smoke.mjs",
     "prepare-local": "node scripts/prepare-local-link.mjs",
-    "crap": "bun scripts/crap.mjs",
-    "crap:ci": "bun scripts/crap.mjs --ci",
-    "preflight": "bun scripts/crap.mjs --preflight",
+    "crap": "node scripts/crap.mjs",
+    "crap:ci": "node scripts/crap.mjs --ci",
+    "preflight": "node scripts/crap.mjs --preflight",
     "hooks": "node scripts/setup-hooks.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
-    "ci:publish": "bun run build && bun run check:artifact && bun run check:dist-graph && bun run check:publint && bunx changeset publish",
+    "ci:publish": "npm run build && npm run check:artifact && npm run check:dist-graph && npm run check:publint && npx changeset publish",
     "changeset": "changeset"
   },
   "peerDependencies": {
@@ -91,7 +95,7 @@
     "happy-dom": "^20.11.6",
     "lucide-react": "^1.34.0",
     "oxc-parser": "^0.147.0",
-    "oxc-transform-react": "^0.147.0",
+    "oxc-transform-react": "^0.145.0",
     "publint": "^0.3.24",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",

@@ -23,15 +23,15 @@ import { fileURLToPath } from 'node:url';
 //
 // The `src` symlink is the realpath-vs-symlink-path edge this lane exists to
 // catch (the fs.allow / plugin-react include regexes are built from
-// clientEntryPath through this layout). Empirically it holds together
-// (#150): bun never materializes the symlinked `src` into the fixture's
-// node_modules — but never needs to, because node realpath-resolves the
-// running `dist/index.js` back to this staging, where the symlink sits; the
-// detection then realpaths through it to the repo's own `src/`, which is
-// what every downstream consumer (the /@fs URL, fs.allow, the include
-// regex) operates on. If that ever breaks (bun or node changes either
-// resolution behavior), the honest fallback is a plain copy here — and
-// ADR-0001 must say which one ships.
+// clientEntryPath through this layout). It holds together (#150, re-verified
+// under npm): npm links the whole staging dir into the fixture's
+// node_modules as one symlink, so the symlinked `src` never needs to be
+// materialized anywhere — node realpath-resolves the running `dist/index.js`
+// back to this staging, where the symlink sits; the detection then realpaths
+// through it to the repo's own `src/`, which is what every downstream
+// consumer (the /@fs URL, fs.allow, the include regex) operates on. If that
+// ever breaks (npm or node changes either resolution behavior), the honest
+// fallback is a plain copy here — and ADR-0001 must say which one ships.
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const staging = join(root, '.astroix-local-src');
@@ -52,7 +52,7 @@ function walkFiles(dir) {
   const files = [];
   for (const entry of entries) {
     const path = join(dir, entry.name);
-    // classify through symlinks (statSync follows), like the bun-materialized
+    // classify through symlinks (statSync follows), like the npm-linked
     // installed tree this walker also serves — see prepare-local-link.mjs
     const stats = statSync(path);
     if (stats.isDirectory()) files.push(...walkFiles(path));
@@ -76,10 +76,10 @@ function treeHash(dir) {
  * Staging shape: dist + src + manifest, never the repo itself (`e2e` is the
  * recursion tripwire; `src` is required here, not forbidden — the inverse of
  * the publish-shape assert in prepare-local-link.mjs). The INSTALLED copy
- * only mirrors what bun materializes — and bun skips the staging `src`
- * symlink entirely (verified: clean install, no lock, no cache) — so `src`
- * is asserted on the staging alone, where the running dist actually
- * realpath-resolves from.
+ * is npm's single symlink into this staging (verified: clean install), so
+ * `src` shows up through the link too — the assert stays staging-strict
+ * (`requireSrc`) and installed-lenient, since the running dist realpath-
+ * resolves into the staging either way.
  */
 function assertShape(dir, label, { requireSrc }) {
   const required = requireSrc ? ['dist', 'src', 'package.json'] : ['dist', 'package.json'];
@@ -103,8 +103,8 @@ const outputMtimes = BUILD_OUTPUTS.map((name) => {
   return existsSync(path) ? statSync(path).mtimeMs : 0;
 });
 if (Math.max(...inputMtimes) > Math.min(...outputMtimes)) {
-  console.log('[astroix] dist is stale — rebuilding (bun run build)');
-  run('bun run build', root);
+  console.log('[astroix] dist is stale — rebuilding (npm run build)');
+  run('npm run build', root);
 }
 
 // 2. Sync: meta + dist copied fresh, then `src` symlinked at the repo's own
@@ -120,14 +120,15 @@ symlinkSync('../src', join(staging, 'src'), 'dir');
 assertShape(staging, 'staging dir', { requireSrc: true });
 
 // 3. Refresh the installed copy (same digest dance as the publish staging:
-// bun re-links a dir `file:` dep on install; dist bytes decide).
+// npm links a dir `file:` dep as one symlink into the staging dir, so the
+// symlinked `src` rides along; dist bytes decide on cold boots).
 const stagedDist = treeHash(join(staging, 'dist'));
 const installedDist = treeHash(join(installed, 'dist'));
 if (stagedDist !== installedDist) {
   console.log(
-    '[astroix] staged dist differs from the installed copy — bun install in e2e/src-fixture',
+    '[astroix] staged dist differs from the installed copy — npm install in e2e/src-fixture',
   );
-  run('bun install --frozen-lockfile', fixture);
+  run('npm install', fixture);
 }
 
 // 4. Guard: whatever sits in the src-fixture's node_modules must carry the

@@ -1,5 +1,11 @@
 name: Experimental snapshot
 
+# PAUSED by the Electron rewrite (lane A2, #211; ADR-0010,
+# docs/agents/release-loop.md): npm publication — stable and snapshot — is
+# dormant. The job below is hard-disabled, so even a manual dispatch runs
+# nothing; any run during the pause is an incident (release-loop.md). The
+# retirement lane deletes this workflow; the steps are dormant provenance,
+# kept for reference in the npm toolchain.
 on:
   workflow_dispatch:
 
@@ -15,28 +21,26 @@ concurrency:
 jobs:
   snapshot:
     name: snapshot (experimental channel)
-    if: github.ref == 'refs/heads/main'
+    if: false # paused — see the workflow header; do not re-enable without an owner ruling
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: 1.3.14
       - uses: actions/setup-node@v4
         with:
           node-version: 24
+          cache: npm
           registry-url: https://registry.npmjs.org
-      - run: bun install --frozen-lockfile
-      - run: bun run build
-      - run: bun run check:artifact
+      - run: npm ci
+      - run: npm run build
+      - run: npm run check:artifact
       - name: Version (snapshot, experimental)
         run: |
           pending=$(ls .changeset/*.md 2>/dev/null | grep -v 'README.md' | wc -l)
           if [ "$pending" -eq 0 ]; then
             echo "::warning::No pending changesets: this snapshot publishes nothing (main HEAD == latest stable release)"
           fi
-          bunx changeset version --snapshot experimental
+          npx changeset version --snapshot experimental
         # never run snapshot publish bare: without --tag the snapshot lands on latest
-      - run: bunx changeset publish --tag experimental --no-git-tag
+      - run: npx changeset publish --tag experimental --no-git-tag
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
