@@ -1,0 +1,37 @@
+name: Issue 209 kernel lease proof
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - codex/issue-209-kernel-lease-proof
+    paths:
+      - .github/workflows/issue-209-kernel-lease-proof.yml
+      - spikes/issue-209-kernel-lease/**
+
+permissions:
+  contents: read
+
+jobs:
+  linux-x64:
+    name: Linux x64 package-shaped qualification
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out proof source
+        uses: actions/checkout@v5
+
+      - name: Install bootstrap Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24.20.0
+
+      - name: Run exact bundled-Node matrix
+        run: node spikes/issue-209-kernel-lease/run.mjs
+
+      - name: Upload qualification report
+        uses: actions/upload-artifact@v4
+        with:
+          name: issue-209-linux-x64-report
+          path: spikes/issue-209-kernel-lease/REPORT.linux-x64.json
+          if-no-files-found: error

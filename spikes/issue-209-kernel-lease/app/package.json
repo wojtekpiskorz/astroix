@@ -1,0 +1,6 @@
+{
+  "name": "astroix-issue-209-proof",
+  "private": true,
+  "type": "module",
+  "main": "main.mjs"
+}
