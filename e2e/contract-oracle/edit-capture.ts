@@ -329,23 +329,44 @@ export async function captureEditCorpus(options: EditCaptureOptions): Promise<Ed
     // runner's first transform can outlive a one-shot trigger, so every
     // iteration re-arms it; the budget is CI-realistic for a full module
     // re-transform on a 2-core runner (local runs finish in well under 20s)
-    const scopedAfterRecords = await poll(
-      'the renamed scoped selector re-joined with its cid',
-      async () => {
-        await fetch(`${base}${styleModuleUrl}`);
-        return readIndex(base);
-      },
-      (records) =>
-        records.some(
-          (record) =>
-            record.scoped &&
-            record.file === INDEX_ASTRO &&
-            record.selector === RENAMED_SELECTOR &&
-            record.effectiveSelector?.startsWith(RENAMED_SELECTOR) === true &&
-            record.effectiveSelector.includes(CID_FORM.attribute),
-        ),
-      60_000,
-    );
+    let scopedAfterRecords: Awaited<ReturnType<typeof readIndex>>;
+    try {
+      scopedAfterRecords = await poll(
+        'the renamed scoped selector re-joined with its cid',
+        async () => {
+          await fetch(`${base}${styleModuleUrl}`);
+          return readIndex(base);
+        },
+        (records) =>
+          records.some(
+            (record) =>
+              record.scoped &&
+              record.file === INDEX_ASTRO &&
+              record.selector === RENAMED_SELECTOR &&
+              record.effectiveSelector?.startsWith(RENAMED_SELECTOR) === true &&
+              record.effectiveSelector.includes(CID_FORM.attribute),
+          ),
+        60_000,
+      );
+    } catch (error) {
+      // timeout diagnostics: WHERE is the staleness — static index, module
+      // transform, or the join between them?
+      const moduleBody = await fetch(`${base}${styleModuleUrl}`).then((response) =>
+        response.text(),
+      );
+      const current = await readIndex(base);
+      const scopedNow = current.filter((record) => record.file === INDEX_ASTRO);
+      console.error(
+        `[astroix] style-join poll timed out — module bytes contain RENAMED selector: ${moduleBody.includes(RENAMED_SELECTOR)}; module bytes contain cid form: ${moduleBody.includes(CID_FORM.attribute)}; index.astro records: ${JSON.stringify(
+          scopedNow.map((record) => ({
+            selector: record.selector,
+            effectiveSelector: record.effectiveSelector,
+            scoped: record.scoped,
+          })),
+        )}`,
+      );
+      throw error;
+    }
     const scopedAfter = scopedAfterRecords.find(
       (record) =>
         record.scoped &&
