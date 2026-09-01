@@ -14,9 +14,6 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   retries: 0,
   reporter: process.env.CI ? 'github' : 'list',
-  use: {
-    baseURL: 'http://localhost:4314',
-  },
   projects: [
     {
       name: 'chromium',

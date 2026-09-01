@@ -1,9 +1,11 @@
 /**
  * Per-lane e2e ports (#120): canonical defaults for CI, env overrides for
  * parallel local lanes — each worktree runs its own pair, so sibling lanes
- * never share a port or a server. Single module because playwright.config.ts
- * and the specs must read the same numbers: a spec hardcoding a port drifts
- * from the webServer it drives.
+ * never share a port or a server. Single module so every consumer reads the
+ * same numbers: during the no-E2E interval the consumers are the oracle
+ * staging scripts and the coming B-lane capture suites (playwright.config.ts
+ * carries no webServers until product e2e returns, #240) — a spec or script
+ * hardcoding a port drifts from the server it drives.
  */
 // `||`, not `??`: an empty-string export must fall through to the default the
 // same way the `${VAR:-default}` dev scripts treat it — `Number('')` is 0.
