@@ -318,6 +318,12 @@ import { defineConfig } from 'astro/config';
 // registers the retired integration.
 export default defineConfig({
   integrations: [astroix()],
+  // Polling watch: the capture corpora write through the endpoint and read
+  // the re-transformed style module back — native watching proved
+  // environment-fragile for that invalidation (linux CI never re-served the
+  // module; diagnosed in #287), polling makes it deterministic everywhere.
+  // Oracles live for seconds, so the CPU cost is a non-issue here.
+  vite: { server: { watch: { usePolling: true, interval: 250 } } },
 });
 `;
 
