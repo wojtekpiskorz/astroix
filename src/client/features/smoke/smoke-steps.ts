@@ -7,8 +7,9 @@ export interface SmokeStep {
   surface: string;
 }
 
-// The client-side mirror of docs/manual-smoke.md (the owner's POC definition
-// of done) — when the doc changes, this module changes alongside it (#61).
+// Retired in place: the integration-era manual-smoke wizard's step list. The
+// doc-mirror contract and its e2e enforcement are gone (#262 owner ruling);
+// the feature itself is deleted with the legacy integration (#215/A6).
 // `as const satisfies` narrows the ids to a real union (StepId) so the store
 // can key by them — an unknown step id is a compile error there.
 export const SMOKE_STEPS = [
