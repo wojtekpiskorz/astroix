@@ -334,7 +334,13 @@ export async function captureEditCorpus(options: EditCaptureOptions): Promise<Ed
       scopedAfterRecords = await poll(
         'the renamed scoped selector re-joined with its cid',
         async () => {
-          await fetch(`${base}${styleModuleUrl}`);
+          // CI/linux truth (diagnosed 2026-09-01): fetching the style module
+          // URL alone never re-transforms it there — vite serves the stale
+          // cached transform forever. Fetching the PAGE drives the module
+          // graph the way a user reload does (the pipeline re-transforms
+          // index.astro and its style module); the style-URL fetch stays as
+          // a second arm. Both are idempotent GETs per 250ms iteration.
+          await Promise.all([fetch(`${base}${styleModuleUrl}`), fetch(`${base}/`)]);
           return readIndex(base);
         },
         (records) =>
