@@ -4,7 +4,7 @@
  * for the astroix pre-commit hook (blocking biome staged check + blocking
  * typecheck when the staged set touches TypeScript + the crap4ts CC-warn
  * scan, wayfinder #55/#64, #102). Idempotent; run once per clone via
- * `bun run hooks`.
+ * `npm run hooks`.
  *
  * Deliberately NOT a postinstall: this package is published, and a
  * postinstall would rewrite git config inside consumers' repositories.

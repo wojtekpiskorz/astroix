@@ -37,7 +37,7 @@ function walkFiles(dir) {
   const files = [];
   for (const entry of entries) {
     const path = join(dir, entry.name);
-    // bun installs a directory `file:` dep as per-file symlinks into the
+    // npm installs a directory `file:` dep as a single symlink into the
     // staging dir — classify through the link (statSync follows it), never
     // by the dirent type, or every linked file looks like neither file nor
     // dir and the installed tree hashes as empty.
@@ -93,8 +93,8 @@ const outputMtimes = BUILD_OUTPUTS.map((name) => {
   return existsSync(path) ? statSync(path).mtimeMs : 0;
 });
 if (Math.max(...inputMtimes) > Math.min(...outputMtimes)) {
-  console.log('[astroix] dist is stale — rebuilding (bun run build)');
-  run('bun run build', root);
+  console.log('[astroix] dist is stale — rebuilding (npm run build)');
+  run('npm run build', root);
 }
 
 // 2. Sync the publish surface into the staging dir (always: a full re-copy
@@ -105,24 +105,23 @@ for (const name of PUBLISH_SURFACE) {
 }
 assertPublishShape(staging, 'staging dir');
 
-// 3. Refresh the installed copy. bun 1.3 materializes a directory `file:` dep
-// as per-file symlinks into the staging dir (a re-sync is already live) — but
-// the digest stays content-based so a plain-copy layout (other bun versions,
-// copyfile backend) refreshes too: `bun install` re-links/re-copies and needs
-// none of the lockfile gymnastics the tarball lane has
-// (prepare-pack-fixture.mjs). Frozen on purpose: a dir `file:` dep's lockfile
-// spec never changes with dist bytes, so frozen never blocks a legitimate
-// refresh — it only refuses to rewrite a lockfile the fixture manifest drifted
-// from, keeping CI's committed-lockfile guard meaningful.
+// 3. Refresh the installed copy. npm links a directory `file:` dep as one
+// symlink into the staging dir (verified: both `npm ci` and `npm install`
+// materialize `node_modules/@wojciechpiskorz/astroix ->
+// ../../../../.astroix-local`), so a re-sync is already live and the digest
+// below only fires on a cold checkout (first install) or a regressed copy.
+// The digest stays content-based so any plain-copy layout a future npm
+// ships refreshes too. The lockfile guard is `npm ci` in CI: it hard-fails
+// a manifest/lock drift, while a local `npm install` re-reifies the ideal
+// tree from the lock and needs none of the lockfile gymnastics the tarball
+// lane has (prepare-pack-fixture.mjs).
 const stagedDist = treeHash(join(staging, 'dist'));
 const installedDist = treeHash(join(installed, 'dist'));
 // Shape arm (#152): a regressed copy (pre-#123 full-repo residue) must
 // self-heal on the next boot even when its dist still hashes equal — the
-// digest alone is blind to foreign dirs. Unlike the tarball lane, where
-// bun's cache serves the old extraction, a frozen dir-`file:` install
-// rebuilds the installed tree wholesale and evicts whatever the source
-// does not carry (verified: planted src/ + loose files vanish) — no
-// rmSync needed.
+// digest alone is blind to foreign dirs. An install re-reifies the lock's
+// ideal tree and evicts whatever the source does not carry (verified:
+// planted src/ + loose files vanish) — no rmSync needed.
 const digestStale = stagedDist !== installedDist;
 const shapeBroken = !isPublishShaped(installed);
 if (digestStale || shapeBroken) {
@@ -130,8 +129,8 @@ if (digestStale || shapeBroken) {
     ...(digestStale ? ['staged dist differs from the installed copy'] : []),
     ...(shapeBroken ? ['installed copy is not publish-shaped'] : []),
   ];
-  console.log(`[astroix] ${triggers.join('; ')} — bun install in e2e/fixture`);
-  run('bun install --frozen-lockfile', fixture);
+  console.log(`[astroix] ${triggers.join('; ')} — npm install in e2e/fixture`);
+  run('npm install', fixture);
 }
 
 // 4. Guard: whatever sits in the fixture's node_modules must be

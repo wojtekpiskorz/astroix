@@ -1,16 +1,16 @@
 #!/bin/sh
 # astroix pre-commit: biome blocks on staged lint/format errors (fix with
-# `bunx biome check --staged --write`, re-stage); the typecheck blocks when
+# `npx biome check --staged --write`, re-stage); the typecheck blocks when
 # the staged set touches TypeScript; the crap4ts CC scan warns, never
-# blocks — the hard stops live in `bun run preflight`.
+# blocks — the hard stops live in `npm run preflight`.
 # Wired without a hook manager: git config core.hooksPath scripts/hooks
-# (run `bun run hooks` once per clone; see AGENTS.md).
+# (run `npm run hooks` once per clone; see AGENTS.md).
 cd "$(git rev-parse --show-toplevel)" || exit 0
-if command -v bun >/dev/null 2>&1; then
+if [ -x node_modules/.bin/biome ]; then
   # biome's published recipe for staged hooks: unknown file types ignored,
   # an empty matched set is not an error (docs-only/fixture-only commits pass)
-  bunx biome check --staged --files-ignore-unknown=true --no-errors-on-unmatched || {
-    echo "astroix: commit blocked by biome — fix with 'bunx biome check --staged --write', then re-stage"
+  node_modules/.bin/biome check --staged --files-ignore-unknown=true --no-errors-on-unmatched || {
+    echo "astroix: commit blocked by biome — fix with 'npx biome check --staged --write', then re-stage"
     exit 1
   }
   # tsc has no staged mode: it reads the whole working tree, so an unstaged
@@ -18,11 +18,11 @@ if command -v bun >/dev/null 2>&1; then
   # typecheck tier is deterministic, like biome, not a heuristic like the
   # CC scan). The .ts/.tsx gate spares docs/changeset-only commits the run.
   if git diff --cached --name-only | grep -qE '\.(ts|tsx)$'; then
-    bun run typecheck || {
+    npm run typecheck || {
       echo "astroix: commit blocked by typecheck — fix the errors, then retry"
       exit 1
     }
   fi
-  bun scripts/crap.mjs --staged || echo "astroix: pre-commit CC scan skipped (engine unavailable)"
+  node scripts/crap.mjs --staged || echo "astroix: pre-commit CC scan skipped (engine unavailable)"
 fi
 exit 0
