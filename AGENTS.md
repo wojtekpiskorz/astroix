@@ -68,6 +68,7 @@ Rationale and trade-offs live in `docs/adr/0002-chrome-module-architecture.md` (
 ## Testing doctrine
 
 - **Unit (vitest + happy-dom)**: pure modules only. Indexer/matcher/splice-writer/route-resolution are pure functions over fixtures — test behavior (matched rules, output bytes), never index internals.
+- **No-E2E interval** (ADR-0010, amended 2026-09-01, owner ruling on #197): between the plain-fixture conversion (#213) and the first web-host slice there is no product E2E — the legacy-chrome regression suite is deleted; one serverless plain-fixture build smoke remains. Behavior truth lives in the frozen B-lane contracts until web-host E2E returns.
 - **Web host (Playwright)**: web mode is the deterministic full-behavior test host and the only source of truth for selector-engine behavior (`[data-astro-cid-*]` under the default `attribute` scopedStyleStrategy — `:where(...)` only when configured; certified pair `astro@7.2.10 + vite@8.2.2`) and full builder loops, including A-to-B-to-A switch races, stale-authority rejection, and zero-injection byte/metadata snapshots.
 - **Behavior contracts** (ADR-0010): payloads, selector matches, conflicts, and output bytes captured from the integration oracle bind the replacement — a replacement result that drifts from a captured contract is a defect, not a redesign license.
 - **Electron**: an early packaged-host smoke precedes vertical work; an instrumented Electron build may test wiring but is never release evidence. Packaged qualification (ADR-0008) runs at candidate checkpoints only.

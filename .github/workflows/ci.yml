@@ -34,25 +34,13 @@ jobs:
       - run: npm run check:dist-graph
       # the published manifest/exports must be consumer-clean (needs the build)
       - run: npm run check:publint
-
-  e2e:
-    name: e2e (playwright)
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: npm
-      # pin npm to packageManager — same rationale as the check job
-      - run: npm install -g npm@11.6.2
-      - run: npm ci
-      - run: npm run build
-      # stage the publish-shaped local link before the fixture resolves it (#123);
-      # the fixture lockfile's file: dep resolves against this staging dir
-      - run: npm run prepare-local
+      # plain-fixture build smoke — the only e2e during the no-E2E interval
+      # (serverless: fixture install + build, no browser, no oracle prep)
       - run: npm ci
         working-directory: e2e/fixture
-      - run: npx playwright install --with-deps chromium
       - run: npm run test:e2e
+
+  # No-E2E interval (ADR-0010, amended 2026-09-01 — owner ruling on #197):
+  # the legacy-chrome e2e lane is deleted until the web-host slices land.
+  # CI states the interval and never presents it as passing product E2E;
+  # the one serverless plain-fixture build smoke runs in the check job.
