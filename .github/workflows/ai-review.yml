@@ -55,6 +55,9 @@ jobs:
         with:
           node-version: 24
           cache: npm
+      # pin npm to packageManager (keep in sync) — same lockfile/validation
+      # skew rationale as ci.yml (#211)
+      - run: npm install -g npm@11.6.2
       # recompute the CRAP table from scratch. CI is the source of truth,
       # local runs are advisory (wayfinder #55)
       - run: npm ci
