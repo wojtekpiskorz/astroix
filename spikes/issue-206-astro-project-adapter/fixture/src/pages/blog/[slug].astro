@@ -1,0 +1,15 @@
+---
+import { getCollection } from 'astro:content';
+
+export async function getStaticPaths() {
+  const entries = await getCollection('blog');
+  return entries.map((entry) => ({ params: { slug: entry.id }, props: { entry } }));
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: Astro template expressions consume this binding.
+const { entry } = Astro.props;
+---
+
+<article data-proof-node={`blog-${entry.id}`}>
+  <h1>{entry.data.title}</h1>
+</article>

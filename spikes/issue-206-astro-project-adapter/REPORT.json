@@ -1,0 +1,602 @@
+{
+  "artifact": "AstroProjectAdapter current-stable and duplicate-hook proof",
+  "certifiedPair": {
+    "astro": "7.2.10",
+    "vite": "8.2.2"
+  },
+  "checkedAt": "2026-09-01T00:41:52.007Z",
+  "environment": {
+    "arch": "arm64",
+    "node": "v22.22.3",
+    "platform": "darwin",
+    "bun": "1.3.14"
+  },
+  "issue": 206,
+  "outcome": "passed",
+  "tempWorkspace": {
+    "deletedAfterSuccess": true,
+    "retainedAfterFailure": false
+  },
+  "preConfigCertification": {
+    "configImportStarted": false,
+    "detectedPair": {
+      "astro": "7.2.10",
+      "vite": "8.2.2"
+    },
+    "diagnostic": "AstroProjectAdapter compatibility rejection: detected astro@7.2.10 + vite@8.2.2; certified pairs: astro@7.2.10 + vite@0.0.0-uncertified; failed contract: exact Astro/Vite pair certification must pass before project config executes",
+    "rejectedBeforeConfigImport": true
+  },
+  "plainProject": {
+    "astroixDependencyAbsent": true,
+    "astroixIntegrationAbsent": true,
+    "dependencyNames": ["astro", "vite"],
+    "hiddenControlArtifacts": [],
+    "projectOwnedObservableIntegration": true
+  },
+  "strategies": {
+    "attribute": {
+      "adapter": {
+        "content": {
+          "collectionIds": {
+            "blog": ["alpha", "beta"],
+            "homepage": ["index"]
+          },
+          "schemaNames": ["blog", "homepage"]
+        },
+        "privateSeams": {
+          "compiledCssEntries": [
+            {
+              "contentBytes": 99,
+              "id": "<project>/src/pages/home.css",
+              "url": "/src/pages/home.css"
+            },
+            {
+              "contentBytes": 59,
+              "id": "<project>/src/pages/index.astro?astro&type=style&index=0&lang.css",
+              "url": "/src/pages/index.astro?astro&type=style&index=0&lang.css"
+            }
+          ],
+          "clientCssGraph": [
+            {
+              "cssContentBytes": 59,
+              "id": "<project>/src/pages/index.astro?astro&type=style&index=0&lang.css",
+              "transformedCodeBytes": 675,
+              "url": "/src/pages/index.astro?astro&type=style&index=0&lang.css",
+              "virtualEntryContentBytes": 59
+            }
+          ],
+          "devCssModule": "virtual:astro:dev-css:src/pages/index@_@astro",
+          "moduleGraph": {
+            "id": "\u0000virtual:astro:dev-css:src/pages/index@_@astro",
+            "transformedCodeBytes": 3585
+          },
+          "routeVirtualModule": "virtual:astro:routes"
+        },
+        "routes": {
+          "entries": [
+            {
+              "component": "_server-islands.astro",
+              "pattern": "/_server-islands/[name]",
+              "type": "page"
+            },
+            {
+              "component": "node_modules/astro/dist/assets/endpoint/dev.js",
+              "pattern": "/_image",
+              "type": "endpoint"
+            },
+            {
+              "component": "src/pages/blog/[slug].astro",
+              "pattern": "/blog/[slug]",
+              "type": "page"
+            },
+            {
+              "component": "src/pages/index.astro",
+              "pattern": "/",
+              "type": "page"
+            },
+            {
+              "component": "astro-default-404.astro",
+              "pattern": "/404",
+              "type": "page"
+            }
+          ],
+          "renderedSlugs": ["alpha", "beta"]
+        },
+        "runner": {
+          "isClosedBeforeClose": false,
+          "listenersBefore": 1,
+          "listenersConnected": 2,
+          "attempts": [
+            {
+              "cleanupObserved": true,
+              "isClosedAfterClose": true,
+              "listenersAfterClose": 1,
+              "listenersBefore": 1,
+              "listenersConnected": 2,
+              "outcome": "passed",
+              "sequence": 1
+            },
+            {
+              "cleanupObserved": true,
+              "isClosedAfterClose": true,
+              "listenersAfterClose": 1,
+              "listenersBefore": 1,
+              "listenersConnected": 2,
+              "outcome": "passed",
+              "sequence": 2
+            }
+          ],
+          "isClosedAfterClose": true,
+          "listenersAfterClose": 1
+        },
+        "stylePayloadRecords": 4
+      },
+      "certifiedPair": {
+        "astro": "7.2.10",
+        "vite": "8.2.2"
+      },
+      "duplicateHookExecution": {
+        "compatibleNonIdempotentAppendSucceeded": true,
+        "configHookExecutions": [
+          {
+            "hook": "astro:config:setup",
+            "pid": 29561,
+            "processLocalConfigSetupCount": 1,
+            "role": "managed"
+          },
+          {
+            "hook": "astro:config:setup",
+            "pid": 29602,
+            "processLocalConfigSetupCount": 1,
+            "role": "composition"
+          }
+        ],
+        "executions": 2,
+        "meaning": "one project-owned config hook in each separate real Astro execution"
+      },
+      "invalidation": {
+        "browserDocumentPreserved": true,
+        "effectiveSelector": ".hero-lead[data-astro-cid-lcdefpme]",
+        "freshRunnerClosed": true,
+        "runnerAttempts": [
+          {
+            "cleanupObserved": true,
+            "isClosedAfterClose": true,
+            "listenersAfterClose": 1,
+            "listenersBefore": 1,
+            "listenersConnected": 2,
+            "outcome": "passed",
+            "sequence": 1
+          },
+          {
+            "cleanupObserved": true,
+            "isClosedAfterClose": true,
+            "listenersAfterClose": 1,
+            "listenersBefore": 1,
+            "listenersConnected": 2,
+            "outcome": "passed",
+            "sequence": 2
+          },
+          {
+            "cleanupObserved": true,
+            "error": "AstroProjectAdapter private seam rejection: compiled CSS rule count 1 does not match static scoped rule count 2 for src/pages/index.astro style block 0",
+            "isClosedAfterClose": true,
+            "listenersAfterClose": 1,
+            "listenersBefore": 1,
+            "listenersConnected": 2,
+            "outcome": "inspection-rejected",
+            "sequence": 3
+          },
+          {
+            "cleanupObserved": true,
+            "isClosedAfterClose": true,
+            "listenersAfterClose": 1,
+            "listenersBefore": 1,
+            "listenersConnected": 2,
+            "outcome": "passed",
+            "sequence": 4
+          }
+        ],
+        "sourceChangeObserved": true,
+        "transientSnapshotRejections": [
+          "AstroProjectAdapter private seam rejection: compiled CSS rule count 1 does not match static scoped rule count 2 for src/pages/index.astro style block 0"
+        ],
+        "watcherEvents": [
+          {
+            "event": "change",
+            "file": "src/pages/index.astro",
+            "observedAt": 1788223321415
+          }
+        ]
+      },
+      "lifecycle": {
+        "composition": {
+          "exit": {
+            "code": 0,
+            "signal": null
+          },
+          "forced": false,
+          "pid": 29602,
+          "serverClosed": true,
+          "shutdownMs": 1.2
+        },
+        "managed": {
+          "exit": {
+            "code": 143,
+            "signal": null
+          },
+          "forced": false,
+          "pid": 29561,
+          "portClosed": true,
+          "shutdownMs": 358,
+          "startupMs": 3168.8
+        },
+        "oracle": {
+          "exit": {
+            "code": 143,
+            "signal": null
+          },
+          "forced": false,
+          "pid": 29625,
+          "portClosed": true,
+          "shutdownMs": 325.4,
+          "startupMs": 3379.3
+        }
+      },
+      "oracle": {
+        "disposableCopy": true,
+        "preservedIntegrationPayloadRecords": 4
+      },
+      "plainManagedProject": {
+        "hiddenControlArtifacts": [],
+        "mutation": {
+          "afterSha256": "6837e595ad75def915ed90f7991e70c6aa7b551bee14b2fc8cdddefcc63893a9",
+          "beforeSha256": "81fef25fae67925f613a1cb43a1c4ce270af38d09bc8d3fe6ade47ef39593733",
+          "changedPaths": ["src/pages/index.astro"],
+          "excludedGeneratedDirectories": [".astro", "node_modules"],
+          "unexpectedMutations": []
+        }
+      },
+      "parity": {
+        "normalizedPayloadEqual": true,
+        "selectorApplications": [
+          {
+            "file": "src/pages/home.css",
+            "line": 1,
+            "nodes": ["hero"],
+            "selector": ".hero"
+          },
+          {
+            "file": "src/pages/home.css",
+            "line": 5,
+            "nodes": ["title"],
+            "selector": ".hero-title"
+          },
+          {
+            "file": "src/pages/home.css",
+            "line": 9,
+            "nodes": ["lead"],
+            "selector": ".hero-lead"
+          },
+          {
+            "file": "src/pages/index.astro",
+            "line": 15,
+            "nodes": ["title"],
+            "selector": ".hero-title[data-astro-cid-<scope>]"
+          }
+        ]
+      },
+      "strategy": "attribute",
+      "startup": {
+        "compositionMs": 1239.6,
+        "managedMs": 3168.8,
+        "oracleMs": 3379.3
+      }
+    },
+    "where": {
+      "adapter": {
+        "content": {
+          "collectionIds": {
+            "blog": ["alpha", "beta"],
+            "homepage": ["index"]
+          },
+          "schemaNames": ["blog", "homepage"]
+        },
+        "privateSeams": {
+          "compiledCssEntries": [
+            {
+              "contentBytes": 99,
+              "id": "<project>/src/pages/home.css",
+              "url": "/src/pages/home.css"
+            },
+            {
+              "contentBytes": 57,
+              "id": "<project>/src/pages/index.astro?astro&type=style&index=0&lang.css",
+              "url": "/src/pages/index.astro?astro&type=style&index=0&lang.css"
+            }
+          ],
+          "clientCssGraph": [
+            {
+              "cssContentBytes": 57,
+              "id": "<project>/src/pages/index.astro?astro&type=style&index=0&lang.css",
+              "transformedCodeBytes": 669,
+              "url": "/src/pages/index.astro?astro&type=style&index=0&lang.css",
+              "virtualEntryContentBytes": 57
+            }
+          ],
+          "devCssModule": "virtual:astro:dev-css:src/pages/index@_@astro",
+          "moduleGraph": {
+            "id": "\u0000virtual:astro:dev-css:src/pages/index@_@astro",
+            "transformedCodeBytes": 3555
+          },
+          "routeVirtualModule": "virtual:astro:routes"
+        },
+        "routes": {
+          "entries": [
+            {
+              "component": "_server-islands.astro",
+              "pattern": "/_server-islands/[name]",
+              "type": "page"
+            },
+            {
+              "component": "node_modules/astro/dist/assets/endpoint/dev.js",
+              "pattern": "/_image",
+              "type": "endpoint"
+            },
+            {
+              "component": "src/pages/blog/[slug].astro",
+              "pattern": "/blog/[slug]",
+              "type": "page"
+            },
+            {
+              "component": "src/pages/index.astro",
+              "pattern": "/",
+              "type": "page"
+            },
+            {
+              "component": "astro-default-404.astro",
+              "pattern": "/404",
+              "type": "page"
+            }
+          ],
+          "renderedSlugs": ["alpha", "beta"]
+        },
+        "runner": {
+          "isClosedBeforeClose": false,
+          "listenersBefore": 1,
+          "listenersConnected": 2,
+          "attempts": [
+            {
+              "cleanupObserved": true,
+              "isClosedAfterClose": true,
+              "listenersAfterClose": 1,
+              "listenersBefore": 1,
+              "listenersConnected": 2,
+              "outcome": "passed",
+              "sequence": 1
+            },
+            {
+              "cleanupObserved": true,
+              "isClosedAfterClose": true,
+              "listenersAfterClose": 1,
+              "listenersBefore": 1,
+              "listenersConnected": 2,
+              "outcome": "passed",
+              "sequence": 2
+            }
+          ],
+          "isClosedAfterClose": true,
+          "listenersAfterClose": 1
+        },
+        "stylePayloadRecords": 4
+      },
+      "certifiedPair": {
+        "astro": "7.2.10",
+        "vite": "8.2.2"
+      },
+      "duplicateHookExecution": {
+        "compatibleNonIdempotentAppendSucceeded": true,
+        "configHookExecutions": [
+          {
+            "hook": "astro:config:setup",
+            "pid": 29746,
+            "processLocalConfigSetupCount": 1,
+            "role": "managed"
+          },
+          {
+            "hook": "astro:config:setup",
+            "pid": 29788,
+            "processLocalConfigSetupCount": 1,
+            "role": "composition"
+          }
+        ],
+        "executions": 2,
+        "meaning": "one project-owned config hook in each separate real Astro execution"
+      },
+      "invalidation": {
+        "browserDocumentPreserved": true,
+        "effectiveSelector": ".hero-lead:where(.astro-lcdefpme)",
+        "freshRunnerClosed": true,
+        "runnerAttempts": [
+          {
+            "cleanupObserved": true,
+            "isClosedAfterClose": true,
+            "listenersAfterClose": 1,
+            "listenersBefore": 1,
+            "listenersConnected": 2,
+            "outcome": "passed",
+            "sequence": 1
+          },
+          {
+            "cleanupObserved": true,
+            "isClosedAfterClose": true,
+            "listenersAfterClose": 1,
+            "listenersBefore": 1,
+            "listenersConnected": 2,
+            "outcome": "passed",
+            "sequence": 2
+          },
+          {
+            "cleanupObserved": true,
+            "error": "AstroProjectAdapter private seam rejection: compiled CSS rule count 1 does not match static scoped rule count 2 for src/pages/index.astro style block 0",
+            "isClosedAfterClose": true,
+            "listenersAfterClose": 1,
+            "listenersBefore": 1,
+            "listenersConnected": 2,
+            "outcome": "inspection-rejected",
+            "sequence": 3
+          },
+          {
+            "cleanupObserved": true,
+            "isClosedAfterClose": true,
+            "listenersAfterClose": 1,
+            "listenersBefore": 1,
+            "listenersConnected": 2,
+            "outcome": "passed",
+            "sequence": 4
+          }
+        ],
+        "sourceChangeObserved": true,
+        "transientSnapshotRejections": [
+          "AstroProjectAdapter private seam rejection: compiled CSS rule count 1 does not match static scoped rule count 2 for src/pages/index.astro style block 0"
+        ],
+        "watcherEvents": [
+          {
+            "event": "change",
+            "file": "src/pages/index.astro",
+            "observedAt": 1788223330369
+          }
+        ]
+      },
+      "lifecycle": {
+        "composition": {
+          "exit": {
+            "code": 0,
+            "signal": null
+          },
+          "forced": false,
+          "pid": 29788,
+          "serverClosed": true,
+          "shutdownMs": 1.1
+        },
+        "managed": {
+          "exit": {
+            "code": 143,
+            "signal": null
+          },
+          "forced": false,
+          "pid": 29746,
+          "portClosed": true,
+          "shutdownMs": 323.4,
+          "startupMs": 2846.1
+        },
+        "oracle": {
+          "exit": {
+            "code": 143,
+            "signal": null
+          },
+          "forced": false,
+          "pid": 29804,
+          "portClosed": true,
+          "shutdownMs": 291.5,
+          "startupMs": 3285.7
+        }
+      },
+      "oracle": {
+        "disposableCopy": true,
+        "preservedIntegrationPayloadRecords": 4
+      },
+      "plainManagedProject": {
+        "hiddenControlArtifacts": [],
+        "mutation": {
+          "afterSha256": "6837e595ad75def915ed90f7991e70c6aa7b551bee14b2fc8cdddefcc63893a9",
+          "beforeSha256": "81fef25fae67925f613a1cb43a1c4ce270af38d09bc8d3fe6ade47ef39593733",
+          "changedPaths": ["src/pages/index.astro"],
+          "excludedGeneratedDirectories": [".astro", "node_modules"],
+          "unexpectedMutations": []
+        }
+      },
+      "parity": {
+        "normalizedPayloadEqual": true,
+        "selectorApplications": [
+          {
+            "file": "src/pages/home.css",
+            "line": 1,
+            "nodes": ["hero"],
+            "selector": ".hero"
+          },
+          {
+            "file": "src/pages/home.css",
+            "line": 5,
+            "nodes": ["title"],
+            "selector": ".hero-title"
+          },
+          {
+            "file": "src/pages/home.css",
+            "line": 9,
+            "nodes": ["lead"],
+            "selector": ".hero-lead"
+          },
+          {
+            "file": "src/pages/index.astro",
+            "line": 15,
+            "nodes": ["title"],
+            "selector": ".hero-title:where(.astro-<scope>)"
+          }
+        ]
+      },
+      "strategy": "where",
+      "startup": {
+        "compositionMs": 1058.8,
+        "managedMs": 2846.1,
+        "oracleMs": 3285.7
+      }
+    }
+  },
+  "incompatibleDuplicateHook": {
+    "compositionCleanup": {
+      "compositionServerCreated": false,
+      "compositionServerClosed": true,
+      "pid": 29939,
+      "reason": "startup-failure",
+      "shutdownMs": 0,
+      "watcherEvents": []
+    },
+    "compositionExit": {
+      "code": 1,
+      "signal": null
+    },
+    "diagnostic": "proof integration incompatible duplicate hook: exclusive side effect already claimed at /var/folders/zk/tkmdgsd97nd6d4t1yd82hslr0000gn/T/astroix-issue-206-l5wCiA/exclusive-project-resource",
+    "exactFailureSurfaced": true,
+    "hooks": [
+      {
+        "pid": 29861,
+        "processLocalConfigSetupCount": 1,
+        "role": "managed"
+      },
+      {
+        "pid": 29939,
+        "processLocalConfigSetupCount": 1,
+        "role": "composition"
+      }
+    ],
+    "managedLifecycle": {
+      "exit": {
+        "code": 143,
+        "signal": null
+      },
+      "forced": false,
+      "pid": 29861,
+      "portClosed": true,
+      "shutdownMs": 309.1,
+      "startupMs": 3068.3
+    },
+    "resourceOwner": "managed"
+  },
+  "preservedIntegrationOracle": {
+    "fileCount": 139,
+    "sha256": "bcc660bd4066d8fdc1e3b47bc2e7b11552d236fc128e19f630eff89ed73f0d6d",
+    "unchanged": true
+  },
+  "durationMs": 23189.8
+}

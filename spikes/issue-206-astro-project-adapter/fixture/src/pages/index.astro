@@ -1,0 +1,20 @@
+---
+import { getEntry } from 'astro:content';
+import './home.css';
+
+const home = await getEntry('homepage', 'index');
+if (!home) throw new Error('homepage entry missing');
+---
+
+<section class="hero" data-proof-node="hero">
+  <h1 class="hero-title" data-proof-node="title">{home.data.title}</h1>
+  <p class="hero-lead" data-proof-node="lead">{home.data.lead}</p>
+</section>
+
+<style>
+  .hero-title {
+    color: #1e293b;
+  }
+
+  /* ASTROIX_PROOF_STYLE_INSERT */
+</style>
