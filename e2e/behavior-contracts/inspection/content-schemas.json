@@ -1,0 +1,149 @@
+{
+  "contractVersion": "1.0.0",
+  "kind": "content-schemas",
+  "schemas": [
+    {
+      "collection": "blog",
+      "fields": [
+        {
+          "kind": "string",
+          "path": "title",
+          "label": "title",
+          "required": true
+        },
+        {
+          "kind": "raw",
+          "reason": "date",
+          "path": "date",
+          "label": "date",
+          "required": true
+        },
+        {
+          "kind": "array",
+          "item": {
+            "kind": "string"
+          },
+          "path": "tags",
+          "label": "tags",
+          "required": false,
+          "initial": []
+        },
+        {
+          "kind": "enum",
+          "options": ["bold", "calm"],
+          "path": "tone",
+          "label": "tone",
+          "required": false,
+          "initial": "bold"
+        },
+        {
+          "kind": "number",
+          "path": "priority",
+          "label": "priority",
+          "required": false,
+          "initial": 0
+        },
+        {
+          "kind": "boolean",
+          "path": "featured",
+          "label": "featured",
+          "required": false,
+          "initial": false
+        },
+        {
+          "kind": "group",
+          "children": [
+            {
+              "kind": "string",
+              "path": "meta.source",
+              "label": "source",
+              "required": false
+            }
+          ],
+          "path": "meta",
+          "label": "meta",
+          "required": false
+        },
+        {
+          "kind": "raw",
+          "reason": "union",
+          "path": "aside",
+          "label": "aside",
+          "required": false
+        }
+      ]
+    },
+    {
+      "collection": "gallery",
+      "fields": [
+        {
+          "kind": "image",
+          "path": "hero",
+          "label": "hero",
+          "required": true
+        },
+        {
+          "kind": "string",
+          "path": "alt",
+          "label": "alt",
+          "required": true
+        }
+      ]
+    },
+    {
+      "collection": "homepage",
+      "fields": [
+        {
+          "kind": "string",
+          "path": "title",
+          "label": "title",
+          "required": true
+        },
+        {
+          "kind": "string",
+          "path": "lead",
+          "label": "lead",
+          "required": true
+        },
+        {
+          "kind": "string",
+          "path": "image",
+          "label": "image",
+          "required": false
+        },
+        {
+          "kind": "group",
+          "children": [
+            {
+              "kind": "string",
+              "path": "cta.label",
+              "label": "label",
+              "required": true
+            },
+            {
+              "kind": "string",
+              "path": "cta.href",
+              "label": "href",
+              "required": true
+            }
+          ],
+          "path": "cta",
+          "label": "cta",
+          "required": false
+        }
+      ]
+    },
+    {
+      "collection": "notes",
+      "fields": [
+        {
+          "kind": "raw",
+          "reason": "unwalkable",
+          "path": "",
+          "label": "frontmatter",
+          "required": true
+        }
+      ]
+    }
+  ]
+}

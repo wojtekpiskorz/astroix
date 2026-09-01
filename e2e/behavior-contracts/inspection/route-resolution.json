@@ -1,0 +1,89 @@
+{
+  "contractVersion": "1.0.0",
+  "kind": "route-resolution",
+  "entryResolutions": [
+    {
+      "entryId": "2024/post",
+      "holderCollections": ["blog"],
+      "candidateUrl": "/blog/2024/post",
+      "hasCandidateRoutes": true,
+      "unrouted": false
+    },
+    {
+      "entryId": "2025/release-notes",
+      "holderCollections": ["blog"],
+      "candidateUrl": "/blog/2025/release-notes",
+      "hasCandidateRoutes": true,
+      "unrouted": false
+    },
+    {
+      "entryId": "hello-builder",
+      "holderCollections": ["blog"],
+      "candidateUrl": "/blog/hello-builder",
+      "hasCandidateRoutes": true,
+      "unrouted": false
+    },
+    {
+      "entryId": "showcase",
+      "holderCollections": ["gallery"],
+      "candidateUrl": null,
+      "hasCandidateRoutes": false,
+      "unrouted": true
+    },
+    {
+      "entryId": "index",
+      "holderCollections": ["homepage", "notes"],
+      "candidateUrl": null,
+      "hasCandidateRoutes": false,
+      "unrouted": true
+    },
+    {
+      "entryId": "scratch",
+      "holderCollections": ["notes"],
+      "candidateUrl": null,
+      "hasCandidateRoutes": false,
+      "unrouted": true
+    }
+  ],
+  "urlProbes": [
+    {
+      "url": "/",
+      "httpStatus": 200,
+      "resolved": null
+    },
+    {
+      "url": "/blog/hello-builder",
+      "httpStatus": 200,
+      "resolved": {
+        "collection": "blog",
+        "entryId": "hello-builder"
+      }
+    },
+    {
+      "url": "/blog/2024/post",
+      "httpStatus": 200,
+      "resolved": {
+        "collection": "blog",
+        "entryId": "2024/post"
+      }
+    },
+    {
+      "url": "/blog/2025/release-notes",
+      "httpStatus": 200,
+      "resolved": {
+        "collection": "blog",
+        "entryId": "2025/release-notes"
+      }
+    },
+    {
+      "url": "/blog/nonexistent",
+      "httpStatus": 404,
+      "resolved": null
+    },
+    {
+      "url": "/does-not-exist",
+      "httpStatus": 404,
+      "resolved": null
+    }
+  ]
+}

@@ -1,0 +1,113 @@
+{
+  "contractVersion": "1.0.0",
+  "kind": "collections",
+  "collections": [
+    {
+      "name": "blog",
+      "hasSchema": true,
+      "entries": [
+        {
+          "id": "2024/post",
+          "filePath": "src/content/blog/2024/post.md",
+          "data": {
+            "title": "Nested post",
+            "date": "2024-06-01T00:00:00.000Z",
+            "tags": ["nested"],
+            "tone": "bold",
+            "priority": 0,
+            "featured": false
+          },
+          "body": "Fixture post with a nested-path id (`2024/post`) for route resolution."
+        },
+        {
+          "id": "2025/release-notes",
+          "filePath": "src/content/blog/2025/release-notes.md",
+          "data": {
+            "title": "Release notes",
+            "date": "2025-01-15T00:00:00.000Z",
+            "tags": ["nested", "releases"],
+            "tone": "bold",
+            "priority": 0,
+            "featured": false
+          },
+          "body": "Second nested fixture post (`2025/release-notes`)."
+        },
+        {
+          "id": "hello-builder",
+          "filePath": "src/content/blog/hello-builder.md",
+          "data": {
+            "title": "Hello builder",
+            "date": "2026-08-26T00:00:00.000Z",
+            "tags": ["meta"],
+            "tone": "bold",
+            "priority": 0,
+            "featured": false
+          },
+          "body": "First fixture post — flat id."
+        }
+      ]
+    },
+    {
+      "name": "gallery",
+      "hasSchema": true,
+      "entries": [
+        {
+          "id": "showcase",
+          "filePath": "src/content/gallery/showcase.md",
+          "data": {
+            "hero": {
+              "src": "/src/assets/pixel.png?origWidth=1&origHeight=1&origFormat=png",
+              "width": 1,
+              "height": 1,
+              "format": "png"
+            },
+            "alt": "A single pixel"
+          },
+          "body": "The function-schema fixture entry — one image() field beside a plain string."
+        }
+      ]
+    },
+    {
+      "name": "homepage",
+      "hasSchema": true,
+      "entries": [
+        {
+          "id": "index",
+          "filePath": "src/content/homepage/index.md",
+          "data": {
+            "title": "Astroix fixture",
+            "lead": "A synthetic Astro 7 project exercising the builder e2e loop.",
+            "cta": {
+              "label": "Get started",
+              "href": "https://astro.build"
+            }
+          },
+          "body": "Fixture body — the markdown seam for the Content tab."
+        }
+      ]
+    },
+    {
+      "name": "notes",
+      "hasSchema": false,
+      "entries": [
+        {
+          "id": "index",
+          "filePath": "src/content/notes/index.md",
+          "data": {
+            "title": "Index twin"
+          },
+          "body": "Notes-side twin of the homepage `index` id — the two-collection holder\nfixture (#109): an id held by two collections keeps entry clicks silent."
+        },
+        {
+          "id": "scratch",
+          "filePath": "src/content/notes/scratch.md",
+          "data": {
+            "kind": "scratchpad",
+            "pinned": true
+          },
+          "body": "A schema-less note — any frontmatter passes through untouched."
+        }
+      ]
+    }
+  ]
+}

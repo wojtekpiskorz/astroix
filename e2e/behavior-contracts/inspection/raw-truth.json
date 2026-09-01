@@ -1,0 +1,14 @@
+{
+  "contractVersion": "1.0.0",
+  "kind": "raw-truth",
+  "reads": [
+    {
+      "file": "src/content/blog/hello-builder.md",
+      "contents": "---\ntitle: Hello builder\ndate: 2026-08-26\ntags: [meta]\n---\n\nFirst fixture post — flat id.\n"
+    },
+    {
+      "file": "src/content/notes/scratch.md",
+      "contents": "---\nkind: scratchpad\npinned: true\n---\n\nA schema-less note — any frontmatter passes through untouched.\n"
+    }
+  ]
+}
