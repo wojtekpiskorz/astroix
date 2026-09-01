@@ -18,6 +18,7 @@ import { join } from 'node:path';
 import {
   assertOracleLink,
   copyOracleSources,
+  ensureFreshDist,
   oraclePack,
   packInput,
   resetOracleSources,
@@ -28,8 +29,11 @@ import {
 const tarballName = 'astroix-pack.tgz';
 
 // 1. Build + pack the repo, stage the tarball under the stable name the
-// generated manifest references (`file:./astroix-pack.tgz`).
-execSync('npm run build', { cwd: root, stdio: 'inherit' });
+// generated manifest references (`file:./astroix-pack.tgz`). The build rides
+// the shared serialized gate (a fresh dist is the exact shipped artifact; a
+// stale one rebuilds single-flight — never two concurrent `npm run build`
+// at the root while the farmed lanes boot beside this one).
+ensureFreshDist();
 rmSync(join(root, tarballName), { force: true });
 const packed = execSync('npm pack --json', { cwd: root, encoding: 'utf8' });
 const fileName = JSON.parse(packed)[0]?.filename;

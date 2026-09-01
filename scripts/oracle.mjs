@@ -30,7 +30,9 @@ export const oracleSrc = join(root, ORACLE_SRC);
 
 // exactly what `files: ["dist"]` + the npm defaults allow into a tarball
 const PUBLISH_SURFACE = ['dist', 'package.json', 'README.md', 'LICENSE'];
-const BUILD_INPUTS = ['tsup.config.ts', 'vite.chrome.config.ts', 'package.json'];
+// root build inputs: the two build configs, the manifest, and the tsconfig
+// (tsup's dts pass reads it — a tsconfig-only edit must trip the gate too)
+const BUILD_INPUTS = ['tsup.config.ts', 'vite.chrome.config.ts', 'package.json', 'tsconfig.json'];
 const BUILD_OUTPUTS = ['dist/index.js', 'dist/chrome.js'];
 
 const run = (command, cwd) => execSync(command, { cwd, stdio: 'inherit' });
@@ -100,8 +102,9 @@ const LINK_SOURCE_SHAPE = {
 };
 
 /**
- * Every file the build reads: the src tree, the three root build configs,
- * and every packages/<name> src tree — dist bundles through the src/core +
+ * Every file the build reads: the src tree, the root build inputs (both
+ * build configs, the manifest, the tsconfig tsup's dts pass reads), and
+ * every packages/<name> src tree — dist bundles through the src/core +
  * src/client re-export shims (#270, #273), so a local edit under packages/
  * must trip the gate exactly like one under src/ (advisory round 1: the
  * walk gap let both lanes boot a stale chrome with no warning). walkFiles
@@ -162,13 +165,17 @@ function acquireBuildLock() {
       if (error.code !== 'EEXIST') throw error;
     }
     let holder = 0;
+    let age = 0;
     try {
       holder = Number.parseInt(readFileSync(BUILD_LOCK, 'utf8').trim(), 10);
+      age = Date.now() - statSync(BUILD_LOCK).mtimeMs;
     } catch {
-      // unreadable or vanished between the failed create and this read —
-      // fall through and retry the create
+      // the lock vanished (or was replaced) between the failed create and
+      // this read — the exact release race this loop absorbs: retry the
+      // create instead of dying on the now-missing file. holder=0 from a
+      // fresh iteration steers takeover if it reappears unreadable.
+      continue;
     }
-    const age = Date.now() - statSync(BUILD_LOCK).mtimeMs;
     const live = Number.isInteger(holder) && holder > 0 && pidIsLive(holder);
     if (!live || age > BUILD_LOCK_STALE_MS) {
       // takeover: dead holder, or a lock aged past any honest build. The
