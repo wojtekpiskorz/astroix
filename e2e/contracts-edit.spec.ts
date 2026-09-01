@@ -195,6 +195,9 @@ test('the freeze comparison is byte- and order-sensitive (mutation negatives)', 
   );
 });
 
+// the negative-mutation battery here has a vitest twin over the validators
+// (e2e/behavior-contracts/schema/edit-contract.test.ts) — new invariants go
+// in BOTH: the spec owns corpus truth, vitest owns validator truth
 test('freeze: the main oracle still produces the frozen edit corpus byte-for-byte', {
   tag: '@oracle-boot',
 }, async () => {

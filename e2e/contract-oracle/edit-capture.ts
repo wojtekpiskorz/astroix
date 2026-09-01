@@ -325,10 +325,16 @@ export async function captureEditCorpus(options: EditCaptureOptions): Promise<Ed
     // form while naming the pre-edit selector; only the renamed text proves
     // the module re-served.
     const styleModuleUrl = `/${INDEX_ASTRO}?astro&type=style&index=${scopedBefore.styleBlockIndex}&lang.css`;
-    await fetch(`${base}${styleModuleUrl}`);
+    // the refetch rides INSIDE the poll loop (idempotent GET): a slow
+    // runner's first transform can outlive a one-shot trigger, so every
+    // iteration re-arms it; the budget is CI-realistic for a full module
+    // re-transform on a 2-core runner (local runs finish in well under 20s)
     const scopedAfterRecords = await poll(
       'the renamed scoped selector re-joined with its cid',
-      () => readIndex(base),
+      async () => {
+        await fetch(`${base}${styleModuleUrl}`);
+        return readIndex(base);
+      },
       (records) =>
         records.some(
           (record) =>
@@ -338,6 +344,7 @@ export async function captureEditCorpus(options: EditCaptureOptions): Promise<Ed
             record.effectiveSelector?.startsWith(RENAMED_SELECTOR) === true &&
             record.effectiveSelector.includes(CID_FORM.attribute),
         ),
+      60_000,
     );
     const scopedAfter = scopedAfterRecords.find(
       (record) =>

@@ -172,8 +172,9 @@ export async function poll<T>(
   description: string,
   read: () => Promise<T>,
   ready: (value: T) => boolean,
+  timeoutMs: number = POLL_TIMEOUT_MS,
 ): Promise<T> {
-  const deadline = Date.now() + POLL_TIMEOUT_MS;
+  const deadline = Date.now() + timeoutMs;
   for (;;) {
     const value = await read();
     if (ready(value)) return value;

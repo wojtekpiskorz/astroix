@@ -218,11 +218,14 @@ export const cssScopedSpliceFixtureSchema = z
         message: 'the frozen replaced slice must be the baseline bytes at the splice range',
       });
     }
-    for (const record of [fixture.indexBefore, fixture.indexAfter]) {
+    for (const [name, record] of [
+      ['indexBefore', fixture.indexBefore],
+      ['indexAfter', fixture.indexAfter],
+    ] as const) {
       if (!record.scoped) {
         ctx.addIssue({
           code: 'custom',
-          path: ['indexBefore'],
+          path: [name],
           message: 'the scoped leg freezes scoped rules — an unscoped record is not contract shape',
         });
       }
@@ -232,7 +235,7 @@ export const cssScopedSpliceFixtureSchema = z
       ) {
         ctx.addIssue({
           code: 'custom',
-          path: ['indexAfter', 'effectiveSelector'],
+          path: [name, 'effectiveSelector'],
           message: `a joined scoped selector under the attribute strategy must carry ${CID_FORM.attribute}…) — selector identity is not normalizable`,
         });
       }

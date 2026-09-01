@@ -20,6 +20,9 @@ function frozen(name: string): unknown {
   return JSON.parse(readFileSync(join(EDIT_DIR, name), 'utf8')) as unknown;
 }
 
+// the negative-mutation battery here has a Playwright twin over the frozen
+// corpus (e2e/contracts-edit.spec.ts) — new invariants go in BOTH: vitest owns
+// validator truth, the spec owns corpus truth
 describe('the frozen edit corpus validates against the versioned schema', () => {
   for (const name of Object.keys(editFixtureSchemas)) {
     it(`${name} parses and carries the contract version`, () => {
