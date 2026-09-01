@@ -88,7 +88,12 @@ const cssIndexRecord = z.object({
   effectiveSelector: z.string().nullable(),
 });
 
-/** The scopedStyleStrategy variants the corpus freezes (docs/spec.md T2 seam). */
+/**
+ * The scopedStyleStrategy variants the corpus freezes — the testing-doctrine
+ * seam of docs/spec.md (Web host: selector-engine behavior is the source of
+ * truth, `[data-astro-cid-*]` under the default `attribute` strategy,
+ * `:where(...)` only when configured).
+ */
 const scopedStyleStrategy = z.enum(['attribute', 'where']);
 
 /**

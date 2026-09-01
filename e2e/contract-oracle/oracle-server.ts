@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { join } from 'node:path';
 import { ORACLE_MAIN } from '../oracle.mjs';
-import { MAIN_PORT } from '../ports.ts';
+import { MAIN_PORT, WHERE_PORT } from '../ports.ts';
 
 /**
  * Boot helper for the disposable inspection-contract oracles (#216): runs
@@ -18,11 +18,8 @@ import { MAIN_PORT } from '../ports.ts';
 
 export type OracleKind = 'main' | 'where';
 
-/** The where lane's port (#216): canonical default + env override for parallel local lanes. */
-export const WHERE_PORT = Number(process.env.ASTROIX_E2E_WHERE_PORT || 4395);
-
-/** Main oracle port — re-exported from the shared per-lane module (#120). */
-export { MAIN_PORT };
+/** The oracle ports — re-exported from the shared per-lane module (#120): one statement of the numbers, every consumer reads it. */
+export { MAIN_PORT, WHERE_PORT };
 
 const ROOT = process.cwd();
 

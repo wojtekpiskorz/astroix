@@ -12,10 +12,10 @@
 // only difference from the main prep is the generated astro.config.mjs and
 // the output dir (gitignored via this folder's .gitignore).
 //
-// The where lane's port: ASTROIX_E2E_WHERE_PORT (default 4395 — off the
-// canonical 4314/4313/4311 trio and the lane-env trio alike; the boot side
-// in oracle-server.ts always exports the var, the baked default only
-// serves manual `npm run dev` in the generated dir).
+// The where lane's port: ASTROIX_E2E_WHERE_PORT, owned (default, rationale,
+// and all) by e2e/ports.ts beside the main/pack/src trio; the boot side in
+// oracle-server.ts always exports the var, so the baked default below only
+// serves manual `npm run dev` in the generated dir.
 
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';

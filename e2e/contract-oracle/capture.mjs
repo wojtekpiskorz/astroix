@@ -16,7 +16,7 @@ import { join } from 'node:path';
 import { fixtureSchemas } from '../behavior-contracts/schema/inspection-contract.ts';
 import {
   assertNoForbiddenArtifacts,
-  CORPUS_FILES,
+  CORPUS_MANIFEST,
   captureInspectionCorpus,
   serializeFixture,
 } from './live-capture.ts';
@@ -30,29 +30,21 @@ const main = await withOracleServer('main', MAIN_PORT, (handle) =>
 const where = await withOracleServer('where', WHERE_PORT, (handle) =>
   captureInspectionCorpus({ base: handle.base, root: handle.dir, strategy: 'where' }),
 );
+const runs = { attribute: main, where };
 
-// One file per frozen envelope: the main run owns the corpus, the where run
-// contributes only its css-index leg under the strategy-named file.
-const fixtures = new Map([
-  [CORPUS_FILES.cssIndex, main.cssIndex],
-  [CORPUS_FILES.collections, main.collections],
-  [CORPUS_FILES.contentSchemas, main.contentSchemas],
-  [CORPUS_FILES.rawTruth, main.rawTruth],
-  [CORPUS_FILES.routes, main.routes],
-  [CORPUS_FILES.routeResolution, main.routeResolution],
-  ['css-index.where.json', where.cssIndex],
-]);
-
+// The manifest is the single enumeration: exactly these files are written,
+// each from the oracle run its strategy names — no second list to drift.
 mkdirSync(FIXTURE_DIR, { recursive: true });
-for (const [name, envelope] of fixtures) {
-  const schema = fixtureSchemas[name];
-  if (schema === undefined) throw new Error(`no schema registered for fixture ${name}`);
+for (const { file, strategy, leg } of CORPUS_MANIFEST) {
+  const envelope = runs[strategy][leg];
+  const schema = fixtureSchemas[file];
+  if (schema === undefined) throw new Error(`no schema registered for fixture ${file}`);
   const parsed = schema.safeParse(envelope);
   if (!parsed.success) {
-    throw new Error(`captured ${name} fails its schema: ${JSON.stringify(parsed.error.issues)}`);
+    throw new Error(`captured ${file} fails its schema: ${JSON.stringify(parsed.error.issues)}`);
   }
   const text = serializeFixture(envelope);
-  assertNoForbiddenArtifacts(text, `captured ${name}`);
-  writeFileSync(join(FIXTURE_DIR, name), text);
-  console.log(`[astroix] inspection contract frozen: ${name}`);
+  assertNoForbiddenArtifacts(text, `captured ${file}`);
+  writeFileSync(join(FIXTURE_DIR, file), text);
+  console.log(`[astroix] inspection contract frozen: ${file}`);
 }

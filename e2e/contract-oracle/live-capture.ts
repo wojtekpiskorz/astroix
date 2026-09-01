@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { chromium } from '@playwright/test';
+import { chromium, test } from '@playwright/test';
 import {
   type CollectionsIndex,
   hasCandidateRoutes,
@@ -49,15 +49,38 @@ export interface InspectionCorpus {
   routeResolution: RouteResolutionFixture;
 }
 
-/** The corpus fixture file each captured envelope freezes into. */
-export const CORPUS_FILES = {
-  cssIndex: 'css-index.attribute.json',
-  collections: 'collections.json',
-  contentSchemas: 'content-schemas.json',
-  rawTruth: 'raw-truth.json',
-  routes: 'routes.json',
-  routeResolution: 'route-resolution.json',
-} as const;
+/** One frozen fixture file: which oracle run produces it, and which captured leg it freezes. */
+export interface CorpusManifestEntry {
+  file: string;
+  strategy: CaptureStrategy;
+  leg: keyof InspectionCorpus;
+}
+
+/**
+ * The corpus manifest — the SINGLE enumeration of the frozen fixture set
+ * (#216): capture.mjs writes exactly these files, the freeze spec re-derives
+ * exactly these files (per strategy), and the spec asserts agreement with
+ * the schema registry's keys, so a fixture kind cannot be frozen without
+ * also being re-frozen — a new kind that misses this list fails the spec,
+ * never silently stops re-deriving.
+ */
+export const CORPUS_MANIFEST: readonly CorpusManifestEntry[] = [
+  { file: 'css-index.attribute.json', strategy: 'attribute', leg: 'cssIndex' },
+  { file: 'collections.json', strategy: 'attribute', leg: 'collections' },
+  { file: 'content-schemas.json', strategy: 'attribute', leg: 'contentSchemas' },
+  { file: 'raw-truth.json', strategy: 'attribute', leg: 'rawTruth' },
+  { file: 'routes.json', strategy: 'attribute', leg: 'routes' },
+  { file: 'route-resolution.json', strategy: 'attribute', leg: 'routeResolution' },
+  { file: 'css-index.where.json', strategy: 'where', leg: 'cssIndex' },
+];
+
+/** Filename lookup over the attribute-strategy legs (the common case) — derived, never a second list. */
+export const CORPUS_FILES = Object.fromEntries(
+  CORPUS_MANIFEST.filter((entry) => entry.strategy === 'attribute').map((entry) => [
+    entry.leg,
+    entry.file,
+  ]),
+) as { [K in keyof InspectionCorpus]: string };
 
 /**
  * Deterministic, diffable, repo-canonical bytes: two-space JSON through the
@@ -99,6 +122,21 @@ export function serializeFixture(value: unknown): string {
  */
 export function chromiumExecutableExists(): boolean {
   return existsSync(chromium.executablePath());
+}
+
+/**
+ * The one skip-guard every browser-needing contract test opens with — one
+ * home so B2's capture suites copy one pattern, not a paste. Skip (with the
+ * tracked prerequisite named, #285 — install chromium in the check job) when
+ * the executable probe fails; call this as the first statement of the test
+ * body, before any oracle prep or boot. The serverless legs of a suite
+ * (schema validation, negatives) never call it and keep running everywhere.
+ */
+export function skipWithoutChromium(): void {
+  test.skip(
+    !chromiumExecutableExists(),
+    'chromium not installed — CI browser install is the tracked prerequisite (#285)',
+  );
 }
 
 /** The raw-truth reads the corpus pins: the zod-defaults gap and the schema-less passthrough. */

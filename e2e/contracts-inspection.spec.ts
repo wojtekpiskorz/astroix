@@ -14,9 +14,10 @@ import {
 import {
   assertNoForbiddenArtifacts,
   CORPUS_FILES,
+  CORPUS_MANIFEST,
   captureInspectionCorpus,
-  chromiumExecutableExists,
   serializeFixture,
+  skipWithoutChromium,
 } from './contract-oracle/live-capture.ts';
 import { MAIN_PORT, WHERE_PORT, withOracleServer } from './contract-oracle/oracle-server.ts';
 
@@ -59,6 +60,13 @@ function expectSchemaRejects(
 }
 
 test('every frozen inspection fixture validates against the versioned schema and carries no forbidden artifacts', () => {
+  // The manifest is the single enumeration of the frozen set — it must agree
+  // with the schema registry exactly, so a fixture cannot be frozen without
+  // also being re-frozen (and a schema without a manifest entry, which would
+  // silently never re-derive, fails here too).
+  expect(CORPUS_MANIFEST.map((entry) => entry.file).sort()).toEqual(
+    Object.keys(fixtureSchemas).sort(),
+  );
   for (const [name, schema] of Object.entries(fixtureSchemas)) {
     const text = frozenText(name);
     const data = JSON.parse(text);
@@ -206,16 +214,7 @@ test('the freeze comparison is order- and identity-sensitive (mutation negatives
 test('freeze: the main oracle still produces the frozen inspection corpus byte-for-byte', {
   tag: '@oracle-boot',
 }, async () => {
-  // The browserless check job of the no-E2E interval installs no browsers
-  // (#283): probe Playwright's own executable path and skip (with reason)
-  // rather than die inside chromium.launch(). The CI companion's
-  // `playwright install` is the tracked prerequisite — once it lands, this
-  // guard auto-unskips. The serverless legs of this suite (schema
-  // validation, negatives, mutation sensitivity) keep running everywhere.
-  test.skip(
-    !chromiumExecutableExists(),
-    'chromium not installed — CI browser install is the tracked prerequisite',
-  );
+  skipWithoutChromium();
   test.setTimeout(240_000);
   await withOracleServer('main', MAIN_PORT, async (handle) => {
     const corpus = await captureInspectionCorpus({
@@ -223,17 +222,9 @@ test('freeze: the main oracle still produces the frozen inspection corpus byte-f
       root: handle.dir,
       strategy: 'attribute',
     });
-    const legs: ReadonlyArray<[string, unknown]> = [
-      [CORPUS_FILES.cssIndex, corpus.cssIndex],
-      [CORPUS_FILES.collections, corpus.collections],
-      [CORPUS_FILES.contentSchemas, corpus.contentSchemas],
-      [CORPUS_FILES.rawTruth, corpus.rawTruth],
-      [CORPUS_FILES.routes, corpus.routes],
-      [CORPUS_FILES.routeResolution, corpus.routeResolution],
-    ];
-    for (const [name, live] of legs) {
-      expect(serializeFixture(live), `${name} drifted from the frozen corpus`).toBe(
-        frozenText(name),
+    for (const { file, leg } of CORPUS_MANIFEST.filter((entry) => entry.strategy === 'attribute')) {
+      expect(serializeFixture(corpus[leg]), `${file} drifted from the frozen corpus`).toBe(
+        frozenText(file),
       );
     }
   });
@@ -242,20 +233,18 @@ test('freeze: the main oracle still produces the frozen inspection corpus byte-f
 test('freeze: the where-strategy oracle still produces the frozen scoped selector form', {
   tag: '@oracle-boot',
 }, async () => {
-  // Same browserless-CI skip-guard as the main freeze leg above.
-  test.skip(
-    !chromiumExecutableExists(),
-    'chromium not installed — CI browser install is the tracked prerequisite',
-  );
+  skipWithoutChromium();
   test.setTimeout(240_000);
   await withOracleServer('where', WHERE_PORT, async (handle) => {
-    const { cssIndex } = await captureInspectionCorpus({
+    const corpus = await captureInspectionCorpus({
       base: handle.base,
       root: handle.dir,
       strategy: 'where',
     });
-    expect(serializeFixture(cssIndex), 'css-index.where.json drifted from the frozen corpus').toBe(
-      frozenText('css-index.where.json'),
-    );
+    for (const { file, leg } of CORPUS_MANIFEST.filter((entry) => entry.strategy === 'where')) {
+      expect(serializeFixture(corpus[leg]), `${file} drifted from the frozen corpus`).toBe(
+        frozenText(file),
+      );
+    }
   });
 });
