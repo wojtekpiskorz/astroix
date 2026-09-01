@@ -30,7 +30,7 @@ const allowed = new Set([
 const failures = [];
 
 if (!existsSync(join(DIST, 'index.js'))) {
-  failures.push('missing dist/index.js — run bun run build first');
+  failures.push('missing dist/index.js — run npm run build first');
 }
 
 // oxc's AST over the built artifact: statics as top-level declarations,

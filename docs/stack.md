@@ -2,7 +2,7 @@
 
 Technology decisions of record for the Electron parent-app rewrite (lane A1, [#210](https://github.com/wojtekpiskorz/astroix/issues/210), 2026-09-01). Each retained decision keeps its research or product rationale; each replaced decision names its ruling. Governing rulings: runtime/packaging [#207](https://github.com/wojtekpiskorz/astroix/issues/207), migration/toolchain [#190](https://github.com/wojtekpiskorz/astroix/issues/190) + [#200](https://github.com/wojtekpiskorz/astroix/issues/200), runtime topology [#202](https://github.com/wojtekpiskorz/astroix/issues/202), protocol [#204](https://github.com/wojtekpiskorz/astroix/issues/204). Standing rule from the core-reuse research: **if Astro/Vite core already provides it, we do not build it** — inventory by seam class in `docs/core-reuse.md`.
 
-Transitional note: until the isolated npm-migration lane (charter A2) merges, the repository still runs on bun (`package.json` pins `bun@1.3.14`) and still has the integration-era one-package layout. That is a migration state, not a decision; **npm workspaces + Node 24 are the stack of record** from this document on.
+Migration note: the npm-migration lane (charter A2, PR #266) has landed — locks, scripts, hooks, CI, and fixture commands run on npm, and publication is paused. The one-package layout stays until the extraction lanes (A3+) create the workspace members; that is a migration state, not a decision. **npm workspaces + Node 24 are the stack of record**.
 
 ---
 
@@ -60,7 +60,7 @@ Transitional note: until the isolated npm-migration lane (charter A2) merges, th
 
 ## Rejected alternatives (current)
 
-- **bun** — replaced by npm per [#190](https://github.com/wojtekpiskorz/astroix/issues/190); the checkout migrates in the isolated A2 lane.
+- **bun** — replaced by npm per [#190](https://github.com/wojtekpiskorz/astroix/issues/190); the migration landed with the isolated A2 lane (PR #266).
 - **One-package repo** — replaced by deployment-shaped npm workspaces per [#200](https://github.com/wojtekpiskorz/astroix/issues/200).
 - **Electron `runAsNode` / `ELECTRON_RUN_AS_NODE`** — proof-only; binds execution to Electron fuse/ABI/BoringSSL behavior; rejected for the artifact ([#201](https://github.com/wojtekpiskorz/astroix/issues/201), [#207](https://github.com/wojtekpiskorz/astroix/issues/207)).
 - **Custom Node selection / runtime managers / first-run downloads** — rejected by the packaged-runtime boundary ([#207](https://github.com/wojtekpiskorz/astroix/issues/207)).
