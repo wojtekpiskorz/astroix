@@ -1,6 +1,6 @@
 # Chrome viewport scope: desktop-only
 
-Status: accepted (2026-08-29, owner ruling on the PR #85 thread · review round 5, item 3)
+Status: accepted (2026-08-29, owner ruling on the PR #85 thread · review round 5, item 3) — reaffirmed unchanged by the Electron parent-app rewrite (2026-09-01, [#204](https://github.com/wojtekpiskorz/astroix/issues/204)/[#205](https://github.com/wojtekpiskorz/astroix/issues/205); lane A1 [#210](https://github.com/wojtekpiskorz/astroix/issues/210)): the app shell (formerly `chrome`) stays desktop-only; `chrome` in this record reads as `app shell`.
 
 ## Context
 

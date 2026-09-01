@@ -1,115 +1,150 @@
 # Astroix — Spec
 
-Status: ready-for-agent · Pochodzenie: sesja grilling 2026-08-26 (9 potwierdzonych decyzji) + grilling stackowy 2026-08-26 (patrz `docs/stack.md`) · Nazwa projektu: **Astroix**; pakiet npm: `@wojciechpiskorz/astroix` (unscoped `astroix` zablokowany przez npm name-similarity rule vs `astro` — decyzja 2026-08-26: scope osobisty)
+Status: product spec of record for the Electron parent-app rewrite · Authority: [map #197](https://github.com/wojtekpiskorz/astroix/issues/197) + [rewrite charter #203](https://github.com/wojtekpiskorz/astroix/issues/203); this rewrite landed as lane A1 ([#210](https://github.com/wojtekpiskorz/astroix/issues/210), 2026-09-01) and supersedes the integration-era spec in full (git history is provenance) · Project name: **Astroix** — a standalone Electron parent app; the former public npm integration (`@wojciechpiskorz/astroix`) is retired by this rewrite and never returns (ADR-0010). Pre-alpha delivery is a packaged unsigned macOS artifact (ADR-0008), not an npm package.
 
-Astroix = visual builder dla projektów Astro: dev-only integration z chrome (content + CSS) nad same-origin iframe canvas, oparta o repo-mapping stylów. Filozofia hostów: **najnowsze Astro — narzędzie do robienia nowych projektów i ich maintenance, nie do utrzymywania legacy** (peerDeps: `astro ^7`, `vite ^8`, zod 4; `engines >=22.12`).
+Astroix is the **Electron parent app for registered existing Astro projects**: a visual layer that hosts the project's own dev server, renders its live site in a same-origin canvas, and edits **Content Collections content** and **repo-mapped CSS** through the product's two verticals. It owns exactly **one active project session** at a time, performs **zero managed-project injection**, and is delivered as an **unsigned macOS Electron pre-alpha**. Web mode — the same control-plane implementation booted without Electron — is the **behavioral test host**: the protocol-level, deterministic, full-behavior surface every vertical is tested against; it is not the user-facing destination.
+
+Vocabulary is normative: `CONTEXT.md` defines every term used here. Architecture decisions are recorded in `docs/adr/0004`–`0010`; this spec summarizes and binds them, it does not replace them.
 
 ---
 
 ## Problem Statement
 
-Agent wykonuje dziś ~90% pracy nad projektami Astro, ale ostatnie 10% — poprawka treści ("zmień lead w hero") i doszlifowanie stylów ("to zdjęcie ma być mniejsze i zaokrąglone") — zmusza użytkownika do ręcznego grzebania w codebasie, którego może w ogóle nie znać: szukania właściwego pliku markdown, frontmattera, pliku CSS odpowiadającego konkretnemu elementowi na stronie. To odwraca proporcje: trivialna zmiana kosztuje więcej niż cała agentowa budowa sekcji.
+An AI agent does ~90% of the work on Astro projects today, but the last 10% — a content fix ("change the hero lead") and CSS polish ("this image should be smaller and rounded") — forces the user to dig through a codebase they may not know at all: finding the right markdown file, the frontmatter, the CSS file behind one specific element on the page. It inverts the proportions: a trivial change costs more than the agent-built section around it.
 
-Problem ma dwie twarze:
+The problem has two faces:
 
-1. **Content**: treść stron i postów żyje we frontmatterze Content Collections — edycja bez GUI to ręczne YAML-owanie i zgadywanie pól.
-2. **CSS**: style elementów są rozsiane po plikach `.css` i scoped `<style>` w `.astro` — nie ma mapy "element na ekranie → plik w repo".
+1. **Content**: page and post content lives in Content Collections frontmatter — editing without a GUI means hand-writing YAML and guessing fields.
+2. **CSS**: element styles are scattered across `.css` files and scoped `<style>` blocks in `.astro` files — there is no map from "element on screen" to "file in the repo".
+
+The integration-era answer (an Astro integration installed into the managed project) is settled history: it demanded package installation and config registration inside the project, and is retired (ADR-0010). The product answer is a **parent app**: Astroix registers a project the developer already trusts, runs that project's own dev server under its supervision, and edits the project's real files — with nothing of Astroix ever entering the project.
+
+## Product Boundary and Trust Model
+
+Ruled in [#205](https://github.com/wojtekpiskorz/astroix/issues/205) (ADR-0004); threat detail in [#199](https://github.com/wojtekpiskorz/astroix/issues/199) (ADR-0007).
+
+- **Destination**: a working macOS-first unsigned Electron pre-alpha. Web mode is the protocol-level test, diagnostic, and development host — never the completion milestone.
+- **Registered existing projects**: pre-alpha registers projects that already exist. `Add Existing Project...` is a native Electron action (application menu / neutral trusted launcher); Electron main obtains the chosen directory and hands it to the Astroix runtime for validation. No project creation, scaffolding, or templating.
+- **One active session**: Astroix owns one supervisor-global active project session. A switch replaces that session transactionally and performs a top-level navigation to the new project's app origin. No simultaneous active projects, per-tab sessions, or multi-window editing.
+- **Developer-trusted projects**: the registered project, its Astro configuration, integrations, dependencies, inline code, and external scripts are developer-trusted executable code — a trust inherent in starting its dev server. Astroix does not sandbox, filter, or audit them. The project plane is a failure and lifecycle boundary, **not** a malicious-code sandbox.
+- **Same-origin direct DOM**: the app shell and canvas share the active project's origin for direct canvas DOM access (`iframe.contentDocument`, `Element.matches()`). A canvas that navigates off the project origin may stay visible, but editing is unavailable until it returns.
+- **No privileged renderer bridge**: the renderer receives no raw Electron API, no generic filesystem bridge, no raw IPC — only the product operations Astroix needs.
+- **Zero-injection guarantee** (replaces the integration-era "dev-only guarantee"): Astroix never adds an Astroix dependency, integration, generated bridge, Astro config mutation, package manifest mutation, or hidden control file to a managed project. Permitted side effects: explicit Content edits initiated through Astroix; explicit mapped-CSS edits initiated through Astroix; ordinary Astro/Vite runtime caches. Registering or removing a project never changes its source files.
 
 ## Solution
 
-Dev-only integration do Astro. Po odpaleniu `astro dev` wejście przez `?builder=1` otwiera chrome buildera (sidebar w shadow DOM), w którym kanwa to same-origin iframe z żywą stroną. Dwie zakładki:
+A standalone Electron app. The app shell (sidebar + editor dock + canvas, the retained workbench-row layout) is served from Astroix's reserved origin namespace; the canvas is a same-origin iframe loading the project's **natural URL** (including its resolved Astro `base`) on the active project hostname, proxied through the control plane to the project's managed dev server. Two verticals, both preserving the settled editing contracts:
 
-- **Content**: GUI nad Content Collections — formularze generowane automatycznie ze schem zod (custom fields = pola), body w edytorze markdown, auto-write (debounce ~300ms), walidacja inline nieblokująca zapisu.
-- **CSS**: tryb zaznaczania na canwie. Klik w element → lista reguł z repo pasujących do niego, każda z plikiem i linią, z wskazaniem wygrywającej w kaskadzie → edycja inline (wiersze property→value z widgetami: kolor, jednostki, enumy; plus raw mode) → zapis text-splice do oryginalnego pliku źródłowego z auto-write debounce → HMR = live preview.
+- **Content**: GUI over Content Collections — forms generated from zod schemas (custom fields become fields), markdown body editing, auto-write (debounce ~300 ms), inline validation that never blocks saving.
+- **CSS**: selection mode on the canvas. Click an element → the repo rules matching it, each with file and line, winner marked in the cascade → inline editing (property→value rows with color/unit/enum widgets; plus raw mode) → text-splice into the original source file with auto-write debounce → HMR = live preview.
 
-Kluczowa zasada: **repo-mapping, nie parallel world**. Builder czyta i pisze prawdziwe pliki repo tam, gdzie agent by je położył ("najbliższy dom"), więc repo pozostaje jednorodne, a agent pracuje obok bez świadomości istnienia buildera.
-
-Synchronizacja dwukierunkowa (wymóg twardy): zapis w IDE → live update canvasu **i chroma** (podświetlony element i preview jego reguł odświeżają się same po reindex); zmiana w builderze → zapis do pliku lokalnego. Selekcja elementu przeżywa reindex.
+The core principle survives unchanged: **repo-mapping, not a parallel world**. Astroix reads and writes the real repo files where an agent would put them ("nearest home"), so the repo stays coherent for humans and agents alike. Bidirectional sync (a hard requirement): a save in the IDE live-updates both canvas and the open panel of the selected element's rules after reindex; a change in the app writes the local file. Element selection survives reindex.
 
 ## User Stories
 
-1. Jako developer, chcę zainstalować Astroix jako pakiet w istniejącym projekcie Astro, tak aby nie przepisywać projektu pod narzędzie.
-2. Jako developer, chcę aby `astro dev` z zainstalowanym Astroixem otwierał się od razu w wrapperze buildera (default-on), tak aby nie uczyć się osobnego URL-a ani panelu admina.
-3. Jako developer, chcę dostać czystą, nietkniętą stronę przez `?builder=0` (lub odinstalowując Astroixa), tak aby ja i agent mogli pracować normalnie, bez side-effektów narzędzia.
-4. Jako developer, chcę aby builder nie istniał w produkcyjnym buildzie, tak aby koszt na produkcji był zerowy.
-5. Jako developer, chcę kanwę z prawdziwym viewportem (iframe), tak aby media queries i jednostki `vw` nie kłamały.
-6. Jako developer, chcę tryb zaznaczania z hover outline, tak aby widzieć, co kliknę, zanim kliknę.
-7. Jako developer, chcę móc wyłączyć tryb zaznaczania, tak aby normalnie klikać linki i interakcje na stronie.
-8. Jako developer, chcę ostrzeżenie gdy selector elementu jest brittle (strukturalny), tak aby wiedzieć, że CSS może się oderwać po refactorze HTML.
-9. Jako developer, chcę listę kolekcji i entry, tak aby znaleźć content do edycji bez znajomości ścieżek w repo.
-10. Jako developer, chcę formularz generowany ze schemy zod, tak aby custom fields (np. `hero.title`, `hero.cta.href`) były polami, a nie YAML-em do odręcznej edycji.
-11. Jako developer, chcę inline walidację zod przy polach, tak aby widzieć błąd przed zapisem.
-12. Jako developer, chcę aby walidacja nie blokowała zapisu, tak aby móc zapisać draft łamiący schemę i zostawić poprawkę agentowi.
-13. Jako developer, chcę edytor markdown z podglądem, tak aby poprawiać body bez otwierania IDE.
-14. Jako developer, chcę auto-write dla contentu — debounce ~300ms po pauzie w pisaniu, podgląd żywy = kanwa przeładowywana przez sync Astro — tak aby treść pracowała jak style: natychmiastowa pętla edycja→dysk→podgląd, bez przycisku Save. *(Zmiana 2026-08-28, wayfinder #47 → #67: pierwotnie jawny Save, żeby niezapisane zmiany nie lądowały na dysku przy każdym znaku; wygrała wspólna doktryna auto-write z pionu CSS — plik brudny na dysku w trakcie sesji to zaakceptowany koszt, patrz Impl #9.)*
-15. Jako developer, chcę tworzyć nowe entry jako draft (przez flagę we frontmatterze), tak aby szkicować posty z poziomu GUI.
-16. Jako developer, po kliknięciu elementu chcę listę reguł CSS pasujących do niego — każda z plikiem i linią — tak aby wiedzieć, GDZIE w repo żyją jego style.
-17. Jako developer, chcę wskazanie, która reguła wygrywa w kaskadzie, tak aby nie edytować przegranej reguły i dziwić się brakowi efektu.
-18. Jako developer, chcę widzieć reguły ze scoped style w `.astro` (z odfiltrowanym hashem `data-astro-cid-*`), tak aby scoped style nie były czarną magią.
-19. Jako developer, chcę badge `@media` przy regułach w media queries, tak aby wiedzieć, że reguła działa warunkowo.
-20. Jako developer, chcę edytować regułę w miejscu przez widgety (kolor, jednostki, enumy), tak aby podstawowe poprawki nie wymagały pisania z ręki.
-21. Jako developer, chcę raw mode, tak aby móc pisać dowolny CSS, łącznie z ręcznym `@media`.
-22. Jako developer, chcę aby edycja zapisywała się do oryginalnego pliku źródłowego z zachowaniem formatowania, tak aby git diff był minimalny, a agent czytał znany sobie świat.
-23. Jako developer, chcę auto-write z debounce i podgląd na żywo przez HMR, tak aby skręcanie stylów było natychmiastowe, bez przycisku Save.
-24. Jako developer, chcę undo w pamięci sesji, tak aby eksperymenty były odwracalne bez angażowania gita.
-25. Jako developer, chcę aby nowa reguła lądowała w pliku stylów najbliższego przodka elementu ("najbliższy dom"), tak aby repo pozostało jednorodne z konwentem agenta.
-26. Jako developer, chcę dropdown wyboru miejsca zapisu nowej reguły, tak aby móc świadomie wybrać plik, gdy heurystyka nie trafia.
-27. Jako developer, gdy element nie ma żadnego domu w repo, chcę fallback do per-route overrides ładowany na końcu kaskady, tak aby zawsze było gdzie pisać.
-28. Jako developer pracujący równolegle z agentem, chcę mtime/hash guard przed zapisem, tak aby builder nie nadpisał pliku zmienionego pod spodem — zamiast tego przeładował i pokazał diff.
-29. Jako agent, chcę czytać pliki pisane przez Astroix jako zwykłe pliki repo, tak aby moja praca nie wymagała świadomości istnienia buildera.
-30. Jako developer, chcę aby Astroix nigdy nie wykonywał operacji git, tak aby wersjonowanie było wyłącznie moją decyzją.
-31. Jako developer, chcę chrome buildera w shadow DOM, tak aby style strony nie psuły UI buildera i odwrotnie.
-32. Jako developer, chcę pracować na localhost bez warstwy auth, tak aby narzędzie dev nie wymagało setupu bezpieczeństwa.
-33. Jako developer, chcę aby zapis pliku w IDE odświeżał live zarówno canvas, jak i otwarty panel reguł wybranego elementu, tak aby builder i IDE nigdy się nie rozjechały.
-34. Jako developer, po kliknięciu elementu chcę zobaczyć, z jakiego pliku komponentu pochodzi (atrybuty `data-astro-source-*` dodawane przez dev mode Astro), tak aby nawigacja "element → źródło" była natychmiastowa, bez grepowania po repo.
+Grouped; the editing contracts carry over from the integration era unchanged in behavior, re-framed for the parent app.
+
+### Registration and session
+
+1. As a developer, I want to register an existing Astro project from a native file chooser, so the project needs no Astroix package, config, or any other injection.
+2. As a developer, I want Astroix to remember my registered projects between launches, so I do not re-register each session.
+3. As a developer, I want to rename or remove a registered project from the launcher, and removal must never delete project files.
+4. As a developer, I want exactly one active project session, with switching that never mixes two projects' data, so a stale tab, selection, or queued write can never land in the wrong project.
+5. As a developer, when the canvas navigates away from the project origin it may stay visible but editing is disabled, so I never edit through a foreign document.
+
+### Canvas and selection
+
+6. As a developer, I want a real-viewport canvas (iframe with live page, its own HMR), so media queries and `vw` units do not lie.
+7. As a developer, I want hover outlines in selection mode, so I see what I will click before I click it.
+8. As a developer, I want to switch selection mode off, so I can click links and interact with the page normally.
+
+### CSS vertical
+
+9. As a developer, clicking an element shows the matching repo rules — each with file and line — so I know WHERE in the repo its styles live.
+10. As a developer, the winning rule in the cascade is marked, so I do not edit a losing rule and wonder why nothing changed.
+11. As a developer, scoped rules from `.astro` `<style>` blocks are shown readably (hash `data-astro-cid-*` filtered), so scoped styles are not black magic.
+12. As a developer, rules in `@media` queries carry the condition as a badge, so I know a rule is conditional.
+13. As a developer, I edit a rule in place through widgets (color, units, enums) or raw mode, so basic fixes need no hand-writing.
+14. As a developer, an edit writes the original source file preserving formatting, so the git diff is minimal and the agent reads its known world.
+15. As a developer, auto-write with debounce (~300 ms) plus live HMR preview means no Save button, so style tweaking is immediate.
+16. As a developer, undo lives in session memory, so experiments are reversible without touching git.
+17. As a developer, a new rule lands in the nearest styled ancestor/sibling's file ("nearest home"), with a dropdown of alternatives and a per-route overrides fallback loaded last, so the repo stays coherent and there is always somewhere to write.
+18. As a developer, clicking an element shows its source component file (from dev-mode source instrumentation), so element→source navigation is immediate.
+
+### Content vertical
+
+19. As a developer, I get the list of collections and entries, so I find content to edit without knowing repo paths.
+20. As a developer, the form is generated from the zod schema, so custom fields (e.g. `hero.title`, `hero.cta.href`) are fields, not YAML to hand-edit.
+21. As a developer, inline zod validation flags errors per field, but never blocks saving, so I can save a schema-breaking draft and leave the fix to the agent.
+22. As a developer, I edit the markdown body with preview, so body fixes need no IDE.
+23. As a developer, auto-write for content works like CSS (debounce ~300 ms, live canvas reload through Astro sync), so content has the same immediate edit→disk→preview loop.
+24. As a developer, I can create new entries as drafts (frontmatter flag), so I can sketch posts from the GUI.
+25. As a developer, unsupported schema subtrees render as clearly marked editable YAML fields (raw fields) and `image()` metadata round-trips untouched, so every schema opens in the builder.
+
+### Sync and write safety
+
+26. As a developer working beside an agent, an mtime/hash guard precedes every write, so Astroix reloads and shows a diff instead of overwriting a file changed underneath.
+27. As an agent, I read files written by Astroix as ordinary repo files, so my work needs no awareness of the builder.
+28. As a developer, Astroix never performs git operations, so versioning stays exclusively my decision.
+29. As a developer, a file save in my IDE live-refreshes both the canvas and the open rule panel of the selected element, so builder and IDE never drift.
+
+### App qualities
+
+30. As a developer, the app shell renders in shadow DOM, so page styles and builder styles never fight.
+31. As a developer, I work on loopback with activation-bound request authorization (no ambient authority in URLs), so the dev tool needs no auth setup yet remote and stale traffic cannot act.
 
 ## Implementation Decisions
 
-1. **Form factor**: pakiet npm (`@wojciechpiskorz/astroix`) = Astro integration (Vite plugin + middleware), rejestrowany wyłącznie w trybie dev; produkcyjny build go nie zawiera. Host compat: `astro ^7`, `vite ^8`, zod 4, `engines >=22.12` — świadomie bez legacy.
-2. **Wejście (default-on)**: z zainstalowanym Astroixem **każdy top-level URL w dev** renderuje chrome buildera; kanwa to same-origin iframe ładujący ten sam URL jako czystą stronę (`?builder=0`) — bezpośredni dostęp do `contentDocument`. **Escape hatch**: `?builder=0` na top-level URL zwraca nietkniętą stronę (dla człowieka, agenta, curla); nawigacja po stronie żyje wewnątrz canwy; tryb zaznaczania domyślnie wyłączony, włączany świadomie. Konfigurowalność trybu (opcje integracji w `astro.config` vs root `astroix.config.*`) — poza v1. *(Zmiana 2026-08-26, wayfinder charting: pierwotnie opt-in `?builder=1`; default-on wygrał jako naturalniejszy do testowania.)* Mechanika (core-first, patrz `docs/core-reuse.md`): chrome interceptuje Vite middleware zarejestrowany w **ciele** `configureServer` (pre-internal — dev handler Astro jest w post-hooku i nie woła `next()`), HTML przechodzi przez `server.transformIndexHtml` i referencje do **wirtualnego modułu chroma** — w dev-checkout (dogfood) chrome serwowany jest z source z pełnym HMR; publikowana paczka shipuje **prebuilt bundel chroma** (ADR-0001, hybryda). Skrypt iframe'a (`?builder=0`): `injectScript` (guard `command === 'dev'`; per-URL filtracji brak — skrypt sam sprawdza query param). Dev toolbar Astro renderuje się na każdej stronie dev — w iframie chowamy go CSS-em z middleware; świadomie NIE wyłączamy `devToolbar.enabled` w configu, bo z tym ustawieniem wiąże się generowanie atrybutów `data-astro-source-*`, z których korzystamy (pkt 14).
-3. **Kanwa = iframe** (nie div-wrapper): prawdziwy viewport (media queries działają), izolacja stylów, tanie przyszłe zoom / resize / mobile preview przez transform i szerokość wrapper-a. Chrome na stałe zabiera szerokość ekranu — zaakceptowane.
-4. **Content v1**: wyłącznie Astro Content Collections (glob loader, schemy zod w content config). Odczyt przez core: `runner.import('astro:content')` (Environment API, jak samo Astro) — `getCollection()` zwraca **sparsowane** `entry.data`/`body`/`filePath`; schemy przez import `content.config` (`.collections`), introspekcja po `astro/zod` (wspólna instancja zoda z projektem). Formularz generowany z definicji schemy (zagnieżdżone obiekty → zagnieżdżone pola; `image()` → upload/picker — endpoint nasz, resolwcja metadanych darmowa). Zapis = pliki markdown z frontmatterem, serializacja przez Document API pakietu `yaml` (zachowuje komentarze, kolejność, styl cytowania). Źródła `.ts` data files i DB — poza v1. **Route resolution** (wayfinder #47, moduł #69): mostowanie URL↔entry w obie strony czystą heurystyką w `src/core` — wzorce route'ów (z `astro:routes:resolved`) × id entry; bez instrumentacji źródeł (`data-astro-source-*` jest stubem na astro@7.2.7 i sięga komponentów, nie entry). Selekcja wyłącznie jednoznacznego trafu: dokładnie jeden wzorzec jedno-parametrowy (segment lub catch-all — id glob-loaderów to ścieżki slugifikowane, więc `2024/post` pasuje do `[...slug]`) dopasowany do URL kanwy, wyłapany identyfikator istniejący w dokładnie jednej kolekcji; niejednoznaczność (ta sama nazwa w dwóch kolekcjach, nakładające się wzorce prowadzące do różnych entry, statyczna strona zasłaniająca dynamiczną) lub brak trafu — cisza, nigdy zły wybór. Nawigacja entry→kanwa korzysta z kandydackich route'ów i weryfikuje się forward-matchem po nawigacji (#71). **Active entry** (#71, zdanie wspierające terminu z #47): wpis otwarty w edytorze treści. Wybór ręczny (klik na liście entries) otwiera formularz natychmiast, a nawigacja kanwy jest wtórna: odpala się tylko przy dokładnie jednym kandydackim route'cie i id niewspółdzielonym z inną kolekcją, po nawigacji weryfikuje forward-matchem, a nieudana weryfikacja zostawia wybór ręczny (czysty formularz bez uznawania kanwy). *(Zmiana 2026-08-30, grilling content-UX: plurality wzorców prowadzących do tego samego wpisu nawiguje — wybór najbardziej konkretnego (segmentowy przed catch-all, potem najkrótszy); plurality do różnych wpisów pozostaje ciszą.)* Wybór reaktywny to route resolution z aktualnego URL kanwy przy każdym `load` same-origin iframe'a; działa cicho niezależnie od aktywnego taba (bez przeskakiwania taba — wpis podświetla się dopiero po wejściu do Content), cisza rezolucji przy zwykłej nawigacji czyści wybór. Terminy glossary z #47 — **active entry**, **raw field** — opisują zachowania już rozstrzygnięte (#47); zdanie wspierające **active entry** ląduje tu z #71; **raw field** z #72: dowolny niewspierany węzeł schemy (unie, transformacje, rekordy, daty, literały…) renderowany jako wyraźnie oznaczone pole tekstowe z YAML tego poddrzewa — każda schema otwiera się w builderze, dziwne pola pozostają edytowalne, tylko bez widgetu, a `image()` to read-only metadane (`src`/`width`/`height`), których wartość round-trip'uje nietknięta. Reguły terminów żyją w `CONTEXT.md`.
-5. **CSS indeks repo — hybryda**: statyczny skan źródeł projektu (`src/**`): globalne `.css` + bloki `<style>` z `.astro` (pozycje przez `extractStylesSync` z compiler-rs). Parser postcss (czysty CSS — bez SCSS, bez Tailwind emission). Indeks: selector → (plik, source range, media condition). To **prawda edycyjna** — dev mode nie generuje sourcemap CSS, a `is:inline` jest widoczne tylko w źródłach. Żywotność ("co realnie działa na podglądanym route'cie") i skompilowane formy scoped selectorów — z module graphu i wirtualnego modułu `virtual:astro:dev-css:{route}`.
-6. **Matchowanie**: po kliknięciu, każdy selector z indeksu testowany na klikniętym elemencie przez `matches()` w kontekście dokumentu iframa; wyniki sortowane po specyficzności; wygrana reguła oznaczona; reguły w `@media` dostają badge warunku (warunek nie jest ewaluowany w v1). Selektory scoped (z hashem) rozpoznawane i prezentowane czytelnie.
-7. **Edycja**: zmiany reguł to text-splice po source range z parsera — bez reprintu pliku, formatowanie i konwencje agenta nietknięte. UI reguły: wiersze property→value z inline-widgetami (color picker, stepper jednostek, dropdown enum) + toggle raw mode.
-8. **Nowe reguły**: dom = plik zawierający style najbliższego przodka/rodzeństwa ("najbliższy dom"); dropdown z alternatywami jako escape hatch; fallback `src/styles/builder/[route].css` injectowany na końcu kaskady (wygrywa load orderem, bez `!important`). Nowych reguł nie piszemy do scoped bloków `.astro`; scoped style istniejące: czytane i edytowalne.
-9. **Persistencja = auto-write w obu pionach** (doktryna urodzona w CSS, PR #36; content dołącza — zmiana 2026-08-28, wayfinder #47 → #67, pierwotnie jawny Save): zapis na pauzę w pisaniu (debounce ~300ms) do prawdziwego pliku w repo, bez przycisku Save. CSS: text-splice po source range, podgląd = HMR; undo = historia w pamięci sesji. Content: serializacja całego pliku (frontmatter przez Document API pakietu `yaml` + raw body), podgląd = sync Astro przeładowujący kanwę; hash guard (pkt 10) obowiązuje tak samo, okno utraty ≈ debounce. Zaakceptowane konsekwencje (#47, Q1.4): przejściowe stany złamane w trakcie pisania w wymaganym polu — ta sama klasa co edycja w IDE obok `astro dev`; plik contentu brudny na dysku w trakcie sesji edycji (jak pliki CSS od zawsze); git pozostaje jedynym "commitem" (US30 nietknięte). Walidacja inline nigdy nie blokuje zapisu (US11/US12 obowiązują jak są) — draft łamiący schemę ląduje na dysku dla agenta, ~300ms po pauzie. Astroix nigdy nie wykonuje operacji git.
-10. **Konflikt z agentem**: przed każdym zapisem weryfikacja mtime/hash pliku; przy zmianie pod spodem — przeładowanie i diff zamiast nadpisania.
-11. **Izolacja UI**: chrome buildera renderowany w shadow DOM.
-12. **Format stylów**: czysty CSS. W projektach z Tailwindem overrides po prostu ładują się po utility i wygrywają kaskadą — read-side będzie tam ubogi (spodziewane i OK).
-13. **Sync dwukierunkny**: watcher hosta (`server.watcher`) jako jedyny subscriber FS → debounce reindex → push do chroma przez **custom eventy Vite WS** (`server.ws.send('astroix:…')` / `import.meta.hot.on`) — ten sam kanał, którego Astro używa dla własnych eventów; SSE niepotrzebne. Świeżość contentu: obserwacja pliku data store (sygnał post-sync core); tablica route'ów: hook `astro:routes:resolved` (re-runs przy zmianach route'ów). Operacje chrome→middleware to zwykłe requesty (fetch na Vite middleware). Selekcja elementu przeżywa reindex (re-match po zmianie plików).
-14. **Instrumentacja źródeł = czytanie core Astro, nie własny transform**: w dev mode Astro dodaje do elementów atrybuty `data-astro-source-file` / `data-astro-source-loc` (mechanizm, na którym działa dev toolbar). v1 czyta je read-only — klik w element pokazuje plik/linię komponentu-źródła obok listy reguł. *(Uwaga T2, issue #3: na astro@7.2.7 + compiler-rs 0.4.0 `annotateSourceFile` jest stubem — atrybuty nie są emitowane; v1 potrzebuje mechanizmu własnego astroix lub zmiany strategii.)* Faza 2 ("nazwij ten element" → stabilne selectory) buduje na tym samym mechanizmie. Architektura (indeks + splicer) nie zmienia się przez to.
+The full contracts live in the ADRs; each decision below names its authority. Anything not listed here retains its integration-era contract where the verticals are concerned (auto-write doctrine, route resolution, raw truth/raw field/zod projection, nearest home, overrides fallback) — those editing-domain contracts were extracted as behavior contracts during migration and bind the replacement unchanged.
 
-Stack, plumbing i narzędzia (React 19, Tailwind 4 + shadcn na Base UI, TanStack, bun, vitest, Playwright, Biome, changesets): **patrz `docs/stack.md`**. Pełna inwentaryzacja mechanizmów przejmowanych z core Astro/Vite (zamiast pisania własnych): **`docs/core-reuse.md`**.
+1. **Form factor**: a standalone Electron parent app (ADR-0004). Electron main is a thin native host (window, menus, single instance, lifecycle, Electron security policy); the trusted **control plane** is a separate long-lived Node-compatible process; the **project plane** is a disposable runtime group (project-runtime worker, managed Astro dev server, composition Vite server, fresh runners, watchers, timers) (ADR-0005). No Astroix code executes inside the managed project's own process tree beyond its own dev server.
+2. **Origins and proxy**: one loopback port per control-plane lifetime. Neutral launcher at `http://launcher.localhost:<port>/__astroix/app/`; active project app at `http://<project-key>.localhost:<port>/__astroix/app/`. `/__astroix/` is Astroix's reserved namespace — a project claiming it fails compatibility validation. The canvas loads the project's natural URL (resolved `base` included); every non-reserved HTTP request streams to the managed dev server; WebSocket upgrades preserve URL/Host/Origin/HMR token/`vite-hmr` subprotocol and upstream handshake bytes; the proxy never synthesizes a `101`. A switch performs top-level `location.replace()` to the new project hostname — never data swaps inside the old origin (ADR-0005).
+3. **ProjectRuntime**: the deep, process-neutral interface (`start()` → `ProjectRun` with `ready`/`inspect()`/`subscribe()`/`stop()`/`closed`); `inspect()` accepts only typed `project`, `content`, `routes`, `styles` requests, each result carrying a monotonic resource revision; no PID, port, Vite handle, runner, watcher, timer, or raw path escapes the interface (ADR-0005).
+4. **Registry**: canonical-root project identity (`fs.realpath` + filesystem case/identity semantics), random 128-bit lowercase-Base32 DNS-safe `ProjectKey` allocated per record (never derived from the root), versioned JSON persistence below Electron `userData` (dir `0700`, files `0600`), atomic same-directory-rename writes with `fsync`, last-known-good snapshot, quarantine + explicit recovery on corrupt/future schema, one kernel-backed registry-writer lease lifetime-held by the control-plane child (ADR-0006; lease mechanics per [#209](https://github.com/wojtekpiskorz/astroix/issues/209)).
+5. **Session and edit authority**: `SessionRef` (`runtimeEpoch` + `generation`) on every session-scoped command, response, error, query key, and event; request authority is a separate 256-bit capability (host-only `HttpOnly` cookie, `Path=/`) plus an Electron-injected per-document client capability; one authoritative editing client, up to three read-only diagnostic targets; activation is a serialized staged transaction with rollback, bounded drain (5 s), forced-reap path (2 s), one-use switch-preparation receipts, and irreversible post-revocation failure handling; each session owns a disposable serialized write executor lifetime-holding the kernel-backed edit-writer lease; the server issues opaque per-activation resource grants bound to revision contracts, exact SHA-256 baselines for existing resources, expected-absent exclusive creation, `realpath` containment recheck immediately before commit, external symlinks ungrantable, `nlink > 1` rejected (ADR-0006).
+6. **Protocol v1**: control traffic below `/__astroix/api/v1/`, every envelope carries `protocolVersion: 1`; events are same-origin SSE at `/__astroix/events` (Vite HMR is the only transparent WebSocket); strict Host/Origin/Fetch Metadata/capability checks, no CORS, unknown-field and ambiguous-encoding rejection, hard size limits, stable sanitized error envelopes that never disclose roots, ports, PIDs, environment values, capabilities, or stacks (ADR-0006).
+7. **Security posture**: loopback-only listener bound before an origin is published; Host validation rejecting unknown/malformed/duplicate/trailing-dot/rebinding values; activation-bound authority checked at dispatch and again immediately before every write; no operations for arbitrary paths, shell commands, PID kills, arbitrary module evaluation, raw Vite handles, or git (ADR-0007 + the #199 negative-test matrix).
+8. **Service workers**: the authoritative BrowserWindow and its canvas live in a fresh non-persistent Electron partition; CDP `Network.setBypassServiceWorker({ bypass: true })` is attached before the first project navigation and retained — a detach (including opening DevTools) makes the target unready and disables edits until bypass is restored. Astroix does not promise Service Worker or PWA fidelity inside the editor (ADR-0009).
+9. **Compatibility**: Astroix supports the latest stable Astro available when an Astroix release ships, driven by **certified exact Astro/Vite pairs** — first certified pair `astro@7.2.10 + vite@8.2.2` ([#206](https://github.com/wojtekpiskorz/astroix/issues/206)); Astro and Vite resolve from the managed project's own installation; an uncertified pair fails before project config executes with the detected pair, certified pairs, and rejected contract; all version-sensitive behavior lives behind the internal `AstroProjectAdapter` whose private seams fail closed (ADR-0005, `docs/core-reuse.md`). Real project config and integrations execute in both the managed dev server and the composition inspector — duplicate hook execution is an explicit accepted pre-alpha cost, confined to the disposable project plane.
+10. **Editing domain**: the Content/CSS editing contracts of the integration era are preserved — content read through the fresh module runner per inspection pass (closed in `finally`), schema introspection through the shared zod instance, the static postcss index as CSS edit-truth joined with effective selectors from real Astro output, text-splice writes preserving formatting, yaml Document API serialization, route resolution as a pure module. See `docs/core-reuse.md` for the seam classes.
+11. **Web behavioral hosting**: web mode boots the same control-plane implementation as its test and diagnostic host — the deterministic full-behavior surface for Playwright and diagnostics. It acquires no registry write authority (tests inject an isolated registry) and is not the user-facing destination (ADR-0004/#205, ADR-0008/#207).
+12. **Electron pre-alpha delivery**: one Forge-built, ad-hoc-sealed Apple Silicon (`arm64`) macOS 13.5+ ZIP with bundled stock Node 24 (`Contents/Resources/node/`), immutable verified runtime resources under `Contents/Resources/astroix-runtime/`, hardened release fuses (ASAR integrity, only-load-app-from-ASAR, RunAsNode/NODE_OPTIONS/CLI-inspection disabled), inner-tester delivery through access-limited GitHub draft releases with SHA-256 checksums, smoke-before-publish on the exact candidate bytes (ADR-0008). Qualified environment floor per [#209](https://github.com/wojtekpiskorz/astroix/issues/209): stock Node 24.20.0 (`node:sqlite` `DatabaseSync` holds the two fixed lease files).
+13. **Migration**: additive — reusable core and UI foundation are extracted under behavior contracts, the canonical fixture becomes a plain Astro project, then the integration, injected chrome, old delivery lanes, and npm publish machinery are deleted **before** replacement-runtime implementation. No side-by-side parity cutover; the replacement is judged against the extracted behavior contracts, the web checkpoint, and the packaged pre-alpha qualification gate (ADR-0010).
+
+Stack, plumbing, and tooling (npm workspaces, Node 24, Electron/Forge pins, React 19, TanStack, vitest, Playwright, Biome): **see `docs/stack.md`**. The inventory of Astro/Vite mechanisms reused, by seam class (public / certified exact-pair / fail-closed private): **`docs/core-reuse.md`**.
 
 ## Testing Decisions
 
-Dobra reguła: testujemy wyłącznie zachowanie zewnętrzne (wynikowe bajty plików, trafione reguły na fixture'ach), nigdy wewnętrzną strukturę indeksu.
+Rule unchanged: test only external behavior (resulting file bytes, matched rules on fixtures), never index internals.
 
-Szwy (liczba celowo minimalna, dwa czyste moduły + jeden e2e):
-
-1. **Indexer/Matcher** (czysty moduł): wejście — źródła CSS/astro jako stringi; wyjście — indeks selector→(plik, range, media); oraz funkcja match(indeks, element) → posortowane reguły. Testowalne bez Astro: fixture CSS + happy-dom. Kluczowe casy: scoped hashe, `@media` badge, sort po specyficzności.
-2. **Splice-writer** (czysty moduł): (treść pliku, range, replacement) → nowa treść. Testy: zachowanie formatowania, edycje na brzegach range'u, append reguły na końcu pliku bez nowej linii.
-3. **E2E seam**: syntetyczny projekt-fixture w repo (Astro 7, kolekcja ze schemą hero + co-located CSS) odpalany na prawdziwym dev serverze + Playwright — pełna pętla: `?builder=1`, klik element, edycja, asercja bajtów na dysku + reflect w iframe. Prawdę o selector engine mówi tylko prawdziwy Chrome (`[data-astro-cid-*]` — domyślna strategia `attribute`; `:where(...)` tylko po konfiguracji — weryfikacja T2, issue #3).
-
-Wzorzec hybrydowy testów: `@playwright/test` w CI jako źródło prawdy; Playwright MCP lokalnie do interaktywnego debugowania i autoryzowania speców przez agenta (agent eksploruje przez MCP → pisze deterministyczny spec → CI go odpala).
+- **Unit (vitest + happy-dom)**: pure modules — indexer/matcher, splice-writer, route resolution, protocol schemas, registry/session state machines where pure.
+- **Web host (Playwright)**: web mode is the deterministic full-behavior test host — the only source of truth for selector-engine behavior (`[data-astro-cid-*]` under the default `attribute` scopedStyleStrategy; `:where(...)` only when configured) and full builder loops, including the A-to-B-to-A switch races, stale-authority rejection, and zero-injection byte/metadata snapshots.
+- **Behavior contracts**: payloads, matched selectors, conflicts, and output bytes captured from the integration oracle before retirement bind the replacement (`docs/adr/0010`).
+- **Electron smoke**: an early packaged-host smoke precedes vertical work; a separately marked instrumented Electron build may test wiring but is never release evidence.
+- **Packaged qualification**: the exact hardened release artifact is tested black-box (resource discovery, process topology and cleanup, security settings, launch lifecycle) plus the owner Finder/UI smoke — only at candidate/release checkpoints, never on every feature PR (ADR-0008). The final owner manual smoke is `docs/manual-smoke.md`.
+- **No-E2E interval**: between the retirement gate and the first web-host slice there is explicitly no product E2E lane; CI must not present that interval as a passing E2E (ADR-0010).
+- Hybrid pattern retained: `@playwright/test` in CI as source of truth; Playwright MCP locally for exploring and authoring deterministic specs.
 
 ## Out of Scope
 
-- WYSIWYG, edycja blokowa, drag-drop layoutu
-- SCSS; emission klas Tailwind; osobny panel wizualny Webflow-style
-- Widgety breakpointów (raw `@media` ręcznie tylko); UI kaskadowych przekreśleń DevTools-style
-- Resizable canvas, zoom, mobile preview (tanie później dzięki iframe, świadomie nie w v1)
-- Element-naming przez instrumentację źródeł (faza 2)
-- Content poza Content Collections (`.ts` data files, DB/CMS)
-- Operacje git, auth (localhost dev only), jakiekolwiek działanie w produkcyjnym buildzie
-- Wsparcie Astro < 7, Vite < 8, zod 3 (filozofia: nowe projekty, nie legacy)
+From map #197, binding:
 
-## Further Notes
+- Public npm launch, signing, notarization, auto-update, and production distribution — the destination is an unsigned inner-tester pre-alpha.
+- Creating new Astro projects and template UX — pre-alpha registers and manages existing projects.
+- Multiple simultaneous active projects, multi-window editing, per-tab project sessions.
+- GitHub-connected remote projects, dependency updates, project build/check orchestration, app self-update.
+- Mobile or narrow-viewport UI (ADR-0003, reaffirmed).
+- Support for Astro below 7, Vite below 8, zod 3 — or any Astroix presence in a managed project's production build.
+- WYSIWYG/block editing/drag-drop layout; SCSS; Tailwind class emission; breakpoint widgets; DevTools-style cascade strikethroughs; content beyond Content Collections (`.ts` data files, DB/CMS); git operations.
 
-- **Fixture zamiast pilotów**: e2e żyje na syntetycznym projekcie w repo — stare projekty testowe nie są punktem odniesienia.
-- **Ryzyka**: selektory scoped wymagają odfiltrowania hasha w UI; warunki `@media` nie są ewaluowane (badge tylko); w projektach Tailwind read-side naturalnie pusty (nowe reguły → fallback); quirki Tailwind 4 w shadow DOM (`@property`, `:root` vs `:host`) — rozwiązane mechanizmem zero-build z T1 (issue #2): jedna constructed stylesheet adoptowana na document + shadowRoot; `:root, :host` emitowane upstream.
-- **TODO po v1 (nie blokuje POC)**: automatyczny AI review na PR — primary: `claude-code-action@v1` skierowany na endpoint Z.AI (`ANTHROPIC_BASE_URL=https://api.z.ai/api/anthropic`, klucz z GLM coding plan), advisory-only; fallback: PR-Agent z `zai/glm-5.2`. Required gates pozostają deterministyczne (biome → tsc → vitest → e2e).
-- **Provenance decyzji**: 9 decyzji produktowych (grilling #1, 2026-08-26) + decyzje stackowe (grilling #2, 2026-08-26, z researchami: frameworki/Effect/bun, agent browser automation, StyleX/Base UI, AI PR review) + research core-reuse (2026-08-26, 3 researchy: content APIs, CSS/compiler, integration surface — wyniki w `docs/core-reuse.md`).
-- **Tracker**: GitHub Issues (mapa wayfindera + tickety decyzyjne). Ten plik pozostaje **specem of record** — plik > issue dla dokumentu produktu; decyzje POC żyją na mapie (`wayfinder:map`). *(Zmiana 2026-08-26, wayfinder charting — pierwotna notatka zakładała migrację specu do trackera.)*
-- **POC**: zakres i decyzje — mapa wayfindera (GitHub Issues, label `wayfinder:map`); POC = pion v0 z pełnymi bramkami jakości (nie spike).
+## Provenance
+
+- Boundary, trust, and domain model: [#205](https://github.com/wojtekpiskorz/astroix/issues/205) (ADR-0004).
+- Runtime, origin, introspection: [#202](https://github.com/wojtekpiskorz/astroix/issues/202) (ADR-0005); adapter proof [#206](https://github.com/wojtekpiskorz/astroix/issues/206).
+- Registry, session, edit authority, protocol v1: [#204](https://github.com/wojtekpiskorz/astroix/issues/204) (ADR-0006); lease proof [#209](https://github.com/wojtekpiskorz/astroix/issues/209); packaged-host proof [#201](https://github.com/wojtekpiskorz/astroix/issues/201).
+- Threat model: [#199](https://github.com/wojtekpiskorz/astroix/issues/199) (ADR-0007).
+- Packaged artifact and delivery: [#207](https://github.com/wojtekpiskorz/astroix/issues/207) (ADR-0008).
+- Service worker and editor transport: [#208](https://github.com/wojtekpiskorz/astroix/issues/208) (ADR-0009).
+- Migration and retirement: [#200](https://github.com/wojtekpiskorz/astroix/issues/200) (ADR-0010).
+- Charter and DAG: [#203](https://github.com/wojtekpiskorz/astroix/issues/203); map: [#197](https://github.com/wojtekpiskorz/astroix/issues/197).
+- The integration-era spec (Polish, last revision at the #176 merge) is provenance in git history; its editing-domain decisions survive as the preserved contracts summarized above.
