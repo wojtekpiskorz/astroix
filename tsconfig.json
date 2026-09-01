@@ -16,6 +16,7 @@
   },
   "include": [
     "src",
+    "packages",
     "e2e/*.spec.ts",
     "playwright.config.ts",
     "tsup.config.ts",

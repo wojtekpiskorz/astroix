@@ -6,17 +6,24 @@ import type { FunctionComplexity } from './complexity';
  * preflight. Pure functions only — file walking, git, and report rendering
  * live in `scripts/crap.mjs`.
  *
+ * This file and `complexity.ts` are the CRAP tooling layer, not
+ * editing-domain code: they stayed at `src/core` when the editing modules
+ * moved to `packages/core` (#212, AC-6) and are owned by this layer plus
+ * `scripts/crap.mjs`.
+ *
  * Metric honesty is the load-bearing rule: full CRAP (CC² × (1−coverage)³ +
  * CC, per crap4clj/PHPUnit) is computed only where per-function coverage is
- * real — `src/core`, covered by unit tests through vitest's istanbul-format
- * JSON. `src/node` and `src/client` land on a CC-only watchlist: their truth
- * is e2e coverage, which stays fog on the map. A watchlist row has
- * `coverage === null` and `crap === null`, and its gate metric is CC.
+ * real — the covered core tier (`packages/core` since #212, plus the `src/core`
+ * CRAP tooling layer and compatibility shims), covered by unit tests through
+ * vitest's istanbul-format JSON. `src/node` and `src/client` land on a CC-only
+ * watchlist: their truth is e2e coverage, which stays fog on the map. A
+ * watchlist row has `coverage === null` and `crap === null`, and its gate
+ * metric is CC.
  *
  * Per-function coverage is derived from istanbul statement counters inside
  * the function's line range (the technique both CRAP tools verified during
  * the engine research use — v8-derived `fnMap` names anonymous functions
- * lossily, so names never join; ranges do). A `src/core` file absent from
+ * lossily, so names never join; ranges do). A covered-tier file absent from
  * the coverage JSON was never loaded by a test and reads as 0%.
  *
  * The ratchet: `crap-baseline.json` grandfathers the gate-metric value of
@@ -38,7 +45,7 @@ export interface RiskEntry extends FunctionComplexity {
   file: string;
   /** The band of the gate metric (Uncle Bob: ≤5 low, <30 moderate, else high). */
   band: 'low' | 'moderate' | 'high';
-  /** The metric preflight gates on for this row: CRAP for src/core, CC elsewhere. */
+  /** The metric preflight gates on for this row: CRAP for the covered core tier, CC elsewhere. */
   metric: 'crap' | 'cc';
   /** The gate metric's value — `cc` for watchlist rows, `crap` for covered rows. */
   value: number;
@@ -51,7 +58,7 @@ export interface RiskEntry extends FunctionComplexity {
 }
 
 export interface GateStops {
-  /** Hard stop: CRAP ≥ this in src/core. */
+  /** Hard stop: CRAP ≥ this in the covered core tier (src/core, packages/core). */
   coreCrapStop: number;
   /** Hard stop: CC ≥ this in src/node + src/client (complexity-only proxy). */
   watchlistCcStop: number;
@@ -102,7 +109,10 @@ export function touchedFunctions(
 
 /** The layer where per-function unit coverage is real — CRAP's only honest home. */
 function isCoreFile(relPath: string): boolean {
-  return relPath.startsWith('src/core/');
+  // packages/core since #212; src/core keeps the CRAP tooling layer and the
+  // compatibility shims — both unit-covered or coverage-honest (a shim the
+  // tests never load reads 0%, CRAP stays trivially under the stop)
+  return relPath.startsWith('src/core/') || relPath.startsWith('packages/core/');
 }
 
 /** The shadcn-generated tier: regenerated per ADR-0002, never hand-edited — visible in reports, never gated (owner ruling 2026-08-28, #62). */

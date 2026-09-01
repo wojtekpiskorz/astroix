@@ -209,6 +209,29 @@ describe('toRiskEntry', () => {
     });
   });
 
+  it('keeps the CRAP metric on the moved editing domain: packages/core rows stay covered-tier (#212)', () => {
+    const fileCov = {
+      statementMap: {
+        s0: { start: { line: 4 }, end: { line: 4 } },
+        s1: { start: { line: 5 }, end: { line: 5 } },
+      },
+      s: { s0: 1, s1: 0 },
+    };
+    const e = toRiskEntry('packages/core/src/matcher.ts', fn, fileCov);
+    expect(e).toMatchObject({
+      metric: 'crap',
+      coverage: 0.5,
+      crap: crapScore(5, 0.5),
+      value: crapScore(5, 0.5),
+      stop: 30,
+    });
+    // absent from the coverage JSON (never loaded by a test) reads as 0%,
+    // keeping the CRAP term a discovery backstop: vacuous test discovery for
+    // a moved module fails preflight, not silently passes
+    const unloaded = toRiskEntry('packages/core/src/matcher.ts', fn, undefined);
+    expect(unloaded).toMatchObject({ metric: 'crap', coverage: 0, value: crapScore(5, 0) });
+  });
+
   it('derives watchlist rows: no coverage term even when handed one, cc stop', () => {
     const e = toRiskEntry('src/node/rest.ts', fn, { statementMap: {}, s: {} });
     expect(e).toMatchObject({

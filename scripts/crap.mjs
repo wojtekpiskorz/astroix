@@ -1,29 +1,34 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 /**
  * crap4ts — the repo's risk report over the in-house CC engine (engine:
  * wayfinder #54; wiring: #55). One tool, six modes:
  *
- *   bun run crap                full report: CC everywhere, CRAP + Uncle Bob
- *                               bands where coverage is real (src/core)
- *   bun run crap --staged       pre-commit scan: CC warn (>= 10) on functions
+ *   npm run crap                full report: CC everywhere, CRAP + Uncle Bob
+ *                               bands where coverage is real (src/core +
+ *                               packages/core)
+ *   npm run crap --staged       pre-commit scan: CC warn (>= 10) on functions
  *                               touched by staged changes — warns, never blocks,
  *                               skips the generated ui/ tier (ruling #62: no
  *                               un-followable advice on code we regenerate)
- *   bun run preflight           full-src ratchet: every run evaluates all of
- *                               src/ against the baseline — CRAP >= 30 in
- *                               src/core, CC >= 15 in src/node + src/client,
- *                               any new breach fails (the diff only annotates)
- *   bun run crap:ci             CI recompute: full table to crap-table.md for
+ *   npm run preflight           full-scope ratchet: every run evaluates all of
+ *                               src/ + packages/core against the baseline —
+ *                               CRAP >= 30 in the covered core tier, CC >= 15
+ *                               in src/node + src/client, any new breach fails
+ *                               (the diff only annotates)
+ *   npm run crap:ci             CI recompute: full table to crap-table.md for
  *                               the advisory reviewer prompt; never exits nonzero
- *   bun run crap --calibrate    one-time: pin current violators as the initial
+ *   npm run crap --calibrate    one-time: pin current violators as the initial
  *                               baseline (refuses if one already exists)
- *   bun run crap --update-baseline  ratchet the baseline after refactors:
+ *   npm run crap --update-baseline  ratchet the baseline after refactors:
  *                               tightens and drops only, refuses new violators
  *
  * Metric honesty: CRAP (CC² × (1−cov)³ + CC) only where per-function coverage
- * is real (src/core, unit-tested); src/node and src/client are a CC watchlist.
- * The pure math lives in src/core/{complexity,crap}.ts; this file owns IO:
- * files, git, vitest coverage, rendering, exit codes.
+ * is real (src/core + packages/core, unit-tested); src/node and src/client are
+ * a CC watchlist. The pure math lives in src/core/{complexity,crap}.ts — the
+ * CRAP tooling layer, which is where those two files stay while the
+ * editing-domain modules live in packages/core (#212: the tooling layer owns
+ * the engine, this script owns the IO: files, git, vitest coverage, rendering,
+ * exit codes).
  */
 import { spawnSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
@@ -43,6 +48,10 @@ import {
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const SRC_ROOT = join(ROOT, 'src');
+// Risk roots: the integration tree and the extracted editing domain
+// (packages/core, #212). Future workspace packages join this list in the PR
+// that lands them, together with their coverage-tier decision in crap.ts.
+const RISK_ROOTS = [SRC_ROOT, join(ROOT, 'packages/core')];
 const BASELINE_PATH = join(ROOT, 'crap-baseline.json');
 const COVERAGE_JSON = join(ROOT, 'coverage', 'coverage-final.json');
 
@@ -72,10 +81,10 @@ function mergeBaseSha() {
   throw new Error('no merge-base against origin/main or main — run preflight on a branch off main');
 }
 
-/** Risk scope: product TS/TSX under src/ — test bodies are the coverage, not the risk. */
+/** Risk scope: product TS/TSX under src/ and packages/core/ — test bodies are the coverage, not the risk. */
 function isRiskScope(relPath) {
   return (
-    relPath.startsWith('src/') &&
+    (relPath.startsWith('src/') || relPath.startsWith('packages/core/')) &&
     (relPath.endsWith('.ts') || relPath.endsWith('.tsx')) &&
     !relPath.endsWith('.test.ts') &&
     !relPath.endsWith('.test.tsx') &&
@@ -101,12 +110,14 @@ const committedSource = (abs) => gitOk(['show', `HEAD:${relative(ROOT, abs)}`]) 
 
 // ——— analysis ———
 
-function walkTs(dir = SRC_ROOT) {
+function walkTs(dirs = RISK_ROOTS) {
   const out = [];
-  for (const name of readdirSync(dir).sort()) {
-    const p = join(dir, name);
-    if (statSync(p).isDirectory()) out.push(...walkTs(p));
-    else if ((p.endsWith('.ts') || p.endsWith('.tsx')) && !p.endsWith('.d.ts')) out.push(p);
+  for (const dir of dirs) {
+    for (const name of readdirSync(dir).sort()) {
+      const p = join(dir, name);
+      if (statSync(p).isDirectory()) out.push(...walkTs([p]));
+      else if ((p.endsWith('.ts') || p.endsWith('.tsx')) && !p.endsWith('.d.ts')) out.push(p);
+    }
   }
   return out.filter((p) => isRiskScope(relative(ROOT, p)));
 }
@@ -172,13 +183,20 @@ function touchedKeys(files, diffSpec, read) {
 }
 
 /**
- * Runs vitest with coverage. `hard: false` (CI table, local report) degrades
- * to null on a red suite — those outputs must never gate anything, and a
- * CC-only table beats no review at all. The gates (preflight, baseline
- * modes) stay hard: untrustworthy CRAP must not pass or pin.
+ * Runs vitest with coverage via the repo-local vitest entry and the running
+ * Node executable — no PATH lookup, so preflight works on a stripped,
+ * bun-less PATH (#211/#212 toolchain of record: npm + Node 24).
+ * `hard: false` (CI table, local report) degrades to null on a red suite —
+ * those outputs must never gate anything, and a CC-only table beats no review
+ * at all. The gates (preflight, baseline modes) stay hard: untrustworthy CRAP
+ * must not pass or pin.
  */
 function runCoverage({ hard = true } = {}) {
-  const r = spawnSync('bun', ['x', 'vitest', 'run', '--coverage'], { cwd: ROOT, stdio: 'inherit' });
+  const r = spawnSync(
+    process.execPath,
+    [join(ROOT, 'node_modules', 'vitest', 'vitest.mjs'), 'run', '--coverage'],
+    { cwd: ROOT, stdio: 'inherit' },
+  );
   const failed = r.status !== 0;
   let json = null;
   if (!failed) {
@@ -227,7 +245,7 @@ function renderTable(entries) {
 }
 
 function headerLine() {
-  return `stops: CRAP >= ${GATE_STOPS.coreCrapStop} (src/core) · CC >= ${GATE_STOPS.watchlistCcStop} (src/node, src/client) · pre-commit warns CC >= ${PRECOMMIT_CC_WARN} · generated ui/ is watch-only`;
+  return `stops: CRAP >= ${GATE_STOPS.coreCrapStop} (src/core, packages/core) · CC >= ${GATE_STOPS.watchlistCcStop} (src/node, src/client) · pre-commit warns CC >= ${PRECOMMIT_CC_WARN} · generated ui/ is watch-only`;
 }
 
 // ——— modes ———
@@ -258,7 +276,7 @@ function modeReport() {
   }
   if (improved.length > 0) {
     console.log(
-      `\nimproved below their baseline pin — tighten with \`bun run crap --update-baseline\`:`,
+      `\nimproved below their baseline pin — tighten with \`npm run crap -- --update-baseline\`:`,
     );
     for (const i of improved)
       console.log(
@@ -296,25 +314,26 @@ function modeStaged() {
 }
 
 /**
- * Full-src ratchet (owner ruling 2026-08-28, issue #62): every run evaluates
- * all of src/ against the baseline, so a coverage regression from a
- * test-weakening PR fails even though the PR touched no product function —
- * CC cannot move under untouched code, CRAP can. The diff survives only as
- * annotations ([PR touches this file]) and the CI table's in-PR marks.
+ * Full-scope ratchet (owner ruling 2026-08-28, issue #62): every run evaluates
+ * all of src/ + packages/core against the baseline, so a coverage regression
+ * from a test-weakening PR fails even though the PR touched no product
+ * function — CC cannot move under untouched code, CRAP can. The diff survives
+ * only as annotations ([PR touches this file]) and the CI table's in-PR marks.
  */
 function modePreflight() {
   const { base, ref } = mergeBaseSha();
-  // scoped to what the gate can actually read: src/ and the vitest config;
-  // untracked files elsewhere cannot color either term
+  // scoped to what the gate can actually read: the risk roots and the vitest
+  // config; untracked files elsewhere cannot color either term
   const dirty =
-    (gitOk(['status', '--porcelain', '--', 'src', 'vitest.config.ts']) ?? '').length > 0;
+    (gitOk(['status', '--porcelain', '--', 'src', 'packages', 'vitest.config.ts']) ?? '').length >
+    0;
   if (dirty) {
     // this check is the only committed-state guard for BOTH terms: the
-    // full-src ratchet reads CC from the working tree (buildEntries default)
-    // and coverage from the tree vitest runs over — a pass on a dirty src/
+    // full-scope ratchet reads CC from the working tree (buildEntries default)
+    // and coverage from the tree vitest runs over — a pass on a dirty tree
     // could rest on content that never gets committed
     console.error(
-      'preflight: src/ or vitest.config.ts is dirty — the gate would read uncommitted content (CC from the tree, coverage from the tree vitest runs over). Commit or stash (git stash -u covers untracked), then rerun.',
+      'preflight: src/, packages/ or vitest.config.ts is dirty — the gate would read uncommitted content (CC from the tree, coverage from the tree vitest runs over). Commit or stash (git stash -u covers untracked), then rerun.',
     );
     process.exit(1);
   }
@@ -326,9 +345,9 @@ function modePreflight() {
   const changed = new Set(changedFiles(base).map((abs) => relative(ROOT, abs)));
   const inPr = (e) => (changed.has(e.file) ? ' [PR touches this file]' : '');
 
-  console.log(`\npreflight — full-src ratchet over ${entries.length} functions vs ${ref}`);
+  console.log(`\npreflight — full-scope ratchet over ${entries.length} functions vs ${ref}`);
   console.log(headerLine());
-  console.log('(full banded table: bun run crap)');
+  console.log('(full banded table: npm run crap)');
   for (const g of grandfathered)
     console.log(`grandfathered: ${g.file} ${g.name} (${g.metric} ${num(g.value)})${inPr(g)}`);
   for (const i of improved)
@@ -375,7 +394,7 @@ function modeCi() {
   lines.push('# crap4ts report (recomputed by CI — the source of truth; local runs are advisory)');
   lines.push('');
   lines.push(
-    `CC per function (ESLint-classic counting, pinned in \`src/core/complexity.test.ts\`); CRAP = CC² × (1−cov)³ + CC where per-function coverage is real (\`src/core\`, unit tests); \`src/node\` + \`src/client\` are a CC-only watchlist (their truth is e2e coverage). Uncle Bob bands: <=5 low, <30 moderate, >=30 high.`,
+    `CC per function (ESLint-classic counting, pinned in \`src/core/complexity.test.ts\`); CRAP = CC² × (1−cov)³ + CC where per-function coverage is real (\`src/core\` + \`packages/core\`, unit tests); \`src/node\` + \`src/client\` are a CC-only watchlist (their truth is e2e coverage). Uncle Bob bands: <=5 low, <30 moderate, >=30 high.`,
   );
   if (coverage === null)
     lines.push(
@@ -384,7 +403,7 @@ function modeCi() {
     );
   lines.push('');
   lines.push(
-    `Hard stops (preflight, baseline-ratcheted): CRAP >= ${GATE_STOPS.coreCrapStop} (src/core) · CC >= ${GATE_STOPS.watchlistCcStop} (src/node, src/client). Pre-commit warns at CC >= ${PRECOMMIT_CC_WARN}.`,
+    `Hard stops (preflight, baseline-ratcheted): CRAP >= ${GATE_STOPS.coreCrapStop} (src/core, packages/core) · CC >= ${GATE_STOPS.watchlistCcStop} (src/node, src/client). Pre-commit warns at CC >= ${PRECOMMIT_CC_WARN}.`,
   );
   lines.push('');
   lines.push('| file | function | cc | cov | crap | band | in-PR |');
@@ -411,7 +430,7 @@ function modeCi() {
     lines.push('');
   }
   lines.push(
-    `Baseline: \`${relative(ROOT, BASELINE_PATH)}\` — entries tighten or drop via \`bun run crap --update-baseline\`, never grow. Rows marked ·gen (\`src/client/components/ui/\`, shadcn-generated) are watch-only: visible, never gated.`,
+    `Baseline: \`${relative(ROOT, BASELINE_PATH)}\` — entries tighten or drop via \`npm run crap -- --update-baseline\`, never grow. Rows marked ·gen (\`src/client/components/ui/\`, shadcn-generated) are watch-only: visible, never gated.`,
   );
 
   writeFileSync(join(ROOT, 'crap-table.md'), `${lines.join('\n')}\n`);
@@ -423,7 +442,7 @@ function modeCi() {
 function modeCalibrate() {
   if (existsSync(BASELINE_PATH)) {
     console.error(
-      'calibrate: crap-baseline.json already exists — calibration happens once; from here the ratchet only tightens (bun run crap --update-baseline)',
+      'calibrate: crap-baseline.json already exists — calibration happens once; from here the ratchet only tightens (npm run crap -- --update-baseline)',
     );
     process.exit(1);
   }
