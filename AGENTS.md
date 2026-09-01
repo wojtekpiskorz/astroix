@@ -26,7 +26,7 @@ The repo runs on npm workspaces + Node 24 (chartered by lane A2, ruling [#190](h
 - `npm test` — unit tests (vitest + happy-dom); `npm run test:watch` for watch mode.
 - `npm run test:e2e` — Playwright e2e against the integration-era fixture lanes (:4314 main, :4313 npm-pack, :4311 src; the owner's manual smoke owns :4312 — lanes never share servers; parallel local lanes override via `ASTROIX_E2E_PORT` / `ASTROIX_E2E_PACK_PORT` / `ASTROIX_E2E_SRC_PORT`). These lanes are migration-oracle assets: they exist until the retirement gate (ADR-0010) deletes them, and the interval after retirement with no product E2E is explicit — CI must not present it as a pass.
 - `npm run crap` — crap4ts risk report; `--update-baseline` manages the ratchet baseline after refactoring a pinned function.
-- `npm run preflight` — full-src CRAP ratchet (every run evaluates all of src/ against the baseline; owner ruling, issue #62); the agent runs it before `gh pr create`. Scope and baseline keys move with the physical workspace moves, in the same PR as the move.
+- `npm run preflight` — full-tree CRAP ratchet (every run evaluates `src/` + `packages/` against the baseline; owner ruling, issue #62); the agent runs it before `gh pr create`. Scope and baseline keys move with the physical workspace moves, in the same PR as the move.
 - `npm run hooks` — once per clone: wires `git config core.hooksPath scripts/hooks`. Not a postinstall.
 - `npm run build` — tsup (node side) + vite build (the prebuilt chrome bundle). Integration-era only: ADR-0001 is superseded and these build surfaces die at the retirement gate.
 - `npm run smoke` — the integration-era owner smoke (see `docs/manual-smoke.md` for what replaces it).
@@ -35,7 +35,7 @@ The repo runs on npm workspaces + Node 24 (chartered by lane A2, ruling [#190](h
 
 Current (transitional — the migration oracle):
 
-- `src/core/` — pure modules (indexer, matcher, splice-writer, route resolution); no IO; unit-tested over fixtures. Extraction source for `packages/core`.
+- `packages/core/` — the reusable pure editing-domain modules (collections, entry-writer, form-tree, indexer, matcher, route-resolver, splice-writer); no IO; unit-tested over fixtures. `src/core/` keeps only the CRAP tooling layer (`complexity.ts`, `crap.ts`) plus one-line compatibility re-export shims that die at the retirement gate.
 - `src/node/` — the integration (Vite plugin, middleware, watcher, REST endpoints); retirement-bound.
 - `src/client/` — the integration chrome (React 19, shadow DOM); the UI foundation is the extraction source for `packages/app-shell`. shadcn on Base UI (`base-nova`): components under `src/client/components/ui/`, imported through `package.json#imports` (`#components/*`, `#lib/*`, `#hooks/*`); theme tokens in `src/client/chrome.css`; new components via `npx shadcn@latest add <name>`. Target layout: ADR-0002 (amended), enforced by the app-shell checklist below.
 - `e2e/fixture/` — synthetic Astro 7 project; becomes the canonical plain Astro project (disposable copies serve the remaining oracle runs).
@@ -78,8 +78,8 @@ Rationale and trade-offs live in `docs/adr/0002-chrome-module-architecture.md` (
 
 Static and deterministic, upstream of the advisory AI review (wayfinder #55). Engine: `src/core/complexity.ts` (per-function CC, ESLint-classic counting pinned by the probe fixtures; oxc-parser primary, tsc oracle asserted equal in tests). Math: `src/core/crap.ts`. CLI: `scripts/crap.mjs`.
 
-- **Metric honesty**: full CRAP (CC² × (1−cov)³ + CC) only where per-function unit coverage is real (`src/core` → `packages/core`); the runtime and shell tiers are a CC-only watchlist.
-- **Stops**: preflight is a full-src ratchet — CRAP ≥ 30 (core) / CC ≥ 15 (elsewhere) evaluated over all of src/ against the baseline on every run, so coverage regressions from test-weakening PRs fail too (#62); the pre-commit hook warns at CC ≥ 10 on staged functions and never blocks. The generated `components/ui/` tier is watch-only: rows visible, never gated.
+- **Metric honesty**: full CRAP (CC² × (1−cov)³ + CC) only where per-function unit coverage is real (`src/core` tooling + `packages/core`); the runtime and shell tiers are a CC-only watchlist.
+- **Stops**: preflight is a full-tree ratchet — CRAP ≥ 30 (core) / CC ≥ 15 (elsewhere) evaluated over `src/` + `packages/` against the baseline on every run, so coverage regressions from test-weakening PRs fail too (#62); the pre-commit hook warns at CC ≥ 10 on staged functions and never blocks. The generated `components/ui/` tier is watch-only: rows visible, never gated.
 - **Baseline ratchet** (`crap-baseline.json`): calibrated once 2026-08-28; entries only tighten or drop — after refactoring a pinned function, `npm run crap --update-baseline`. New violations fail preflight: refactor them, the baseline never absorbs them. Physical module moves retarget scope and baseline keys in the move PR.
 - **CI** recomputes the table from scratch (`npm run crap:ci` in `ai-review.yml`) and feeds it to the advisory reviewer prompt; local runs are advisory.
 
@@ -88,7 +88,7 @@ Static and deterministic, upstream of the advisory AI review (wayfinder #55). En
 - Every PR touching code needs a changeset (patch by default) while Changesets exist; docs-only PRs do not.
 - Conventional-commit titles (`feat:`, `fix:`, `docs:`, `chore:`).
 - Keep PRs surgical: every changed line should trace to the ticket.
-- Run `npm run preflight` before `gh pr create` — the CRAP gate is a full-src baseline ratchet.
+- Run `npm run preflight` before `gh pr create` — the CRAP gate is a full-tree baseline ratchet.
 - **npm publication is paused by the rewrite** (ADR-0010): do not publish, do not add changesets whose intent is a release, and expect the retirement lane to delete the machinery. Pre-alpha delivery is the packaged artifact path (ADR-0008, `docs/agents/release-loop.md`).
 
 ## Parallel sessions & worktrees
