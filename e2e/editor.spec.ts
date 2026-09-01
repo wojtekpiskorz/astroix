@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
+import { ORACLE_MAIN } from './oracle.mjs';
 
 // Serial: the write test edits a fixture source on disk and restores it.
 test.describe.configure({ mode: 'serial' });
@@ -52,7 +53,7 @@ test('typing writes through the splice loop: disk bytes, format preserved, canva
   const editor = page.locator('[data-astroix-editor="view"]');
   await expect(editor.locator('.cm-content')).toBeVisible();
 
-  const filePath = join('e2e', 'fixture', 'src', 'pages', 'index.astro');
+  const filePath = join(ORACLE_MAIN, 'src', 'pages', 'index.astro');
   const original = readFileSync(filePath, 'utf8');
   try {
     // dispatch a real CM transaction — the same change path as typing

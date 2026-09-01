@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
+import { ORACLE_MAIN } from './oracle.mjs';
 
 // The write-staleness REST guard. The file→chrome IDE-edit half of sync
 // moved to live-refresh.spec.ts on the source lane (#150): the pushed
@@ -8,7 +9,7 @@ import { expect, test } from '@playwright/test';
 // lane boots cannot subscribe to.
 test.describe.configure({ mode: 'serial' });
 
-const FILE_PATH = join('e2e', 'fixture', 'src', 'pages', 'home.css');
+const FILE_PATH = join(ORACLE_MAIN, 'src', 'pages', 'home.css');
 
 test('stale write guard: a chrome edit based on outdated disk content is refused, never spliced', async ({
   page,

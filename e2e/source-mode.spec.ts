@@ -4,12 +4,13 @@ import { expect, test } from '@playwright/test';
 import { SRC_PORT } from './ports';
 
 /**
- * Source-mode lane (ADR-0001, #150): the src-fixture consumes the src-ful
- * staging (`.astroix-local-src` — dist copy + `src` symlink), so the chrome
- * boots from this checkout's source with fast-refresh. The main lane has
- * been publish-shaped (prebuilt chrome) since #123; this lane is the only
- * live runtime for the HMR promise that is ADR-0001's raison d'être, and
- * doubles as the owner's dogfood vehicle (`bun run dev` in e2e/src-fixture).
+ * Source-mode lane (ADR-0001, #150): the disposable src oracle (#213)
+ * links the src-ful staging (`.astroix-local-src` — dist copy + `src`
+ * symlink), so the chrome boots from this checkout's source with
+ * fast-refresh. The main lane has been publish-shaped (prebuilt chrome)
+ * since #123; this lane is the only live runtime for the HMR promise that
+ * is ADR-0001's raison d'être, and doubles as the owner's dogfood vehicle
+ * (`npm run dev` in e2e/.oracle-src after its prep script runs).
  */
 // This file drives the source lane's server, not the config-wide baseURL —
 // same ports module as the config (pack.spec.ts precedent).

@@ -3,6 +3,7 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
 import { expectVisibleWithBootRecovery } from './boot-gate';
+import { ORACLE_MAIN } from './oracle.mjs';
 
 // Serial: the build test mutates fixture build output. (The chrome-source
 // hot-swap tests moved to source-mode.spec.ts with the source lane — this
@@ -252,9 +253,11 @@ test('select mode on: hover outline, click selects and highlights', async ({ pag
   expect(await canvas.locator('.astroix-selected').count()).toBe(0);
 });
 
-test('dev-only guarantee: the fixture production build contains no astroix bytes', () => {
-  const fixtureDist = join('e2e', 'fixture', 'dist');
-  execSync('npm run build', { cwd: 'e2e/fixture', stdio: 'pipe' });
+test('zero-injection guarantee: the oracle production build contains no astroix bytes; the plain fixture builds', () => {
+  // the oracle registers astroix — this is the integration's guarantee under
+  // test: registered in dev, yet zero chrome bytes in build output
+  execSync('npm run build', { cwd: ORACLE_MAIN, stdio: 'pipe' });
+  const oracleDist = join(ORACLE_MAIN, 'dist');
 
   const files: string[] = [];
   const collect = (dir: string): void => {
@@ -264,11 +267,15 @@ test('dev-only guarantee: the fixture production build contains no astroix bytes
       else files.push(full);
     }
   };
-  collect(fixtureDist);
+  collect(oracleDist);
   expect(files.length).toBeGreaterThan(0);
 
   // Case-sensitive: the fixture hero says "Astroix fixture" (capital A) —
   // injected chrome markup is the only lowercase-'astroix' producer.
   const offenders = files.filter((file) => readFileSync(file, 'utf8').includes('astroix'));
   expect(offenders).toEqual([]);
+
+  // the canonical fixture is plain Astro (#213): no astroix dependency at
+  // all — its build proves the tracked project installs and stands alone
+  execSync('npm run build', { cwd: join('e2e', 'fixture'), stdio: 'pipe' });
 });

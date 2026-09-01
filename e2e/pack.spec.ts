@@ -1,20 +1,22 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
+import { ORACLE_PACK } from './oracle.mjs';
 import { PACK_PORT } from './ports';
 import { settleWrites } from './settle-writes';
 
 /**
  * npm-pack smoke lane (ADR-0001): the exact shipped artifact, not the
  * `file:`-linked checkout. The second playwright webServer packs the repo,
- * installs the tarball into the pack fixture and boots it (canonical :4313,
- * per-lane override via the shared ports module — #120). Catches
+ * installs the tarball into the disposable pack oracle (generated from the
+ * tracked pack input, #213) and boots it (canonical :4313, per-lane
+ * override via the shared ports module — #120). Catches
  * `files`/`exports`/package-shape regressions source mode can never see.
  */
 // This file drives the pack lane's server, not the config-wide baseURL
 // (that one belongs to the main fixture) — same ports module either way.
 test.use({ baseURL: `http://localhost:${PACK_PORT}` });
-const FIXTURE = join('e2e', 'pack-fixture');
+const FIXTURE = ORACLE_PACK;
 
 test('chrome loads from the shipped artifact (prebuilt mode)', async ({ page }) => {
   const chromeSourceRequests: string[] = [];

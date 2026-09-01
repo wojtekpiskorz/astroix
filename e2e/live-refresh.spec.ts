@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
 import { type CmView, expectSettled, openEntry } from './entry-pane';
 import { restoreEntry } from './entry-restore';
+import { ORACLE_SRC } from './oracle.mjs';
 import { SRC_PORT } from './ports';
 
 /**
@@ -26,7 +27,9 @@ test.describe.configure({ mode: 'serial' });
 // mechanism, subsuming the 90 s slow() used to buy.
 test.setTimeout(150_000);
 
-const FIXTURE = join('e2e', 'src-fixture');
+// the source lane's disposable oracle copy (#213): canonical content bytes,
+// src-ful staging link — the lane's server serves this dir
+const FIXTURE = ORACLE_SRC;
 const POST = join(FIXTURE, 'src', 'content', 'blog', '2024', 'post.md');
 const HOME_CSS = join(FIXTURE, 'src', 'pages', 'home.css');
 const ENTRY_PROBE = join(FIXTURE, 'src', 'content', 'blog', 'new-entry.md');

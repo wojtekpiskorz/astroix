@@ -12,11 +12,15 @@ dist/
 # astro dev artifacts (when dogfooding inside this repo)
 .astro/
 
-# publish-shaped local link the e2e fixture installs from (#123)
+# publish-shaped local link the oracle copies link from (#123)
 .astroix-local/
 
-# src-ful local link the src-fixture installs from (#150)
+# src-ful local link the src oracle links from (#150)
 .astroix-local-src/
+
+# single-flight lock for the shared oracle build gate (#213): a stale dist
+# must trigger one npm run build, never two concurrent ones
+.astroix-build.lock
 
 # tests
 coverage/
@@ -30,5 +34,11 @@ test-results/
 
 # npm pack smoke lane artifact
 *.tgz
-# pack smoke fixture: the tarball regenerates per build — its lockfile cannot be pinned
-e2e/pack-fixture/package-lock.json
+
+# disposable oracle copies the e2e lanes generate from the canonical
+# fixtures (#213, ADR-0010): the canonical fixture stays plain Astro and the
+# integration config lives only here, regenerated per run — cleanup is
+# rm-and-regenerate, never git
+e2e/.oracle-fixture/
+e2e/.oracle-pack/
+e2e/.oracle-src/

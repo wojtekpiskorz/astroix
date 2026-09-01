@@ -36,7 +36,18 @@ export async function openEntry(page: Page, entry: string): Promise<Locator> {
     'chrome boot: the builder shell never mounted',
     105_000,
   );
+  // routes gate (#213): the entry click navigates the canvas only when the
+  // chrome's own routes query has resolved — clicking first is silent by
+  // design (pickNavigableCandidate returns null without route data). On the
+  // cold oracle boots the query can lag the entries list, so the click is
+  // pinned behind the one /__astroix/routes response the Content tab mount
+  // fires. The listener arms before the click that triggers the query.
+  const routesLoaded = page.waitForResponse(
+    (response) => response.url().includes('/__astroix/routes') && response.status() === 200,
+    { timeout: 10_000 },
+  );
   await page.getByRole('tab', { name: 'Content' }).click();
+  await routesLoaded;
   await expect(page.locator('[data-astroix-entries="ready"]')).toBeVisible({ timeout: 10_000 });
   await page.locator(`[data-astroix-entry="${entry}"]`).click();
   const pane = page.locator('[data-astroix-content-pane="form"]');

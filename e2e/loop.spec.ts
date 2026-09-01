@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
+import { ORACLE_MAIN } from './oracle.mjs';
 
 /**
  * The POC definition of done, executable: the whole CSS editing loop in one
@@ -43,7 +44,7 @@ test('the full CSS editing loop', async ({ page }) => {
   await expect(editor.locator('.astroix-rule-highlight').first()).toBeVisible();
 
   // 5. raw-text edit: the canvas must NOT reload (HMR, not refresh)
-  const filePath = join('e2e', 'fixture', 'src', 'pages', 'index.astro');
+  const filePath = join(ORACLE_MAIN, 'src', 'pages', 'index.astro');
   const original = readFileSync(filePath, 'utf8');
   await canvas.locator('.hero-title').evaluate((el) => {
     (el.ownerDocument.defaultView as { __astroixLoopMarker?: number }).__astroixLoopMarker =

@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
+import { ORACLE_MAIN } from './oracle.mjs';
 
 /** One-based lines of every occurrence of a needle in a text. */
 function occurrenceLines(text: string, needle: string): number[] {
@@ -40,13 +41,13 @@ test('rule list: matched rules with file+line, sorted, winner marked, hash hidde
   expect(panelText).not.toContain('data-astro-cid');
 
   // file:line values match the real source, derived independently here
-  const homeCss = readFileSync('e2e/fixture/src/pages/home.css', 'utf8');
+  const homeCss = readFileSync(`${ORACLE_MAIN}/src/pages/home.css`, 'utf8');
   const heroTitleLines = occurrenceLines(homeCss, '.hero-title {');
   expect(heroTitleLines).toHaveLength(3);
   for (const line of heroTitleLines) {
     expect(panelText).toContain(`src/pages/home.css:${line}`);
   }
-  const astro = readFileSync('e2e/fixture/src/pages/index.astro', 'utf8');
+  const astro = readFileSync(`${ORACLE_MAIN}/src/pages/index.astro`, 'utf8');
   const scopedLine = occurrenceLines(astro, '.hero-title {')[0];
   expect(panelText).toContain(`src/pages/index.astro:${scopedLine}`);
 

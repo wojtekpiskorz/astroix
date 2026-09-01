@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
+import { ORACLE_MAIN } from './oracle.mjs';
 
 // Serial: the edit test rewrites a fixture source file on disk and restores it.
 test.describe.configure({ mode: 'serial' });
@@ -80,7 +81,7 @@ test('POST /__astroix/edit splices bytes on disk and host HMR picks it up', asyn
   );
   if (mediaRule === undefined) throw new Error('media rule missing from the index payload');
 
-  const filePath = join('e2e', 'fixture', 'src', 'pages', 'home.css');
+  const filePath = join(ORACLE_MAIN, 'src', 'pages', 'home.css');
   const original = readFileSync(filePath, 'utf8');
   const windowText = original.slice(mediaRule.range.start, mediaRule.range.end);
   expect(windowText).toContain('2rem');
