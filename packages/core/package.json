@@ -1,0 +1,15 @@
+{
+  "name": "@wojciechpiskorz/astroix-core",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Pure editing-domain behavior extracted from the integration core (#212, ADR-0010)",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=24"
+  },
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "sideEffects": false
+}

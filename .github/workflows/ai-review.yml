@@ -89,7 +89,7 @@ jobs:
             - .agents/skills/unslop/SKILL.md: apply to every piece of prose you read and write, your own comments, and any prose the PR adds (docs, comments, titles).
             - AGENTS.md: house rules the diff must respect, meaning code style, testing doctrine, boundaries (Always / Ask first / Never), gotchas.
             - CONTEXT.md: the glossary; flag drift from its terms.
-            - crap-table.md (workspace root): the crap4ts risk table this CI recomputed for the PR — CC per function (ESLint-classic counting), CRAP where per-function coverage is real (src/core), Uncle-Bob bands, PR-touched functions marked, stop breaches and baseline-grandfathered debt listed. Weigh it when judging the diff: call out PR-touched functions landing high-band or breaching the preflight stops (CRAP >= 30 in src/core, CC >= 15 elsewhere). Grandfathered entries are known calibrated debt — raise them only if the PR makes them worse.
+            - crap-table.md (workspace root): the crap4ts risk table this CI recomputed for the PR — CC per function (ESLint-classic counting), CRAP where per-function coverage is real (src/core + packages/core), Uncle-Bob bands, PR-touched functions marked, stop breaches and baseline-grandfathered debt listed. Weigh it when judging the diff: call out PR-touched functions landing high-band or breaching the preflight stops (CRAP >= 30 in src/core or packages/core, CC >= 15 elsewhere). Grandfathered entries are known calibrated debt — raise them only if the PR makes them worse.
 
             The PR branch is already checked out in the current working directory. Inspect it with `gh pr diff`, `gh pr view`, and by reading files; judge the diff in the context of the surrounding code, not in isolation.
 
