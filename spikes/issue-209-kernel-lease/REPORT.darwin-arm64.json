@@ -1,0 +1,170 @@
+{
+  "schemaVersion": 1,
+  "sourceCommit": "657021ef974839fb7a4b54f1b6ea65cfcb20d481",
+  "packageLaunch": "electron",
+  "runtime": {
+    "arch": "arm64",
+    "platform": "darwin",
+    "version": "v24.20.0",
+    "embeddedSqliteVersion": "3.53.4",
+    "executable": "node/bin/node"
+  },
+  "matrix": {
+    "passed": true,
+    "testCount": 25,
+    "testFiles": [
+      "kernel-lease-interface.test.mjs",
+      "kernel-lease-process.test.mjs",
+      "packaged-assets.test.mjs",
+      "runtime-package.test.mjs"
+    ],
+    "cases": [
+      {
+        "name": "exposes only fixed process-lifetime acquisition calls",
+        "passed": true
+      },
+      {
+        "name": "rejects an unqualified bundled Node pin before touching private state",
+        "passed": true
+      },
+      {
+        "name": "accepts only the exact Node 24.20.0 SQLite contention error shape",
+        "passed": true
+      },
+      {
+        "name": "the qualification gate rejects any missing or duplicate required case",
+        "passed": true
+      },
+      {
+        "name": "first creation holds one fixed lease in private local state",
+        "passed": true
+      },
+      {
+        "name": "barrier-started processes allow exactly one holder for the same lease",
+        "passed": true
+      },
+      {
+        "name": "instrumentation failures cannot alter lease authority outcomes",
+        "passed": true
+      },
+      {
+        "name": "asynchronous instrumentation failures cannot terminate lease holders",
+        "passed": true
+      },
+      {
+        "name": "different fixed lease names can be held concurrently",
+        "passed": true
+      },
+      {
+        "name": "clean process exit releases the lease without unlinking its file",
+        "passed": true
+      },
+      {
+        "name": "a lease remains exclusive through later synchronous exit listeners",
+        "passed": true
+      },
+      {
+        "name": "SIGKILL releases the lease without stale-owner recovery",
+        "passed": true
+      },
+      {
+        "name": "a live orphaned edit executor excludes replacement until that process exits",
+        "passed": true
+      },
+      {
+        "name": "returns only the verified fixed bundled Node executable",
+        "passed": true
+      },
+      {
+        "name": "missing bundled Node fails closed without trying PATH or a system runtime",
+        "passed": true
+      },
+      {
+        "name": "tampered bundled Node fails before spawn",
+        "passed": true
+      },
+      {
+        "name": "an unqualified manifest pin fails before spawn",
+        "passed": true
+      },
+      {
+        "name": "tampered runtime code fails before import or spawn",
+        "passed": true
+      },
+      {
+        "name": "an unmanifested runtime file fails the fixed inventory",
+        "passed": true
+      },
+      {
+        "name": "a bundled Node root symlink cannot escape package resources",
+        "passed": true
+      },
+      {
+        "name": "a runtime root symlink cannot escape package resources",
+        "passed": true
+      },
+      {
+        "name": "pins the official Node 24.20.0 darwin arm64 archive",
+        "passed": true
+      },
+      {
+        "name": "pins the official Node 24.20.0 linux x64 archive",
+        "passed": true
+      },
+      {
+        "name": "rejects an unqualified platform instead of choosing another Node",
+        "passed": true
+      },
+      {
+        "name": "a timed-out qualification kills its complete process group",
+        "passed": true
+      }
+    ]
+  },
+  "qualification": {
+    "acquisitionMs": 0.7693329999999996,
+    "embeddedSqliteVersion": "3.53.4",
+    "extensionsDisabled": true,
+    "filesystem": {
+      "blockSize": 4096,
+      "type": "26"
+    },
+    "journalMode": "delete",
+    "leaseFileMode": "0600",
+    "node": {
+      "arch": "arm64",
+      "platform": "darwin",
+      "version": "v24.20.0"
+    },
+    "privateDirectoryMode": "0700",
+    "sensitiveEnvironmentAbsent": {
+      "electronRunAsNode": true,
+      "nodeOptions": true,
+      "proofSecret": true
+    },
+    "sqliteSourceId": "2026-07-24 19:02:57 bf7c7f30031888f4e796e429ab3978879485813aaca6f641c7b33e4e09459bcc",
+    "sqliteVersion": "3.53.4"
+  },
+  "fallbacks": {
+    "electronRunAsNode": false,
+    "pathLookup": false,
+    "shell": false,
+    "systemNode": false
+  },
+  "package": {
+    "electron": {
+      "arch": "arm64",
+      "filename": "electron-v44.1.0-darwin-arm64.zip",
+      "platform": "darwin",
+      "sha256": "9e624a8c44dee2792a532551f224ec8b8649b654a0e039416164fbf620888512",
+      "version": "44.1.0"
+    },
+    "layout": ["astroix-runtime/", "node/"],
+    "signatureVerifiedAfterZipExtraction": true
+  },
+  "host": {
+    "arch": "arm64",
+    "platform": "darwin"
+  },
+  "poisonPathUnused": true
+}
