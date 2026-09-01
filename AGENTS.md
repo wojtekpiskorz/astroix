@@ -88,7 +88,7 @@ Static and deterministic, upstream of the advisory AI review (wayfinder #55). En
 - Every PR touching code needs a changeset (patch by default) while Changesets exist; docs-only PRs do not.
 - Conventional-commit titles (`feat:`, `fix:`, `docs:`, `chore:`).
 - Keep PRs surgical: every changed line should trace to the ticket.
-- Run `npm run preflight` before `gh pr create` — the CRAP gate is a full-tree baseline ratchet.
+- Run `npm run preflight` before `gh pr create` — the CRAP gate is a baseline ratchet over `src/` + `packages/core`.
 - **npm publication is paused by the rewrite** (ADR-0010): do not publish, do not add changesets whose intent is a release, and expect the retirement lane to delete the machinery. Pre-alpha delivery is the packaged artifact path (ADR-0008, `docs/agents/release-loop.md`).
 
 ## Parallel sessions & worktrees
