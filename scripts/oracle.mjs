@@ -172,8 +172,9 @@ function acquireBuildLock() {
     } catch {
       // the lock vanished (or was replaced) between the failed create and
       // this read — the exact release race this loop absorbs: retry the
-      // create instead of dying on the now-missing file. holder=0 from a
-      // fresh iteration steers takeover if it reappears unreadable.
+      // create instead of dying on the now-missing file. Poll-paced so a
+      // persistently unreadable lock cannot hot-spin.
+      sleepSync(LOCK_POLL_MS);
       continue;
     }
     const live = Number.isInteger(holder) && holder > 0 && pidIsLive(holder);
