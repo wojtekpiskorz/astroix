@@ -10,7 +10,6 @@
 // git, so cross-run contamination cannot survive (#213 AC, replacing the
 // boot-heal git restore).
 
-import { cpSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   assertOracleLink,
@@ -40,11 +39,10 @@ syncStaging(staging);
 ensurePlainFixtureInstall();
 evictStaleFixtureIntegration();
 
-// 3. Generate the disposable oracle: fresh dir, canonical bytes, generated
-// config + manifest, farmed node_modules, staged link.
+// 3. Generate the disposable oracle: fresh dir, canonical bytes (tsconfig
+// included), generated config + manifest, farmed node_modules, staged link.
 resetOracle(oracleMain);
 copyOracleSources(oracleMain, join(root, 'e2e', 'fixture'));
-cpSync(join(root, 'e2e', 'fixture', 'tsconfig.json'), join(oracleMain, 'tsconfig.json'));
 writeOracleMeta(oracleMain, {
   name: 'astroix-e2e-oracle',
   scripts: {

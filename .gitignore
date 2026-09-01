@@ -18,6 +18,10 @@ dist/
 # src-ful local link the src oracle links from (#150)
 .astroix-local-src/
 
+# single-flight lock for the shared oracle build gate (#213): a stale dist
+# must trigger one npm run build, never two concurrent ones
+.astroix-build.lock
+
 # tests
 coverage/
 crap-table.md

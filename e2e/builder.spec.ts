@@ -253,7 +253,7 @@ test('select mode on: hover outline, click selects and highlights', async ({ pag
   expect(await canvas.locator('.astroix-selected').count()).toBe(0);
 });
 
-test('dev-only guarantee: the oracle production build contains no astroix bytes; the plain fixture builds', () => {
+test('zero-injection guarantee: the oracle production build contains no astroix bytes; the plain fixture builds', () => {
   // the oracle registers astroix — this is the integration's guarantee under
   // test: registered in dev, yet zero chrome bytes in build output
   execSync('npm run build', { cwd: ORACLE_MAIN, stdio: 'pipe' });

@@ -20,7 +20,6 @@
 // Regenerated wholesale on every pass: cleanup is rm-and-recreate, never
 // git (#213 AC).
 
-import { cpSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   assertOracleLink,
@@ -45,10 +44,9 @@ syncStaging(staging, { withSrcSymlink: true });
 // guard; CI `npm ci`s it before the lanes run).
 ensurePlainFixtureInstall();
 
-// 3. Generate the disposable source-mode oracle.
+// 3. Generate the disposable source-mode oracle (canonical bytes + tsconfig).
 resetOracle(oracleSrc);
 copyOracleSources(oracleSrc, join(root, 'e2e', 'fixture'));
-cpSync(join(root, 'e2e', 'fixture', 'tsconfig.json'), join(oracleSrc, 'tsconfig.json'));
 writeOracleMeta(oracleSrc, {
   name: 'astroix-src-oracle',
   scripts: {

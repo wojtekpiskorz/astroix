@@ -4,6 +4,7 @@ import {
   existsSync,
   mkdirSync,
   readdirSync,
+  readFileSync,
   renameSync,
   rmSync,
   statSync,
@@ -29,9 +30,6 @@ export const oracleSrc = join(root, ORACLE_SRC);
 
 // exactly what `files: ["dist"]` + the npm defaults allow into a tarball
 const PUBLISH_SURFACE = ['dist', 'package.json', 'README.md', 'LICENSE'];
-// repo-only dirs a publish-shaped copy must never carry; shared by the shape
-// predicate and its diagnostic so the two cannot drift
-const FORBIDDEN_DIRS = ['src', 'e2e'];
 const BUILD_INPUTS = ['tsup.config.ts', 'vite.chrome.config.ts', 'package.json'];
 const BUILD_OUTPUTS = ['dist/index.js', 'dist/chrome.js'];
 
@@ -52,25 +50,141 @@ function walkFiles(dir) {
   return files;
 }
 
-/** A publish-shaped copy carries dist + manifest and never the repo itself. */
-function isPublishShaped(dir) {
-  return (
-    !FORBIDDEN_DIRS.some((name) => existsSync(join(dir, name))) &&
-    existsSync(join(dir, 'package.json')) &&
-    existsSync(join(dir, 'dist'))
-  );
+/**
+ * One shape predicate for every staging / installed-oracle surface: required
+ * present + forbidden absent, data-driven — the publish vs source-mode
+ * difference is data, not code branches (the pre-#213 prepare-src-link had a
+ * unified assertShape worth keeping; #213 first regressed it into three
+ * near-copies, advisory round 1 folded them back).
+ */
+function assertShape(dir, label, shape) {
+  const { required, forbidden, hint } = shape;
+  const missing = required.filter((name) => !existsSync(join(dir, name)));
+  const present = forbidden.filter((name) => existsSync(join(dir, name)));
+  if (missing.length > 0 || present.length > 0) {
+    throw new Error(
+      `[astroix] ${label} at ${dir} is wrong-shaped` +
+        (missing.length > 0 ? ` (missing ${missing.join(', ')})` : '') +
+        (present.length > 0 ? ` (contains ${present.join(', ')})` : '') +
+        ` — ${hint}`,
+    );
+  }
 }
 
-function assertPublishShape(dir, label) {
-  if (!isPublishShaped(dir)) {
-    const forbidden = FORBIDDEN_DIRS.filter((name) => existsSync(join(dir, name)));
-    throw new Error(
-      `[astroix] ${label} at ${dir} is not publish-shaped` +
-        (forbidden.length > 0
-          ? ` (contains ${forbidden.join(', ')})`
-          : ' (missing package.json/dist)') +
-        ' — the local link regressed to a full-repo copy; see scripts/prepare-local-link.mjs (#123).',
-    );
+/** Publish shape: the tarball surface only — `src` and `e2e` never ride along. */
+const PUBLISH_SHAPE = {
+  required: ['package.json', 'dist'],
+  forbidden: ['src', 'e2e'],
+  hint: 'the local link regressed to a full-repo copy; see scripts/prepare-local-link.mjs (#123).',
+};
+
+/** Source-mode shape: the inverse — `src` is required here, never forbidden. */
+const SOURCE_SHAPE = {
+  required: ['dist', 'src', 'package.json'],
+  forbidden: ['e2e'],
+  hint: 'see scripts/prepare-src-link.mjs (#150).',
+};
+
+/** Installed-oracle link shape: package surface through the link, no repo. */
+const LINK_SHAPE = {
+  required: ['dist', 'package.json'],
+  forbidden: ['e2e'],
+  hint: 'see scripts/oracle.mjs (#213).',
+};
+
+/** Installed-oracle link shape for the source-mode staging (src rides along). */
+const LINK_SOURCE_SHAPE = {
+  required: ['dist', 'src', 'package.json'],
+  forbidden: ['e2e'],
+  hint: 'see scripts/oracle.mjs (#213).',
+};
+
+/**
+ * Every file the build reads: the src tree, the three root build configs,
+ * and every packages/<name> src tree — dist bundles through the src/core +
+ * src/client re-export shims (#270, #273), so a local edit under packages/
+ * must trip the gate exactly like one under src/ (advisory round 1: the
+ * walk gap let both lanes boot a stale chrome with no warning). walkFiles
+ * returns [] for a missing tree, so a checkout without packages/ still
+ * gates on src/.
+ */
+function buildInputFiles() {
+  const packageSrcs = existsSync(join(root, 'packages'))
+    ? readdirSync(join(root, 'packages')).flatMap((name) =>
+        walkFiles(join(root, 'packages', name, 'src')),
+      )
+    : [];
+  return walkFiles(join(root, 'src'))
+    .concat(BUILD_INPUTS.map((name) => join(root, name)))
+    .concat(packageSrcs);
+}
+
+/** dist is stale when any build input postdates the oldest build output. */
+function distIsStale() {
+  const inputMtimes = buildInputFiles().map((path) => statSync(path).mtimeMs);
+  const outputMtimes = BUILD_OUTPUTS.map((name) => {
+    const path = join(root, name);
+    return existsSync(path) ? statSync(path).mtimeMs : 0;
+  });
+  return Math.max(...inputMtimes) > Math.min(...outputMtimes);
+}
+
+// Single-flight guard for the shared build gate: playwright boots the lanes'
+// webServers concurrently, and both farmed lanes run this gate — a stale dist
+// must trigger exactly ONE `npm run build`, never two writing dist/ at the
+// same time. The lock is crash-safe: a builder that dies leaves the file
+// behind, so a waiter checks the holder's pid for life and caps the lock's
+// age — a crashed builder never wedges the next run.
+const BUILD_LOCK = join(root, '.astroix-build.lock');
+const BUILD_LOCK_STALE_MS = 10 * 60_000;
+const LOCK_POLL_MS = 500;
+
+const sleepSync = (ms) => {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+};
+
+/** True when a pid is alive (EPERM = alive under another owner). */
+function pidIsLive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error.code === 'EPERM';
+  }
+}
+
+function acquireBuildLock() {
+  for (;;) {
+    try {
+      writeFileSync(BUILD_LOCK, String(process.pid), { flag: 'wx' });
+      return;
+    } catch (error) {
+      if (error.code !== 'EEXIST') throw error;
+    }
+    let holder = 0;
+    try {
+      holder = Number.parseInt(readFileSync(BUILD_LOCK, 'utf8').trim(), 10);
+    } catch {
+      // unreadable or vanished between the failed create and this read —
+      // fall through and retry the create
+    }
+    const age = Date.now() - statSync(BUILD_LOCK).mtimeMs;
+    const live = Number.isInteger(holder) && holder > 0 && pidIsLive(holder);
+    if (!live || age > BUILD_LOCK_STALE_MS) {
+      // takeover: dead holder, or a lock aged past any honest build. The
+      // tiny rm/create race with a third process degrades to today's
+      // behavior (one redundant build), never to a wedge.
+      try {
+        rmSync(BUILD_LOCK, { force: true });
+      } catch {
+        // someone replaced it already — loop and re-evaluate
+      }
+      console.log(
+        `[astroix] taking over the stale build lock (holder pid ${holder}, live: ${live}, age ${Math.round(age / 1000)}s)`,
+      );
+      continue;
+    }
+    sleepSync(LOCK_POLL_MS);
   }
 }
 
@@ -78,19 +192,20 @@ function assertPublishShape(dir, label) {
  * Build gate: dist must exist and postdate every build input, so a stale
  * dist can never silently serve an oracle (the copies link at prep time —
  * freshness is decided here, before the link is made). statSync throws
- * loudly when src/ or a build config is missing.
+ * loudly when a build input is missing. Stale → one serialized build: the
+ * waiter re-checks freshness inside the lock and skips when the other lane
+ * already rebuilt.
  */
 export function ensureFreshDist() {
-  const inputMtimes = walkFiles(join(root, 'src'))
-    .concat(BUILD_INPUTS.map((name) => join(root, name)))
-    .map((path) => statSync(path).mtimeMs);
-  const outputMtimes = BUILD_OUTPUTS.map((name) => {
-    const path = join(root, name);
-    return existsSync(path) ? statSync(path).mtimeMs : 0;
-  });
-  if (Math.max(...inputMtimes) > Math.min(...outputMtimes)) {
-    console.log('[astroix] dist is stale — rebuilding (npm run build)');
-    run('npm run build', root);
+  if (!distIsStale()) return;
+  acquireBuildLock();
+  try {
+    if (distIsStale()) {
+      console.log('[astroix] dist is stale — rebuilding (npm run build)');
+      run('npm run build', root);
+    }
+  } finally {
+    rmSync(BUILD_LOCK, { force: true });
   }
 }
 
@@ -110,20 +225,9 @@ export function syncStaging(staging, { withSrcSymlink = false } = {}) {
     // relative to the staging dir, so the link always points at this
     // checkout's src from wherever the staging sits
     symlinkSync('../src', join(staging, 'src'), 'dir');
-    // source-mode shape — the inverse of the publish shape: `src` is
-    // required here, never forbidden (see assertOracleLink's requireSrc)
-    const missing = ['dist', 'src', 'package.json'].filter(
-      (name) => !existsSync(join(staging, name)),
-    );
-    if (missing.length > 0 || existsSync(join(staging, 'e2e'))) {
-      throw new Error(
-        `[astroix] staging dir at ${staging} is not source-mode-shaped` +
-          (missing.length > 0 ? ` (missing ${missing.join(', ')})` : ' (contains e2e)') +
-          ' — see scripts/prepare-src-link.mjs (#150).',
-      );
-    }
+    assertShape(staging, 'staging dir', SOURCE_SHAPE);
   } else {
-    assertPublishShape(staging, 'staging dir');
+    assertShape(staging, 'staging dir', PUBLISH_SHAPE);
   }
 }
 
@@ -258,23 +362,18 @@ export function linkStagedIntegration(oracleDir, stagingDir) {
 /**
  * Guard: the oracle's installed integration must carry the package surface
  * through the link — `src` rides along only for the source-mode staging
- * (requireSrc, the inverse shape of the publish-shaped assert) — and never
- * the repo itself.
+ * (requireSrc) — and never the repo itself.
  */
 export function assertOracleLink(oracleDir, { requireSrc = false } = {}) {
   const installed = join(oracleDir, 'node_modules', '@wojciechpiskorz', 'astroix');
-  const required = requireSrc ? ['dist', 'src', 'package.json'] : ['dist', 'package.json'];
-  const missing = required.filter((name) => !existsSync(join(installed, name)));
-  if (missing.length > 0 || existsSync(join(installed, 'e2e'))) {
-    throw new Error(
-      `[astroix] oracle link at ${installed} is wrong-shaped` +
-        (missing.length > 0 ? ` (missing ${missing.join(', ')})` : ' (contains e2e)') +
-        ' — see scripts/oracle.mjs (#213).',
-    );
-  }
+  assertShape(installed, 'oracle link', requireSrc ? LINK_SOURCE_SHAPE : LINK_SHAPE);
 }
 
-/** Copy the canonical content bytes into a fresh oracle (verbatim). */
+/** Copy the canonical content bytes into a fresh oracle (verbatim, tsconfig included when the input carries one). */
 export function copyOracleSources(oracleDir, sourceDir) {
   cpSync(join(sourceDir, 'src'), join(oracleDir, 'src'), { recursive: true });
+  const tsconfig = join(sourceDir, 'tsconfig.json');
+  if (existsSync(tsconfig)) {
+    cpSync(tsconfig, join(oracleDir, 'tsconfig.json'));
+  }
 }
