@@ -141,6 +141,7 @@ describe('page-size ceilings and budget clamping', () => {
     const page = boundedPage({
       items,
       offset: Number.NaN,
+      requestedPageSize: 1,
       budget: 'lifecycleJsonBytes',
       envelopeFor: listEnvelopeFor,
     });
