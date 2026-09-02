@@ -153,6 +153,18 @@ export default defineConfig({
         // collected here like the plane's other composition files —
         // metric honesty lives in the tier decision, not the collection.
         'packages/runtime/project-runtime/**',
+        // The origin/proxy seams (#233, F1, additive): the virtual-host
+        // vocabulary and Host/target classification, the routing grant/
+        // revoke state machine, and the upgrade admission + handshake
+        // reconstruction are deterministic pure units (covered tier). The
+        // real IO — the listener composition, the HTTP stream proxy, the
+        // raw upgrade tunnel, and the proxy-health prober — is
+        // watchlist-tiered in crap.ts but stays collected here like the
+        // plane's other composition files: its behavior truth is the
+        // real-socket focused lane under test/proxy (loopback stand-in
+        // upstreams, OS-assigned ports).
+        'packages/runtime/origin/**',
+        'packages/runtime/proxy/**',
       ],
       reporter: ['json'],
       reportsDirectory: 'coverage',

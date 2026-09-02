@@ -49,7 +49,12 @@ import type { FunctionComplexity } from './complexity';
  * prerequisite — are covered (deterministic units over supervisor/wire
  * fakes); the production launch composition (plane-launch.ts — real
  * spawn plans, real children via the supervisor) is watchlist like the
- * plane's other IO glue (#232). A
+ * plane's other IO glue (#232). The origin/proxy seams since #233 (F1)
+ * split the same way: the virtual-host vocabulary and Host/target
+ * classification, the routing state machine, and the upgrade admission
+ * + handshake reconstruction are covered; the listener composition, the
+ * HTTP stream proxy, the raw upgrade tunnel, and the proxy-health
+ * prober are watchlist (#233). A
  * watchlist row has `coverage === null` and `crap === null`, and its gate
  * metric is CC. (The `src/node` + `src/client` watchlist tiers were
  * deleted with their functions at the retirement gate, #215.)
@@ -205,6 +210,20 @@ function isCoreFile(relPath: string): boolean {
   // the plane's other IO glue: its truth is the supervision process lane
   // over the same ingredients.
   const projectRuntimeWatchlist = relPath === 'packages/runtime/project-runtime/plane-launch.ts';
+  // The origin/proxy seams since #233 (F1): the virtual-host vocabulary
+  // and Host/target classification, the routing grant/revoke state
+  // machine, and the upgrade admission + handshake reconstruction are
+  // covered (deterministic pure units); the real IO — the listener
+  // composition (binds the loopback server, tracks and revokes sockets),
+  // the HTTP stream proxy, the raw upgrade tunnel, and the proxy-health
+  // prober — is watchlist like the plane's other IO glue: its truth is
+  // the real-socket focused lane (test/proxy, loopback stand-in
+  // upstreams, OS-assigned ports).
+  const originProxyWatchlist =
+    relPath === 'packages/runtime/origin/origin-listener.ts' ||
+    relPath === 'packages/runtime/proxy/http-stream.ts' ||
+    relPath === 'packages/runtime/proxy/upgrade-tunnel.ts' ||
+    relPath === 'packages/runtime/proxy/proxy-health.ts';
   return (
     (relPath.startsWith('src/core/') ||
       relPath.startsWith('packages/core/') ||
@@ -215,6 +234,8 @@ function isCoreFile(relPath: string): boolean {
       relPath.startsWith('packages/runtime/edit-authority/') ||
       (relPath.startsWith('packages/runtime/project-plane/') && !projectPlaneWatchlist) ||
       (relPath.startsWith('packages/runtime/project-runtime/') && !projectRuntimeWatchlist) ||
+      (relPath.startsWith('packages/runtime/origin/') && !originProxyWatchlist) ||
+      (relPath.startsWith('packages/runtime/proxy/') && !originProxyWatchlist) ||
       (relPath.startsWith('packages/runtime/astro-project-adapter/') && !adapterWatchlist)) &&
     !relPath.startsWith('packages/runtime/astro-project-adapter/certification/')
   );
