@@ -32,7 +32,7 @@ import type { IndexPayloadRecord } from '../../../core/src/matcher';
  *    `error` (anything else). The widget displays the result; the write
  *    loop that produced it stays with the host.
  * 4. **Presentation-only state** — selection, active entry, collapsed
- *    folders, loading/pending flags: chrome state that changes what
+ *    folders, loading/pending flags: app-shell state that changes what
  *    renders, never what the data means.
  */
 

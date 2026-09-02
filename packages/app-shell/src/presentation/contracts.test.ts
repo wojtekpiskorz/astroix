@@ -154,7 +154,7 @@ describe('the export-surface boundary', () => {
     }
     // `WriteStatus` is a type-only export of the presentation surface — the
     // compile-time proof it never crosses the deaf barrel is the import in
-    // chrome-widgets.test.tsx resolving from this package's presentation
+    // app-shell-widgets.test.tsx resolving from this package's presentation
     // barrel alone.
   });
 });
