@@ -144,7 +144,7 @@ export const DELETION_TARGETS: readonly DeletionTarget[] = [
     what: 'The delivery-lane staging scripts: the publish-shaped local link, the npm-pack lane, and the source-mode lane.',
     evidence: [
       "ADR-0001's three e2e delivery lanes die at the retirement gate (ADR-0010)",
-      'the remaining oracle consumers (the freeze suites and the retained-UI regression — all themselves deletion targets) use prepare-local-link; both die together in this inventory',
+      'every spec that boots the oracle is itself a deletion target under target:legacy-e2e-and-oracle-specs; the staging scripts and those specs die together in this inventory',
     ],
     a6Owned: true,
   },
@@ -184,7 +184,7 @@ export const DELETION_TARGETS: readonly DeletionTarget[] = [
     paths: ['e2e/oracle.mjs', 'e2e/oracle.d.mts', 'e2e/contract-oracle/**'],
     what: 'The disposable-oracle machinery: oracle path constants, the boot/teardown server helper, and the B-lane capture pipelines.',
     evidence: [
-      'the freeze specs and the readiness oracle leg are its only consumers; both die with the runtime that boots the oracle',
+      'every spec that boots the oracle is itself a deletion target under target:legacy-e2e-and-oracle-specs; the machinery dies with the runtime that boots the oracle',
       'the frozen corpora remain the evidence — contract truth stops being re-derivable and becomes the frozen standard the web host is judged against',
     ],
     a6Owned: false,
