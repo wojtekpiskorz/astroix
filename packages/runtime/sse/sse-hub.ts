@@ -151,7 +151,16 @@ export interface SseHub {
   };
 }
 
-/** Builds one hub. The composition owns its lifetime alongside the surfaces that feed it. */
+/**
+ * Builds one hub. The composition owns its lifetime alongside the
+ * surfaces that feed it. One hub lives at most ONE runtime epoch: the
+ * stale-publication watermark pins the epoch at the first session-scoped
+ * publication and refuses every other epoch afterwards — a live control
+ * plane's epoch is fixed at boot, so a foreign epoch is stale by
+ * construction, and a hub that somehow outlived an epoch rotation would
+ * fail closed into a permanently refusing (never leaking) channel. A
+ * composition that rotates epochs recreates the hub with them.
+ */
 export function createSseHub(): SseHub {
   interface Live {
     readonly id: number;

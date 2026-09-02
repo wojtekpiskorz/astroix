@@ -53,7 +53,9 @@ export interface BoundedPageInput<T> {
   /**
    * The page-size ceiling (a server-side choice; protocol v1 requests
    * carry no page parameters). Clamped down when the budget cannot
-   * carry the requested count; omitted means "as many as fit".
+   * carry the requested count; omitted means "as many as fit"; a value
+   * of 0 or less is invalid input and clamps to one item — never
+   * widened to "everything".
    */
   readonly requestedPageSize?: number;
   /** The byte budget this API paginates under — a `LIMITS` byte-cap name. */
@@ -101,10 +103,15 @@ export function boundedPage<T>(input: BoundedPageInput<T>): BoundedPage<T> {
     }
     return refused('single-item-over-budget', firstBytes, input.budget);
   }
+  // A requested page size of 0 or less is invalid input: widening it to
+  // "the whole available prefix" would invert the hint's intent, so it
+  // clamps to the smallest honest page — one item — the same direction
+  // every other clamp here moves (bounded delivery outranks the hint;
+  // nonsense never becomes "everything").
   const ceiling =
-    input.requestedPageSize !== undefined && input.requestedPageSize > 0
-      ? Math.min(Math.floor(input.requestedPageSize), available)
-      : available;
+    input.requestedPageSize === undefined
+      ? available
+      : Math.min(Math.max(1, Math.floor(input.requestedPageSize)), available);
   const count = ceiling === 1 ? 1 : largestFittingCount(input, offset, ceiling);
   return page(input, offset, count);
 }

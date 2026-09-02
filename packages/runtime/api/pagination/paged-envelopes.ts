@@ -22,7 +22,7 @@ import { type BoundedPageRefusal, boundedPage } from './page-contract.ts';
  *
  * The envelope is constructed THROUGH the protocol's closed
  * `responseEnvelopeSchema` (the `buildErrorEnvelope` idiom: closure at
- * construction), and the page math (`./page-math.ts`) counts UTF-8
+ * construction), and the page math (`./page-contract.ts`) counts UTF-8
  * bytes over the serialized envelope (the `envelopeBytes` unit). The
  * continuation is an offset cursor the CALLER owns: protocol v1's
  * closed request envelopes carry no page parameters, so page size and

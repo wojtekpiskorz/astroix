@@ -97,6 +97,25 @@ describe('page-size ceilings and budget clamping', () => {
     expect(page.continuation).toBe(page.items.length);
   });
 
+  it('treats a requested page size of 0 or less as invalid input — the smallest honest page, never "everything"', () => {
+    const items = itemsOf(8, 10);
+    for (const requestedPageSize of [0, -5]) {
+      const page = boundedPage({
+        items,
+        offset: 0,
+        requestedPageSize,
+        budget: 'lifecycleJsonBytes',
+        envelopeFor: listEnvelopeFor,
+      });
+      expect(page.kind, `requested ${requestedPageSize}`).toBe('page');
+      if (page.kind !== 'page') return;
+      // one item carried, the rest continues — the nonsense hint is
+      // never widened into the whole available prefix
+      expect(page.items, `requested ${requestedPageSize}`).toEqual(items.slice(0, 1));
+      expect(page.continuation, `requested ${requestedPageSize}`).toBe(1);
+    }
+  });
+
   it('paginates a collection that could never fit whole — every page within budget, walk to completion', () => {
     const items = itemsOf(300, 1020);
     const collected: string[] = [];
