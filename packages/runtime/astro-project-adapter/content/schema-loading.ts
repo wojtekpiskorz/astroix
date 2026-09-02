@@ -100,6 +100,17 @@ export function classifyCollectionCategory(
 }
 
 /**
+ * Whether a collection definition declares a schema factory — Astro's
+ * canonical function form `schema: ({ image }) => …`. Stated once,
+ * here beside the factory arm that owns it; the pass's
+ * needs-the-zod-namespace scan uses the same predicate, so the two
+ * cannot drift.
+ */
+export function isSchemaFactory(definition: CollectionDefinitionSeams): boolean {
+  return typeof definition.schema === 'function';
+}
+
+/**
  * Resolves one collection's schema with the project's actual behavior:
  * the instance arm takes the declared schema as-is; the factory arm
  * invokes it exactly as Astro does (`schema({ image })`), substituting
@@ -117,10 +128,11 @@ export async function loadCollectionSchema(
   if (declared === undefined) {
     return { outcome: 'loaded', loaded: { declared: false, schema: null, isImage: neverImage } };
   }
-  if (typeof declared === 'function') {
+  if (isSchemaFactory(definition)) {
     if (zod === null) {
-      // The pass only imports astro/zod when a factory exists; reaching
-      // here without it is a pass-orchestration bug, not a project shape.
+      // The pass's zod-namespace scan uses isSchemaFactory too; reaching
+      // here without the namespace is a pass-orchestration bug, not a
+      // project shape.
       throw new Error('schema factory present but the zod namespace was not resolved');
     }
     return resolveFactorySchema(name, declared as (context: unknown) => unknown, zod);

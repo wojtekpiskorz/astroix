@@ -6,6 +6,7 @@ import type { FreshRunnerOutcome } from '../fresh-runner';
 import { withFreshRunner } from '../fresh-runner';
 import type { ModuleRunnerLike } from '../seam-readers';
 import {
+  CONTENT_CONFIG_MODULE,
   type CollectionDefinitionSeams,
   type ContentApiSeams,
   getCollectionRejection,
@@ -28,9 +29,10 @@ import type {
   ContentSchemaResult,
 } from './content-result';
 import { type CollectionTruth, collectionRevision, passRevision } from './content-revisions';
-import { readEntryBaseline } from './entry-baselines';
+import { readConfigBaseline, readEntryBaseline } from './entry-baselines';
 import {
   classifyCollectionCategory,
+  isSchemaFactory,
   type LoadedCollectionSchema,
   loadCollectionSchema,
 } from './schema-loading';
@@ -49,9 +51,6 @@ import {
  * certified; and the runner is closed on every exit path with the
  * #206 cleanup proof attached to the outcome.
  */
-
-/** The content config's certified location — a fixed form, never a path search. */
-const CONTENT_CONFIG_MODULE = 'src/content.config.ts';
 
 /**
  * Inspects the managed project's content: collections, entries,
@@ -77,6 +76,8 @@ interface PassContext {
   readonly contentApi: ContentApiSeams;
   readonly zod: ZodNamespaceSeams | null;
   readonly projectRoot: string;
+  /** The content config module's byte baseline — the schema-semantics revision input. */
+  readonly configBaseline: string;
 }
 
 /** The pass body — everything inside the fresh runner's lifetime. */
@@ -89,7 +90,8 @@ async function runContentPass(
   const zod = definitionsNeedZod(definitions)
     ? readZodNamespace(await importZodNamespace(runner))
     : null;
-  const context: PassContext = { contentApi, zod, projectRoot };
+  const configBaseline = await readConfigBaseline(projectRoot);
+  const context: PassContext = { contentApi, zod, projectRoot, configBaseline };
 
   const collections: ContentCollectionResult[] = [];
   const diagnostics: ContentCompatibilityDiagnostic[] = [];
@@ -142,7 +144,10 @@ async function inspectCollection(
     entries: entryResults,
     schema: schemaResult(schema.loaded),
   };
-  return { outcome: 'result', result: { ...truth, revision: collectionRevision(truth) } };
+  return {
+    outcome: 'result',
+    result: { ...truth, revision: collectionRevision(context.configBaseline, truth) },
+  };
 }
 
 /** One entry: the served projection beside its file baseline and real-schema validation. */
@@ -242,7 +247,7 @@ async function loadDefinitions(
 
 function definitionsNeedZod(definitions: ReadonlyMap<string, CollectionDefinitionSeams>): boolean {
   for (const definition of definitions.values()) {
-    if (typeof definition.schema === 'function') return true;
+    if (isSchemaFactory(definition)) return true;
   }
   return false;
 }

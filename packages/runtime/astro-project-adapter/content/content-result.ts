@@ -67,9 +67,15 @@ export interface ContentCollectionResult {
   readonly entries: readonly ContentEntryResult[];
   readonly schema: ContentSchemaResult;
   /**
-   * SHA-256 hex over the collection's typed truth: entry ids + file
-   * baselines + the schema declaration and field walk. Bumps when any
-   * entry file, the schema, or the entry set changes.
+   * SHA-256 hex over the collection's typed truth: the content config
+   * module's byte baseline, entry ids + file baselines, and the schema
+   * declaration and field walk. The config-bytes input is what makes
+   * the promise cover schema SEMANTICS (a changed default, refinement,
+   * or transform body alters served behavior without altering the
+   * walked tree) — every collection's schema lives in that one file, so
+   * a config edit bumps every collection revision: over-invalidation
+   * by construction, never under-invalidation. Bumps when any entry
+   * file, the config, or the entry set changes.
    */
   readonly revision: string;
 }

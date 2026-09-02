@@ -1,28 +1,30 @@
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { parseEntryDraft } from '@wojciechpiskorz/astroix-core';
-import type { AdapterErrorDetails } from '../adapter-error';
-import { AdapterError } from '../adapter-error';
+import { type EntryDraft, parseEntryDraft } from '@wojciechpiskorz/astroix-core';
+import type { AdapterError } from '../adapter-error';
+import { CONTENT_CONFIG_MODULE, contentSeamRejected, SEAM_CONTENT_CONFIG } from './content-probes';
 
 /**
- * The per-entry baseline read (#228): the entry source file's bytes —
- * the raw truth's anchor — read once per entry per pass, giving the
- * SHA-256 revision (ADR-0006 §6's exact baseline for existing
- * resources) and the raw frontmatter the project's actual schema
- * validates against (the same space Astro parses and safe-parses in its
- * content layer). Files are addressed ONLY through the project's own
- * served `filePath` (probed project-relative by `content-probes.ts`)
- * joined under the canonical project root — never a client-selected
- * path, never a directory walk.
+ * The per-entry and per-config baseline reads (#228): the source files'
+ * bytes — the raw truth's anchors — read once per pass, giving the
+ * SHA-256 revisions (ADR-0006 §6's exact baseline for existing
+ * resources), the raw frontmatter the project's actual schema validates
+ * against (the same space Astro parses and safe-parses in its content
+ * layer), and the content config module's own bytes (the
+ * schema-semantics digest input — defaults, refinements, and transform
+ * bodies live there, not in the walked field tree). Files are addressed
+ * ONLY through the project's own discovered/served paths under the
+ * canonical project root — never a client-selected path, never a
+ * directory walk.
  */
 
 /** What one entry's source file yielded. */
-export interface EntryBaseline {
+export interface EntryFileBaseline {
   /** SHA-256 hex over the file's bytes — the resource revision / grant baseline. */
   readonly revision: string;
-  /** The raw file parse; null when the frontmatter does not parse (mid-edit breakage). */
-  readonly raw: { readonly data: unknown; readonly body: string } | null;
+  /** The raw file parse (core's draft shape); null when the frontmatter does not parse (mid-edit breakage). */
+  readonly raw: EntryDraft | null;
 }
 
 /**
@@ -37,7 +39,7 @@ export interface EntryBaseline {
 export async function readEntryBaseline(
   projectRoot: string,
   filePath: string,
-): Promise<EntryBaseline | null> {
+): Promise<EntryFileBaseline | null> {
   let bytes: Buffer;
   try {
     bytes = await readFile(join(projectRoot, filePath));
@@ -45,24 +47,40 @@ export async function readEntryBaseline(
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
     throw baselineRejection(filePath, error);
   }
-  const raw = parseEntryDraft(bytes.toString('utf8'));
   return {
     revision: createHash('sha256').update(bytes).digest('hex'),
-    raw: raw === null ? null : { data: raw.data, body: raw.body },
+    raw: parseEntryDraft(bytes.toString('utf8')),
   };
 }
 
+/**
+ * The content config module's byte baseline — the digest input that
+ * makes the revision contract cover schema SEMANTICS, not just the
+ * walked field shape. Read after the pass already imported the module
+ * through the runner, so a mid-pass disappearance is the same
+ * invalidation race the watcher owns — it fails closed, never silently.
+ */
+export async function readConfigBaseline(projectRoot: string): Promise<string> {
+  try {
+    const bytes = await readFile(join(projectRoot, CONTENT_CONFIG_MODULE));
+    return createHash('sha256').update(bytes).digest('hex');
+  } catch (cause) {
+    throw contentSeamRejected(
+      SEAM_CONTENT_CONFIG,
+      'fail-closed private',
+      `a readable content config module (${CONTENT_CONFIG_MODULE})`,
+      'a read rejection',
+      cause,
+    );
+  }
+}
+
 function baselineRejection(filePath: string, cause: unknown): AdapterError {
-  const details: AdapterErrorDetails = {
-    seam: 'astro:content entry source file',
-    seamClass: 'fail-closed private',
-    expected: `a readable entry source file (${filePath})`,
-    observed: 'a read rejection',
-  };
-  return new AdapterError(
-    'seam-rejected',
-    `AstroProjectAdapter seam rejection at ${details.seam}: expected ${details.expected}; observed ${details.observed}`,
-    details,
-    { cause },
+  return contentSeamRejected(
+    'astro:content entry source file',
+    'fail-closed private',
+    `a readable entry source file (${filePath})`,
+    'a read rejection',
+    cause,
   );
 }

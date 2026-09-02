@@ -1,3 +1,4 @@
+import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { AdapterError } from '../../astro-project-adapter/adapter-error';
 import { inspectContent } from '../../astro-project-adapter/content/inspect-content';
@@ -301,6 +302,31 @@ describe('inspectContent (the pass)', () => {
     expect(third.result.collections.find((c) => c.name === 'blog')?.revision).toBe(
       first.result.collections.find((c) => c.name === 'blog')?.revision,
     );
+  });
+
+  it('bumps every revision when the content config bytes change, even with identical walked truth', async () => {
+    const { project, composition } = await stagedPass();
+    const first = await inspectContent(composition);
+
+    // A semantics-only config edit (comment append): the walked fields
+    // and entry bytes are unchanged; only the config's own bytes moved —
+    // the schema-semantics revision input (#298 advisory round 2).
+    const { readFile } = await import('node:fs/promises');
+    const configPath = join(project.root, 'src/content.config.ts');
+    const original = await readFile(configPath, 'utf8');
+    await writeEntry(project, 'src/content.config.ts', `${original}\n// schema semantics edited\n`);
+    const edited = await inspectContent(composition);
+    expect(edited.result.revision).not.toBe(first.result.revision);
+    for (const collection of edited.result.collections) {
+      expect(collection.revision).not.toBe(
+        first.result.collections.find((c) => c.name === collection.name)?.revision,
+      );
+    }
+
+    // Identical config bytes restore the original revisions exactly.
+    await writeEntry(project, 'src/content.config.ts', original);
+    const restored = await inspectContent(composition);
+    expect(restored.result.revision).toBe(first.result.revision);
   });
 
   it('probes the entry serving shape and rejects drift fail-closed', async () => {

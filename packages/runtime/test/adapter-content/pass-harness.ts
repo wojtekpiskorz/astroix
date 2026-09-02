@@ -125,10 +125,15 @@ export interface StagedContentProject {
   readonly collections: Record<string, unknown>;
 }
 
-/** Stages the temp managed project: the fixture's content tree + the served store. */
+/** Stages the temp managed project: the fixture's content tree + config + the served store. */
 export async function stageContentProject(): Promise<StagedContentProject> {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'astroix-content-pass-')));
   await copyTree(FIXTURE_CONTENT, join(root, 'src', 'content'));
+  // The config module's real bytes — the revision pass digests them.
+  await copyFile(
+    join(process.cwd(), 'e2e', 'fixture', 'src', 'content.config.ts'),
+    join(root, 'src', 'content.config.ts'),
+  );
   const collections = mirrorCollections();
   const store = new Map<string, StoreEntry[]>();
   for (const { name } of REPROJECTED) {

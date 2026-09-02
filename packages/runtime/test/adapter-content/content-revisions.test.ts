@@ -12,8 +12,13 @@ import {
 /**
  * The content revisions (#228 focused tests): deterministic digests over
  * the typed truth — identical truth ⇒ identical revision across calls,
- * changed truth ⇒ changed revision, at the collection and pass levels.
+ * changed truth ⇒ changed revision, at the collection and pass levels —
+ * with the content config module's byte baseline as a first-class input
+ * (the schema-semantics leg: semantics live in the config's bytes, not
+ * in the walked field tree).
  */
+
+const CONFIG_BASELINE = 'config-bytes-digest';
 
 const fields: FormFieldNode[] = [{ kind: 'string', path: 'title', label: 'title', required: true }];
 
@@ -50,20 +55,34 @@ describe('collectionRevision', () => {
     const base = collection();
     const entry = base.entries[0];
     if (entry === undefined) throw new Error('harness: the base collection needs its entry');
-    const first = collectionRevision(base);
-    expect(collectionRevision(collection())).toBe(first);
+    const first = collectionRevision(CONFIG_BASELINE, base);
+    expect(collectionRevision(CONFIG_BASELINE, collection())).toBe(first);
 
-    expect(collectionRevision(collection({ entries: [{ ...entry, revision: 'def' }] }))).not.toBe(
-      first,
-    );
-    expect(collectionRevision(collection({ schema: { declared: false, fields: [] } }))).not.toBe(
-      first,
-    );
-    expect(collectionRevision(collection({ name: 'news' }))).not.toBe(first);
+    expect(
+      collectionRevision(CONFIG_BASELINE, collection({ entries: [{ ...entry, revision: 'def' }] })),
+    ).not.toBe(first);
+    expect(
+      collectionRevision(CONFIG_BASELINE, collection({ schema: { declared: false, fields: [] } })),
+    ).not.toBe(first);
+    expect(collectionRevision(CONFIG_BASELINE, collection({ name: 'news' }))).not.toBe(first);
     // The zod projection is deliberately not an input: same bytes, same walk.
-    expect(collectionRevision(collection({ entries: [{ ...entry, data: { other: 1 } }] }))).toBe(
-      first,
-    );
+    expect(
+      collectionRevision(
+        CONFIG_BASELINE,
+        collection({ entries: [{ ...entry, data: { other: 1 } }] }),
+      ),
+    ).toBe(first);
+  });
+
+  it('moves with the config byte baseline even when the walked truth is identical', () => {
+    // The schema-semantics leg: `.min(3)` → `.min(5)`, a changed default,
+    // or a rewritten transform body changes the config's bytes — and the
+    // served projections and issue records with them — without changing
+    // the walked field tree. The config baseline is the input that
+    // carries that change into the revision.
+    const first = collectionRevision(CONFIG_BASELINE, collection());
+    expect(collectionRevision('config-bytes-edited', collection())).not.toBe(first);
+    expect(collectionRevision(CONFIG_BASELINE, collection())).toBe(first);
   });
 });
 
