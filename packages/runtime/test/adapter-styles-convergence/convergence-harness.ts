@@ -118,7 +118,6 @@ export async function convergenceHarness(
       return styleTransformCount;
     },
   };
-  const harness: ConvergenceHarness = {} as ConvergenceHarness;
   const devCssImportRef: { current: () => Promise<unknown> } = {
     current: async () => ({
       css: new Set([
@@ -199,7 +198,7 @@ export async function convergenceHarness(
     getDevCSSModuleName: (componentId: string) => `virtual:astro:dev-css:${componentId}`,
   };
 
-  Object.assign(harness, {
+  const harness: ConvergenceHarness = {
     server,
     seams,
     projectRoot,
@@ -226,7 +225,7 @@ export async function convergenceHarness(
     dispose: async () => {
       await rm(projectRoot, { recursive: true, force: true });
     },
-  } satisfies ConvergenceHarness);
+  };
   return harness;
 }
 

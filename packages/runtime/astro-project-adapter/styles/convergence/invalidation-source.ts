@@ -131,9 +131,10 @@ export function isProjectRelativePath(relativeFile: string): boolean {
 /**
  * The project-relative posix path of a watcher file, or null when the
  * file is not a style-truth input: outside the project root, not
- * `.astro`/`.css`, or inside a dot directory or `node_modules` (the
- * static walk skips exactly these, so invalidations fire only for files
- * whose change can move the static index).
+ * `.astro`/`.css`, or inside a dot directory or `node_modules` (never
+ * style truth). The static walk reads only the `src` subtree on top of
+ * these skips — the filter's extra width is the header's deliberate
+ * over-invalidation.
  */
 function styleTruthFile(projectRoot: string, file: string): string | null {
   const projectFile = relative(projectRoot, file).split(sep).join('/');
