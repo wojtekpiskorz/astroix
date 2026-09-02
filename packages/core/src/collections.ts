@@ -1,11 +1,12 @@
 /**
  * The collections payload contract (spec Impl #4 — read side): one definition
- * in core, consumed by the node REST layer (`src/node/content.ts`), the chrome
- * (`features/content/api.ts`) and the e2e specs — the `IndexPayloadRecord`
- * arrangement (core/matcher.ts), which the index side already follows.
+ * in core. Its retired consumers were the node REST layer (`src/node/content.ts`)
+ * and the integration chrome's content client (`features/content/api.ts`);
+ * bound for the protocol/runtime layers (D/E lanes), which inherit the
+ * `IndexPayloadRecord` arrangement (core/matcher.ts) the index side follows.
  */
 
-/** A single collection entry as served to the chrome (core's getCollection shape, JSON-projected). */
+/** A single collection entry as served to the app shell (core's getCollection shape, JSON-projected). */
 export interface CollectionEntryRecord {
   /** Slugified source path (glob loader id), e.g. `2024/post`. */
   id: string;

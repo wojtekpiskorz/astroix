@@ -30,7 +30,7 @@ Rewritten for the Electron parent-app rewrite (lane A1, [#210](https://github.co
 | **managed dev server** | The Astro dev process belonging to a project session — started, proxied, and reaped by the runtime; the project's own server, never a reimplementation. |
 | **ProjectRuntime** | The deep, process-neutral seam interface to a project run (`start()` → `ProjectRun`: `ready`/`inspect()`/`subscribe()`/`stop()`/`closed`). Sibling deep seams inside the runtime package: `ProjectRegistry`, `SessionSupervisor`, `EditAuthority` — deep modules, none a package of its own. |
 | **ProjectRun** | One supervised process attempt, including a private staged candidate. |
-| **certified pair** | An exact Astro+Vite version pair accepted for the `AstroProjectAdapter` — first: `astro@7.2.10 + vite@8.2.2` ([#206](https://github.com/wojtekpiskorz/astroix/issues/206)). Astro and Vite resolve from the managed project's own installation; an uncertified pair fails before project config executes; a new pair enters the set only after the compatibility fixture and the migration oracle pass. |
+| **certified pair** | An exact Astro+Vite version pair accepted for the `AstroProjectAdapter` — first: `astro@7.2.10 + vite@8.2.2` ([#206](https://github.com/wojtekpiskorz/astroix/issues/206)). Astro and Vite resolve from the managed project's own installation; an uncertified pair fails before project config executes; a new pair entered the set through the compatibility fixture and oracle-backed capture (the oracle died at the retirement gate, #215 — requalification machinery is the E1 lane's to build). |
 
 ## Registry and session
 
@@ -87,7 +87,7 @@ Rewritten for the Electron parent-app rewrite (lane A1, [#210](https://github.co
 | Term | Meaning |
 | --- | --- |
 | **behavior contract** | An executable contract frozen from integration-era behavior (payloads, selector matches, conflicts, output bytes; lanes B1/B2). The replacement is judged against these, not against the old implementation. |
-| **migration oracle** | The integration-era implementation retained during migration as the source of behavior-contract extraction and reusable-core/UI extraction — a retirement-bound reference (ADR-0010), not the product and not a compatibility contract. |
+| **migration oracle** | *(Historical, died at the retirement gate #215.)* The integration-era implementation retained during migration as the source of behavior-contract extraction and reusable-core/UI extraction — it was a retirement-bound reference (ADR-0010), never the product and never a compatibility contract. Its extracted truth lives on as the frozen behavior contracts. |
 
 ## Repo tooling
 

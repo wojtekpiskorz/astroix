@@ -209,7 +209,7 @@ export const DELETION_TARGETS: readonly DeletionTarget[] = [
     what: 'The integration-era owner smoke script (?builder=1 wizard driver).',
     evidence: [
       "the smoke wizard UI it drives is part of src/client (this inventory's injected-chrome target)",
-      "the rewrite's owner smoke is the packaged-artifact checklist (docs/manual-smoke.md, ADR-0008) — open finding #279 already tracks the repoint/retire decision",
+      "the rewrite's owner smoke is the packaged-artifact checklist (docs/manual-smoke.md, ADR-0008) — #279 (repoint-or-retire) was closed by the gate's own deletion of the script",
     ],
     a6Owned: true,
   },
