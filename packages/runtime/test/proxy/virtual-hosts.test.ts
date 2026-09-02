@@ -178,6 +178,27 @@ describe('classifyRequestTarget', () => {
     // agreement in the natural direction stays natural
     expect(classifyRequestTarget('/foo%2fbar')).toEqual({ kind: 'natural', target: '/foo%2fbar' });
   });
+
+  it('rejects backslash boundaries — WHATWG consumers treat \\ as /, so a boundary that flips under that normalization is ambiguous', () => {
+    expect(classifyRequestTarget('/__astroix\\foo')).toEqual({
+      kind: 'rejected',
+      reason: 'ambiguous-reserved-encoding',
+    });
+    expect(classifyRequestTarget('/__astroix%5Cfoo')).toEqual({
+      kind: 'rejected',
+      reason: 'ambiguous-reserved-encoding',
+    });
+    expect(classifyRequestTarget('/%5f%5fastroix\\app')).toEqual({
+      kind: 'rejected',
+      reason: 'ambiguous-reserved-encoding',
+    });
+    // a backslash away from the reserved prefix flips nothing — forwarded verbatim
+    expect(classifyRequestTarget('/foo\\bar')).toEqual({ kind: 'natural', target: '/foo\\bar' });
+    expect(classifyRequestTarget('/__astroixx\\foo')).toEqual({
+      kind: 'natural',
+      target: '/__astroixx\\foo',
+    });
+  });
 });
 
 describe('vocabulary', () => {

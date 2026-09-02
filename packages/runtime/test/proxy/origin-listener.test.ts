@@ -6,6 +6,7 @@ import {
   ASTROIX_GENERATED_HEADER,
   createOriginListener,
   InvalidProjectKeyError,
+  NonLoopbackUpstreamError,
   OriginLeaseOccupiedError,
   type OriginListener,
 } from '../../origin/origin-listener.ts';
@@ -165,6 +166,11 @@ describe('Host rejection (ADR-0007 mandatory negatives, end-to-end)', () => {
     expect(connect.status).toBe(405);
     expect((await rawExchange(listener.port, rawGet('/__astroix%2Fapp', host))).status).toBe(400);
     expect((await rawExchange(listener.port, rawGet('/%5f%5fastroix/app', host))).status).toBe(400);
+    // backslash boundaries: WHATWG routers normalize \ to /, so these
+    // are reserved-namespace claims in the normalizing view — refused,
+    // never forwarded
+    expect((await rawExchange(listener.port, rawGet('/__astroix\\app', host))).status).toBe(400);
+    expect((await rawExchange(listener.port, rawGet('/__astroix%5Capp', host))).status).toBe(400);
     expect(upstream.requests).toHaveLength(0);
   });
 
@@ -290,6 +296,38 @@ describe('natural-route proxying (canvas fidelity)', () => {
   });
 });
 
+describe('upstream loopback posture (the rebinding posture enforced at the seam)', () => {
+  it('refuses any non-loopback upstream before routing state changes', async () => {
+    const { upstream } = fixture as Fixture;
+    const listener = await createOriginListener();
+    try {
+      for (const host of [
+        '0.0.0.0',
+        'localhost',
+        'example.com',
+        '10.0.0.1',
+        '[::1]',
+        '127.0.0.2',
+      ]) {
+        expect(() =>
+          listener.grantProjectLease({
+            projectKey: KEY_B,
+            upstream: { host, port: upstream.port },
+          }),
+        ).toThrow(NonLoopbackUpstreamError);
+      }
+      // the refusal preceded routing: the lease is still grantable
+      listener.grantProjectLease({
+        projectKey: KEY_B,
+        upstream: { host: '::1', port: upstream.port },
+      });
+      expect(listener.activeLease?.projectKey).toBe(KEY_B);
+    } finally {
+      await listener.close();
+    }
+  });
+});
+
 describe('lease grant occupancy', () => {
   it('refuses a second grant while a lease is active, then admits after revocation', async () => {
     const { listener, lease, upstream } = fixture as Fixture;
@@ -375,6 +413,82 @@ describe('revocation: tracked sockets die before child termination', () => {
     } finally {
       await listener.close();
       await hmrStandIn.close();
+    }
+  });
+});
+
+describe('launcher-owned reserved sockets (ownership-tagged revocation)', () => {
+  it('survive a project-lease revoke untouched and die with the listener', async () => {
+    let push: (chunk: string) => void = () => {};
+    let reservedSocket: Socket | undefined;
+    const listener = await createOriginListener({
+      handleReserved: (_request, response, track) => {
+        const socket = response.socket;
+        if (socket !== null && socket !== undefined) {
+          track(socket);
+          reservedSocket = socket;
+        }
+        response.writeHead(200, { 'content-type': 'text/plain' });
+        response.write('held-open');
+        push = (chunk) => response.write(chunk);
+      },
+    });
+    const upstream = await startStandInUpstream([
+      { path: '/hanging', status: 200, body: 'held', contentType: 'text/plain', hanging: true },
+    ]);
+    try {
+      // One held-open launcher-side reserved connection.
+      const reservedClient = connect({ host: '127.0.0.1', port: listener.port });
+      reservedClient.on('error', () => {});
+      const reservedChunks: Buffer[] = [];
+      reservedClient.on('data', (chunk: Buffer) => reservedChunks.push(chunk));
+      await new Promise<void>((resolve) => reservedClient.once('connect', resolve));
+      reservedClient.write(
+        'GET /__astroix/app/ HTTP/1.1\r\nHost: launcher.localhost\r\nConnection: keep-alive\r\n\r\n',
+      );
+      await waitFor(() => reservedChunks.length > 0);
+
+      // One in-flight proxied exchange on a project lease.
+      const lease = listener.grantProjectLease({
+        projectKey: KEY_A,
+        upstream: { host: '127.0.0.1', port: upstream.port },
+      });
+      const proxied = httpRequest(
+        {
+          host: '127.0.0.1',
+          port: listener.port,
+          method: 'GET',
+          path: '/hanging',
+          headers: { host: lease.hostname },
+        },
+        () => {},
+      );
+      proxied.on('error', () => {});
+      proxied.end();
+      await waitFor(() => upstream.requests.length > 0);
+
+      // The revoke destroys ONLY the lease's legs; the launcher-owned
+      // reserved connection keeps flowing across it.
+      const revocation = await lease.revoke();
+      expect(revocation.destroyedSockets).toBeGreaterThanOrEqual(2);
+      expect(reservedSocket?.destroyed).toBe(false);
+      push('still-alive');
+      await waitFor(() => Buffer.concat(reservedChunks).toString('latin1').includes('still-alive'));
+
+      // Listener close is terminal for BOTH owners.
+      await listener.close();
+      await new Promise<void>((resolve) => {
+        if (reservedSocket?.destroyed === true) {
+          resolve();
+          return;
+        }
+        reservedSocket?.once('close', resolve);
+      });
+      expect(reservedSocket?.destroyed).toBe(true);
+      reservedClient.destroy();
+    } finally {
+      await listener.close();
+      await upstream.close();
     }
   });
 });

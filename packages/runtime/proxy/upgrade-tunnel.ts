@@ -62,22 +62,20 @@ export function tunnelRawUpgrade(input: RawUpgradeTunnelInput): void {
  * not a handshake): the client sees a failed connection, never a
  * synthesized `101`.
  */
-export function respondRawAndClose(socket: Duplex, status: number): void {
+export function respondRawAndClose(socket: Duplex, status: RawRefusalStatus): void {
   const headers = astroixGeneratedHeaders();
-  let head = `HTTP/1.1 ${status} ${statusPhrase(status)}\r\n`;
+  let head = `HTTP/1.1 ${status} ${RAW_REFUSAL_PHRASES[status]}\r\n`;
   for (const [name, value] of Object.entries(headers)) head += `${name}: ${value}\r\n`;
   socket.end(`${head}\r\n`);
   socket.on('error', () => socket.destroy());
 }
 
-const PHRASES: Record<number, string> = {
+/** Exactly the refusal statuses this seam writes — fixed by its call sites, total by construction. */
+export type RawRefusalStatus = 400 | 404 | 405 | 421;
+
+const RAW_REFUSAL_PHRASES: Record<RawRefusalStatus, string> = {
   400: 'Bad Request',
   404: 'Not Found',
   405: 'Method Not Allowed',
   421: 'Misdirected Request',
-  502: 'Bad Gateway',
 };
-
-function statusPhrase(status: number): string {
-  return PHRASES[status] ?? 'Forbidden';
-}

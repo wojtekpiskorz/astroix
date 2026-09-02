@@ -144,8 +144,11 @@ export type RequestTargetClassification =
  * query-parameter wrapper; `reserved` is Astroix's own namespace and is
  * never proxied; everything else is refused: absolute-form and
  * asterisk-form targets, fragments, undecodable percent sequences, and
- * encodings whose decoded form disagrees with the raw form about the
- * reserved boundary (`/__astroix%2F…`, `/%5f%5fastroix/…`).
+ * targets whose decoded, backslash-normalized form disagrees with the
+ * raw form about the reserved boundary (`/__astroix%2F…`,
+ * `/%5f%5fastroix/…`, `/__astroix\foo`, `/__astroix%5Cfoo` — WHATWG
+ * consumers treat `\` as `/`, so a boundary that flips under that
+ * normalization is ambiguous and refused).
  */
 export function classifyRequestTarget(rawTarget: string | undefined): RequestTargetClassification {
   if (rawTarget === undefined || rawTarget.length === 0) {
@@ -166,7 +169,16 @@ export function classifyRequestTarget(rawTarget: string | undefined): RequestTar
     return { kind: 'rejected', reason: 'malformed-target' };
   }
   const rawReserved = isReservedPath(rawPath);
-  if (rawReserved !== isReservedPath(decoded)) {
+  // The normalizing-router view: WHATWG consumers (browsers, and the
+  // reserved router F2/F3 install behind `handleReserved`) treat `\` as
+  // `/` for special schemes — so `/__astroix\foo` is reserved to them
+  // while it looks natural to a raw-path forwarder. The boundary
+  // question must answer identically in the raw view and the decoded,
+  // backslash-normalized view, or the target is ambiguous and refused
+  // (`/__astroix%2F…`, `/%5f%5fastroix/…`, `/__astroix\…`,
+  // `/__astroix%5C…`).
+  const routerView = decoded.replaceAll('\\', '/');
+  if (rawReserved !== isReservedPath(routerView)) {
     return { kind: 'rejected', reason: 'ambiguous-reserved-encoding' };
   }
   return rawReserved ? { kind: 'reserved' } : { kind: 'natural', target: rawTarget };
@@ -184,7 +196,10 @@ export type ListenerRejectionReason =
   | 'unknown-host'
   | 'retired-host';
 
-export const LISTENER_REJECTION_STATUS: Record<ListenerRejectionReason, number> = {
+/** The exact statuses the listener itself synthesizes — the raw-refusal call sites type against this set. */
+export type ListenerGeneratedStatus = 400 | 404 | 405 | 421;
+
+export const LISTENER_REJECTION_STATUS: Record<ListenerRejectionReason, ListenerGeneratedStatus> = {
   'missing-host': 400,
   'duplicate-host': 400,
   'malformed-host': 400,

@@ -69,6 +69,7 @@ export {
   type HostRejectionReason,
   isReservedPath,
   LAUNCHER_HOSTNAME,
+  type ListenerGeneratedStatus,
   launcherOrigin,
   projectHostname,
   projectOrigin,
@@ -98,6 +99,23 @@ export class InvalidProjectKeyError extends Error {
     this.name = 'InvalidProjectKeyError';
   }
 }
+
+/**
+ * A non-loopback upstream was offered at the lease seam. The lane's
+ * DNS-rebinding posture (ADR-0007) rests on the managed dev server — and
+ * nothing else — being the only upstream, reachable only at a literal
+ * loopback address; anything else fails closed at grant time, before any
+ * routing state exists.
+ */
+export class NonLoopbackUpstreamError extends Error {
+  constructor() {
+    super('an origin lease upstream must be a literal loopback address');
+    this.name = 'NonLoopbackUpstreamError';
+  }
+}
+
+/** The loopback literals a lease upstream may carry — hostnames (even `localhost`) resolve and therefore never qualify. */
+const LOOPBACK_UPSTREAM_HOSTS = new Set(['127.0.0.1', '::1']);
 
 /** One revocation's honest accounting — counts and outcome only, never an address (output hygiene). */
 export interface LeaseRevocation {
@@ -132,9 +150,16 @@ export interface OriginListenerOptions {
   /**
    * The reserved-namespace handler (F2/F3's API/SSE surface hooks here);
    * absent, every reserved path answers 404 — reserved means NEVER
-   * proxied, with or without a handler.
+   * proxied, with or without a handler. The third argument is the
+   * launcher-scoped socket tracker: connections the handler registers
+   * survive project-lease revocations and are destroyed at listener
+   * close.
    */
-  readonly handleReserved?: (request: IncomingMessage, response: ServerResponse) => void;
+  readonly handleReserved?: (
+    request: IncomingMessage,
+    response: ServerResponse,
+    track: (socket: Duplex) => void,
+  ) => void;
 }
 
 export interface OriginListener {
@@ -146,8 +171,10 @@ export interface OriginListener {
   /**
    * Grants the active project virtual host. Throws
    * {@link OriginLeaseOccupiedError} while a lease is active (revoke
-   * first — the switch protocol's order) and
-   * {@link InvalidProjectKeyError} for a malformed key.
+   * first — the switch protocol's order), {@link InvalidProjectKeyError}
+   * for a malformed key, and {@link NonLoopbackUpstreamError} for any
+   * non-loopback upstream (the lane's rebinding posture, enforced at the
+   * seam).
    */
   grantProjectLease(input: {
     readonly projectKey: ProjectKey;
@@ -161,10 +188,15 @@ export interface OriginListener {
 export async function createOriginListener(
   options: OriginListenerOptions = {},
 ): Promise<OriginListener> {
-  const tracked = new Set<Duplex>();
-  let active:
-    | (OriginLease & { readonly upstream: { readonly host: string; readonly port: number } })
-    | null = null;
+  type LeaseHandle = OriginLease & {
+    readonly upstream: { readonly host: string; readonly port: number };
+  };
+  // Ownership-tagged tracking (#314 review round): every tracked socket
+  // belongs to exactly one owner — the lease whose exchange it serves,
+  // or null for the launcher's reserved-surface connections — so a
+  // lease revocation destroys only ITS sockets and never the launcher's.
+  const tracked = new Map<Duplex, LeaseHandle | null>();
+  let active: LeaseHandle | null = null;
   let closeCall: Promise<void> | null = null;
 
   const server = createServer((request, response) => {
@@ -185,15 +217,22 @@ export async function createOriginListener(
   const port = await listenOnLoopback(server, options.port ?? 0);
   const router = createHostRouter({ expectedPort: port });
 
-  function track(socket: Duplex): void {
-    tracked.add(socket);
-    socket.once('close', () => {
-      tracked.delete(socket);
-    });
+  /** One owner's tracking view: sockets registered here are destroyed by that owner's revocation alone. */
+  function trackFor(owner: LeaseHandle | null): (socket: Duplex) => void {
+    return (socket) => {
+      tracked.set(socket, owner);
+      socket.once('close', () => {
+        tracked.delete(socket);
+      });
+    };
   }
 
   function handleRequest(request: IncomingMessage, response: ServerResponse): void {
     if (request.method === 'CONNECT') {
+      // Defense in depth only, deliberately unreachable on this Node
+      // line: CONNECT arrives on the server's 'connect' event (answered
+      // above), never as a request — this branch holds the refusal if
+      // that parser routing ever changes.
       sendGeneratedResponse(response, 405);
       return;
     }
@@ -225,7 +264,7 @@ export async function createOriginListener(
       sendGeneratedResponse(response, LISTENER_REJECTION_STATUS['unknown-host']);
       return;
     }
-    proxyHttpStream({ request, response, upstream: active.upstream, track });
+    proxyHttpStream({ request, response, upstream: active.upstream, track: trackFor(active) });
   }
 
   function serveReserved(request: IncomingMessage, response: ServerResponse): void {
@@ -233,7 +272,10 @@ export async function createOriginListener(
       sendGeneratedResponse(response, 404);
       return;
     }
-    options.handleReserved(request, response);
+    // The launcher-scoped tracker: connections the reserved surface
+    // registers here are launcher-owned — a project-lease revocation
+    // never destroys them; listener close does.
+    options.handleReserved(request, response, trackFor(null));
   }
 
   function handleUpgrade(request: IncomingMessage, socket: Duplex, head: Buffer): void {
@@ -282,7 +324,7 @@ export async function createOriginListener(
       head,
       clientSocket: socket,
       upstream: active.upstream,
-      track,
+      track: trackFor(active),
     });
   }
 
@@ -297,6 +339,7 @@ export async function createOriginListener(
       return active;
     },
     grantProjectLease: (input) => {
+      if (!LOOPBACK_UPSTREAM_HOSTS.has(input.upstream.host)) throw new NonLoopbackUpstreamError();
       const granted = router.grant(input.projectKey);
       if (granted.kind === 'refused') {
         if (granted.reason === 'lease-occupied') throw new OriginLeaseOccupiedError();
@@ -304,9 +347,7 @@ export async function createOriginListener(
       }
       let revocation: Promise<LeaseRevocation> | null = null;
       let revoked = false;
-      const lease: OriginLease & {
-        readonly upstream: { readonly host: string; readonly port: number };
-      } = {
+      const lease: LeaseHandle = {
         projectKey: input.projectKey,
         hostname: granted.hostname,
         origin: projectOriginOf(input.projectKey, port),
@@ -321,7 +362,7 @@ export async function createOriginListener(
           router.revoke(input.projectKey);
           if (active === lease) active = null;
           revoked = true;
-          revocation ??= destroyTrackedSockets(input.projectKey);
+          revocation ??= destroyTrackedSockets(lease);
           return revocation;
         },
       };
@@ -331,7 +372,9 @@ export async function createOriginListener(
     close: () => {
       closeCall ??= (async () => {
         await active?.revoke();
-        const sockets = [...tracked];
+        // Terminal for the WHOLE listener: every tracked socket, both
+        // lease-owned and launcher-owned, dies with the listener.
+        const sockets = [...tracked.keys()];
         tracked.clear();
         for (const socket of sockets) socket.destroy();
         server.close();
@@ -342,26 +385,32 @@ export async function createOriginListener(
     },
   };
 
-  /** Destroys every tracked socket and settles when their closes are observed inside the bound. */
-  async function destroyTrackedSockets(projectKey: ProjectKey): Promise<LeaseRevocation> {
-    const sockets = [...tracked];
-    tracked.clear();
+  /** Destroys the revoking lease's tracked sockets and settles when their closes are observed inside the bound. */
+  async function destroyTrackedSockets(lease: LeaseHandle): Promise<LeaseRevocation> {
+    const owned: Duplex[] = [];
+    for (const [socket, owner] of tracked) {
+      if (owner === lease) {
+        owned.push(socket);
+        tracked.delete(socket);
+      }
+    }
     // The close observers attach BEFORE destroying: `destroyed` flips
     // synchronously, so observing after the call would shortcut and
     // report completion without ever seeing a close event — the honest
-    // accounting waits for the events, bounded.
-    const closes = sockets.map(
+    // accounting waits for the events, bounded. Launcher-owned sockets
+    // are untouched: they outlive the lease and die with the listener.
+    const closes = owned.map(
       (socket) =>
         new Promise<void>((resolve) => {
           socket.once('close', resolve);
           if (socket.destroyed) resolve();
         }),
     );
-    for (const socket of sockets) socket.destroy();
+    for (const socket of owned) socket.destroy();
     const settled = await raceBound(Promise.all(closes));
     return {
-      projectKey,
-      destroyedSockets: sockets.length,
+      projectKey: lease.projectKey,
+      destroyedSockets: owned.length,
       outcome: settled ? 'complete' : 'incomplete',
     };
   }

@@ -17,6 +17,7 @@
  */
 
 import { type IncomingMessage, type ServerResponse, request as upstreamRequest } from 'node:http';
+import { connect } from 'node:net';
 import type { Duplex } from 'node:stream';
 import { ASTROIX_GENERATED_HEADER, astroixGeneratedHeaders } from '../origin/virtual-hosts.ts';
 
@@ -44,8 +45,13 @@ export const STREAM_PROXY_FAILURE_STATUS = 502;
  * inventing bytes the upstream never sent.
  */
 export function proxyHttpStream(input: HttpStreamProxyInput): void {
-  // Both legs of the exchange join the tracked set: revocation severs
-  // the client side AND the upstream connection.
+  // Both legs of the exchange join the tracked set — SYNCHRONOUSLY, in
+  // the same turn this function runs: the client socket directly, the
+  // upstream socket through a `createConnection` hook (with no agent
+  // option and the hook provided, node:http invokes it inside the
+  // request constructor). A `revoke()` landing in the former
+  // request-creation-to-'socket'-event window therefore still counts
+  // and destroys the upstream leg — the close report never undercounts.
   input.track(input.request.socket);
   const forwarded = upstreamRequest({
     host: input.upstream.host,
@@ -56,9 +62,12 @@ export function proxyHttpStream(input: HttpStreamProxyInput): void {
     // node:http uses a provided host instead of deriving one from the
     // connection target (the AC's "HTTP preserves Host").
     headers: { ...input.request.headers },
-    agent: false,
+    createConnection: () => {
+      const socket = connect(input.upstream.port, input.upstream.host);
+      input.track(socket);
+      return socket;
+    },
   });
-  forwarded.on('socket', (socket) => input.track(socket));
   forwarded.on('response', (upstream) => {
     input.response.writeHead(upstream.statusCode ?? STREAM_PROXY_FAILURE_STATUS, upstream.headers);
     upstream.pipe(input.response);
