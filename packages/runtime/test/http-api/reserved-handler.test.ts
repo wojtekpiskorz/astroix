@@ -158,7 +158,13 @@ function rawInterleavedUpload(
     async function pump(): Promise<void> {
       socket.write(head);
       for (let offset = 0; offset < payload.length && !settled; offset += UPLOAD_PIECE_BYTES) {
-        socket.write(payload.slice(offset, offset + UPLOAD_PIECE_BYTES));
+        const piece = payload.slice(offset, offset + UPLOAD_PIECE_BYTES);
+        // Backpressure made explicit: a slow server must never let the
+        // whole remaining payload buffer in Node's writable queue — the
+        // pacing guarantee is awaited, not incidental.
+        if (!socket.write(piece)) {
+          await new Promise<void>((resolve) => socket.once('drain', resolve));
+        }
         // The yield is the heart of the fix: the event loop drains the
         // read side between upload pieces, not after the whole payload.
         await new Promise<void>((resolve) => setImmediate(resolve));
