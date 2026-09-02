@@ -232,6 +232,28 @@ describe('toRiskEntry', () => {
     expect(unloaded).toMatchObject({ metric: 'crap', coverage: 0, value: crapScore(5, 0) });
   });
 
+  it('keeps the CRAP metric on the registry seam: packages/runtime/registry rows are covered-tier, later runtime seams watchlist (#221)', () => {
+    const fileCov = {
+      statementMap: {
+        s0: { start: { line: 4 }, end: { line: 4 } },
+        s1: { start: { line: 5 }, end: { line: 5 } },
+      },
+      s: { s0: 1, s1: 0 },
+    };
+    const registryRow = toRiskEntry('packages/runtime/registry/document.ts', fn, fileCov);
+    expect(registryRow).toMatchObject({
+      metric: 'crap',
+      coverage: 0.5,
+      crap: crapScore(5, 0.5),
+      value: crapScore(5, 0.5),
+      stop: 30,
+    });
+    // a runtime seam outside the registry prefix has no per-function
+    // coverage claim yet — CC-only watchlist until its lane rules otherwise
+    const laterSeam = toRiskEntry('packages/runtime/kernel-lease/lease.ts', fn, fileCov);
+    expect(laterSeam).toMatchObject({ metric: 'cc', coverage: null, crap: null, stop: 15 });
+  });
+
   it('derives watchlist rows: no coverage term even when handed one, cc stop', () => {
     const e = toRiskEntry('src/node/rest.ts', fn, { statementMap: {}, s: {} });
     expect(e).toMatchObject({

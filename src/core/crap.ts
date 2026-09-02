@@ -14,11 +14,15 @@ import type { FunctionComplexity } from './complexity';
  * Metric honesty is the load-bearing rule: full CRAP (CC² × (1−coverage)³ +
  * CC, per crap4clj/PHPUnit) is computed only where per-function coverage
  * is real — the covered core tier (`packages/core` since #212,
- * `packages/protocol` since #220, plus the `src/core` CRAP tooling
- * layer), covered by unit tests through
+ * `packages/protocol` since #220, the `src/core` CRAP tooling
+ * layer, and `packages/runtime/registry` since #221 — deterministic
+ * real-filesystem unit tests over temp directories), covered by unit
+ * tests through
  * vitest's istanbul-format JSON. The UI foundation package
  * `packages/app-shell` (#218 — its truth is e2e coverage, not
- * per-function unit tests) lands on a CC-only watchlist. A
+ * per-function unit tests) lands on a CC-only watchlist; later
+ * `packages/runtime` seams beyond the registry decide their own tier in
+ * the lane that lands them. A
  * watchlist row has `coverage === null` and `crap === null`, and its gate
  * metric is CC. (The `src/node` + `src/client` watchlist tiers were
  * deleted with their functions at the retirement gate, #215.)
@@ -116,11 +120,15 @@ function isCoreFile(relPath: string): boolean {
   // schemas + pure helpers with colocated unit tests — the covered tier);
   // src/core keeps the CRAP tooling layer — unit-covered (the
   // compatibility shims died at the retirement gate, #215; what remains
-  // under src/core is this tooling itself)
+  // under src/core is this tooling itself); packages/runtime/registry
+  // since #221 (deterministic real-filesystem unit tests over temp dirs —
+  // the registry seam only; later runtime seams are watchlist until
+  // their lane rules otherwise)
   return (
     relPath.startsWith('src/core/') ||
     relPath.startsWith('packages/core/') ||
-    relPath.startsWith('packages/protocol/')
+    relPath.startsWith('packages/protocol/') ||
+    relPath.startsWith('packages/runtime/registry/')
   );
 }
 
