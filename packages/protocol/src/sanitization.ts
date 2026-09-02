@@ -26,13 +26,16 @@ import { z } from 'zod';
 const DISCLOSURE_PATTERNS: ReadonlyArray<{ id: string; pattern: RegExp; what: string }> = [
   { id: 'stack-frame', pattern: /(?:^|\n)\s*at\s+[^\n(]*\(/, what: 'a stack trace' },
   { id: 'node-internal', pattern: /\bnode:internal\//, what: 'a Node internals frame' },
+  // windows-drive precedes absolute-path on purpose: the colon boundary
+  // added to the absolute guard would otherwise claim `D:/dev/site` before
+  // the more specific drive-letter finding wins
+  { id: 'windows-path', pattern: /[A-Za-z]:[\\/]/, what: 'a Windows drive path' },
   {
     id: 'absolute-path',
     pattern: /(?:^|[\s"'`(=:])\/[a-z][^/\s]*\//i,
     what: 'an absolute filesystem path',
   },
   { id: 'home-relative-path', pattern: /(?:^|[\s"'`(=:])~\//, what: 'a home-relative path' },
-  { id: 'windows-path', pattern: /[A-Za-z]:[\\/]/, what: 'a Windows drive path' },
   { id: 'unc-path', pattern: /\\\\[^\\/\s]+[\\/]/, what: 'a UNC path' },
   { id: 'pid', pattern: /\bpid\b\s*[:=]?\s*\d+/i, what: 'a process id' },
 ];
