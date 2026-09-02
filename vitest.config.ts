@@ -52,16 +52,27 @@ export default defineConfig({
       // Behavior-contract schema validators (#217, directive from B1's
       // review): the schemas are pure zod over frozen fixtures — the unit
       // doctrine's home, no browser needed. The corpus bytes stay owned by
-      // the freeze specs; these tests own the validators.
+      // the frozen standard itself.
       'e2e/behavior-contracts/schema/**/*.test.ts',
+      // The retirement-readiness serverless legs (#214; retained past the
+      // gate by #215, lane A6): corpora validation, retained-UI coupling
+      // scan, fixture plainness + zero-byte build, counts, and the
+      // deletion inventory — plus the presentation mounts, folded into
+      // the same root run (advisory round 1 on #291: the mounts had a
+      // dedicated spawned config only because a Playwright aggregate
+      // couldn't host vitest; the aggregate is vitest now). Mount
+      // failures fail npm test directly; the counts leg's non-empty
+      // mount row is the vacuity tripwire.
+      'e2e/retirement-readiness/readiness.test.ts',
+      'e2e/retirement-readiness/presentation-mount.test.tsx',
     ],
     coverage: {
       // The CRAP coverage term is honest only where per-function unit coverage
-      // is real: the pure editing modules (packages/core since #212, plus the
-      // src/core compatibility shims and the CRAP tooling layer that stayed)
-      // — metric honesty, wayfinder #55. src/node and src/client stay a
-      // CC-only watchlist — their truth is e2e coverage, which is fog on the
-      // map.
+      // is real: the pure editing modules (packages/core since #212) plus the
+      // CRAP tooling layer itself (src/core — complexity + crap, the only
+      // src/ survivors of the retirement gate) — metric honesty, wayfinder
+      // #55. The integration tiers (src/node, src/client) are deleted; no
+      // watchlist tier exists under src/ anymore.
       provider: 'v8',
       include: ['src/core/**', 'packages/core/**'],
       reporter: ['json'],

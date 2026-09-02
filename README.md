@@ -4,7 +4,7 @@ A standalone Electron parent app for Astro projects. An AI agent does ~90% of th
 
 **Zero injection**: no Astroix package, integration, bridge, config mutation, or control file ever enters your project — only the explicit Content and CSS edits you make through the app.
 
-**Status: Electron rewrite in progress (pre-alpha).** The former public npm integration is retired by design (ADR-0010); npm publication is paused. Delivery will be an unsigned, ad-hoc-sealed macOS (Apple Silicon) Electron pre-alpha for inner testers (ADR-0008). Docs are the source of truth.
+**Status: Electron rewrite in progress (pre-alpha).** The former public npm integration is retired and deleted (ADR-0010); the repository root is a private workspace with no publishable artifact. Delivery will be an unsigned, ad-hoc-sealed macOS (Apple Silicon) Electron pre-alpha for inner testers (ADR-0008). Docs are the source of truth.
 
 ## What it does
 
@@ -29,13 +29,13 @@ Certified against exact Astro/Vite pairs (first: `astro@7.2.10` + `vite@8.2.2`, 
 
 ## Development
 
-The repository runs on npm workspaces + Node 24 (migrated by charter lane A2, ADR-0010) and still contains the integration-era code as a retirement-bound migration oracle.
+The repository runs on npm workspaces + Node 24 (charter lane A2, ADR-0010) and is private: the legacy integration, its build surfaces, and its npm publication machinery were deleted at the retirement gate (#215). What remains is the rewrite foundation — `packages/core` (pure editing domain) and `packages/app-shell` (UI foundation + retained presentation widgets) — plus the frozen behavior contracts (`e2e/behavior-contracts/`) that bind the replacement, and the canonical plain Astro fixture (`e2e/fixture/`).
 
 ```sh
 npm install                        # also in e2e/fixture/
 npm run check && npm run typecheck # Biome + tsc
-npm run test                       # vitest (unit)
-npm run test:e2e                   # Playwright (integration-era oracle lanes)
+npm run test                       # vitest (unit + contract validators + readiness legs)
+npm run test:e2e                   # the no-product-E2E interval's one lane: plain-fixture build smoke
 ```
 
 Target workspace shape: `packages/core`, `packages/protocol`, `packages/runtime`, `packages/app-shell`, `apps/web`, `apps/desktop`, with `e2e/fixture` a plain Astro project. See `docs/stack.md` and `AGENTS.md`.

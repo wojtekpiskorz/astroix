@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 /**
@@ -15,6 +15,12 @@ import { join } from 'node:path';
  * proof ran. Gaps — targets the retirement decision requires but #215 does
  * not own — are first-class data, not footnotes: they surface in the PR
  * body and the report so A6 starts with an explicit contract.
+ *
+ * Past the gate (#215, lane A6): the gaps G1–G4 were executed by the A6
+ * PR itself under the disclosed-seams authorization (the readiness
+ * report's reconciliation section is the authority), and the
+ * reconciliation below now ASSERTS the deletion rather than the
+ * pre-deletion tree — see `reconcileInventory`.
  */
 
 /** One deletion target for A6. */
@@ -25,7 +31,13 @@ export interface DeletionTarget {
   paths: readonly string[];
   /** What it is, one line. */
   what: string;
-  /** Where the retained replacement evidence lives. */
+  /**
+   * The A5-freeze record of where replacement evidence lived at gate time —
+   * the freeze specs, oracle legs, and retained-ui regression named in rows
+   * below died WITH the runtime at the retirement gate; the retained
+   * evidence today is the frozen corpora, the schema validators, and the
+   * readiness contracts leg.
+   */
   evidence: readonly string[];
   /** Whether #215's owned-path list covers every path. */
   a6Owned: boolean;
@@ -242,6 +254,29 @@ export function inventoryGaps(): readonly DeletionTarget[] {
   return DELETION_TARGETS.filter((target) => !target.a6Owned);
 }
 
+/**
+ * Deletion-target paths that survive the gate BY NAME (checked for
+ * post-gate shape, never for absence): the section-scoped docs, the root
+ * manifest (asserted private), and the ratchet baseline (asserted
+ * stale-key-clean by preflight itself).
+ */
+const SURVIVORS = new Set([
+  'package.json',
+  'crap-baseline.json',
+  'docs/agents/release-loop.md',
+  'docs/manual-smoke.md',
+]);
+
+/**
+ * The named no-product-E2E lane's own paths (ADR-0010's interval): the
+ * Playwright runner and the glob it matches. `playwright.config.ts` is a
+ * straight existence exemption; `e2e/*.spec.ts` is NOT — the surviving
+ * spec set is asserted to equal exactly the one named smoke below.
+ */
+const DELIBERATE_LANE_SURVIVORS = new Set(['playwright.config.ts']);
+const E2E_SPECS_GLOB = 'e2e/*.spec.ts';
+const NAMED_NO_PRODUCT_E2E_SPEC = 'e2e/plain-build.spec.ts';
+
 const REPORT_PATH = join('docs', 'retirement-readiness.md');
 
 export interface Reconciliation {
@@ -252,11 +287,20 @@ export interface Reconciliation {
 }
 
 /**
- * Holds three artifacts in agreement: this inventory, the evidence report,
- * and #215's owned paths. The report names every target with the exact
- * token `` `target:<id>` `` — that token is the reconciliation protocol, so
- * a renamed slug must move with its report row. Throws with a named
- * finding on any disagreement or dangling path; returns the summary.
+ * Holds three artifacts in agreement — this inventory, the evidence
+ * report, and the post-gate tree — and asserts the gate actually
+ * happened. The report names every target with the exact token
+ * `` `target:<id>` `` — that token is the reconciliation protocol, so a
+ * renamed slug must move with its report row. Past the retirement gate
+ * (#215, lane A6) the existence check is INVERTED from the A5 proof: then,
+ * every non-glob path had to exist (the targets were named before they
+ * died); now every deletion target's paths must be GONE — a resurrected
+ * `src/index.ts` or a recreated `.changeset/` fails here, which is what
+ * keeps this suite the durable record of the deletion instead of a
+ * one-shot proof. The section-scoped survivors (`package.json`,
+ * `crap-baseline.json`, and the two docs pruned by section, not deleted)
+ * are exempted by name and carry their own post-gate shape checks.
+ * Throws with a named finding on any disagreement; returns the summary.
  */
 export function reconcileInventory(): Reconciliation {
   const report = readFileSync(join(process.cwd(), REPORT_PATH), 'utf8');
@@ -282,16 +326,54 @@ export function reconcileInventory(): Reconciliation {
     throw new Error(`report names targets absent from the inventory: ${unknown.join(', ')}`);
   }
 
-  // every non-glob path in the inventory exists in the tree today
-  const dangling: string[] = [];
+  // every deletion target is actually deleted: exact paths and `/**`
+  // roots must be absent from the tree, except the named survivors
+  // (checked for shape below, not existence) and the named lane's runner.
+  // The `e2e/*.spec.ts` glob is skipped here only because it gets a
+  // STRICTER check of its own right after: the surviving spec set must
+  // equal exactly the one named no-product-E2E smoke.
+  const resurrected: string[] = [];
   for (const target of DELETION_TARGETS) {
     for (const path of target.paths) {
-      if (path.includes('*')) continue;
-      if (!existsSync(join(process.cwd(), path))) dangling.push(`${target.id}: ${path}`);
+      if (SURVIVORS.has(path) || DELIBERATE_LANE_SURVIVORS.has(path) || path === E2E_SPECS_GLOB)
+        continue;
+      const exact = path.endsWith('/**') ? path.slice(0, -3) : path;
+      if (existsSync(join(process.cwd(), exact))) resurrected.push(`${target.id}: ${path}`);
     }
   }
-  if (dangling.length > 0) {
-    throw new Error(`inventory names paths absent from the tree: ${dangling.join(', ')}`);
+  if (resurrected.length > 0) {
+    throw new Error(
+      `deletion targets still present after the retirement gate: ${resurrected.join(', ')}`,
+    );
+  }
+
+  // the interval's named lane is EXACTLY one spec: the glob above is not
+  // a wholesale exemption. Anything else surviving under e2e/*.spec.ts
+  // means an oracle-era spec resurrected — or product E2E landing without
+  // its web-host ruling — and fails the reconciliation.
+  const survivingSpecs = readdirSync(join(process.cwd(), 'e2e'))
+    .filter((name) => name.endsWith('.spec.ts'))
+    .map((name) => join('e2e', name))
+    .sort();
+  if (survivingSpecs.length !== 1 || survivingSpecs[0] !== NAMED_NO_PRODUCT_E2E_SPEC) {
+    throw new Error(
+      `the no-product-E2E interval's spec set must be exactly [${NAMED_NO_PRODUCT_E2E_SPEC}], found: [${survivingSpecs.join(', ')}]`,
+    );
+  }
+
+  // the surviving root manifest carries its post-gate shape: private,
+  // with no publishable surface left (target:root-manifest, #215 AC-1)
+  const manifest = JSON.parse(readFileSync(join(process.cwd(), 'package.json'), 'utf8')) as Record<
+    string,
+    unknown
+  >;
+  if (manifest.private !== true) {
+    throw new Error('package.json is not private — the root must expose no publishable artifact');
+  }
+  for (const field of ['exports', 'files', 'publishConfig', 'keywords']) {
+    if (manifest[field] !== undefined) {
+      throw new Error(`package.json still carries the publication field "${field}"`);
+    }
   }
 
   return {

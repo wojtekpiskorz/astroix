@@ -1,7 +1,7 @@
 # deps
 node_modules/
 
-# build
+# build (the canonical fixture's astro build output lives under e2e/fixture/dist)
 dist/
 *.tsbuildinfo
 
@@ -12,16 +12,6 @@ dist/
 # astro dev artifacts (when dogfooding inside this repo)
 .astro/
 
-# publish-shaped local link the oracle copies link from (#123)
-.astroix-local/
-
-# src-ful local link the src oracle links from (#150)
-.astroix-local-src/
-
-# single-flight lock for the shared oracle build gate (#213): a stale dist
-# must trigger one npm run build, never two concurrent ones
-.astroix-build.lock
-
 # tests
 coverage/
 crap-table.md
@@ -31,14 +21,3 @@ test-results/
 # os / editor
 .DS_Store
 *.log
-
-# npm pack smoke lane artifact
-*.tgz
-
-# disposable oracle copies the e2e lanes generate from the canonical
-# fixtures (#213, ADR-0010): the canonical fixture stays plain Astro and the
-# integration config lives only here, regenerated per run — cleanup is
-# rm-and-regenerate, never git
-e2e/.oracle-fixture/
-e2e/.oracle-pack/
-e2e/.oracle-src/

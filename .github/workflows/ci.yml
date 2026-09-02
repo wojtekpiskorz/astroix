@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   check:
-    name: check (biome · tsc · vitest · artifact · dist-graph)
+    name: check (biome · tsc · vitest)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -26,26 +26,31 @@ jobs:
       - run: npm ci
       - run: npm run check
       - run: npm run typecheck
-      - run: npm run test
-      # build both outputs and gate the prebuilt chrome shape (ADR-0001)
-      - run: npm run build
-      - run: npm run check:artifact
-      # the node-side dist graph must stay inside builtins + dependencies + peers (#138)
-      - run: npm run check:dist-graph
-      # the published manifest/exports must be consumer-clean (needs the build)
-      - run: npm run check:publint
-      # plain-fixture build smoke + the frozen behavior-contract suite
-      # (B1, #284): the freeze legs boot chromium + disposable oracles.
-      # The suite's skip-guard probes the executable, so this install is
-      # what turns the freeze on in CI (#285).
+      # the fixture install must precede npm test: the retirement-readiness
+      # legs run under the root vitest config (npm test) and build the
+      # canonical fixture (e2e/fixture has its own committed lockfile)
       - run: npm ci
         working-directory: e2e/fixture
-      - run: npx playwright install --with-deps chromium
-      - run: npm run test:e2e
+      # vitest: the retained unit lanes (src/core tooling, packages/core,
+      # packages/app-shell), the frozen-contract schema validators, and the
+      # five serverless retirement-readiness legs (corpora re-derivation,
+      # retained-UI coupling scan + mounts, fixture plainness + zero-byte
+      # build, counts, inventory)
+      - run: npm run test
+      # ── no-product-E2E interval — the named state (ADR-0010) ──
+      # There is NO product E2E lane until the web-host slices land (#240),
+      # and this step is never presented as one. Exactly one serverless
+      # Playwright spec survives the retirement gate (#215): the
+      # plain-fixture build smoke. Playwright itself fails a config whose
+      # testMatch matches zero specs, so the interval cannot silently pass
+      # empty — deleting the last spec reds this step instead of vacuously
+      # greening it. No browser is launched; no chromium install is needed.
+      - name: no-product-E2E interval — plain-fixture build smoke (not product E2E, ADR-0010)
+        run: npm run test:e2e
 
-  # No-E2E interval (ADR-0010, amended 2026-09-01 — owner ruling on #197):
-  # no product E2E lane exists until the web-host slices land, and CI never
-  # presents the interval as passing product E2E. What the check job runs
-  # instead is not product E2E: the serverless plain-fixture build smoke and
-  # the frozen behavior-contract suite (B1, #284) — capture evidence over
-  # the retired implementation as oracle, not regression lanes for a product.
+  # Retirement gate context (#215, lane A6): the integration runtime,
+  # injected chrome, delivery lanes, npm artifact checks, Changesets, and
+  # publish workflows are deleted; the root package is private. What CI
+  # gates on is the retained tree: lint + types + the vitest lanes above,
+  # and the one serverless fixture smoke as the explicit stand-in for E2E
+  # until product E2E returns with the web host (#240).
