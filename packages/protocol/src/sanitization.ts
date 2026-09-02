@@ -29,7 +29,9 @@ const DISCLOSURE_PATTERNS: ReadonlyArray<{ id: string; pattern: RegExp; what: st
   // windows-drive precedes absolute-path on purpose: the colon boundary
   // added to the absolute guard would otherwise claim `D:/dev/site` before
   // the more specific drive-letter finding wins
-  { id: 'windows-path', pattern: /[A-Za-z]:[\\/]/, what: 'a Windows drive path' },
+  // a drive letter is a SINGLE letter with no letter before it — the
+  // lookbehind keeps prose like `see:/Users/...` out of this finding
+  { id: 'windows-path', pattern: /(?<![A-Za-z])[A-Za-z]:[\\/]/, what: 'a Windows drive path' },
   {
     id: 'absolute-path',
     pattern: /(?:^|[\s"'`(=:])\/[a-z][^/\s]*\//i,
