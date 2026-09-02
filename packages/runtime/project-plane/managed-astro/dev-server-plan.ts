@@ -1,6 +1,6 @@
 import { readFile, stat } from 'node:fs/promises';
 import { createRequire } from 'node:module';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve, sep } from 'node:path';
 import { canonicalProjectRoot } from '../../astro-project-adapter/installed-pair.ts';
 import { type ExactChildPlan, minimalChildEnv } from '../supervision/exact-child.ts';
 
@@ -61,7 +61,7 @@ export async function managedDevServerPlan(
   };
 }
 
-/** Resolves the project's own astro CLI entry from its installation — the manifest's `bin`, verified to exist. */
+/** Resolves the project's own astro CLI entry from its installation — the manifest's `bin`, confined to the astro package directory and verified to exist. */
 async function resolveAstroCli(root: string): Promise<string> {
   const projectRequire = createRequire(join(root, 'package.json'));
   let manifestPath: string;
@@ -84,7 +84,13 @@ async function resolveAstroCli(root: string): Promise<string> {
         ? bin
         : undefined;
   if (typeof entry !== 'string' || entry.length === 0) throw unresolved();
-  const cliPath = join(dirname(manifestPath), entry);
+  // Containment: the manifest's bin entry may name anything lexically —
+  // resolve it and require it to stay inside the astro package directory,
+  // so "the project's own astro CLI" is literal, never a discovered
+  // executable elsewhere on disk. An escaping entry fails closed.
+  const packageDirectory = dirname(manifestPath);
+  const cliPath = resolve(packageDirectory, entry);
+  if (!cliPath.startsWith(`${packageDirectory}${sep}`)) throw unresolved();
   try {
     const stats = await stat(cliPath);
     if (!stats.isFile()) throw unresolved();

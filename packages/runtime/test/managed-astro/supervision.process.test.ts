@@ -10,6 +10,7 @@ import {
   createProjectPlaneSupervisor,
   type PlaneSupervisorOptions,
   type ProjectPlaneSupervisor,
+  workerSpawnPlan,
 } from '../../project-plane/supervision/plane-supervisor.ts';
 
 // @vitest-environment node — spawns real children with real signals and sockets; no DOM.
@@ -365,6 +366,28 @@ describe('startup cancellation and the startup deadline', () => {
     expect(report.accounting.managedAstroReaped).toBe(true);
     expect(await markerStamps(lane.markerDir, 'astro-exit')).toHaveLength(1);
   }, 15_000);
+
+  it('a worker whose project inspection FAILS is never admitted — the startup deadline terminates the plane', async () => {
+    const lane = await startLane({
+      workerBehaviors: { probeFail: true },
+      bounds: { startupTimeoutMs: 350 },
+    });
+    const rejection = await rejectedReady(lane.supervisor);
+    expect(rejection.code).toBe('startup-timeout');
+
+    const report = await lane.supervisor.closed;
+    expect(report.reason).toBe('startup-timeout');
+    expect(report.outcome).toBe('complete');
+    // Not admitted — and never was: the failed probe answer is not readiness.
+    expect(lane.supervisor.admission).toBe('revoked');
+    expect(lane.supervisor.state).toBe('closed');
+    // The worker stayed alive until the terminal stop (it only ever failed
+    // the inspection), answered the stop, and was reaped.
+    expect(await markerStamps(lane.markerDir, 'worker-boot')).toHaveLength(1);
+    expect(await markerStamps(lane.markerDir, 'worker-stop-received')).toHaveLength(1);
+    expect(report.accounting.workerReaped).toBe(true);
+    expect(report.accounting.managedAstroReaped).toBe(true);
+  }, 15_000);
 });
 
 describe('escalation and the reap bounds', () => {
@@ -502,4 +525,29 @@ describe('the exact-child spawn discipline over real children', () => {
     expect(existsSync(join(metacharRoot, 'pwned'))).toBe(false);
     expect(existsSync(join(canonical, 'pwned'))).toBe(false);
   }, 20_000);
+});
+
+describe('the production worker spawn plan', () => {
+  it("forks E6's worker-child out of the canonical root, with the bundled-Node override mirroring the dev-server plan", async () => {
+    const scratch = await makeScratch();
+    const canonical = await realpath(scratch);
+
+    const plan = await workerSpawnPlan({ projectRoot: scratch });
+    expect(plan.executable).toBe(process.execPath);
+    expect(plan.ipc).toBe(true);
+    expect(plan.cwd).toBe(canonical);
+    expect(plan.argv[0]).toMatch(/worker-child\.ts$/); // the dev-checkout spelling; the packaged runtime rebases (ADR-0008)
+    expect(JSON.parse(plan.argv[1] ?? '{}')).toEqual({ projectRoot: canonical });
+    expect(plan.env.ASTRO_TELEMETRY_DISABLED).toBe('1');
+    expect(Object.hasOwn(plan.env, 'NODE_OPTIONS')).toBe(false);
+
+    // The sibling symmetry the reviewer pinned: one executable override
+    // shape for both children — the packaged runtime's bundled stock Node.
+    const overridden = await workerSpawnPlan({
+      projectRoot: scratch,
+      nodeExecutable: '/opt/astroix-node/bin/node',
+    });
+    expect(overridden.executable).toBe('/opt/astroix-node/bin/node');
+    expect(overridden.cwd).toBe(canonical);
+  });
 });

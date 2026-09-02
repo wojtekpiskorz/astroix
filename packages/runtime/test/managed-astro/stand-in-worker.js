@@ -65,6 +65,21 @@ if (config.controlDir) {
 
 process.on('message', (message) => {
   if (message?.type === 'inspect') {
+    // probeFail: the worker is alive but its project inspection failed —
+    // E6's ok:false failure answer, byte-shaped like the real wire.
+    if (config.behaviors?.probeFail) {
+      process.send({
+        type: 'inspect-result',
+        id: message.id,
+        ok: false,
+        failure: {
+          code: 'inspection-failed',
+          message: 'the project inspection failed unexpectedly',
+          adapterCode: null,
+        },
+      });
+      return;
+    }
     process.send({
       type: 'inspect-result',
       id: message.id,

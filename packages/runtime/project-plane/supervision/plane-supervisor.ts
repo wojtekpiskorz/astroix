@@ -134,16 +134,24 @@ export function spawnExactChild(plan: ExactChildPlan): ChildProcess {
  * to the bundled entry per ADR-0008; a dev-checkout consumer that runs
  * raw Node supplies the bundler-resolution `execArgv`, the E6
  * process-lane disclosure) with the canonical root as the only
- * configuration it ever receives (argv, never a wire request).
+ * configuration it ever receives (argv, never a wire request). The
+ * `nodeExecutable` override mirrors `managedDevServerPlan`'s, so both
+ * siblings' spawn plans carry the same ADR-0008 shape — the packaged
+ * runtime's bundled stock Node, one override for both children.
  */
 export async function workerSpawnPlan(input: {
   readonly projectRoot: string;
   readonly execArgv?: readonly string[];
+  /**
+   * The Node executable for the child; defaults to the control plane's own
+   * `process.execPath` (the bundled stock Node in the packaged runtime).
+   */
+  readonly nodeExecutable?: string;
 }): Promise<ExactChildPlan> {
   const root = await canonicalProjectRoot(input.projectRoot);
   const workerModule = fileURLToPath(new URL('../worker/worker-child.ts', import.meta.url));
   return {
-    executable: process.execPath,
+    executable: input.nodeExecutable ?? process.execPath,
     argv: [workerModule, JSON.stringify({ projectRoot: root })],
     cwd: root,
     env: minimalChildEnv(process.env),
@@ -217,10 +225,20 @@ export function createProjectPlaneSupervisor(
   const startupTimer = setTimeout(() => initiateClose('startup-timeout'), bounds.startupTimeoutMs);
 
   const onWorkerMessage = (message: unknown): void => {
-    const wire = message as { readonly type?: unknown; readonly id?: unknown } | null;
+    const wire = message as {
+      readonly type?: unknown;
+      readonly id?: unknown;
+      readonly ok?: unknown;
+    } | null;
     if (wire?.type === 'inspect-result' && wire.id === WORKER_PROBE_ID) {
-      workerAnswered = true;
-      resolveWorkerAnswer();
+      // Readiness is a SUCCESSFUL project inspection (E6's `ok` flag): a
+      // failed answer means the worker is alive but the composition it
+      // would serve is dead — this plane never becomes ready, and the
+      // startup deadline owns the terminal path.
+      if (wire.ok === true) {
+        workerAnswered = true;
+        resolveWorkerAnswer();
+      }
       return;
     }
     if (wire?.type === 'closed' && workerReport === null) {

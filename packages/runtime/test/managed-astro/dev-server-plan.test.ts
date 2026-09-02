@@ -118,4 +118,21 @@ describe('managedDevServerPlan', () => {
       ManagedDevServerPlanError,
     );
   });
+
+  it('fails closed when the bin entry escapes the astro package directory — even when the escaped file exists', async () => {
+    const escaping = await makeScratch();
+    await writeFile(join(escaping, 'package.json'), '{}\n');
+    const astroDir = join(escaping, 'node_modules', 'astro');
+    await mkdir(astroDir, { recursive: true });
+    await writeFile(
+      join(astroDir, 'package.json'),
+      '{ "name": "astro", "version": "1.0.0", "bin": { "astro": "../../escaped-entry.js" } }\n',
+    );
+    // The escaped target exists and is a file — containment, not existence,
+    // is what rejects it: "the project's own astro CLI" must be literal.
+    await writeFile(join(escaping, 'escaped-entry.js'), '// outside the package\n');
+    await expect(managedDevServerPlan({ projectRoot: escaping, port: 4179 })).rejects.toThrow(
+      ManagedDevServerPlanError,
+    );
+  });
 });
