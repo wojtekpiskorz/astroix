@@ -19,12 +19,16 @@ import type { FunctionComplexity } from './complexity';
  * `packages/runtime/{kernel-lease,private-boot}` boot-authority seams
  * since #222 and the AstroProjectAdapter's pure seams since #225 — all
  * deterministic real-filesystem unit tests over temp directories and
- * real temp SQLite lease files), covered by unit
+ * real temp SQLite lease files), the styles join's pure seams since #226
+ * (correspondence join + source walk, deterministic units), covered by
+ * unit
  * tests through
  * vitest's istanbul-format JSON. The UI foundation package
  * `packages/app-shell` (#218 — its truth is e2e coverage, not
- * per-function unit tests) and the adapter's composition IO seam (#225 —
- * its truth is the real-install certification suite) land on a CC-only
+ * per-function unit tests), the adapter's composition IO seam (#225 —
+ * its truth is the real-install certification suite), and the styles
+ * join's client-environment IO composition (#226, same truth) land on a
+ * CC-only
  * watchlist; later
  * `packages/runtime` seams beyond the ruled ones decide their own tier in
  * the lane that lands them. A
@@ -137,6 +141,15 @@ function isCoreFile(relPath: string): boolean {
   // composition.ts, the adapter's IO seam, whose truth is the
   // real-install certification suite (`npm run certify:adapter`), not
   // unit fakes at the behavior layer: it stays on the CC-only watchlist.
+  // The styles join's pure seams since #226 (correspondence join, source
+  // walk, shared rejection helper — deterministic units; the
+  // client-environment IO composition files stay watchlist like
+  // composition.ts: their behavior-layer truth is the certification
+  // suite, the units only exercise their own rejection wiring).
+  const adapterWatchlist =
+    relPath === 'packages/runtime/astro-project-adapter/composition.ts' ||
+    relPath === 'packages/runtime/astro-project-adapter/styles/join/client-scoped-css.ts' ||
+    relPath === 'packages/runtime/astro-project-adapter/styles/join/route-styles.ts';
   return (
     (relPath.startsWith('src/core/') ||
       relPath.startsWith('packages/core/') ||
@@ -144,8 +157,7 @@ function isCoreFile(relPath: string): boolean {
       relPath.startsWith('packages/runtime/registry/') ||
       relPath.startsWith('packages/runtime/kernel-lease/') ||
       relPath.startsWith('packages/runtime/private-boot/') ||
-      (relPath.startsWith('packages/runtime/astro-project-adapter/') &&
-        relPath !== 'packages/runtime/astro-project-adapter/composition.ts')) &&
+      (relPath.startsWith('packages/runtime/astro-project-adapter/') && !adapterWatchlist)) &&
     !relPath.startsWith('packages/runtime/astro-project-adapter/certification/')
   );
 }
