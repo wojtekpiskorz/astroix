@@ -1,8 +1,14 @@
+import { connect } from 'node:net';
 import { errorEnvelopeSchema } from '@wojciechpiskorz/astroix-protocol';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createReservedApiSurface } from '../../api/http/reserved-handler.ts';
 import { createOriginListener, type OriginListener } from '../../origin/origin-listener.ts';
-import { rawExchange, type StandInUpstream, startStandInUpstream } from '../proxy/stand-ins.ts';
+import {
+  type RawExchange,
+  rawExchange,
+  type StandInUpstream,
+  startStandInUpstream,
+} from '../proxy/stand-ins.ts';
 import {
   type AuthorityFixture,
   activateEnvelope,
@@ -61,6 +67,105 @@ afterEach(async () => {
 function errorOf(exchange: { body: string }): { code: string } {
   return (errorEnvelopeSchema.parse(JSON.parse(exchange.body)) as { error: { code: string } })
     .error;
+}
+
+/** The upload piece size for the interleaved leg — small enough to yield the loop often. */
+const UPLOAD_PIECE_BYTES = 64 * 1024;
+
+/**
+ * The chunked-cap leg's client shape (#320): a real client READS its
+ * response while the upload is still in flight. The wire bytes are the
+ * ones `rawExchange` would send in one giant write — the head, then the
+ * chunk payload, then the terminating frames — but paced: the head
+ * first, then the payload in bounded pieces with an event-loop yield
+ * between them so response data drains concurrently, and the upload
+ * stops the moment the complete response is captured. The single-write
+ * shape races the reserved surface's deliberate flood-stop (the
+ * post-413 destroy fires RST under unread receive data on linux, which
+ * can flush the already-queued response bytes before this side ever
+ * reads them — the observed ECONNRESET flake); interleaving removes
+ * the race by consuming the response as it arrives. The surface always
+ * answers with an explicit content-length (`withBody`'s law), so
+ * "complete" is head + that many body bytes — deterministic, never
+ * close-dependent. Teardown noise after capture (the flood-stop RST
+ * landing late) is ignored: the evidence is already in hand. A refusal
+ * that never completes fails loudly instead of resolving partial.
+ */
+function rawInterleavedUpload(
+  port: number,
+  head: string,
+  payload: string,
+  timeoutMs = 3000,
+): Promise<RawExchange> {
+  return new Promise((resolve, reject) => {
+    const socket = connect({ host: '127.0.0.1', port }, () => {
+      socket.setNoDelay(true);
+      void pump();
+    });
+    const chunks: Buffer[] = [];
+    let settled = false;
+    const timer = setTimeout(
+      () => failOnce(new Error('rawInterleavedUpload: no complete response before the timeout')),
+      timeoutMs,
+    );
+    socket.on('data', (chunk: Buffer) => {
+      if (settled) return;
+      chunks.push(chunk);
+      const bytes = Buffer.concat(chunks);
+      const text = bytes.toString('latin1');
+      const split = text.indexOf('\r\n\r\n');
+      if (split === -1) return;
+      const lengthMatch = /content-length:\s*(\d+)/i.exec(text.slice(0, split));
+      if (lengthMatch === null) {
+        failOnce(
+          new Error('rawInterleavedUpload: response head without an explicit content-length'),
+        );
+        return;
+      }
+      const expected = Number.parseInt(lengthMatch[1] ?? '0', 10);
+      if (bytes.length - split - 4 >= expected) settle();
+    });
+    socket.on('error', (error) => {
+      if (settled) return; // post-capture teardown — the exchange is already evidence
+      failOnce(error);
+    });
+    socket.on('close', () => {
+      if (settled) return;
+      failOnce(new Error('rawInterleavedUpload: connection closed before the response completed'));
+    });
+
+    function settle(): void {
+      settled = true;
+      clearTimeout(timer);
+      socket.destroy();
+      const bytes = Buffer.concat(chunks);
+      const text = bytes.toString('latin1');
+      const split = text.indexOf('\r\n\r\n');
+      const statusMatch = /^HTTP\/1\.1 (\d{3})/.exec(text);
+      resolve({
+        status: statusMatch === null ? 0 : Number.parseInt(statusMatch[1] ?? '0', 10),
+        headers: split === -1 ? text : text.slice(0, split),
+        body: split === -1 ? '' : text.slice(split + 4),
+        bytes,
+      });
+    }
+    function failOnce(error: Error): void {
+      settled = true;
+      clearTimeout(timer);
+      socket.destroy();
+      reject(error);
+    }
+    async function pump(): Promise<void> {
+      socket.write(head);
+      for (let offset = 0; offset < payload.length && !settled; offset += UPLOAD_PIECE_BYTES) {
+        socket.write(payload.slice(offset, offset + UPLOAD_PIECE_BYTES));
+        // The yield is the heart of the fix: the event loop drains the
+        // read side between upload pieces, not after the whole payload.
+        await new Promise<void>((resolve) => setImmediate(resolve));
+      }
+      if (!settled && !socket.destroyed) socket.write('\r\n0\r\n\r\n');
+    }
+  });
 }
 
 describe('admitted wire traffic', () => {
@@ -294,9 +399,11 @@ describe('transport-level byte caps at the wire (the pre-parse bound)', () => {
       'Transfer-Encoding: chunked',
       'Connection: close',
       '',
-      `${payload.length.toString(16)}\r\n${payload}\r\n0\r\n\r\n`,
+      `${payload.length.toString(16)}\r\n`,
     ].join('\r\n');
-    const exchange = await rawExchange(listener.port, head);
+    // Read interleaved with the upload (#320): the single giant write let
+    // the flood-stop RST flush the queued 413 before it was ever read.
+    const exchange = await rawInterleavedUpload(listener.port, head, payload);
     expect(exchange.status).toBe(413);
     const details = JSON.parse(exchange.body).error.details as {
       limit: string;
