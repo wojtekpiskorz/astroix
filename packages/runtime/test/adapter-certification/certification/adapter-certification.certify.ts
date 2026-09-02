@@ -1,12 +1,13 @@
 import { readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { buildCssIndex } from '@wojciechpiskorz/astroix-core';
 import { afterAll, expect, it } from 'vitest';
 import {
   CID_FORM,
   type CssIndexFixture,
   cssIndexFixtureSchema,
+  type RoutesFixture,
+  routesFixtureSchema,
 } from '../../../../../e2e/behavior-contracts/schema/inspection-contract.ts';
 import { AdapterError } from '../../../astro-project-adapter/adapter-error';
 import {
@@ -19,13 +20,7 @@ import {
   type StagedProject,
   stageProject,
 } from '../../../astro-project-adapter/certification/stage-project';
-import {
-  comparableRecords,
-  compileCssEntries,
-  type IndexPayloadRecord,
-  joinIndexPayload,
-  readSourceFiles,
-} from '../../../astro-project-adapter/certification/styles-join';
+import { comparableRecords } from '../../../astro-project-adapter/certification/styles-join';
 import { CERTIFIED_PAIRS } from '../../../astro-project-adapter/certified-pair';
 import {
   createCompositionServer,
@@ -37,13 +32,19 @@ import {
 } from '../../../astro-project-adapter/fresh-runner';
 import { resolveInstalledPair } from '../../../astro-project-adapter/installed-pair';
 import { certifyPairBeforeConfig } from '../../../astro-project-adapter/pair-gate';
+import { readRouteMetadata } from '../../../astro-project-adapter/routes/route-metadata';
+import { createRoutesInspector } from '../../../astro-project-adapter/routes/routes-inspection';
+import type { RouteInfo } from '../../../astro-project-adapter/routes/routes-payload';
 import {
   type ModuleRunnerLike,
   type RouteSeamEntry,
-  readDevCssEntries,
   readRouteEntries,
   type ViteServerLike,
 } from '../../../astro-project-adapter/seam-readers';
+import {
+  createRouteStylesJoin,
+  type EffectiveSelectorJoin,
+} from '../../../astro-project-adapter/styles/join/route-styles';
 import { stageStubInstall } from '../stub-install';
 
 /**
@@ -64,13 +65,19 @@ import { stageStubInstall } from '../stub-install';
  *                        accepted #202/#206 cost); an exclusive-claim
  *                        integration fails the second execution with the
  *                        named diagnostic (the accepted boundary).
- *   3. surfaces        — routes/content/schemas and both scoped-style
- *                        strategies joined through fresh runners; the
- *                        styles payloads equal the frozen corpora
+ *   3. surfaces        — routes/content/schemas through fresh runners.
+ *   4. styles          — both scoped-style strategies joined through the
+ *                        PRODUCT joiner (`astro-project-adapter/styles/
+ *                        join/**`, #301 — the suite certifies what
+ *                        ships); the payloads equal the frozen corpora
  *                        (attribute `[data-astro-cid-*]`, where
  *                        `:where(.astro-*)`) and validate against the
  *                        contract schema.
- *   4. fresh runners   — every pass closes its runner and restores the
+ *   5. routes shape    — the #299 routes inspector (origin/prerender
+ *                        routing, managed `getStaticPaths` enumeration,
+ *                        live-field-free plain payload) over the real
+ *                        installs, equal to the frozen routes corpus.
+ *   6. fresh runners   — every pass closes its runner and restores the
  *                        hot transport's send accounting — no residue
  *                        across passes.
  *
@@ -210,13 +217,51 @@ it('surfaces routes, content, schemas, and attribute-strategy styles through fre
     expect(contentPass.result.schemaNames).toEqual(['blog', 'gallery', 'homepage']);
     expect(contentPass.result.schemalessCollections).toEqual(['notes']);
 
-    // Pass 2 (fresh runner): the attribute-strategy styles join.
-    const stylesPayload = await inspectStyles(
-      composition.server,
-      composition.seams,
-      attribute.root,
-    );
+    // Pass 2 (fresh runner inside the product joiner): the
+    // attribute-strategy styles join.
+    const stylesPayload = await inspectStyles(composition.server, composition.seams);
     await assertStylesParity(stylesPayload, 'attribute');
+  } finally {
+    await composition.close();
+  }
+});
+
+it('certifies the routes inspection shape over the real install (#299 seam)', async () => {
+  const composition = await createCompositionServer(attribute.root);
+  try {
+    // The raw seam first (fresh runner): astro injects its internal routes
+    // into `virtual:astro:routes` — real output carrying the `origin` field
+    // the inspector's projection routes on (internal excluded, project
+    // kept), not a lane fake.
+    const seamPass = await withFreshRunner(
+      {
+        createServerModuleRunner: composition.seams.vite.createServerModuleRunner,
+        ssrEnvironment: composition.server.environments.ssr,
+      },
+      async (runner) => readRouteMetadata(await runner.import('virtual:astro:routes')),
+    );
+    assertRunnerEvidence(seamPass.evidence);
+    expect(seamPass.result.some((route) => route.origin === 'internal')).toBe(true);
+    expect(seamPass.result.some((route) => route.origin === 'project')).toBe(true);
+
+    // The product inspector (#229): typed projection (project page routes
+    // only — the internal origin excluded) plus the managed
+    // `getStaticPaths` enumeration, over the same real seams.
+    const routesInspector = createRoutesInspector({ composition });
+    const first = await routesInspector.inspect();
+    const second = await routesInspector.inspect();
+    expect(first.revision).toBe(1);
+    expect(second.revision).toBe(2);
+    expect(second.routes).toEqual(first.routes);
+    await assertRoutesParity(first.routes);
+
+    // The live-field envelope over real output: the seam's `routeData`
+    // holds live `RegExp` patterns and `URL` arrays owned by the module
+    // graph — the payload must survive a JSON round-trip untouched.
+    expect(JSON.parse(JSON.stringify(first))).toEqual(first);
+    for (const route of first.routes) {
+      expect(Object.keys(route)).not.toContain('component');
+    }
   } finally {
     await composition.close();
   }
@@ -224,10 +269,21 @@ it('surfaces routes, content, schemas, and attribute-strategy styles through fre
 
 it('joins contract-shaped styles under the where strategy', async () => {
   const where = await stageAndInstall('where', 'append');
+  // Managed-first for the routes enumeration below (topology per the
+  // file header): without the managed dev server the composition's
+  // `getStaticPaths` reads an unsynced (empty) store and honestly
+  // reports `renders: []` — the readiness argument #232 encodes.
+  await runManagedDevServer({ projectRoot: where.root, hookLog: where.hookLog });
   const composition = await createCompositionServer(where.root);
   try {
-    const payload = await inspectStyles(composition.server, composition.seams, where.root);
+    const payload = await inspectStyles(composition.server, composition.seams);
     await assertStylesParity(payload, 'where');
+
+    // The routes shape over the second real install: the same corpus
+    // parity on the where-strategy project (the routes seam is
+    // strategy-independent, and both installs prove it).
+    const routes = await createRoutesInspector({ composition }).inspect();
+    await assertRoutesParity(routes.routes);
   } finally {
     await composition.close();
   }
@@ -254,38 +310,27 @@ it('rejects an incompatible duplicate hook with the named diagnostic', async () 
 async function inspectStyles(
   server: ViteServerLike,
   seams: ProjectRuntimeSeams,
-  projectRoot: string,
-): Promise<IndexPayloadRecord[]> {
-  // Routes pass (fresh runner): find the index route and its dev-css module.
+): Promise<EffectiveSelectorJoin> {
+  // Routes pass (fresh runner): the certification's own discovery of the
+  // active route's component — independent of the joiner's own dev-css
+  // pass, so the leg names the route it joins rather than trusting the
+  // joiner to find one.
   const routesPass = await withFreshRunner(
     {
       createServerModuleRunner: seams.vite.createServerModuleRunner,
       ssrEnvironment: server.environments.ssr,
     },
-    async (runner) => {
-      const routes = readRouteEntries(await runner.import('virtual:astro:routes'));
-      const indexRoute = projectRoute(routes, '/');
-      const cssEntries = readDevCssEntries(
-        await runner.import(seams.getDevCSSModuleName(indexRoute.component)),
-      );
-      return { component: indexRoute.component, cssEntries };
-    },
+    async (runner) =>
+      projectRoute(readRouteEntries(await runner.import('virtual:astro:routes')), '/').component,
   );
   assertRunnerEvidence(routesPass.evidence);
 
-  // Compiled CSS (fresh runner closed before the client transforms; the
-  // page is primed in the client environment so its scoped style modules
-  // are transformable there — #206 constraint 2):
-  const compiled = await compileCssEntries(
-    server.environments.client,
-    routesPass.result.cssEntries,
-    {
-      routeComponent: routesPass.result.component,
-    },
-  );
-  const staticRecords = buildCssIndex(await readSourceFiles(projectRoot));
-  return joinIndexPayload(staticRecords, compiled, {
-    requiredScopedFiles: [routesPass.result.component],
+  // The product joiner (#226, the shipped styles inspection): the dev-css
+  // set through its own fresh runner, the client transforms with their
+  // graph-ownership proofs, the static index, and the strict
+  // fail-closed correspondence — #301: the suite certifies what ships.
+  return createRouteStylesJoin({ server, seams }).join({
+    routeComponent: routesPass.result,
   });
 }
 
@@ -358,9 +403,14 @@ function assertRunnerEvidence(evidence: RunnerCleanupEvidence): void {
 }
 
 async function assertStylesParity(
-  payload: readonly IndexPayloadRecord[],
+  join: EffectiveSelectorJoin,
   strategy: CertificationStrategy,
 ): Promise<void> {
+  // The shipped shape: a successful join minted a positive revision
+  // (a failed pass never mints one).
+  expect(join.revision).toBeGreaterThan(0);
+  const payload = join.records;
+
   // Contract-shaped: the payload validates against the frozen corpus
   // schema, cid form included (attribute `[data-astro-cid-*]`, where
   // `:where(.astro-*)`).
@@ -384,6 +434,27 @@ async function assertStylesParity(
   // are per-path, not contract identity).
   const corpus = await loadCorpus<CssIndexFixture>(`css-index.${strategy}.json`);
   expect(comparableRecords(payload)).toEqual(comparableRecords(corpus.records));
+}
+
+/** Routes parity: the payload equals the frozen routes corpus, pattern by pattern. */
+async function assertRoutesParity(routes: readonly RouteInfo[]): Promise<void> {
+  // Parity first: patterns, astro's own segment parse, param names,
+  // rendering modes, and the enumerated renders of the prerendered
+  // single-param routes — all equal to the frozen corpus.
+  const corpus = await loadCorpus<RoutesFixture>('routes.json');
+  const byPattern = new Map(routes.map((route) => [route.pattern, route]));
+  expect([...byPattern.keys()].sort()).toEqual(corpus.routes.map((route) => route.pattern).sort());
+  for (const route of corpus.routes) {
+    expect(byPattern.get(route.pattern)).toEqual(route);
+  }
+
+  // Contract-shaped: the payload validates against the frozen corpus
+  // schema once envelope-stamped.
+  routesFixtureSchema.parse({
+    contractVersion: '1.0.0',
+    kind: 'routes',
+    routes,
+  });
 }
 
 async function stageAndInstall(
