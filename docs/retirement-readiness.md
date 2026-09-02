@@ -108,7 +108,7 @@ this report and the tree on every run.
 | `target:smoke-lane` | `scripts/smoke.mjs` (the `?builder=1` wizard driver) | the wizard UI is part of the injected chrome; the rewrite's owner smoke is the packaged-artifact checklist (`docs/manual-smoke.md`, ADR-0008); #279 (repoint-or-retire) closed by the gate's deletion of the script itself (#291) | yes |
 | `target:root-manifest` | the root `package.json` as a publishable integration: exports/files/publishConfig/keywords, the `#components`-into-`src/client` imports map, integration scripts, engines | #215 AC-1 (root private, no artifact); zero-injection proof (readiness leg 3) | yes |
 | `target:release-loop-instructions` | the dormant npm-era sections of `docs/agents/release-loop.md` + `docs/manual-smoke.md` | both files were rewritten by A1 for the rewrite and survive it — the deletion is section-scoped, not file-scoped (ADR-0010) | yes (note) |
-| *(survivor)* root `CHANGELOG.md` — Changesets' generated output | kept as provenance: the 31-section version history (0.0.1–0.0.31) of the retired integration; nothing generates it anymore and nothing reads it as authority | — |
+| *(survivor)* root `CHANGELOG.md` — Changesets' generated output | kept as provenance: the 31-section version history (0.0.1–0.0.31) of the retired integration; nothing generates it anymore and nothing reads it as authority | — | — |
 | `target:crap-baseline-keys` | the `crap-baseline.json` entries for `src/node`/`src/client` functions | the ratchet rule (AGENTS.md): entries only tighten or drop; `npm run crap --update-baseline` lands in the deleting PR | **no — G4** |
 
 ## Reconciliation gaps (the A6 contract)
