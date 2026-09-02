@@ -149,7 +149,7 @@ export function toRiskEntry(
       crap,
       metric: 'crap',
       value: crap,
-      stop: GATE_STOPS.coreCrapStop, // ui/ is a client prefix — never lands in the core tier
+      stop: GATE_STOPS.coreCrapStop, // ui/ is an app-shell prefix — never lands in the core tier
       watchOnly,
       band: bandOf(crap),
     };

@@ -17,12 +17,13 @@ import { buildCollectionsIndex, recomputeEntryResolutions } from './entry-resolu
  * output-byte — through the versioned schemas, and re-derives the derived
  * side of each edit contract with the RETAINED pure modules
  * (packages/core), never with legacy runtime source. The legacy
- * implementation appears in this proof only as the disposable oracle the
- * separate live-comparison leg boots.
+ * implementation appeared in this proof only as the disposable oracle the
+ * live-comparison leg booted — that leg, and byte-exact re-derivation from
+ * a booted oracle generally, died with the runtime at the retirement gate
+ * (#215); the corpora are the frozen standard now.
  *
- * The freeze suites (e2e/contracts-*.spec.ts) own byte-exact re-derivation
- * from a booted oracle; this leg owns the readiness aggregation: family
- * coverage is total (a manifest fixture missing from every family fails),
+ * This leg plus the schema validators are the whole standard's check:
+ * family coverage is total (a manifest fixture missing from every family fails),
  * every family is non-empty (a vacuously-passing family fails), and the
  * frozen evidence is internally consistent under the retained core.
  */
