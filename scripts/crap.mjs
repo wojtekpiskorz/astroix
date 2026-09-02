@@ -5,7 +5,8 @@
  *
  *   npm run crap                full report: CC everywhere, CRAP + Uncle Bob
  *                               bands where coverage is real (src/core +
- *                               packages/core + packages/protocol)
+ *                               packages/core + packages/protocol +
+ *                               packages/runtime/registry)
  *   npm run crap --staged       pre-commit scan: CC warn (>= 10) on functions
  *                               touched by staged changes — warns, never blocks,
  *                               skips the generated ui/ tier (ruling #62: no
@@ -14,7 +15,8 @@
  *                               src/ + packages/ against the baseline —
  *                               CRAP >= 30 in the covered core tier, CC >= 15
  *                               in the CC-only watchlist
- *                               (packages/app-shell), any new
+ *                               (packages/app-shell + runtime seams beyond
+ *                               the registry), any new
  *                               breach fails (the diff only annotates)
  *   npm run crap:ci             CI recompute: full table to crap-table.md for
  *                               the advisory reviewer prompt; never exits nonzero
@@ -24,7 +26,8 @@
  *                               tightens and drops only, refuses new violators
  *
  * Metric honesty: CRAP (CC² × (1−cov)³ + CC) only where per-function coverage
- * is real (src/core + packages/core + packages/protocol, unit-tested);
+ * is real (src/core + packages/core + packages/protocol +
+ * packages/runtime/registry, unit-tested);
  * packages/app-shell is a
  * CC-only watchlist (the src/node + src/client watchlist tiers were deleted
  * with their functions at the retirement gate, #215). The pure math lives in
@@ -55,15 +58,19 @@ const SRC_ROOT = join(ROOT, 'src');
 // Risk roots: the integration tree and the extracted editing domain
 // (packages/core, #212), the protocol schemas (packages/protocol, #220 —
 // covered tier: pure zod schemas + pure helpers with real per-function
-// unit coverage), plus the domain-deaf UI foundation
+// unit coverage), the domain-deaf UI foundation
 // (packages/app-shell, #218 — CC-only watchlist there, per its coverage-tier
-// decision in crap.ts). Future workspace packages join this list in the PR
-// that lands them, together with their coverage-tier decision in crap.ts.
+// decision in crap.ts), and the control plane
+// (packages/runtime, #221 — the registry seam is covered-tier per its
+// decision in crap.ts; later runtime seams decide in their lanes). Future
+// workspace packages join this list in the PR that lands them, together
+// with their coverage-tier decision in crap.ts.
 const RISK_ROOTS = [
   SRC_ROOT,
   join(ROOT, 'packages/core'),
   join(ROOT, 'packages/protocol'),
   join(ROOT, 'packages/app-shell'),
+  join(ROOT, 'packages/runtime'),
 ];
 // the same roots as repo-relative path prefixes — isRiskScope derives from
 // these so the scope is stated once (advisory round 2 on #270: a second
@@ -262,7 +269,7 @@ function renderTable(entries) {
 }
 
 function headerLine() {
-  return `stops: CRAP >= ${GATE_STOPS.coreCrapStop} (src/core, packages/core, packages/protocol) · CC >= ${GATE_STOPS.watchlistCcStop} (packages/app-shell) · pre-commit warns CC >= ${PRECOMMIT_CC_WARN} · generated ui/ is watch-only`;
+  return `stops: CRAP >= ${GATE_STOPS.coreCrapStop} (src/core, packages/core, packages/protocol, packages/runtime/registry) · CC >= ${GATE_STOPS.watchlistCcStop} (packages/app-shell + runtime seams beyond the registry) · pre-commit warns CC >= ${PRECOMMIT_CC_WARN} · generated ui/ is watch-only`;
 }
 
 // ——— modes ———
@@ -411,7 +418,7 @@ function modeCi() {
   lines.push('# crap4ts report (recomputed by CI — the source of truth; local runs are advisory)');
   lines.push('');
   lines.push(
-    `CC per function (ESLint-classic counting, pinned in \`src/core/complexity.test.ts\`); CRAP = CC² × (1−cov)³ + CC where per-function coverage is real (\`src/core\` + \`packages/core\` + \`packages/protocol\`, unit tests); \`packages/app-shell\` is a CC-only watchlist (its truth is e2e coverage). Uncle Bob bands: <=5 low, <30 moderate, >=30 high.`,
+    `CC per function (ESLint-classic counting, pinned in \`src/core/complexity.test.ts\`); CRAP = CC² × (1−cov)³ + CC where per-function coverage is real (\`src/core\` + \`packages/core\` + \`packages/protocol\` + \`packages/runtime/registry\`, unit tests); \`packages/app-shell\` and the runtime seams beyond the registry are a CC-only watchlist (app-shell truth is e2e coverage). Uncle Bob bands: <=5 low, <30 moderate, >=30 high.`,
   );
   if (coverage === null)
     lines.push(
@@ -420,7 +427,7 @@ function modeCi() {
     );
   lines.push('');
   lines.push(
-    `Hard stops (preflight, baseline-ratcheted): CRAP >= ${GATE_STOPS.coreCrapStop} (src/core, packages/core, packages/protocol) · CC >= ${GATE_STOPS.watchlistCcStop} (packages/app-shell). Pre-commit warns at CC >= ${PRECOMMIT_CC_WARN}.`,
+    `Hard stops (preflight, baseline-ratcheted): CRAP >= ${GATE_STOPS.coreCrapStop} (src/core, packages/core, packages/protocol, packages/runtime/registry) · CC >= ${GATE_STOPS.watchlistCcStop} (packages/app-shell + runtime seams beyond the registry). Pre-commit warns at CC >= ${PRECOMMIT_CC_WARN}.`,
   );
   lines.push('');
   lines.push('| file | function | cc | cov | crap | band | in-PR |');

@@ -50,6 +50,10 @@ export default defineConfig({
       'packages/core/src/**/*.test.{ts,tsx}',
       'packages/protocol/src/**/*.test.{ts,tsx}',
       'packages/app-shell/src/**/*.test.{ts,tsx}',
+      // packages/runtime (#221): tests live under test/<seam>/ per the
+      // ticket's owned paths — deterministic real-filesystem unit tests
+      // (temp dirs, real fsync/rename), no servers, no process lanes yet.
+      'packages/runtime/test/**/*.test.{ts,tsx}',
       // Behavior-contract schema validators (#217, directive from B1's
       // review): the schemas are pure zod over frozen fixtures — the unit
       // doctrine's home, no browser needed. The corpus bytes stay owned by
@@ -73,11 +77,19 @@ export default defineConfig({
       // protocol schemas (packages/protocol since #220 — pure zod + pure
       // helpers with colocated unit tests) plus the CRAP tooling layer
       // itself (src/core — complexity + crap, the only src/ survivors of
-      // the retirement gate) — metric honesty, wayfinder #55. The
-      // integration tiers (src/node, src/client) are deleted; no watchlist
-      // tier exists under src/ anymore.
+      // the retirement gate), and the registry persistence
+      // (packages/runtime/registry since #221 — deterministic unit tests
+      // over real temp directories; later runtime seams join their own
+      // coverage-tier decisions in their own lanes) — metric honesty,
+      // wayfinder #55. The integration tiers (src/node, src/client) are
+      // deleted; no watchlist tier exists under src/ anymore.
       provider: 'v8',
-      include: ['src/core/**', 'packages/core/**', 'packages/protocol/**'],
+      include: [
+        'src/core/**',
+        'packages/core/**',
+        'packages/protocol/**',
+        'packages/runtime/registry/**',
+      ],
       reporter: ['json'],
       reportsDirectory: 'coverage',
     },
