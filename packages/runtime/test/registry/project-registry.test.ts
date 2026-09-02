@@ -3,7 +3,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ProjectKey } from '@wojciechpiskorz/astroix-protocol';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createProjectRegistry, type RegistryResult } from '../../registry/project-registry';
+import {
+  createProjectRegistry,
+  type RegistryResult,
+  type SummariesResult,
+} from '../../registry/project-registry';
 import { LAST_KNOWN_GOOD_FILE, QUARANTINE_FILE, REGISTRY_FILE } from '../../registry/store';
 
 /**
@@ -38,7 +42,7 @@ async function modeOf(path: string): Promise<number> {
   return (await stat(path)).mode & 0o777;
 }
 
-function expectFailure(result: RegistryResult, code: string): void {
+function expectFailure(result: RegistryResult | SummariesResult, code: string): void {
   expect(result).toEqual({ ok: false, code, message: expect.any(String) });
 }
 
@@ -122,6 +126,28 @@ describe('first boot and registration', () => {
     expect(registry.snapshot().records).toHaveLength(0);
   });
 
+  it('rejects a defaulted display name that fails the guard — a pathological basename fails closed', async () => {
+    const registryDir = await makeRegistryDir();
+    const base = await makeProjectRoot('pathological');
+    // `port 4314 open` is a legal POSIX basename, so the root itself is
+    // registrable — but its defaulted display name carries a disclosure
+    // shape, and identity.ts's rule is fail-closed, never cosmetic repair.
+    const root = join(base, 'port 4314 open');
+    await mkdir(root);
+    const registry = await createProjectRegistry(registryDir);
+    expectFailure(await registry.execute({ kind: 'register', root }), 'invalid-display-name');
+    expect(registry.snapshot().records).toHaveLength(0);
+  });
+
+  it('adopts a valid explicit display name on a fresh registration', async () => {
+    const registryDir = await makeRegistryDir();
+    const root = await makeProjectRoot('chosen');
+    const registry = await createProjectRegistry(registryDir);
+    const result = await registry.execute({ kind: 'register', root, displayName: 'chosen-name' });
+    expect(result.ok && result.kind === 'registered' && !result.existed).toBe(true);
+    expect(registry.snapshot().records[0]?.displayName).toBe('chosen-name');
+  });
+
   it('serializes overlapping mutations through the single document', async () => {
     const registryDir = await makeRegistryDir();
     const rootA = await makeProjectRoot('a');
@@ -150,6 +176,20 @@ describe('alias dedupe and key rotation', () => {
       displayName: 'ignored-explicit-name',
     });
     expect(aliased).toEqual({ ...first, existed: true });
+    expect(registry.snapshot().records).toHaveLength(1);
+  });
+
+  it('rejects an invalid explicit displayName even on the dedupe path', async () => {
+    const registryDir = await makeRegistryDir();
+    const root = await makeProjectRoot('dedupe-guard');
+    const registry = await createProjectRegistry(registryDir);
+    expect((await registry.execute({ kind: 'register', root })).ok).toBe(true);
+    // Silently discarding the invalid name would mask a caller input error
+    // the rest of the API rejects; a VALID name just stays ignored above.
+    expectFailure(
+      await registry.execute({ kind: 'register', root, displayName: 'see /Users/leak' }),
+      'invalid-display-name',
+    );
     expect(registry.snapshot().records).toHaveLength(1);
   });
 
@@ -478,31 +518,13 @@ describe('close', () => {
     // The snapshot stays readable — it is in-memory truth, not a handle.
     expect(registry.snapshot().records).toHaveLength(1);
   });
-});
 
-it('register rejects an invalid explicit displayName even on the dedupe path', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'astroix-registry-'));
-  const project = join(dir, 'site');
-  await mkdir(project);
-  const registry = await createProjectRegistry(dir);
-  const first = await registry.execute({ kind: 'register', root: project });
-  expect(first.ok).toBe(true);
-  const dup = await registry.execute({
-    kind: 'register',
-    root: project,
-    displayName: 'see /Users/leak',
+  it('fences projectSummaries — no post-close filesystem access', async () => {
+    const registryDir = await makeRegistryDir();
+    const root = await makeProjectRoot('close-summaries');
+    const registry = await createProjectRegistry(registryDir);
+    await registry.execute({ kind: 'register', root });
+    await registry.close();
+    expectFailure(await registry.projectSummaries(), 'closed');
   });
-  expect(dup).toMatchObject({ ok: false, code: 'invalid-display-name' });
-  await registry.close();
-});
-
-it('projectSummaries refuses once closed — no post-close filesystem access', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'astroix-registry-'));
-  const project = join(dir, 'site');
-  await mkdir(project);
-  const registry = await createProjectRegistry(dir);
-  await registry.execute({ kind: 'register', root: project });
-  await registry.close();
-  const summaries = await registry.projectSummaries();
-  expect(summaries).toMatchObject({ ok: false, code: 'closed' });
 });

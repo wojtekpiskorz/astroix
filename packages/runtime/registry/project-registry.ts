@@ -91,10 +91,10 @@ const FAILURE_MESSAGES: Record<RegistryErrorCode, string> = {
   closed: 'the registry is closed',
 };
 
-/** Summaries are Result-shaped for one reason: the closed fence. */
+/** Summaries are Result-shaped for exactly one failure: the closed fence. */
 export type SummariesResult =
   | { ok: true; summaries: readonly ProjectSummary[] }
-  | { ok: false; code: RegistryErrorCode; message: string };
+  | { ok: false; code: 'closed'; message: string };
 
 export type RegistryResult =
   | { ok: true; kind: 'registered'; record: RegistryRecordView; existed: boolean }
@@ -221,20 +221,21 @@ async function register(
   // Alias resolution (ADR-0006 §1): a root symlink or case alias of an
   // existing record IS that record — the registration neither duplicates
   // nor silently renames; an explicit displayName is ignored in favor of
-  // the rename command.
-  // an EXPLICIT name is validated even on the dedupe path — silently
-  // discarding an invalid one would mask a caller input error the rest
-  // of the API rejects (valid explicit names stay ignored on dedupe)
-  const explicitName = command.displayName === undefined ? null : command.displayName;
-  if (explicitName !== null && !sanitizedTextSchema.safeParse(explicitName).success) {
+  // the rename command. An EXPLICIT name is still validated first —
+  // silently discarding an invalid one would mask a caller input error
+  // the rest of the API rejects (a valid name just stays ignored on
+  // dedupe).
+  if (
+    command.displayName !== undefined &&
+    !sanitizedTextSchema.safeParse(command.displayName).success
+  ) {
     return failure('invalid-display-name');
   }
   const existing = state.document.records.find((r) => r.canonicalRoot === canonicalRoot);
   if (existing !== undefined) {
     return { ok: true, kind: 'registered', record: existing, existed: true };
   }
-  const displayName =
-    command.displayName === undefined ? defaultDisplayName(canonicalRoot) : command.displayName;
+  const displayName = command.displayName ?? defaultDisplayName(canonicalRoot);
   if (!sanitizedTextSchema.safeParse(displayName).success) {
     return failure('invalid-display-name');
   }
@@ -420,10 +421,6 @@ function findByKey(state: RegistryState, projectKey: ProjectKey): RegistryRecord
  * that has gone missing stays visible as `unavailable` until its record
  * is explicitly removed; availability says whether, never why.
  */
-function summariesFailure(): SummariesResult {
-  return { ok: false, code: 'closed', message: 'the registry is closed' };
-}
-
 async function projectSummaries(state: RegistryState): Promise<SummariesResult> {
   const summaries = await Promise.all(
     state.document.records.map(async (record) => {
@@ -438,6 +435,11 @@ async function projectSummaries(state: RegistryState): Promise<SummariesResult> 
     }),
   );
   return { ok: true, summaries };
+}
+
+/** The closed fence's answer — the one failure summaries can be. */
+function summariesFailure(): SummariesResult {
+  return { ok: false, code: 'closed', message: FAILURE_MESSAGES.closed };
 }
 
 async function isAvailable(canonicalRoot: string): Promise<boolean> {
