@@ -38,7 +38,12 @@ import type { FunctionComplexity } from './complexity';
  * revision/invalidation/cleanup state machine + typed contracts + the
  * IPC serving loop) join the covered tier; the real IO glue
  * (composition-runtime.ts, worker-child.ts) is watchlist like the
- * adapter's composition (#230). A
+ * adapter's composition (#230). The plane supervision + managed-astro
+ * seams since #231 — the exact-child spawn discipline, the minimal
+ * child environment, the close-report classifier, and the managed
+ * dev-server spawn plan — are covered; their real process IO
+ * (plane-supervisor.ts, the dev-server readiness probe) is watchlist
+ * like the plane's other IO glue (#231). A
  * watchlist row has `coverage === null` and `crap === null`, and its gate
  * metric is CC. (The `src/node` + `src/client` watchlist tiers were
  * deleted with their functions at the retirement gate, #215.)
@@ -174,9 +179,17 @@ function isCoreFile(relPath: string): boolean {
   // the adapter's composition server) and worker-child.ts (the forked
   // entry) — is watchlist like the adapter's composition.ts: its truth is
   // the real-install certification suite and the packaged runtime.
+  // The plane supervision + managed-astro seams since #231: the pure
+  // decision logic (exact-child plans, the minimal child environment,
+  // the close-report classifier, the managed dev-server spawn plan) is
+  // covered (deterministic units + the real-child supervision lane); the
+  // real process IO — plane-supervisor.ts (spawns, signals, reaps) and
+  // the dev-server readiness probe — is watchlist for the same reason.
   const projectPlaneWatchlist =
     relPath === 'packages/runtime/project-plane/composition/composition-runtime.ts' ||
-    relPath === 'packages/runtime/project-plane/worker/worker-child.ts';
+    relPath === 'packages/runtime/project-plane/worker/worker-child.ts' ||
+    relPath === 'packages/runtime/project-plane/supervision/plane-supervisor.ts' ||
+    relPath === 'packages/runtime/project-plane/managed-astro/dev-server.ts';
   return (
     (relPath.startsWith('src/core/') ||
       relPath.startsWith('packages/core/') ||
@@ -185,7 +198,7 @@ function isCoreFile(relPath: string): boolean {
       relPath.startsWith('packages/runtime/kernel-lease/') ||
       relPath.startsWith('packages/runtime/private-boot/') ||
       relPath.startsWith('packages/runtime/edit-authority/') ||
-      (relPath.startsWith('packages/runtime/project-plane/worker/') && !projectPlaneWatchlist) ||
+      (relPath.startsWith('packages/runtime/project-plane/') && !projectPlaneWatchlist) ||
       (relPath.startsWith('packages/runtime/astro-project-adapter/') && !adapterWatchlist)) &&
     !relPath.startsWith('packages/runtime/astro-project-adapter/certification/')
   );
