@@ -51,9 +51,24 @@ export function isProjectPageRoute(entry: RouteMetadataEntry): boolean {
  * Prerendered single-param project page routes are the payload's `renders`
  * space — on-demand routes' `getStaticPaths` is dead code at render, and
  * multi-param or static routes are outside the supported fixture contract.
+ * This is the METADATA-side statement of the renders-space rule; the
+ * payload-side statement is {@link carriesRenders} and the law is
+ * `routesFixtureSchema`'s `renders` superRefine
+ * (`e2e/behavior-contracts/schema/inspection-contract.ts`) — the three
+ * move in lockstep, bound by the focused tests.
  */
 export function isEnumeratable(entry: RouteMetadataEntry): boolean {
   return isProjectPageRoute(entry) && entry.prerender && entry.params.length === 1;
+}
+
+/**
+ * The PAYLOAD-side statement of the renders-space rule; the law is
+ * `routesFixtureSchema`'s `renders` superRefine
+ * (`e2e/behavior-contracts/schema/inspection-contract.ts`), and the
+ * metadata-side statement is {@link isEnumeratable}.
+ */
+export function carriesRenders(info: RouteInfo): boolean {
+  return info.params.length === 1 && info.rendering === 'prerendered';
 }
 
 /** Projects seam metadata to the typed payload — project page routes, seam order, no `renders` yet. */
@@ -75,7 +90,8 @@ export function toRouteInfos(metadata: readonly RouteMetadataEntry[]): readonly 
  * Joins enumeration results into the payload: an entry sets `renders` on
  * its route (`[]` is knowably-dead truth, not unknown); a missing entry
  * means that route's enumeration did not positively succeed — `renders`
- * comes off. Routes outside the renders space never carry it.
+ * comes off. Routes outside the renders space
+ * ({@link carriesRenders}) never carry it.
  */
 export function withRenders(
   infos: readonly RouteInfo[],
@@ -83,7 +99,7 @@ export function withRenders(
 ): readonly RouteInfo[] {
   return infos.map((info) => {
     const values = renders.get(info.pattern);
-    if (values === undefined || !(info.params.length === 1 && info.rendering === 'prerendered')) {
+    if (values === undefined || !carriesRenders(info)) {
       return omitRenders(info);
     }
     return { ...info, renders: [...values] };

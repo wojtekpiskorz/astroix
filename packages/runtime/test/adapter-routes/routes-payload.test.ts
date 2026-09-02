@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
+  carriesRenders,
   isEnumeratable,
   isProjectPageRoute,
   toRouteInfos,
@@ -73,6 +74,25 @@ describe('the renders space', () => {
     ];
     for (const [overrides, expected] of cases) {
       expect(isEnumeratable(metadataEntry(overrides))).toBe(expected);
+    }
+  });
+
+  it('carriesRenders states the same rule once on the payload side, bound to the metadata side', () => {
+    // The payload-side predicate over the projected fixture routes: the
+    // two blog patterns carry renders, the static index does not.
+    const infos = toRouteInfos(fixtureRouteMetadata());
+    expect(infos.map((info) => [info.pattern, carriesRenders(info)])).toEqual([
+      ['/', false],
+      ['/blog/[slug]', true],
+      ['/blog/[...slug]', true],
+    ]);
+    // The binding: for every project page route, the metadata-side and
+    // payload-side statements of the renders-space rule agree — the frozen
+    // schema's superRefine is the law both restate.
+    const payloadSide = new Map(infos.map((info) => [info.pattern, carriesRenders(info)]));
+    for (const entry of fixtureRouteMetadata()) {
+      if (!isProjectPageRoute(entry)) continue;
+      expect(isEnumeratable(entry)).toBe(payloadSide.get(entry.pattern));
     }
   });
 });
