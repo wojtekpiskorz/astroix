@@ -31,11 +31,11 @@ export const SECURITY_RELEVANT_HEADERS: readonly string[] = [
   'x-astroix-client',
 ];
 
-/** One request's header evidence, built from the raw pairs: counts and the single value per name. */
+/** One request's header evidence, built from the raw pairs: counts and the last value per name. */
 export interface HeaderEvidence {
   /** How many raw pairs carried each security-relevant name (lowercased). */
   readonly counts: Readonly<Record<string, number>>;
-  /** The last value of each security-relevant name that appeared exactly once. */
+  /** The last value of each security-relevant name (last-wins) — consult `counts` before trusting it. */
   readonly values: Readonly<Record<string, string>>;
 }
 
