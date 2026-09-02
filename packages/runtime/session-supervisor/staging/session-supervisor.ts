@@ -10,7 +10,6 @@ import {
   createHostCapabilityGrants,
   type HostCapabilityGrants,
 } from '../../api/http/host-capability.ts';
-import type { SupervisionCloseReport } from '../../project-plane/supervision/close-report.ts';
 import {
   shutdownFailure,
   WorkerRejectionError,
@@ -22,6 +21,7 @@ import {
   type AttemptHooks,
   createActivationAttempt,
   FAILURE_MESSAGES,
+  neverSpawnedReport,
   rollbackFailureCategory,
 } from './activation-attempt.ts';
 import { mintRuntimeEpoch } from './runtime-epoch.ts';
@@ -222,29 +222,39 @@ export function createSessionSupervisor(options: SessionSupervisorOptions): Sess
    * it is a crash — no restart, ever — and the crashed session's
    * authority dies with it (its client bindings and its project host
    * capability; authority never outlives the session that minted it).
+   * Convergence discipline: a REJECTED close observation is still a
+   * crash — both branches run the same retirement, so a misbehaving run
+   * can neither hang the observer nor surface an unhandled rejection
+   * (the real facade's closed resolves by contract; the rejection arm is
+   * the belt, not the assumption).
    */
   const observeActiveClose = (entry: ActiveEntry): void => {
-    void entry.run.closed.then((report) => {
+    const crashed = (category: SessionFailure['category']): void => {
       if (active !== entry) return; // replaced already: authority moved, the report is history
       active = null;
       clients.revokeSession(entry.ref);
       hostCapabilities.revoke({ host: 'project', projectKey: entry.projectKey });
-      const category: SessionFailure['category'] =
-        report.reason === 'startup-timeout' ? 'startup-timeout' : 'crash';
       lastFailure = { category, message: FAILURE_MESSAGES[category] };
       notify();
-    });
+    };
+    void entry.run.closed.then(
+      (report) => {
+        crashed(report.reason === 'startup-timeout' ? 'startup-timeout' : 'crash');
+      },
+      () => {
+        crashed('crash');
+      },
+    );
   };
 
   const hooks: AttemptHooks = {
     commitCandidate: (ref) => {
       const ctx = attemptCtx;
-      if (
-        ctx === null ||
-        ctx.ref.runtimeEpoch !== ref.runtimeEpoch ||
-        ctx.ref.generation !== ref.generation
-      ) {
-        return; // fail closed: only the live attempt commits
+      if (ctx === null || !sameSession(ctx.ref, ref)) {
+        // Fail closed AND loud: the attempt machine refuses `not-current`
+        // on this answer — the two machines can never diverge silently
+        // (unreachable by construction; defense-in-depth).
+        return false;
       }
       // The committing phase is observable: the snapshot reports the
       // attempt as `committing` from here until the swap completes.
@@ -257,7 +267,8 @@ export function createSessionSupervisor(options: SessionSupervisorOptions): Sess
         // bindings and its project host capability — and its run's
         // teardown continues in the background (anchored; a replaced
         // session's report is internal history, the completion lane F7
-        // reports post-commit outcomes).
+        // reports post-commit outcomes — and a rejecting stop stays
+        // anchored noise, never an unhandled one).
         clients.revokeSession(outgoing.ref);
         hostCapabilities.revoke({ host: 'project', projectKey: outgoing.projectKey });
         outgoing.run.stop().catch(() => {});
@@ -267,6 +278,7 @@ export function createSessionSupervisor(options: SessionSupervisorOptions): Sess
       hostCapabilities.mint({ host: 'project', projectKey: entry.projectKey });
       observeActiveClose(entry);
       notify();
+      return true;
     },
     attemptEnded: (end) => {
       if (attemptCtx === null) return;
@@ -319,23 +331,19 @@ export function createSessionSupervisor(options: SessionSupervisorOptions): Sess
   };
 }
 
+/**
+ * Same-session predicate (the codebase idiom, cf. api-dispatch.ts /
+ * canonical-bounds.ts): a `SessionRef` equals another exactly when both
+ * its epoch and its generation do — never identity, never partial.
+ */
+function sameSession(left: SessionRef, right: SessionRef): boolean {
+  return left.runtimeEpoch === right.runtimeEpoch && left.generation === right.generation;
+}
+
 /** The run a throwing seam converges to: never spawned, explicitly complete (the E8 never-spawned law). */
 function neverStartedRun(): ProjectRun {
   const ready = Promise.reject(new ProjectRunBootError('launch-failed'));
-  const report: SupervisionCloseReport = {
-    reason: 'cancelled',
-    outcome: 'complete',
-    failures: [],
-    accounting: {
-      workerReportReceived: false,
-      workerCleanupComplete: true,
-      workerReaped: true,
-      managedAstroReaped: true,
-      probesSettled: true,
-      killEscalations: [],
-    },
-  };
-  const closed = Promise.resolve(report);
+  const closed = Promise.resolve(neverSpawnedReport());
   return {
     ready,
     inspect: () => Promise.reject(new WorkerRejectionError(shutdownFailure())),

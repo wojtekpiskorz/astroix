@@ -134,6 +134,15 @@ export interface SessionClients {
   counts(): { readonly editor: number; readonly diagnostic: number };
 }
 
+/**
+ * Same-session predicate (the codebase idiom, cf. api-dispatch.ts /
+ * canonical-bounds.ts): a `SessionRef` equals another exactly when both
+ * its epoch and its generation do — never identity, never partial.
+ */
+function sameSession(left: SessionRef, right: SessionRef): boolean {
+  return left.runtimeEpoch === right.runtimeEpoch && left.generation === right.generation;
+}
+
 /** Builds one registry — the supervisor (or its composition) owns its lifetime. */
 export function createSessionClients(): SessionClients {
   const live = new Map<string, ClientBindingRecord>();
@@ -148,18 +157,24 @@ export function createSessionClients(): SessionClients {
     return null;
   };
 
+  /** The live count per role — `bind`'s cap check and `counts` share the one walk (F2's client-bindings parallel). */
+  const countByRole = (): { editor: number; diagnostic: number } => {
+    let editor = 0;
+    let diagnostic = 0;
+    for (const record of live.values()) {
+      if (record.role === 'editor') editor += 1;
+      else diagnostic += 1;
+    }
+    return { editor, diagnostic };
+  };
+
   return {
     bind: (input) => {
-      let editors = 0;
-      let diagnostics = 0;
-      for (const record of live.values()) {
-        if (record.role === 'editor') editors += 1;
-        else diagnostics += 1;
-      }
-      if (input.role === 'editor' && editors >= 1) {
+      const counts = countByRole();
+      if (input.role === 'editor' && counts.editor >= 1) {
         return { kind: 'refused', reason: 'editor-already-bound' };
       }
-      if (input.role === 'diagnostic' && diagnostics >= 3) {
+      if (input.role === 'diagnostic' && counts.diagnostic >= 3) {
         return { kind: 'refused', reason: 'diagnostics-full' };
       }
       const capability = randomBytes(LIMITS.requestCapabilityBits / 8).toString('hex');
@@ -180,10 +195,7 @@ export function createSessionClients(): SessionClients {
       if (record.document.navigationId !== request.document.navigationId) {
         return { kind: 'rejected', reason: 'stale-navigation' };
       }
-      if (
-        record.sessionRef.runtimeEpoch !== request.sessionRef.runtimeEpoch ||
-        record.sessionRef.generation !== request.sessionRef.generation
-      ) {
+      if (!sameSession(record.sessionRef, request.sessionRef)) {
         return { kind: 'rejected', reason: 'stale-session' };
       }
       if (request.role === 'editor' && record.role !== 'editor') {
@@ -210,10 +222,7 @@ export function createSessionClients(): SessionClients {
     },
     revokeSession: (sessionRef) => {
       for (const [capability, record] of live) {
-        if (
-          record.sessionRef.runtimeEpoch === sessionRef.runtimeEpoch &&
-          record.sessionRef.generation === sessionRef.generation
-        ) {
+        if (sameSession(record.sessionRef, sessionRef)) {
           live.delete(capability);
         }
       }
@@ -221,14 +230,6 @@ export function createSessionClients(): SessionClients {
     revoke: (capability) => {
       live.delete(capability);
     },
-    counts: () => {
-      let editor = 0;
-      let diagnostic = 0;
-      for (const record of live.values()) {
-        if (record.role === 'editor') editor += 1;
-        else diagnostic += 1;
-      }
-      return { editor, diagnostic };
-    },
+    counts: () => countByRole(),
   };
 }

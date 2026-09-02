@@ -36,6 +36,15 @@ export function captureMenuAction(input: {
 }
 
 /**
+ * Same-session predicate (the codebase idiom, cf. api-dispatch.ts /
+ * canonical-bounds.ts): a `SessionRef` equals another exactly when both
+ * its epoch and its generation do — never identity, never partial.
+ */
+function sameSession(left: SessionRef, right: SessionRef): boolean {
+  return left.runtimeEpoch === right.runtimeEpoch && left.generation === right.generation;
+}
+
+/**
  * Executes one captured action against the currently active session (the
  * caller reads it off the supervisor snapshot): the captured pair must be
  * the exact current pair — epoch and generation both — or the action is
@@ -50,10 +59,7 @@ export function executeMenuAction(
   if (current === null) {
     return { kind: 'rejected', reason: 'no-active-session' };
   }
-  if (
-    envelope.sessionRef.runtimeEpoch !== current.runtimeEpoch ||
-    envelope.sessionRef.generation !== current.generation
-  ) {
+  if (!sameSession(envelope.sessionRef, current)) {
     return { kind: 'rejected', reason: 'stale-session' };
   }
   return { kind: 'accepted', sessionRef: current };

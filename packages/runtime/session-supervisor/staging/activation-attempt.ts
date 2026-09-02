@@ -58,7 +58,7 @@ export class ActivationFailedError extends Error {
 }
 
 /** Why `commit`, `rollback`, or `cancel` refused — structured, never free text. */
-export type StageRejectionCode = 'not-ready' | 'settled' | 'committing';
+export type StageRejectionCode = 'not-ready' | 'settled' | 'committing' | 'not-current';
 
 /** The structured rejection a staged-candidate method refuses with. */
 export class StageRejectedError extends Error {
@@ -72,6 +72,7 @@ const STAGE_REJECTION_MESSAGES: Record<StageRejectionCode, string> = {
   'not-ready': 'the candidate has not completed readiness',
   settled: 'the activation attempt has already ended',
   committing: 'the candidate is already committing',
+  'not-current': 'the supervisor no longer holds this attempt as the live one',
 };
 
 /** What a successful commit returns: the reference that became active. */
@@ -111,9 +112,12 @@ export interface AttemptHooks {
    * The commit linearization, called synchronously inside `commit()` after
    * the attempt's own guards passed: the supervisor swaps authority — the
    * one irreversible instant staging owns the state side of; F6 (#238)
-   * owns the ordered external handoff around this call.
+   * owns the ordered external handoff around this call. Returns whether
+   * THIS attempt was the live one and the swap ran; `false` is the loud
+   * divergence signal (the attempt then refuses `not-current` instead of
+   * reporting a success the supervisor never performed).
    */
-  commitCandidate(ref: SessionRef): void;
+  commitCandidate(ref: SessionRef): boolean;
   /**
    * The attempt ended without committing (startup failure, rollback, or
    * cancel): the supervisor updates its snapshot synchronously here;
@@ -194,14 +198,29 @@ export function createActivationAttempt(input: {
     settleClosed(outcome);
   };
 
-  /** Stops the candidate run — the one idempotent stop — and settles `closed` from its report. */
+  /**
+   * Stops the candidate run — the one idempotent stop — and settles
+   * `closed` from its report. Convergence discipline (the E8 stop law,
+   * held at every settlement site): a rejecting stop settles and answers
+   * the never-spawned report instead of hanging `closed` or surfacing an
+   * unhandled rejection. The real facade's stop converges by contract —
+   * the catch is the belt for a misbehaving run, not a load-bearing
+   * assumption.
+   */
   const stopCandidate = (
     settle: (report: SupervisionCloseReport) => void,
-  ): Promise<SupervisionCloseReport> => {
-    const stopping = run.stop();
-    void stopping.then(settle);
-    return stopping;
-  };
+  ): Promise<SupervisionCloseReport> =>
+    run.stop().then(
+      (report) => {
+        settle(report);
+        return report;
+      },
+      () => {
+        const report = neverSpawnedReport();
+        settle(report);
+        return report;
+      },
+    );
 
   const candidate: StagedCandidate = {
     ref,
@@ -214,10 +233,20 @@ export function createActivationAttempt(input: {
       }
       phase = 'committing';
       // The one synchronous linearization: the supervisor swaps authority
-      // inside this call; by the time it returns the candidate IS the
-      // active session and the attempt is spent.
-      hooks.commitCandidate(ref);
+      // inside this call. Its answer is the divergence guard — a refusal
+      // must be loud (a structured `not-current` rejection, the attempt
+      // spent), never a success the supervisor never performed.
+      const linearized = hooks.commitCandidate(ref);
       phase = 'ended';
+      if (!linearized) {
+        // The orphaned candidate run is still stopped — nobody owns it
+        // now — and `closed` converges on the never-spawned report: the
+        // divergence is loud (the structured refusal below) and leaves
+        // nothing hanging and nothing unhandled.
+        void stopCandidate(() => {});
+        settleOutcome({ kind: 'cancelled', report: neverSpawnedReport() });
+        return Promise.reject(new StageRejectedError('not-current'));
+      }
       const result: CommitResult = { committed: ref };
       settleOutcome({ kind: 'committed', ref });
       return Promise.resolve(result);
@@ -291,8 +320,14 @@ export function createActivationAttempt(input: {
   return attempt;
 }
 
-/** The report a candidate that never produced a usable stop answer converges to. */
-function neverSpawnedReport(): SupervisionCloseReport {
+/**
+ * The never-spawned close report — nothing existed, so nothing failed to
+ * clean (the E8 never-spawned law). One helper for every convergence
+ * site in this lane: a rejecting stop, a rejected close observation, a
+ * disowned candidate, and a throwing launch seam all converge HERE
+ * rather than each hand-rolling the literal.
+ */
+export function neverSpawnedReport(): SupervisionCloseReport {
   return {
     reason: 'cancelled',
     outcome: 'complete',

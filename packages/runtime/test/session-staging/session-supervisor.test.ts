@@ -6,10 +6,17 @@ import {
 } from '@wojciechpiskorz/astroix-protocol';
 import { describe, expect, it } from 'vitest';
 import { createHostCapabilityGrants } from '../../api/http/host-capability.ts';
+import type { SupervisionCloseReport } from '../../project-plane/supervision/close-report.ts';
+import type { ProjectRun } from '../../project-runtime/project-runtime.ts';
 import {
   type ClientDocument,
   createSessionClients,
 } from '../../session-supervisor/clients/session-clients.ts';
+import {
+  type AttemptHooks,
+  createActivationAttempt,
+  neverSpawnedReport,
+} from '../../session-supervisor/staging/activation-attempt.ts';
 import {
   type ActivationAttempt,
   ActivationFailedError,
@@ -23,6 +30,7 @@ import {
   candidateRuntime,
   completeReport,
   type FakeRun,
+  fakeRun,
   flush,
   PROJECT_A,
   PROJECT_B,
@@ -645,6 +653,136 @@ describe('authority retirement — authority never outlives its session', () => 
         sessionRef: second.ref,
       }),
     ).toEqual({ kind: 'rejected', reason: 'no-binding' });
+  });
+});
+
+describe('defensive convergence — misbehaving runs and disowned candidates', () => {
+  /** A run whose stop() always rejects with hostile text — the convergence belt's adversary. */
+  function rejectingStopRun(): ProjectRun {
+    return {
+      ready: Promise.resolve(),
+      inspect: () => Promise.reject(new StageRejectedError('settled')),
+      subscribe: () => () => {},
+      stop: () => Promise.reject(new Error('stop exploded at /Users/secret/root (pid 4242)')),
+      closed: new Promise<SupervisionCloseReport>(() => {}),
+    };
+  }
+
+  /** Hooks that answer every callback without supervisor state — the attempt machine alone. */
+  const bareHooks = {
+    commitCandidate: () => true,
+    attemptEnded: () => {},
+  } satisfies AttemptHooks;
+
+  it('a rejecting stop converges to the never-spawned report: rollback answers it, closed settles, nothing unhandled', async () => {
+    const attempt = createActivationAttempt({
+      ref: { runtimeEpoch: 'epoch-236', generation: 1 },
+      run: rejectingStopRun(),
+      hooks: bareHooks,
+    });
+    const candidate = await attempt.ready;
+
+    const report = await candidate.rollback('drain-conflict');
+    expect(report).toEqual(neverSpawnedReport());
+    expect(report).toMatchObject({ reason: 'cancelled', outcome: 'complete' });
+    const outcome = await attempt.closed;
+    expect(outcome).toEqual({
+      kind: 'rolled-back',
+      reason: 'drain-conflict',
+      report: neverSpawnedReport(),
+    });
+  });
+
+  it('the cancel paths share the same convergence — a rejecting stop never hangs closed', async () => {
+    const attempt = createActivationAttempt({
+      ref: { runtimeEpoch: 'epoch-236', generation: 1 },
+      run: rejectingStopRun(),
+      hooks: bareHooks,
+    });
+    // cancel before any readiness microtask runs: the starting branch
+    const cancelling = attempt.cancel('user');
+    const report = await cancelling;
+    expect(report).toEqual(neverSpawnedReport());
+    const outcome = await attempt.closed;
+    expect(outcome).toEqual({ kind: 'cancelled', report: neverSpawnedReport() });
+
+    // and the staged branch: readiness settled first, cancel IS the rollback path
+    const second = createActivationAttempt({
+      ref: { runtimeEpoch: 'epoch-236', generation: 2 },
+      run: rejectingStopRun(),
+      hooks: bareHooks,
+    });
+    await second.ready; // the staged candidate exists; cancelling it is the rollback path
+    const cancelled = await second.cancel('user');
+    expect(cancelled).toEqual(neverSpawnedReport());
+    const secondOutcome = await second.closed;
+    expect(secondOutcome).toEqual({
+      kind: 'rolled-back',
+      reason: 'cancelled',
+      report: neverSpawnedReport(),
+    });
+  });
+
+  it('a rejected close observation still converges to the crash retirement — nothing hangs, nothing unhandled', async () => {
+    let rejectClosed: (error: Error) => void = () => {};
+    const closed = new Promise<SupervisionCloseReport>((_, reject) => {
+      rejectClosed = reject;
+    });
+    const run: ProjectRun = {
+      ready: Promise.resolve(),
+      inspect: () => Promise.reject(new StageRejectedError('settled')),
+      subscribe: () => () => {},
+      stop: () => closed,
+      closed,
+    };
+    const supervisor = createSessionSupervisor({
+      startCandidate: () => run,
+      runtimeEpoch: 'epoch-236',
+    });
+
+    const begun = supervisor.begin(PROJECT_A);
+    if (begun.kind !== 'begun') throw new Error('unreachable');
+    const candidate = await begun.attempt.ready;
+    await candidate.commit();
+    expect(supervisor.snapshot().active?.ref.generation).toBe(1);
+
+    // the observer is attached; a REJECTED close is still a crash
+    rejectClosed(new Error('closed exploded at /Users/secret/root (pid 4242)'));
+    await flush();
+
+    const snapshot = supervisor.snapshot();
+    expect(snapshot.active).toBeUndefined();
+    expect(snapshot.lastFailure).toEqual({ category: 'crash', message: FAILURE_MESSAGES.crash });
+    expect(findDisclosure(JSON.stringify(snapshot))).toBeNull();
+  });
+
+  it('a supervisor that disowns the candidate gets a loud structured refusal, never a false success', async () => {
+    const run = fakeRun();
+    run.settleReady();
+    const attempt = createActivationAttempt({
+      ref: { runtimeEpoch: 'epoch-236', generation: 1 },
+      run: run.run,
+      hooks: {
+        ...bareHooks,
+        commitCandidate: () => false, // the divergence: the supervisor no longer holds this attempt
+      },
+    });
+    const candidate = await attempt.ready;
+
+    const refusal = await rejectionOf(candidate.commit());
+    if (!(refusal instanceof StageRejectedError)) {
+      throw new Error(`expected StageRejectedError, observed: ${String(refusal)}`);
+    }
+    expect(refusal.code).toBe('not-current');
+
+    // the attempt is spent and closed converges — nothing hangs; the orphaned run was stopped
+    const outcome = await attempt.closed;
+    expect(outcome).toEqual({ kind: 'cancelled', report: neverSpawnedReport() });
+    expect(run.stopCalls).toBe(1);
+
+    const again = await rejectionOf(candidate.rollback('drain-conflict'));
+    if (!(again instanceof StageRejectedError)) throw new Error('expected StageRejectedError');
+    expect(again.code).toBe('settled');
   });
 });
 
