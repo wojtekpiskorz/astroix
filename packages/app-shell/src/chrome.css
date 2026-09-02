@@ -2,12 +2,13 @@
  * T1 zero-build delivery (issue #2), load-bearing for the shadow DOM chrome:
  * `source(none)` disables Tailwind's auto source detection and the explicit
  * `@source` lines re-scope it to known sources (the sheet never scans the
- * host project or node_modules). `./` is the foundation package itself
- * (#218); the second line reaches the integration chrome that still
- * consumes this theme through styles.ts — it dies at the retirement gate
- * (ADR-0010), leaving `./` (plus what the Electron app-shell renderer adds)
- * as the sources. The compiled sheet is adopted on BOTH the document and
- * the shadow root through one constructed stylesheet (styles.ts).
+ * `./` is the foundation package itself (#218). The line that reached the
+ * integration chrome through styles.ts — and styles.ts itself — died at
+ * the retirement gate (#215, ADR-0010); `./` (plus what the Electron
+ * app-shell renderer adds) is the source set. The sheet's consumer today
+ * is the package's own presentation tests; the Electron renderer adopts
+ * it on BOTH the document and the shadow root through one constructed
+ * stylesheet when it lands (G/H lanes).
  */
 @import "tailwindcss" source(none);
 @source "./";
