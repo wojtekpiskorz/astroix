@@ -20,7 +20,9 @@
     "./kernel-lease": "./kernel-lease/kernel-lease.ts",
     "./private-boot": "./private-boot/control-plane-boot.ts",
     "./project-plane/composition": "./project-plane/composition/composition-runtime.ts",
-    "./project-plane/worker": "./project-plane/worker/project-worker.ts"
+    "./project-plane/worker": "./project-plane/worker/project-worker.ts",
+    "./project-plane/managed-astro": "./project-plane/managed-astro/dev-server.ts",
+    "./project-plane/supervision": "./project-plane/supervision/plane-supervisor.ts"
   },
   "sideEffects": false,
   "dependencies": {
