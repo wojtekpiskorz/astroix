@@ -63,7 +63,7 @@ export function tunnelRawUpgrade(input: RawUpgradeTunnelInput): void {
  * synthesized `101`.
  */
 export function respondRawAndClose(socket: Duplex, status: number): void {
-  const headers = astroixGeneratedHeaders(status);
+  const headers = astroixGeneratedHeaders();
   let head = `HTTP/1.1 ${status} ${statusPhrase(status)}\r\n`;
   for (const [name, value] of Object.entries(headers)) head += `${name}: ${value}\r\n`;
   socket.end(`${head}\r\n`);

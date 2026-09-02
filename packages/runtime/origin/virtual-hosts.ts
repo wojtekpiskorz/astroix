@@ -28,13 +28,12 @@ export const LAUNCHER_HOSTNAME = 'launcher.localhost';
 export const ASTROIX_GENERATED_HEADER = 'x-astroix-generated';
 
 /** The headers every listener-synthesized response carries — empty bodies, no details (ADR-0006 §7 output hygiene). */
-export function astroixGeneratedHeaders(status: number): Record<string, string> {
+export function astroixGeneratedHeaders(): Record<string, string> {
   return {
     'content-length': '0',
     'cache-control': 'no-store',
     connection: 'close',
     [ASTROIX_GENERATED_HEADER]: '1',
-    ...(status === 421 ? { 'misdirected-host': '1' } : {}),
   };
 }
 

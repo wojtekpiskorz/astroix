@@ -68,10 +68,7 @@ export function proxyHttpStream(input: HttpStreamProxyInput): void {
       input.response.destroy();
       return;
     }
-    input.response.writeHead(
-      STREAM_PROXY_FAILURE_STATUS,
-      astroixGeneratedHeaders(STREAM_PROXY_FAILURE_STATUS),
-    );
+    input.response.writeHead(STREAM_PROXY_FAILURE_STATUS, astroixGeneratedHeaders());
     input.response.end();
   });
   input.request.on('aborted', () => forwarded.destroy());
@@ -80,7 +77,7 @@ export function proxyHttpStream(input: HttpStreamProxyInput): void {
 
 /** Writes one listener-synthesized refusal: bare status, marker header, no details, connection closed. */
 export function sendGeneratedResponse(response: ServerResponse, status: number): void {
-  response.writeHead(status, astroixGeneratedHeaders(status));
+  response.writeHead(status, astroixGeneratedHeaders());
   response.end();
 }
 
