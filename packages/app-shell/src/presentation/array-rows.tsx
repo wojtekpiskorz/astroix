@@ -1,5 +1,5 @@
 import { Button } from '#components/ui/button.tsx';
-import type { FormFieldNode } from '../../../core/src/form-tree';
+import type { FormFieldNode } from './types';
 import { CheckboxWidget, EnumWidget, NumberWidget, StringWidget } from './value-widgets';
 
 /** One repeatable row's widget — same primitives as full-size fields. */

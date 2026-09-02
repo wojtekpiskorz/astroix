@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { parse, stringify } from 'yaml';
 import { Textarea } from '#components/ui/textarea.tsx';
-import type { FormFieldNode } from '../../../core/src/form-tree';
 import { ArrayRows } from './array-rows';
+import type { FormFieldNode } from './types';
 import { CheckboxWidget, EnumWidget, NumberWidget, StringWidget } from './value-widgets';
 
 /**

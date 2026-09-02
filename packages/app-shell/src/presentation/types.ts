@@ -1,4 +1,9 @@
 import type { FormFieldNode, ValidationIssueRecord } from '../../../core/src/form-tree';
+
+// the presentation surface's single deep-import site for core editing types —
+// D1's protocol lane repoints exactly this line, not five widget files (#219 r2)
+export type { FormFieldNode, ValidationIssueRecord };
+
 import type { IndexPayloadRecord } from '../../../core/src/matcher';
 
 /**

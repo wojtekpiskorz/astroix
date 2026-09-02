@@ -1,10 +1,10 @@
 import { useForm } from '@tanstack/react-form';
 import { Field, FieldError, FieldLabel, FieldLegend, FieldSet } from '#components/ui/field.tsx';
-import type { FormFieldNode } from '../../../core/src/form-tree';
 import { FieldWidget } from './field-widgets';
+import type { FormFieldNode } from './types';
 
 /**
- * The chrome's value draft: TanStack Form's store — raw paths hold the
+ * The app shell's value draft: TanStack Form's store — raw paths hold the
  * subtree as a parsed value; the YAML text itself lives in the raw widget's
  * local state (#74 serializes the store, never the text). The type is the
  * exact `useForm` return for a record draft (an instantiation-expression

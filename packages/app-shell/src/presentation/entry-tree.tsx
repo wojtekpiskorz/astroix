@@ -4,7 +4,7 @@ import type { ActiveEntryView, CollectionListingView } from './types';
 
 /**
  * The Content vertical's entry tree (#219, lane C2): the collections →
- * entries list extracted from the integration chrome's content sidebar as a
+ * entries list extracted from the integration-era content sidebar as a
  * prop-driven widget. The tree (nested ids under folders, flat ids bare,
  * #111), the active-entry highlight, and the unrouted-entry marker (#109 —
  * a legend for the click's navigational silence, never a behavior change)

@@ -1,11 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseEntryDraft } from '../../../core/src/entry-writer';
-import type { FormFieldNode } from '../../../core/src/form-tree';
 import { ContentForm } from './content-form';
 import { FieldWidget } from './field-widgets';
 import { editFixture, inspectionFixture } from './fixtures';
 import { mount, typeInto } from './mount';
-import type { ValidationIssueMap } from './types';
+import type { FormFieldNode, ValidationIssueMap } from './types';
 
 /**
  * The form-widget tests (#219, AC-5/6): the frozen B1 content-schemas,

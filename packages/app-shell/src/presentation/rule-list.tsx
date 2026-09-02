@@ -2,7 +2,7 @@ import type { RuleFileTargetView, RuleMatchView } from './types';
 
 /**
  * The rule list (#219, lane C2): the CSS vertical's inspection list,
- * extracted from the integration chrome as a prop-driven widget. The owner
+ * extracted from the integration-era app shell as a prop-driven widget. The owner
  * (adapter or replacement host) runs the matcher over the index payload
  * against its own selection and passes the positioned matches in — the
  * widget holds no payload, no canvas element, no store. Presentation shows
@@ -17,7 +17,7 @@ interface RuleListProps {
    * payload is still loading.
    */
   matches: readonly RuleMatchView[] | null;
-  /** Whether the chrome holds a canvas selection (presentation-only state). */
+  /** Whether the app shell holds a canvas selection (presentation-only state). */
   hasSelection: boolean;
   /**
    * Edit intent: a rule click assembles its file's target — every place that

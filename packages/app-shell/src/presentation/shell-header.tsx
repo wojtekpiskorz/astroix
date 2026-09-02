@@ -2,7 +2,7 @@ import { Button } from '#components/ui/button.tsx';
 
 /**
  * The app-shell header (#219, lane C2): the selection-state surface,
- * extracted from the integration chrome's header as a prop-driven widget.
+ * extracted from the integration-era header as a prop-driven widget.
  * Selection (the clicked canvas element's descriptor), select mode, and the
  * vertical gating all arrive as props — the store, the canvas machinery,
  * and the vertical state stay with the host.

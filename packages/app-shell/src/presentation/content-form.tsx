@@ -1,9 +1,8 @@
 import { useForm, useStore } from '@tanstack/react-form';
 import { useEffect, useRef } from 'react';
-import type { FormFieldNode } from '../../../core/src/form-tree';
 import { RawField } from './field-widgets';
 import { SchemaField } from './schema-field';
-import type { ValidationIssueMap } from './types';
+import type { FormFieldNode, ValidationIssueMap } from './types';
 
 /**
  * The schema-generated form (spec US10, #219 lane C2): one TanStack Form over

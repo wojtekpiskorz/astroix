@@ -8,7 +8,7 @@ import { ShellHeader } from './shell-header';
 import { type WriteStatus, WriteStatusBadge } from './write-status-badge';
 
 /**
- * The chrome-frame widget tests (#219, AC-2): the write-status vocabulary
+ * The app-shell widget tests (#219, AC-2): the write-status vocabulary
  * (the B2 write-outcome display — 200 → saved, the 409's accepted disk
  * truth → stale, everything else → error), the shell header's selection
  * surfacing, the shared editor header, the range chips, and the content

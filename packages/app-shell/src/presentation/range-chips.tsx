@@ -22,7 +22,7 @@ export function RangeChips({ ranges, activeIndex, onJump }: RangeChipsProps) {
       {ranges.map((range, index) => (
         <button
           type="button"
-          key={range.label}
+          key={`${range.start}-${range.end}`}
           data-astroix-range-chip={index}
           aria-pressed={index === activeIndex}
           onClick={() => onJump(index)}
