@@ -112,6 +112,12 @@ export default defineConfig({
         'packages/runtime/private-boot/**',
         'packages/runtime/astro-project-adapter/*.ts',
         'packages/runtime/astro-project-adapter/styles/join/**',
+        // The adapter's content-inspection seams (#228, additive to the
+        // E1 root glob, which covers root modules only): probes, schema
+        // loading, entry baselines, revisions, and the pass assembly —
+        // deterministic unit tests with runner stand-ins and real temp
+        // files, same covered-tier decision as E1's pure seams.
+        'packages/runtime/astro-project-adapter/content/*.ts',
       ],
       reporter: ['json'],
       reportsDirectory: 'coverage',
