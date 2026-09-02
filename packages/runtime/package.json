@@ -28,6 +28,8 @@
     "./origin": "./origin/origin-listener.ts",
     "./proxy/health": "./proxy/proxy-health.ts",
     "./api/http": "./api/http/reserved-handler.ts",
+    "./api/pagination": "./api/pagination/page-contract.ts",
+    "./sse": "./sse/sse-surface.ts",
     "./session-supervisor/staging": "./session-supervisor/staging/session-supervisor.ts",
     "./session-supervisor/clients": "./session-supervisor/clients/session-clients.ts"
   },
