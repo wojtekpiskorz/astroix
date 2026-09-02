@@ -97,3 +97,51 @@ describe('the header-set strip — the raw HMR upgrade shape', () => {
     expect(forwarded.cookie).toBe('session=keep');
   });
 });
+
+describe('the strip under any name casing — the raw handshake view', () => {
+  it('strips a mixed-case client-capability header and Cookie wherever the casing sits', () => {
+    for (const clientHeader of ['X-Astroix-Client', 'X-ASTROIX-CLIENT', 'x-astroix-client']) {
+      for (const cookieHeader of ['Cookie', 'COOKIE', 'cookie']) {
+        const forwarded = stripControlAuthority({
+          [clientHeader]: 'client-secret',
+          [cookieHeader]: `__astroix_host=${SECRET}; session=keep`,
+        });
+        expect(Object.keys(forwarded), clientHeader).toEqual([cookieHeader]);
+        expect(forwarded[cookieHeader]).toBe('session=keep');
+        expect(JSON.stringify(forwarded)).not.toContain('client-secret');
+        expect(JSON.stringify(forwarded)).not.toContain(SECRET);
+      }
+    }
+  });
+
+  it('drops the capitalized Cookie header outright when only the capability rode it', () => {
+    const forwarded = stripControlAuthority({ Cookie: `__astroix_host=${SECRET}` });
+    expect(forwarded).toEqual({});
+  });
+
+  it('preserves every kept header name byte-for-byte — the strip never recases the raw handshake view', () => {
+    // the raw-pairs-shaped view F1's reconstructUpgradeHandshake serves:
+    // original client casing on every name — what stays must be
+    // EXACTLY what arrived, so the upstream handshake bytes stay honest
+    const forwarded = stripControlAuthority({
+      Host: 'abc.localhost:4408',
+      Origin: 'http://abc.localhost:4408',
+      Connection: 'Upgrade',
+      'Sec-WebSocket-Protocol': 'vite-hmr',
+      'Sec-WebSocket-Key': 'dGhlIHRva2VuIHZpdGUgbWludGVk',
+      Cookie: `__astroix_host=${SECRET}; vite-session=keep`,
+      'X-Astroix-Client': 'client-secret',
+    });
+    expect(Object.keys(forwarded)).toEqual([
+      'Host',
+      'Origin',
+      'Connection',
+      'Sec-WebSocket-Protocol',
+      'Sec-WebSocket-Key',
+      'Cookie',
+    ]);
+    expect(forwarded.Host).toBe('abc.localhost:4408');
+    expect(forwarded['Sec-WebSocket-Protocol']).toBe('vite-hmr');
+    expect(forwarded.Cookie).toBe('vite-session=keep');
+  });
+});

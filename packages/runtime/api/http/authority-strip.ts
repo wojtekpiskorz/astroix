@@ -15,7 +15,9 @@ import { CAPABILITY_COOKIE_NAME } from './host-capability.ts';
  *
  * Everything else passes through untouched — other cookies, the Host,
  * the HMR token, Vite's subprotocol: the strip is surgical, never a
- * rewrite.
+ * rewrite. Authority names are matched case-insensitively (both the
+ * parsed view and the raw-cased handshake view spell them), and every
+ * kept header keeps its own name bytes verbatim.
  */
 
 /** Drops the capability cookie from one `Cookie` header value; `undefined` when nothing remains. */
@@ -31,7 +33,7 @@ export function stripCapabilityCookie(cookieHeader: string): string | undefined 
   return kept.length > 0 ? kept.join('; ') : undefined;
 }
 
-/** The header shape both the stream proxy and the upgrade tunnel forward — node:http's parsed view. */
+/** The header shape both the stream proxy and the upgrade tunnel forward — node:http's parsed view, or the raw-cased handshake view. */
 export type ForwardedHeaders = ParsedHeaders;
 
 /**
@@ -40,24 +42,41 @@ export type ForwardedHeaders = ParsedHeaders;
  * outright, the capability cookie filtered out of the `Cookie` value
  * (the header itself dropped when it held nothing else). A new object —
  * the input is never mutated.
+ *
+ * Name matching is case-insensitive and name preservation is verbatim.
+ * The two views this serves spell headers differently: node:http's
+ * parsed view lowercases every name, while the raw HMR handshake view
+ * F1 reconstructs from `rawHeaders` preserves the client's original
+ * casing (`Origin-listener` → `reconstructUpgradeHandshake`, wired by
+ * #246) — a capitalized `X-Astroix-Client` or `Cookie` must be stripped
+ * just the same, and every header that stays must keep its own bytes
+ * exactly: the strip is surgical, never a rewrite, not even a recasing.
  */
 export function stripControlAuthority(
   headers: ForwardedHeaders,
 ): Record<string, string | string[] | undefined> {
-  const out: Record<string, string | string[] | undefined> = { ...headers };
-  delete out[CLIENT_CAPABILITY_HEADER];
-  const cookie = out.cookie;
-  if (typeof cookie === 'string') {
-    const stripped = stripCapabilityCookie(cookie);
-    if (stripped === undefined) delete out.cookie;
-    else out.cookie = stripped;
-  } else if (Array.isArray(cookie)) {
-    const stripped = cookie
-      .map((value) => stripCapabilityCookie(value))
-      .filter((value): value is string => value !== undefined);
-    if (stripped.length === 0) delete out.cookie;
-    else if (stripped.length === 1) out.cookie = stripped[0];
-    else out.cookie = stripped;
+  const out: Record<string, string | string[] | undefined> = {};
+  let cookieKey: string | undefined;
+  for (const [name, value] of Object.entries(headers)) {
+    const lower = name.toLowerCase();
+    if (lower === CLIENT_CAPABILITY_HEADER) continue;
+    if (cookieKey === undefined && lower === 'cookie') cookieKey = name;
+    out[name] = value;
+  }
+  if (cookieKey !== undefined) {
+    const cookie = out[cookieKey];
+    if (typeof cookie === 'string') {
+      const stripped = stripCapabilityCookie(cookie);
+      if (stripped === undefined) delete out[cookieKey];
+      else out[cookieKey] = stripped;
+    } else if (Array.isArray(cookie)) {
+      const stripped = cookie
+        .map((value) => stripCapabilityCookie(value))
+        .filter((value): value is string => value !== undefined);
+      if (stripped.length === 0) delete out[cookieKey];
+      else if (stripped.length === 1) out[cookieKey] = stripped[0];
+      else out[cookieKey] = stripped;
+    }
   }
   return out;
 }

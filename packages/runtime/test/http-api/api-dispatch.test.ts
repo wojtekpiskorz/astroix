@@ -390,14 +390,24 @@ describe('route, method, and transport hygiene', () => {
     expect(errorDetails(ambiguous)).toEqual({ issue: 'ambiguous-encoding' });
   });
 
-  it('refuses duplicate security-relevant headers before any value is read', async () => {
+  it('refuses duplicate security-relevant headers before any value is read — every name in the closed set', async () => {
+    // ALL EIGHT names of SECURITY_RELEVANT_HEADERS drive this one loop:
+    // six the base header set never spells, plus `host` (the base set
+    // already carries one Host pair, so the two appended pairs make
+    // three — the duplicate branch fires BEFORE the Host
+    // re-derivation, which is the ordering under test) and
+    // `content-length` (absent from the base set; a real socket's node
+    // parser would refuse it even earlier — this pins the dispatch's
+    // own defense, the layer further from the socket).
     for (const [name, header] of [
+      ['host', 'Host'],
       ['origin', 'Origin'],
       ['cookie', 'Cookie'],
-      ['x-astroix-client', 'X-Astroix-Client'],
-      ['x-astroix-request', 'X-Astroix-Request'],
-      ['sec-fetch-site', 'Sec-Fetch-Site'],
       ['content-type', 'Content-Type'],
+      ['content-length', 'Content-Length'],
+      ['sec-fetch-site', 'Sec-Fetch-Site'],
+      ['x-astroix-request', 'X-Astroix-Request'],
+      ['x-astroix-client', 'X-Astroix-Client'],
     ] as const) {
       const base = launcherHeaders(fixture);
       const draft = await post(listProjectsEnvelope(), [...base, header, 'x', header, 'y']);
