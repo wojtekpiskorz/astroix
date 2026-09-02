@@ -56,26 +56,32 @@ export function stripControlAuthority(
   headers: ForwardedHeaders,
 ): Record<string, string | string[] | undefined> {
   const out: Record<string, string | string[] | undefined> = {};
-  let cookieKey: string | undefined;
+  const cookieKeys: string[] = [];
   for (const [name, value] of Object.entries(headers)) {
     const lower = name.toLowerCase();
     if (lower === CLIENT_CAPABILITY_HEADER) continue;
-    if (cookieKey === undefined && lower === 'cookie') cookieKey = name;
+    if (lower === 'cookie') cookieKeys.push(name);
     out[name] = value;
   }
-  if (cookieKey !== undefined) {
-    const cookie = out[cookieKey];
+  // EVERY cookie-cased key is stripped, not just the first: a
+  // hand-crafted handshake carrying `Cookie` AND `COOKIE` as distinct
+  // keys must not smuggle a capability through whichever one the scan
+  // happened to record (the cookie law is absolute — browsers send one
+  // canonical header, but this function's contract does not assume a
+  // browser on the other end).
+  for (const key of cookieKeys) {
+    const cookie = out[key];
     if (typeof cookie === 'string') {
       const stripped = stripCapabilityCookie(cookie);
-      if (stripped === undefined) delete out[cookieKey];
-      else out[cookieKey] = stripped;
+      if (stripped === undefined) delete out[key];
+      else out[key] = stripped;
     } else if (Array.isArray(cookie)) {
       const stripped = cookie
         .map((value) => stripCapabilityCookie(value))
         .filter((value): value is string => value !== undefined);
-      if (stripped.length === 0) delete out[cookieKey];
-      else if (stripped.length === 1) out[cookieKey] = stripped[0];
-      else out[cookieKey] = stripped;
+      if (stripped.length === 0) delete out[key];
+      else if (stripped.length === 1) out[key] = stripped[0];
+      else out[key] = stripped;
     }
   }
   return out;

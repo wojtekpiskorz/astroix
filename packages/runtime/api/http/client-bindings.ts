@@ -1,6 +1,7 @@
-import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import type { SessionRef } from '@wojciechpiskorz/astroix-protocol';
 import type { ClientRole, VirtualHostClass } from './command-routes.ts';
+import { sameSecret } from './secret-compare.ts';
 
 /**
  * Document-bound client authority (#234, F2; ADR-0006 §3 "the
@@ -59,13 +60,6 @@ export interface ClientBindings {
   counts(): { readonly editor: number; readonly diagnostic: number; readonly launcher: number };
 }
 
-/** Digests to fixed length before the timing-safe compare — no length oracle, no early exit. */
-function sameCapability(presented: string, expected: string): boolean {
-  const a = createHash('sha256').update(presented).digest();
-  const b = createHash('sha256').update(expected).digest();
-  return timingSafeEqual(a, b);
-}
-
 /** Builds one binding table — the composition owns its lifetime alongside the host capabilities. */
 export function createClientBindings(): ClientBindings {
   const live = new Map<string, ClientBinding>();
@@ -93,7 +87,7 @@ export function createClientBindings(): ClientBindings {
     resolve: (presented) => {
       if (presented === undefined || presented.length === 0) return null;
       for (const [capability, binding] of live) {
-        if (sameCapability(presented, capability)) return binding;
+        if (sameSecret(presented, capability)) return binding;
       }
       return null;
     },

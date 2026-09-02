@@ -1,5 +1,6 @@
-import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import { LIMITS, type ProjectKey } from '@wojciechpiskorz/astroix-protocol';
+import { sameSecret } from './secret-compare.ts';
 
 /**
  * The host capability — the origin-wide request authority (#234, F2;
@@ -15,11 +16,11 @@ import { LIMITS, type ProjectKey } from '@wojciechpiskorz/astroix-protocol';
  * into anything but the `Set-Cookie` header the composition hands the
  * page (ADR-0006 §3).
  *
- * Comparison is timing-safe over SHA-256 digests — equal-length
- * buffers, no early exit, no length oracle. Pure table + crypto only;
- * the Electron document binding that decides WHO holds editor authority
- * is the client-binding seam (`./client-bindings.ts`) and its host lane
- * (#246).
+ * Comparison is timing-safe over SHA-256 digests (`./secret-compare.ts`,
+ * the surface's one comparator) — equal-length buffers, no early exit,
+ * no length oracle. Pure table + crypto only; the Electron document
+ * binding that decides WHO holds editor authority is the client-binding
+ * seam (`./client-bindings.ts`) and its host lane (#246).
  */
 
 /** The capability cookie's name — `__astroix_host`, never sent anywhere else. */
@@ -98,13 +99,6 @@ export interface HostCapabilityGrants {
   verify(presented: string | undefined, target: CapabilityHost): boolean;
   /** The current capability for `target`, or null — composition and tests only; never crosses the wire. */
   current(target: CapabilityHost): string | null;
-}
-
-/** Digests to fixed length before the timing-safe compare — no length oracle, no early exit. */
-function sameSecret(presented: string, expected: string): boolean {
-  const a = createHash('sha256').update(presented).digest();
-  const b = createHash('sha256').update(expected).digest();
-  return timingSafeEqual(a, b);
 }
 
 /** Builds one grants table — the composition owns its lifetime; a switch revokes and re-mints. */

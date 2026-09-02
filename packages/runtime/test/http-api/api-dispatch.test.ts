@@ -1,6 +1,7 @@
 import { errorEnvelopeSchema } from '@wojciechpiskorz/astroix-protocol';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { dispatchApiRequest } from '../../api/http/api-dispatch.ts';
+import { SECURITY_RELEVANT_HEADERS } from '../../api/http/security-headers.ts';
 import {
   type AuthorityFixture,
   activateEnvelope,
@@ -391,24 +392,34 @@ describe('route, method, and transport hygiene', () => {
   });
 
   it('refuses duplicate security-relevant headers before any value is read — every name in the closed set', async () => {
-    // ALL EIGHT names of SECURITY_RELEVANT_HEADERS drive this one loop:
-    // six the base header set never spells, plus `host` (the base set
-    // already carries one Host pair, so the two appended pairs make
-    // three — the duplicate branch fires BEFORE the Host
-    // re-derivation, which is the ordering under test) and
-    // `content-length` (absent from the base set; a real socket's node
-    // parser would refuse it even earlier — this pins the dispatch's
-    // own defense, the layer further from the socket).
-    for (const [name, header] of [
-      ['host', 'Host'],
-      ['origin', 'Origin'],
-      ['cookie', 'Cookie'],
-      ['content-type', 'Content-Type'],
-      ['content-length', 'Content-Length'],
-      ['sec-fetch-site', 'Sec-Fetch-Site'],
-      ['x-astroix-request', 'X-Astroix-Request'],
-      ['x-astroix-client', 'X-Astroix-Client'],
-    ] as const) {
+    // The loop iterates SECURITY_RELEVANT_HEADERS ITSELF — the
+    // spelling map exists only to send each name in canonical wire
+    // casing, and the set-equality assertion pins the map to the
+    // constant in both directions: a ninth name added to the constant
+    // fails here until it gets a spelling entry, and a stale map entry
+    // without a constant member fails too. Never a hardcoded list that
+    // could quietly drift green.
+    const SPELLING: Record<string, string> = {
+      host: 'Host',
+      origin: 'Origin',
+      cookie: 'Cookie',
+      'content-type': 'Content-Type',
+      'content-length': 'Content-Length',
+      'sec-fetch-site': 'Sec-Fetch-Site',
+      'x-astroix-request': 'X-Astroix-Request',
+      'x-astroix-client': 'X-Astroix-Client',
+    };
+    expect(new Set(Object.keys(SPELLING))).toEqual(new Set(SECURITY_RELEVANT_HEADERS));
+    for (const name of SECURITY_RELEVANT_HEADERS) {
+      const header = SPELLING[name];
+      if (header === undefined)
+        throw new Error(`no wire spelling for security-relevant header '${name}'`);
+      // `host`: the base set already carries one Host pair, so the two
+      // appended pairs make three — the duplicate branch fires BEFORE
+      // the Host re-derivation, which is the ordering under test.
+      // `content-length`: absent from the base set; a real socket's
+      // node parser would refuse it even earlier — this pins the
+      // dispatch's own defense, the layer further from the socket.
       const base = launcherHeaders(fixture);
       const draft = await post(listProjectsEnvelope(), [...base, header, 'x', header, 'y']);
       expect(draft.status, name).toBe(400);

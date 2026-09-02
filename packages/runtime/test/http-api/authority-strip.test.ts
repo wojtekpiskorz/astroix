@@ -119,6 +119,22 @@ describe('the strip under any name casing — the raw handshake view', () => {
     expect(forwarded).toEqual({});
   });
 
+  it('strips EVERY cookie-cased key — a hand-crafted Cookie+COOKIE pair smuggles nothing through either', () => {
+    const other = 'f'.repeat(64).replaceAll('f', 'e'); // a second distinct capability value
+    const forwarded = stripControlAuthority({
+      Cookie: `__astroix_host=${SECRET}; session=keep`,
+      COOKIE: `__astroix_host=${other}`,
+    });
+    // the first key keeps its innocent cookies; the second held nothing
+    // else and is gone — neither capability survives anywhere
+    expect(forwarded).toEqual({ Cookie: 'session=keep' });
+    const both = stripControlAuthority({
+      Cookie: `__astroix_host=${SECRET}`,
+      COOKIE: `__astroix_host=${other}`,
+    });
+    expect(both).toEqual({});
+  });
+
   it('preserves every kept header name byte-for-byte — the strip never recases the raw handshake view', () => {
     // the raw-pairs-shaped view F1's reconstructUpgradeHandshake serves:
     // original client casing on every name — what stays must be

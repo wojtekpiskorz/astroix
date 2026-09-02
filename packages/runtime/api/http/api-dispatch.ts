@@ -146,7 +146,7 @@ function admitTransport(
     // The duplicated NAME is the finding; the values never enter the response.
     return refused({ code: 'malformed-request' });
   }
-  const host = resolveHostClass(evidence.rawHeaders, authority);
+  const host = resolveHostClass(headers, authority);
   if (host === null) {
     return refused({ code: 'resource-not-found', details: { notFound: { what: 'route' } } });
   }
@@ -163,19 +163,23 @@ function admitTransport(
   return { kind: 'admitted', ...host, evidence: headers };
 }
 
-/** Re-derives the host class from the raw Host pairs — defense in depth behind the listener's own routing. */
+/**
+ * Re-derives the host class from the header evidence — defense in depth
+ * behind the listener's own routing. The evidence is the SAME
+ * `headerEvidence` view every other header decision reads (the single
+ * entry point for header values the dispatch trusts): `values.host` is
+ * the last pair's value and `counts.host` the pair count, exactly the
+ * semantics the Host parse demands.
+ */
 function resolveHostClass(
-  rawHeaders: readonly string[],
+  headers: HeaderEvidence,
   authority: ApiDispatchAuthority,
 ): { hostClass: VirtualHostClass; capabilityHost: CapabilityHost; expectedOrigin: string } | null {
-  let count = 0;
-  let value: string | undefined;
-  for (let i = 0; i < rawHeaders.length; i += 2) {
-    if ((rawHeaders[i] ?? '').toLowerCase() !== 'host') continue;
-    count += 1;
-    value = rawHeaders[i + 1] ?? '';
-  }
-  const parsed = parseHostHeader({ value, count, expectedPort: authority.expectedPort });
+  const parsed = parseHostHeader({
+    value: headers.values.host,
+    count: headers.counts.host ?? 0,
+    expectedPort: authority.expectedPort,
+  });
   if (parsed.kind === 'rejected') return null;
   if (parsed.hostname === LAUNCHER_HOSTNAME) {
     return {
