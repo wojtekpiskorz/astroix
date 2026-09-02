@@ -1,4 +1,4 @@
-import { type Serializable, fork } from 'node:child_process';
+import { fork, type Serializable } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 /**
