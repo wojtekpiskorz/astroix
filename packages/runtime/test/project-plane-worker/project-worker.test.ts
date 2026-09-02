@@ -367,7 +367,7 @@ describe('shutdown rejection and cleanup ownership', () => {
     const inFlight = worker.dispatch({ kind: 'styles', routeComponent: 'src/pages/index.astro' });
     const settled = inFlight.then(
       () => 'resolved',
-      (error) => `rejected: ${String(error)}`,
+      (error) => error,
     );
     const stopping = worker.stop();
     expect(worker.state).toBe('stopping');
@@ -376,7 +376,14 @@ describe('shutdown rejection and cleanup ownership', () => {
     expect(rejection.failure.code).toBe('shutdown');
     expect(plane.calls.content).toBe(0);
 
-    expect(await settled).toContain('rejected'); // the lifecycle abort reached the in-flight pass
+    // The lifecycle abort reached the in-flight pass as the STRUCTURED
+    // shutdown failure — a normal stop never masquerades as a raw abort
+    // or a branch failure downstream (the serving loop's exit code rides on it).
+    const inFlightRejection = await settled;
+    expect(inFlightRejection).toBeInstanceOf(WorkerRejectionError);
+    if (inFlightRejection instanceof WorkerRejectionError) {
+      expect(inFlightRejection.failure.code).toBe('shutdown');
+    }
     await stopping;
   });
 
@@ -390,7 +397,7 @@ describe('shutdown rejection and cleanup ownership', () => {
     const inFlight = worker.dispatch({ kind: 'routes' });
     const settled = inFlight.then(
       () => 'resolved',
-      (error) => `rejected: ${String(error)}`,
+      (error) => error,
     );
     await tick(5);
 
@@ -406,7 +413,11 @@ describe('shutdown rejection and cleanup ownership', () => {
     expect(plane.sourceListenerCount()).toBe(0);
     await expect(worker.closed).resolves.toBe(report);
     expect(events.some((event) => event.type === 'diagnostic')).toBe(false);
-    expect(await settled).toContain('rejected');
+    const inFlightRejection = await settled;
+    expect(inFlightRejection).toBeInstanceOf(WorkerRejectionError);
+    if (inFlightRejection instanceof WorkerRejectionError) {
+      expect(inFlightRejection.failure.code).toBe('shutdown');
+    }
   });
 
   it('a pending debounce window dies with the run — no publication after stop begins', async () => {

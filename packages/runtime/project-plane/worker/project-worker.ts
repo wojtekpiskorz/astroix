@@ -252,10 +252,16 @@ export function createProjectWorker(options: ProjectWorkerOptions): ProjectWorke
   async function drainInFlight(): Promise<boolean> {
     if (inFlight.size === 0) return true;
     const settled = Promise.allSettled([...inFlight]).then(() => true);
+    let expiry: ReturnType<typeof setTimeout> | undefined;
     const expired = new Promise<boolean>((resolve) => {
-      setTimeout(() => resolve(false), stopTimeoutMs);
+      expiry = setTimeout(() => resolve(false), stopTimeoutMs);
     });
-    return (await Promise.race([settled, expired])) === true;
+    const settledFirst = await Promise.race([settled, expired]);
+    // A settled drain leaves no dangling bound behind — the timer dies
+    // with the race, like the debounce timer above (an in-process
+    // embedder's loop must not stay warm for the stop bound).
+    clearTimeout(expiry);
+    return settledFirst === true;
   }
 }
 
@@ -300,7 +306,12 @@ async function dispatchInspection(
   try {
     return await run;
   } catch (error) {
-    throw dispatchRejection(request.kind, error, merged, context);
+    throw dispatchRejection(
+      request.kind,
+      error,
+      { caller: signal, lifecycle: context.lifecycle },
+      context,
+    );
   } finally {
     context.inFlight.delete(run);
   }
@@ -343,18 +354,25 @@ async function runFamilyInspection(
 
 /**
  * Maps a dispatch failure to its rejection: the caller's own abort
- * reason passes through untouched; an unconverged styles outcome adds
- * its warn diagnostic; any other branch failure is structured (with its
- * error diagnostic) — never a raw error.
+ * reason passes through untouched; a rejection that rode the LIFECYCLE
+ * abort (the stop itself, not the caller) settles as the structured
+ * `shutdown` failure — a normal stop must never masquerade downstream
+ * as a branch failure or a raw abort; an unconverged styles outcome
+ * adds its warn diagnostic; any other branch failure is structured
+ * (with its error diagnostic) — never a raw error.
  */
 function dispatchRejection(
   family: WorkerInspectionRequest['kind'],
   error: unknown,
-  merged: AbortSignal,
+  signals: { readonly caller: AbortSignal | undefined; readonly lifecycle: AbortSignal },
   context: DispatchContext,
 ): unknown {
-  // The caller (or the lifecycle stop) aborted: the caller's reason is the answer.
-  if (merged.aborted) return error;
+  // The caller's own abort: the caller's reason is the answer, untouched.
+  if (signals.caller?.aborted === true) return error;
+  // The lifecycle stop killed this dispatch: the structured shutdown
+  // failure is the answer — the serving loop forwards it as the
+  // request's result, never as a crash exit.
+  if (signals.lifecycle.aborted) return new WorkerRejectionError(shutdownFailure());
   if (error instanceof WorkerRejectionError) {
     if (error.failure.code === 'inspection-unconverged') {
       context.publish(unconvergedDiagnostic(error.failure));

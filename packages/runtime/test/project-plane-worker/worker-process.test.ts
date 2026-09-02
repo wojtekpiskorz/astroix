@@ -112,6 +112,16 @@ async function bootMarkerLines(markerDir: string): Promise<number> {
   }
 }
 
+/** Waits for a marker file with a deadline — observation polling, never a timing assertion (#222 idiom). */
+async function waitForMarker(markerDir: string, name: string, timeoutMs = 10_000): Promise<void> {
+  const path = join(markerDir, `${name}.marker`);
+  const deadline = Date.now() + timeoutMs;
+  while (!existsSync(path)) {
+    if (Date.now() > deadline) throw new Error(`timed out waiting for the ${name} marker`);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+}
+
 describe('the exact worker child', () => {
   it('boots the plane, serves a typed inspection, and answers with the revisioned result', async () => {
     const markerDir = await makeMarkerDir();
@@ -144,6 +154,38 @@ describe('the exact worker child', () => {
     expect(await bootMarkerLines(markerDir)).toBe(0);
     expect(existsSync(join(markerDir, 'plane-closed.marker'))).toBe(false);
   });
+
+  it('a stop while an inspection is in flight answers it with the shutdown failure and exits 0', async () => {
+    const markerDir = await makeMarkerDir();
+    const worker = await spawnWorker({ markerDir, behaviors: { styles: 'hang' } });
+
+    // The inspection must be IN FLIGHT (the branch already called) before
+    // the stop races it — the styles marker is that proof.
+    worker.child.send({
+      type: 'inspect',
+      id: 1,
+      request: { kind: 'styles', routeComponent: 'src/pages/index.astro' },
+    });
+    await waitForMarker(markerDir, 'styles-called');
+
+    worker.child.send({ type: 'stop' });
+    // The in-flight request settles as the structured shutdown failure —
+    // never a raw abort, a branch failure, or a crash exit.
+    const answer = await worker.next(
+      (m) => m.type === 'inspect-result' && m.id === 1,
+      'in-flight shutdown answer',
+    );
+    expect(answer.ok).toBe(false);
+    expect(answer.failure?.code).toBe('shutdown');
+    expect(answer.failure?.message).toBe(
+      'the project plane worker is shutting down and rejects new inspection work',
+    );
+
+    const closed = await worker.next((m) => m.type === 'closed', 'close report');
+    expect(closed.report?.outcome).toBe('complete'); // the abort settled the drain, nothing timed out
+    expect(await worker.exit).toEqual({ code: 0, signal: null }); // a normal stop, not EXIT_CRASH
+    expect(existsSync(join(markerDir, 'plane-closed.marker'))).toBe(true);
+  }, 25_000);
 });
 
 describe('adapter branch failure propagation across the process boundary', () => {

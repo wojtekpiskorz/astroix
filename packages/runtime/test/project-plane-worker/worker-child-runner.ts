@@ -41,8 +41,18 @@ function marker(name: string): void {
 function createPlane(): Promise<ProjectWorkerPlane> {
   const fake = fakePlane();
   Object.assign(fake.behaviors, config.behaviors ?? {});
+  const branches = fake.plane.inspections;
   return Promise.resolve({
-    inspections: fake.plane.inspections,
+    inspections: {
+      // The `styles` marker gives the process lane deterministic proof a
+      // dispatched inspection is IN FLIGHT before a stop races it — the
+      // exit-code discipline this lane's T1 review finding pinned.
+      ...branches,
+      styles: (input: Parameters<typeof branches.styles>[0]) => {
+        marker('styles-called');
+        return branches.styles(input);
+      },
+    },
     invalidations: fake.plane.invalidations,
     close: async () => {
       marker('plane-closed');
