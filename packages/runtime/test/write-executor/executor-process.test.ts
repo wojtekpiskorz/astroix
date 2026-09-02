@@ -225,3 +225,68 @@ describe('forced exit and the unknown write outcome', () => {
     expect(await readFile(join(root, 'src/styles/global.css'), 'utf8')).toBe(NEXT);
   }, 25_000);
 });
+
+describe('dispatch backpressure is not channel death', () => {
+  it('a backpressured send() (false with the channel alive) is awaited, never fenced, never dropped', async () => {
+    const stateDir = await makeStateDir('backpressure');
+    const gateDir = await makeStateDir('backpressure-gate');
+    const { root } = await makeProject();
+
+    const executor = spawnExecutor({
+      privateStateDirectory: stateDir,
+      canonicalRoot: root,
+      gateDir,
+    });
+    await executor.ready;
+
+    // Park the child inside the gate's synchronous wait (the marker is
+    // the proof): its event loop stops draining the IPC channel while
+    // the channel itself stays connected.
+    const dispatches = [executor.execute(absentPlan(root, 'park'))];
+    await waitForMarker(gateDir, 'executing-1');
+
+    // Burst: ~1.5 MB of contents-sized plans into the undrained channel —
+    // far beyond the backlog threshold at which send() returns false with
+    // connected still true. Under the old guard those dispatches rejected
+    // as ExecutorFencedError ("never sent") while the child went on to
+    // execute them, dropping every outcome reply — a write landed
+    // unobserved. The regression leg: every dispatch is observed.
+    const BURST = 12;
+    for (let index = 0; index < BURST; index += 1) {
+      dispatches.push(executor.execute(absentPlan(root, `burst-${index}`, 'x'.repeat(128 * 1024))));
+    }
+    // Release every gate ticket; the parked loop resumes, drains, runs.
+    for (let ticket = 1; ticket <= BURST + 1; ticket += 1) {
+      await writeFile(join(gateDir, `go-${ticket}`), 'go\n', { mode: 0o600 });
+    }
+
+    const outcomes = await Promise.all(dispatches);
+    expect(outcomes).toHaveLength(BURST + 1);
+    for (const outcome of outcomes) {
+      expect(outcome).toEqual({
+        type: 'rejected',
+        code: 'target-absent',
+        message: 'the granted target no longer exists',
+      });
+    }
+    await executor.stop();
+    expect(await executor.exited).toEqual({ code: 0, signal: null });
+  }, 30_000);
+});
+
+/** A hand-bound replace plan against a missing target — a fast, write-free rejection. */
+function absentPlan(root: string, name: string, contents = 'x'): DomainWritePlan {
+  return {
+    operation: 'replace-contents',
+    resource: {
+      canonicalRoot: root,
+      session: session('epoch-a', 1),
+      kind: 'css',
+      operations: ['replace-contents', 'splice'],
+      displayPath: `src/styles/${name}.css`,
+      baseline: { type: 'sha256', sha256: digestOf('missing') },
+      target: { type: 'existing', canonicalPath: join(root, `src/styles/${name}.css`) },
+    },
+    contents,
+  };
+}

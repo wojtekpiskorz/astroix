@@ -150,10 +150,19 @@ export function spawnWriteExecutor(input: SpawnWriteExecutorInput): WriteExecuto
         nextId += 1;
         pending.set(id, resolve);
         const sent = child.send({ type: 'execute', id, plan });
-        if (!sent) {
-          // The channel was already gone: the plan never left this
+        if (sent === false && !child.connected) {
+          // The channel is genuinely GONE: the plan never left this
           // process, nothing was accepted, admission itself failed —
           // fenced, never the maybe-landed `unknown` of settled work.
+          // `send() === false` ALONE does not mean this: Node also
+          // returns false when the channel is alive but its unsent
+          // backlog exceeds the threshold — the message is still queued
+          // and WILL be delivered. Treating backpressure as death would
+          // reject a dispatch as "never sent" while the child executes
+          // it, dropping the outcome reply: a write landed unobserved,
+          // the honesty law run in reverse. Under backpressure the
+          // pending entry stays and the outcome is awaited; if the child
+          // dies before delivering it, the exit path settles `unknown`.
           pending.delete(id);
           reject(new ExecutorFencedError());
         }
