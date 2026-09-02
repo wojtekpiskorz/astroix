@@ -28,9 +28,12 @@ export function mintGrantToken(): string {
 }
 
 /**
- * Structural validation of a token candidate — shape only. Membership is
- * the grant table's decision; a well-shaped stranger is still an
- * unknown grant, never a reason to read further into the value.
+ * Structural validation of a token candidate — shape only. Production
+ * use: the grant table's authorize pre-filter, so a string that cannot
+ * be a minted token fails before Map membership (and never hashes
+ * attacker-sized input). Membership stays the table's decision; a
+ * well-shaped stranger is still an unknown grant, and no meaning is
+ * ever read out of the value.
  */
 export function isGrantTokenShape(token: string): boolean {
   return GRANT_TOKEN_PATTERN.test(token);

@@ -329,7 +329,9 @@ describe('planEdit — revision contract at plan time', () => {
       session: session('epoch-a', 1),
       plan: { operation: 'replace-contents', grant, contents: 'x' },
     });
-    expect(stale).toEqual({ ok: false, code: 'superseded', message: expect.any(String) });
+    // Review round 1 on #304: re-issuance evicts the old grant — the
+    // replayed token is unknown, never a distinguishable superseded state.
+    expect(stale).toEqual({ ok: false, code: 'unknown-grant', message: expect.any(String) });
 
     if (followOn.ok) {
       const fresh = await planEdit(table, {
@@ -369,7 +371,7 @@ describe('planEdit — revision contract at plan time', () => {
     expect(result).toEqual({ ok: false, code: 'target-exists', message: expect.any(String) });
   });
 
-  it('rejects a revoked grant before any write', async () => {
+  it('rejects a revoked grant before any write — evicted, so unknown', async () => {
     const root = await makeProjectRoot();
     const table = await createGrantTable(root);
     const grant = await cssGrant(root, table);
@@ -380,7 +382,42 @@ describe('planEdit — revision contract at plan time', () => {
       session: session('epoch-a', 1),
       plan: { operation: 'replace-contents', grant, contents: 'x' },
     });
-    expect(result).toEqual({ ok: false, code: 'revoked', message: expect.any(String) });
+    expect(result).toEqual({ ok: false, code: 'unknown-grant', message: expect.any(String) });
+  });
+
+  it('rejects create-contents on an existing-text content grant at the boundary', async () => {
+    const root = await makeProjectRoot();
+    await makeDir(root, 'src/content/hero');
+    await writeFile(join(root, 'src/content/hero/first.md'), '---\ntitle: First\n---\n');
+    const table = await createGrantTable(root);
+    const granted = await table.issue(
+      {
+        discovery: 'existing-text',
+        kind: 'content',
+        path: 'src/content/hero/first.md',
+        revision: digestOf('---\ntitle: First\n---\n'),
+      },
+      session('epoch-a', 1),
+    );
+    expect(granted.ok).toBe(true);
+    if (!granted.ok) return;
+    // The narrowed default carries replace-contents alone, so the
+    // incoherent crossing dies at authorize — operation not allowed.
+    expect(granted.grant.operations).toEqual(['replace-contents']);
+
+    const result = await planEdit(table, {
+      session: session('epoch-a', 1),
+      plan: {
+        operation: 'create-contents',
+        grant: { ...granted.grant, operations: ['create-contents'] },
+        contents: 'x',
+      },
+    });
+    expect(result).toEqual({
+      ok: false,
+      code: 'operation-not-allowed',
+      message: expect.any(String),
+    });
   });
 
   it('rejects a vanished target at plan time', async () => {

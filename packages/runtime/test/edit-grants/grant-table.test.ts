@@ -92,7 +92,7 @@ describe('issue — existing text', () => {
     });
   });
 
-  it('issues content-kind grants with the content species set', async () => {
+  it('issues content existing-text grants narrowed to replace-contents (no creation op)', async () => {
     const root = await makeProjectRoot();
     await makeDir(root, 'src/content/hero');
     await writeFile(join(root, 'src/content/hero/first.md'), '---\ntitle: First\n---\n');
@@ -109,7 +109,10 @@ describe('issue — existing text', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.grant.kind).toBe('content');
-    expect(result.grant.operations).toEqual(['replace-contents', 'create-contents']);
+    // Review round 1 on #304: the existing-text default is the kind's
+    // species MINUS creation — an existing target under a create-contents
+    // operation is the incoherence the planner guards; it cannot be minted.
+    expect(result.grant.operations).toEqual(['replace-contents']);
   });
 
   it('rejects arbitrary paths: traversal, absolute, and backslash forms', async () => {
@@ -274,6 +277,25 @@ describe('issue — existing text', () => {
       session('epoch-a', 1),
     );
     expect(entry).toEqual({ ok: false, code: 'invalid-operations', message: expect.any(String) });
+
+    // Review round 1 on #304: create-contents on an EXISTING-text resource
+    // is rejected too — the crossing the narrowed default exists to prevent,
+    // also refused when explicitly requested.
+    const crossing = await table.issue(
+      {
+        discovery: 'existing-text',
+        kind: 'content',
+        path: 'src/styles/global.css',
+        revision,
+        operations: ['create-contents'],
+      },
+      session('epoch-a', 1),
+    );
+    expect(crossing).toEqual({
+      ok: false,
+      code: 'invalid-operations',
+      message: expect.any(String),
+    });
   });
 
   it('honors a valid operation narrowing', async () => {
@@ -457,6 +479,24 @@ describe('issue — creation', () => {
     );
     expect(result).toEqual({ ok: false, code: 'invalid-operations', message: expect.any(String) });
   });
+
+  it('rejects css creation at the mint — the kind\u2019s species has no create-contents', async () => {
+    const root = await makeProjectRoot();
+    await makeDir(root, 'src/styles');
+    const table = await createGrantTable(root);
+    // Review round 1 on #304: a css creation grant could never plan (the
+    // species matrix excludes it, #203's placement deferral) — dead,
+    // contract-inconsistent weight is refused at issuance, not carried.
+    const result = await table.issue(
+      { discovery: 'creation', kind: 'css', parentPath: 'src/styles', fileName: 'new.css' },
+      session('epoch-a', 1),
+    );
+    expect(result).toEqual({
+      ok: false,
+      code: 'creation-not-permitted',
+      message: expect.any(String),
+    });
+  });
 });
 
 describe('authorize', () => {
@@ -510,7 +550,7 @@ describe('authorize', () => {
     ).toEqual({ ok: false, code: 'cross-session', message: expect.any(String) });
   });
 
-  it('rejects revoked grants, and double revocation reports false', async () => {
+  it('evicts revoked grants — unknown afterward, and double revocation reports false', async () => {
     const root = await makeProjectRoot();
     const revision = await writeCss(root, 'src/styles/global.css');
     const table = await createGrantTable(root);
@@ -521,14 +561,17 @@ describe('authorize', () => {
     expect(granted.ok).toBe(true);
     const token = granted.ok ? granted.grant.token : '';
 
+    // Review round 1 on #304: revocation is eviction — a revoked token is
+    // indistinguishable from a never-issued (or forged) one, and the table
+    // never accumulates dead records.
     expect(table.revoke(token)).toBe(true);
     expect(table.revoke(token)).toBe(false);
     expect(
       table.authorize({ token, session: session('epoch-a', 1), kind: 'css', operation: 'splice' }),
-    ).toEqual({ ok: false, code: 'revoked', message: expect.any(String) });
+    ).toEqual({ ok: false, code: 'unknown-grant', message: expect.any(String) });
   });
 
-  it('supersedes the previous grant for the same target and session at re-issue', async () => {
+  it('evicts the previous grant for the same target and session at re-issue', async () => {
     const root = await makeProjectRoot();
     const revision = await writeCss(root, 'src/styles/global.css');
     const table = await createGrantTable(root);
@@ -542,7 +585,8 @@ describe('authorize', () => {
     );
     expect(first.ok).toBe(true);
     expect(second.ok).toBe(true);
-    // Fresh per-activation value: the re-issued grant is a new token.
+    // Fresh per-activation value: the re-issued grant is a new token, and
+    // the superseded one is gone — unknown, never a distinguishable state.
     expect(second.ok && second.grant.token).not.toBe(first.ok ? first.grant.token : '');
     expect(
       table.authorize({
@@ -551,7 +595,7 @@ describe('authorize', () => {
         kind: 'css',
         operation: 'splice',
       }),
-    ).toEqual({ ok: false, code: 'superseded', message: expect.any(String) });
+    ).toEqual({ ok: false, code: 'unknown-grant', message: expect.any(String) });
     expect(
       table.authorize({
         token: second.ok ? second.grant.token : '',
@@ -562,7 +606,7 @@ describe('authorize', () => {
     ).toBe(true);
   });
 
-  it('supersedes the previous creation grant for the same slot and session', async () => {
+  it('evicts the previous creation grant for the same slot and session', async () => {
     const root = await makeProjectRoot();
     await makeDir(root, 'src/content/hero');
     const table = await createGrantTable(root);
@@ -593,7 +637,7 @@ describe('authorize', () => {
         kind: 'content',
         operation: 'create-contents',
       }),
-    ).toEqual({ ok: false, code: 'superseded', message: expect.any(String) });
+    ).toEqual({ ok: false, code: 'unknown-grant', message: expect.any(String) });
     expect(
       table.authorize({
         token: second.ok ? second.grant.token : '',
@@ -615,7 +659,7 @@ describe('authorize', () => {
       { discovery: 'existing-text', kind: 'css', path: 'src/styles/global.css', revision },
       session('epoch-a', 1),
     );
-    // Same target, different session: supersession is per-session.
+    // Same target, different session: eviction is per-session.
     await table.issue(
       { discovery: 'existing-text', kind: 'css', path: 'src/styles/global.css', revision },
       session('epoch-b', 1),
@@ -710,7 +754,7 @@ describe('authorize', () => {
       },
       session('epoch-b', 9),
     );
-    // Supersede the first epoch-a grant so exactly one dies.
+    // Re-issue evicts the first epoch-a grant so exactly one remains to die.
     await table.issue(
       { discovery: 'existing-text', kind: 'css', path: 'src/styles/global.css', revision },
       session('epoch-a', 1),

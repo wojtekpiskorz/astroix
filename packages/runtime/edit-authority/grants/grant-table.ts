@@ -15,7 +15,7 @@ import {
   sameSession,
   sha256Hex,
 } from './canonical-bounds';
-import { mintGrantToken } from './grant-token';
+import { isGrantTokenShape, mintGrantToken } from './grant-token';
 
 /**
  * The server-side resource-grant table (#223, ADR-0006 §6): the only
@@ -34,8 +34,10 @@ import { mintGrantToken } from './grant-token';
  * final realpath/lstat/containment recheck immediately before commit —
  * belongs to `edit-authority/executor/` (D5, #224). The world checks
  * here are the planning-boundary halves of the same law: they fail
- * stale, revoked, mismatched, cross-session, wrong-kind, or changed
- * grants before any write is admitted.
+ * stale, mismatched, cross-session, wrong-kind, or changed grants
+ * before any write is admitted, and revoked or superseded tokens are
+ * evicted — their failure is `unknown-grant`, indistinguishable from a
+ * forged one, and the table never accumulates dead records.
  */
 
 /**
@@ -57,6 +59,18 @@ export const KIND_OPERATIONS: Readonly<Record<ResourceKind, readonly EditOperati
 
 /** The only operation a creation grant may carry. */
 const CREATION_OPERATIONS: readonly EditOperationKind[] = ['create-contents'];
+
+/**
+ * The operations an existing-text grant may carry: the kind's species
+ * minus creation — derived, so the two sets can never drift back into
+ * the incoherence of a creation operation bound to an existing-target
+ * revision contract. A content existing-text grant therefore carries
+ * `replace-contents` alone by default; creation grants opt into
+ * `create-contents` through the creation discovery branch.
+ */
+function existingTextOperations(kind: ResourceKind): readonly EditOperationKind[] {
+  return KIND_OPERATIONS[kind].filter((operation) => operation !== 'create-contents');
+}
 
 /**
  * A discovered existing text resource — control-plane only, never a wire
@@ -125,13 +139,12 @@ export type GrantFailureCode =
   // authorize
   | 'unknown-grant'
   | 'cross-session'
-  | 'revoked'
-  | 'superseded'
   | 'wrong-kind'
   | 'operation-not-allowed'
   // issue
   | 'invalid-resource-path'
   | 'invalid-operations'
+  | 'creation-not-permitted'
   | 'outside-root'
   | 'parent-outside-root'
   | 'target-absent'
@@ -149,13 +162,12 @@ export type GrantFailureCode =
 const FAILURE_MESSAGES: Record<GrantFailureCode, string> = {
   'unknown-grant': 'the presented grant matches no issued grant',
   'cross-session': 'the grant belongs to another session',
-  revoked: 'the grant was revoked',
-  superseded: 'a newer grant for the same resource replaced this one',
   'wrong-kind': 'the grant is for another resource kind',
   'operation-not-allowed': 'the operation is not among the grant\u2019s allowed operations',
   'invalid-resource-path': 'the discovered resource path is not project-relative posix',
   'invalid-operations':
     'the requested operations are not a non-empty subset of the kind\u2019s species',
+  'creation-not-permitted': 'the kind\u2019s species set does not permit creation',
   'outside-root': 'the discovered resource resolves outside the canonical project root',
   'parent-outside-root': 'the creation parent resolves outside the canonical project root',
   'target-absent': 'the discovered resource no longer exists',
@@ -195,14 +207,15 @@ export interface GrantTable {
    * canonical filesystem before anything is minted: containment is
    * realpath-resolved (never lexical-only), the target is a regular
    * unlinked file, and the discovered revision still equals the current
-   * bytes. Issuing supersedes the session's previous active grant for
-   * the same resource.
+   * bytes. Issuing evicts the session's previous grant for the same
+   * resource — a superseded token is gone, indistinguishable from never
+   * issued.
    */
   issue(resource: DiscoveredResource, session: SessionRef): Promise<GrantResult>;
   /**
-   * Re-validates an echoed grant claim against the table: token
-   * membership, session pair, lifecycle status, kind, and operation.
-   * Pure table state — no filesystem access; the world half is
+   * Re-validates an echoed grant claim against the table: token shape
+   * and membership, session pair, kind, and operation. Pure table
+   * state — no filesystem access; the world half is
    * {@link GrantTable.verify}. Returns the server-side truth and the
    * exact issued wire grant (for echo-equality in planning).
    */
@@ -220,20 +233,24 @@ export interface GrantTable {
    * limit (ADR-0006 §6), not a check that can close it.
    */
   verify(resource: GrantedResource): Promise<WorldVerification>;
-  /** Revokes one grant; returns whether an active grant was revoked. */
+  /**
+   * Revokes one grant by evicting it — a revoked token is afterward
+   * indistinguishable from a never-issued one (`unknown-grant`), which
+   * is also why the table never accumulates dead records. Returns
+   * whether a live grant was evicted.
+   */
   revoke(token: string): boolean;
   /**
-   * Revokes every active grant of one session (activation teardown);
-   * returns how many died. Other sessions' grants are untouched.
+   * Evicts every grant of one session (activation teardown); returns
+   * how many died. Other sessions' grants are untouched.
    */
   revokeSession(session: SessionRef): number;
 }
 
-/** One live grant record: the authorized truth plus lifecycle state. */
+/** One live grant record: the authorized truth. The map holds only live grants. */
 interface GrantRecord {
   readonly resource: GrantedResource;
   readonly issued: ResourceGrant;
-  status: 'active' | 'revoked' | 'superseded';
 }
 
 /**
@@ -259,11 +276,14 @@ export async function createGrantTable(canonicalRoot: string): Promise<GrantTabl
     issue: (resource, session) => dispatchIssue(records, root, resource, session),
 
     authorize: (input) => {
+      // Shape pre-filter on the untrusted token: a string that cannot be
+      // a minted token never reaches Map membership (and never hashes
+      // attacker-sized input). Membership stays the authority — a
+      // well-shaped stranger is still an unknown grant.
+      if (!isGrantTokenShape(input.token)) return failure('unknown-grant');
       const record = records.get(input.token);
       if (record === undefined) return failure('unknown-grant');
       if (!sameSession(record.resource.session, input.session)) return failure('cross-session');
-      if (record.status === 'revoked') return failure('revoked');
-      if (record.status === 'superseded') return failure('superseded');
       if (record.resource.kind !== input.kind) return failure('wrong-kind');
       if (!record.resource.operations.includes(input.operation)) {
         return failure('operation-not-allowed');
@@ -274,22 +294,17 @@ export async function createGrantTable(canonicalRoot: string): Promise<GrantTabl
     verify: (resource) =>
       resource.target.type === 'existing' ? verifyExisting(resource) : verifyCreation(resource),
 
-    revoke: (token) => {
-      const record = records.get(token);
-      if (record === undefined || record.status !== 'active') return false;
-      record.status = 'revoked';
-      return true;
-    },
+    revoke: (token) => records.delete(token),
 
     revokeSession: (session) => {
-      let revoked = 0;
-      for (const record of records.values()) {
-        if (record.status === 'active' && sameSession(record.resource.session, session)) {
-          record.status = 'revoked';
-          revoked += 1;
+      let evicted = 0;
+      for (const [token, record] of records) {
+        if (sameSession(record.resource.session, session)) {
+          records.delete(token);
+          evicted += 1;
         }
       }
-      return revoked;
+      return evicted;
     },
   };
 }
@@ -316,8 +331,8 @@ async function issueExisting(
   if (!projectRelativePathSchema.safeParse(resource.path).success) {
     return failure('invalid-resource-path');
   }
-  const operations = resource.operations ?? KIND_OPERATIONS[resource.kind];
-  if (!operationsAreSubset(KIND_OPERATIONS[resource.kind], operations)) {
+  const operations = resource.operations ?? existingTextOperations(resource.kind);
+  if (!operationsAreSubset(existingTextOperations(resource.kind), operations)) {
     return failure('invalid-operations');
   }
   // Canonical resolution: realpath first, containment on the resolved
@@ -353,6 +368,13 @@ async function issueCreation(
   resource: DiscoveredCreationResource,
   session: SessionRef,
 ): Promise<GrantResult> {
+  // Creation admissibility derives from the species matrix: a css
+  // creation grant could never plan (the kind's species has no
+  // create-contents — #203's placement deferral), so it is rejected at
+  // the mint, not carried as dead, contract-inconsistent weight.
+  if (!KIND_OPERATIONS[resource.kind].includes('create-contents')) {
+    return failure('creation-not-permitted');
+  }
   if (
     !projectRelativePathSchema.safeParse(resource.parentPath).success ||
     !isFileNameSegment(resource.fileName)
@@ -394,12 +416,13 @@ async function issueCreation(
 }
 
 /**
- * The shared mint-and-supersede step: a fresh opaque token (never
- * derived from any fact of the resource), supersession of the session's
- * previous active grant for the same exact target, and insertion. The
- * wire grant is the deterministic projection of the record — token,
- * kind, operations, display path, baseline — nothing canonical leaks
- * into it.
+ * The shared mint-and-evict step: a fresh opaque token (never derived
+ * from any fact of the resource), eviction of the session's previous
+ * grant for the same exact target (a superseded token is gone —
+ * indistinguishable from never issued, and the table never grows with
+ * dead weight), and insertion. The wire grant is the deterministic
+ * projection of the record — token, kind, operations, display path,
+ * baseline — nothing canonical leaks into it.
  */
 function commit(records: Map<string, GrantRecord>, resource: GrantedResource): GrantResult {
   const token = mintGrantToken();
@@ -410,16 +433,15 @@ function commit(records: Map<string, GrantRecord>, resource: GrantedResource): G
     displayPath: resource.displayPath,
     baseline: resource.baseline,
   };
-  for (const other of records.values()) {
+  for (const [otherToken, other] of records) {
     if (
-      other.status === 'active' &&
       sameSession(other.resource.session, resource.session) &&
       sameTarget(other.resource, resource)
     ) {
-      other.status = 'superseded';
+      records.delete(otherToken);
     }
   }
-  records.set(token, { resource, issued, status: 'active' });
+  records.set(token, { resource, issued });
   return { ok: true, grant: issued };
 }
 

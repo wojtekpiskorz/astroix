@@ -29,12 +29,13 @@ import { planStyleEdit, type StyleWritePlan } from './style-plans';
  */
 export type DomainWritePlan = StyleWritePlan | EntryWritePlan;
 
-/** The planning failure codes: every grant failure plus the boundary's own. */
+/** The planning failure codes: every grant failure plus the boundary's and the planners' own. */
 export type PlanFailureCode =
   | GrantFailureCode
   | 'invalid-plan'
   | 'claim-mismatch'
-  | 'range-outside-baseline';
+  | 'range-outside-baseline'
+  | 'operation-target-mismatch';
 
 export type PlanResult =
   | { ok: true; plan: DomainWritePlan }

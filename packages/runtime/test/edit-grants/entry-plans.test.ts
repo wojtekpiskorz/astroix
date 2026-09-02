@@ -88,4 +88,35 @@ describe('planEntryEdit', () => {
       message: expect.any(String),
     });
   });
+
+  it('fails closed on create-contents against an existing-target grant (coherence guard)', () => {
+    // Review round 1 on #304: the exact crossing the narrowed issuance
+    // default prevents — a creation operation bound to an existing-target
+    // revision contract must never become a plan, from any future minting
+    // path or hand-built resource (D5's behavior on the shape is not
+    // ours to assume).
+    const result = planEntryEdit(existing, {
+      operation: 'create-contents',
+      grant: { ...stubGrant(), operations: ['create-contents'] },
+      contents: SERIALIZED,
+    });
+    expect(result).toEqual({
+      ok: false,
+      code: 'operation-target-mismatch',
+      message: expect.any(String),
+    });
+  });
+
+  it('fails closed on replace-contents against a creation-target grant (coherence guard)', () => {
+    const result = planEntryEdit(creation, {
+      operation: 'replace-contents',
+      grant: { ...stubGrant(), baseline: { type: 'expected-absent' } },
+      contents: SERIALIZED,
+    });
+    expect(result).toEqual({
+      ok: false,
+      code: 'operation-target-mismatch',
+      message: expect.any(String),
+    });
+  });
 });
