@@ -31,7 +31,10 @@ import type { FunctionComplexity } from './complexity';
  * CC-only
  * watchlist; later
  * `packages/runtime` seams beyond the ruled ones decide their own tier in
- * the lane that lands them. A
+ * the lane that lands them. The styles convergence seams since #227
+ * (parity classifier + revisioned invalidation source) join the covered
+ * tier; its converged-inspection IO composition is watchlist like the
+ * join's (#227). A
  * watchlist row has `coverage === null` and `crap === null`, and its gate
  * metric is CC. (The `src/node` + `src/client` watchlist tiers were
  * deleted with their functions at the retirement gate, #215.)
@@ -145,11 +148,16 @@ function isCoreFile(relPath: string): boolean {
   // walk, shared rejection helper — deterministic units; the
   // client-environment IO composition files stay watchlist like
   // composition.ts: their behavior-layer truth is the certification
-  // suite, the units only exercise their own rejection wiring).
+  // suite, the units only exercise their own rejection wiring). The
+  // styles convergence seams since #227 (parity classifier + revisioned
+  // invalidation source — deterministic units; the converged-inspection
+  // IO composition is watchlist for the same reason).
   const adapterWatchlist =
     relPath === 'packages/runtime/astro-project-adapter/composition.ts' ||
     relPath === 'packages/runtime/astro-project-adapter/styles/join/client-scoped-css.ts' ||
-    relPath === 'packages/runtime/astro-project-adapter/styles/join/route-styles.ts';
+    relPath === 'packages/runtime/astro-project-adapter/styles/join/route-styles.ts' ||
+    relPath ===
+      'packages/runtime/astro-project-adapter/styles/convergence/converged-styles-inspection.ts';
   return (
     (relPath.startsWith('src/core/') ||
       relPath.startsWith('packages/core/') ||
