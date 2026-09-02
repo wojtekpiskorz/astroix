@@ -54,7 +54,13 @@ import type { FunctionComplexity } from './complexity';
  * classification, the routing state machine, and the upgrade admission
  * + handshake reconstruction are covered; the listener composition, the
  * HTTP stream proxy, the raw upgrade tunnel, and the proxy-health
- * prober are watchlist (#233). A
+ * prober are watchlist (#233). The HTTP API v1 seams since #234 (F2)
+ * split the same way: the dispatch core, the command permission matrix,
+ * the security-header evidence, the host-capability grants, the
+ * client-binding table, the authority strip, the bounded envelope
+ * validation, and the sanitized error responses are covered
+ * (deterministic pure units); the reserved-handler socket composition
+ * is watchlist like the plane's other IO glue (#234). A
  * watchlist row has `coverage === null` and `crap === null`, and its gate
  * metric is CC. (The `src/node` + `src/client` watchlist tiers were
  * deleted with their functions at the retirement gate, #215.)
@@ -201,6 +207,14 @@ const COVERED_PREFIXES: readonly string[] = [
   // deterministic pure units; the real socket IO is watchlisted below.
   'packages/runtime/origin/',
   'packages/runtime/proxy/',
+  // `packages/runtime/api` since #234 (F2): the HTTP API v1 pure seams —
+  // the dispatch core, the command permission matrix, the
+  // security-header evidence, the host-capability grants, the
+  // client-binding table, the authority strip, the bounded envelope
+  // validation, and the sanitized error responses — deterministic pure
+  // units; the reserved-handler socket composition is watchlisted below.
+  'packages/runtime/api/http/',
+  'packages/runtime/api/errors/',
   // `packages/runtime/astro-project-adapter` since #225: the pure seams —
   // pair gate, resolution, seam probes, runner accounting (#225), the
   // styles join's correspondence join + source walk (#226), the
@@ -250,6 +264,12 @@ const WATCHLIST_EXCEPTION_FILES: ReadonlySet<string> = new Set([
   'packages/runtime/proxy/http-stream.ts',
   'packages/runtime/proxy/upgrade-tunnel.ts',
   'packages/runtime/proxy/proxy-health.ts',
+  // #234 (F2): the API surface's real socket IO — the reserved-handler
+  // composition behind F1's handleReserved hook (bounded body read,
+  // response write); its truth is the real-socket focused lane
+  // (test/http-api, through the REAL origin listener, OS-assigned
+  // loopback ports).
+  'packages/runtime/api/http/reserved-handler.ts',
 ]);
 
 /**

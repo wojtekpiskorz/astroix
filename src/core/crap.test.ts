@@ -301,6 +301,11 @@ describe('toRiskEntry', () => {
       'packages/runtime/origin/host-router.ts',
       'packages/runtime/proxy/upgrade-request.ts',
       'packages/runtime/astro-project-adapter/seam-readers.ts',
+      // #234 (F2): one representative per new covered prefix — the
+      // dispatch core (api/http) and the sanitized error responses
+      // (api/errors).
+      'packages/runtime/api/http/api-dispatch.ts',
+      'packages/runtime/api/errors/error-responses.ts',
     ];
     for (const file of covered) {
       expect(toRiskEntry(file, fn, fileCov).metric).toBe('crap');
@@ -323,6 +328,8 @@ describe('toRiskEntry', () => {
       'packages/runtime/proxy/http-stream.ts',
       'packages/runtime/proxy/upgrade-tunnel.ts',
       'packages/runtime/proxy/proxy-health.ts',
+      // #234 (F2): the API surface's reserved-handler socket composition
+      'packages/runtime/api/http/reserved-handler.ts',
       // the evidence subtree exception, not just the exact files
       'packages/runtime/astro-project-adapter/certification/staging.ts',
     ];
