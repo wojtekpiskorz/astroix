@@ -26,7 +26,8 @@
     "./project-plane/supervision": "./project-plane/supervision/plane-supervisor.ts",
     "./project-runtime": "./project-runtime/project-runtime.ts",
     "./origin": "./origin/origin-listener.ts",
-    "./proxy/health": "./proxy/proxy-health.ts"
+    "./proxy/health": "./proxy/proxy-health.ts",
+    "./api/http": "./api/http/reserved-handler.ts"
   },
   "sideEffects": false,
   "dependencies": {

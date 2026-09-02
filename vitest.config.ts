@@ -165,6 +165,19 @@ export default defineConfig({
         // upstreams, OS-assigned ports).
         'packages/runtime/origin/**',
         'packages/runtime/proxy/**',
+        // The HTTP API v1 seams (#234, F2, additive): the pure dispatch
+        // core, the command permission matrix, the security-header
+        // evidence, the host-capability grants, the client-binding
+        // table, the authority strip, and the bounded envelope
+        // validation are deterministic pure units (covered tier). The
+        // real IO — the reserved-handler composition that reads one
+        // bounded body and writes one response draft behind F1's
+        // handleReserved hook — is watchlist-tiered in crap.ts but
+        // stays collected here like the plane's other composition
+        // files: its behavior truth is the real-socket focused lane
+        // under test/http-api (through the REAL origin listener,
+        // OS-assigned loopback ports).
+        'packages/runtime/api/**',
       ],
       reporter: ['json'],
       reportsDirectory: 'coverage',
