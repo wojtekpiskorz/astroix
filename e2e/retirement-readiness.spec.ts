@@ -72,14 +72,22 @@ test('retained UI: the presentation surface is uncoupled and runs over contract-
   ];
   const testHelpers = new Set(['mount.tsx', 'fixtures.ts']); // test-only, never shipped through the barrel
   const offenders: string[] = [];
-  for (const entry of readdirSync(PRESENTATION_DIR)) {
-    if (!entry.endsWith('.ts') && !entry.endsWith('.tsx')) continue;
-    if (entry.includes('.test.') || testHelpers.has(entry)) continue;
-    const text = readFileSync(join(PRESENTATION_DIR, entry), 'utf8');
+  const scanned: string[] = [];
+  for (const entry of readdirSync(PRESENTATION_DIR, { withFileTypes: true })) {
+    // the surface is FLAT: a subdirectory or non-TS module would silently
+    // narrow the zero-coupling claim, so a shape change fails here instead
+    if (entry.isDirectory()) {
+      throw new Error(`unexpected directory in the presentation surface: ${entry.name}`);
+    }
+    if (!entry.name.endsWith('.ts') && !entry.name.endsWith('.tsx')) continue;
+    if (entry.name.includes('.test.') || testHelpers.has(entry.name)) continue;
+    scanned.push(entry.name);
+    const text = readFileSync(join(PRESENTATION_DIR, entry.name), 'utf8');
     for (const { token, what } of forbidden) {
-      if (text.includes(token)) offenders.push(`${entry}: ${what}`);
+      if (text.includes(token)) offenders.push(`${entry.name}: ${what}`);
     }
   }
+  expect(scanned.length, 'the coupling scan must cover real surface').toBeGreaterThan(0);
   expect(offenders, 'the presentation surface must stay runtime-uncoupled').toEqual([]);
 
   // (b) the mount lane: run the readiness presentation mounts (this
@@ -146,7 +154,10 @@ test('fixture: the canonical fixture is plain and its production build carries z
     'the fixture lockfile resolves no astroix package',
   ).toBe(false);
 
-  // the clean production build (AC-5)
+  // the clean production build (AC-5). PINNED COMPOSITION of
+  // e2e/plain-build.spec.ts (owned by #215's lane, deliberately not
+  // imported): build, walk dist/, assert zero astroix bytes — the two must
+  // move together, like the scrub's pinned copy in oracle-comparison.ts.
   execSync('npm run build', { cwd: FIXTURE, stdio: 'pipe' });
   const dist = join(FIXTURE, 'dist');
   const files: string[] = [];
