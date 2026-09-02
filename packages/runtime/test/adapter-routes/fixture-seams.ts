@@ -190,11 +190,13 @@ export function fixtureRouteModules(): Map<string, object> {
 export interface FakeRunnerOptions {
   /** Defaults to the fixture export; a malformed shape here exercises the fail-closed reader. */
   readonly virtualRoutesExport?: unknown;
+  /** The virtual-routes import never settles — the metadata read's hang. */
+  readonly hangingVirtualRoutesImport?: boolean;
   /** Modules by component path; a missing entry serves `{}` (import succeeded, no getStaticPaths). */
   readonly modules?: ReadonlyMap<string, object>;
   /** Components whose import rejects — module evaluation failure. */
   readonly failingComponents?: readonly string[];
-  /** Components whose import never settles — the per-route timeout's hang. */
+  /** Components whose import never settles — the per-wait bound's hang. */
   readonly hangingComponents?: readonly string[];
 }
 
@@ -216,6 +218,7 @@ export class FakeRunner implements ModuleRunnerLike {
   async import(id: string): Promise<unknown> {
     this.importedIds.push(id);
     if (id === VIRTUAL_ROUTES_MODULE) {
+      if (this.options.hangingVirtualRoutesImport) return new Promise<never>(() => {});
       return this.options.virtualRoutesExport ?? fixtureVirtualRoutesExport();
     }
     const component = [...knownComponents(this.options)].find(

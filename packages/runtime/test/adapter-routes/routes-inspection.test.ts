@@ -31,11 +31,14 @@ async function corpusRoutes(): Promise<CorpusRoute[]> {
   return corpus.routes;
 }
 
-function inspector(options: FakeRunnerOptions = {}) {
+function inspector(
+  options: FakeRunnerOptions = {},
+  create: { readonly waitTimeoutMs?: number } = {},
+) {
   const harness = fakeComposition(options);
   return {
     harness,
-    inspector: createRoutesInspector({ composition: harness.composition }),
+    inspector: createRoutesInspector({ composition: harness.composition, ...create }),
   };
 }
 
@@ -131,5 +134,37 @@ describe('createRoutesInspector.inspect', () => {
       '2025/release-notes',
       'hello-builder',
     ]);
+  });
+
+  it('fails the pass closed when the metadata read hangs past its bound', async () => {
+    const { harness, inspector: routesInspector } = inspector(
+      { hangingVirtualRoutesImport: true },
+      { waitTimeoutMs: 20 },
+    );
+    const rejection = await routesInspector.inspect().then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    expect(rejection).toBeInstanceOf(Error);
+    expect((rejection as Error).message).toContain('exceeded its per-wait bound');
+    // The hung pass still closed its runner — no residue into the next pass.
+    expect(harness.runners[0]?.isClosed()).toBe(true);
+  });
+
+  it('rejects promptly with the caller reason when aborted during the metadata read', async () => {
+    // The virtual-routes import never settles; the abort fires 10 ms in,
+    // while the per-wait bound sits at 3 s — only the abort race can
+    // reject this pass, and it must not wait for the hung import.
+    const controller = new AbortController();
+    const { harness, inspector: routesInspector } = inspector(
+      { hangingVirtualRoutesImport: true },
+      { waitTimeoutMs: 3_000 },
+    );
+    setTimeout(() => controller.abort('metadata-abort'), 10);
+    await expect(routesInspector.inspect({ signal: controller.signal })).rejects.toBe(
+      'metadata-abort',
+    );
+    expect(harness.runners[0]?.isClosed()).toBe(true);
+    expect(harness.runners[0]?.importedIds).toEqual(['virtual:astro:routes']);
   });
 });

@@ -23,7 +23,7 @@ import {
  * signal rejects the pass with the caller's reason.
  */
 
-const OPTIONS = { projectRoot: '/managed/fixture', routeTimeoutMs: 5_000 };
+const OPTIONS = { projectRoot: '/managed/fixture', waitTimeoutMs: 5_000 };
 
 function runner(options: FakeRunnerOptions = {}): FakeRunner {
   return new FakeRunner(new EventEmitter(), options);
@@ -113,7 +113,7 @@ describe('enumerateRenders', () => {
         hangingComponents: ['src/pages/blog/[slug].astro'],
       }),
       fixtureRouteMetadata(),
-      { ...OPTIONS, routeTimeoutMs: 20 },
+      { ...OPTIONS, waitTimeoutMs: 20 },
     );
     expect(hung.has('/blog/[slug]')).toBe(false);
     expect(hung.get('/blog/[...slug]')).toEqual(ALL_BLOG_IDS);
@@ -125,7 +125,7 @@ describe('enumerateRenders', () => {
     });
     const results = await enumerateRenders(runner({ modules }), fixtureRouteMetadata(), {
       ...OPTIONS,
-      routeTimeoutMs: 20,
+      waitTimeoutMs: 20,
     });
     expect(results.has('/blog/[slug]')).toBe(false);
   });

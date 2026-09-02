@@ -1,5 +1,5 @@
-import type { AdapterErrorDetails, SeamClass } from '../adapter-error';
-import { AdapterError, observedShape } from '../adapter-error';
+import { observedShape } from '../adapter-error';
+import { seamRejected } from './seam-rejection';
 
 /**
  * The route-metadata seam probe (#229, extending #225's
@@ -13,7 +13,8 @@ import { AdapterError, observedShape } from '../adapter-error';
  *
  * Like every seam probe: an unknown shape is a compatibility event —
  * `seam-rejected` naming the seam, its class, the expected shape, and a
- * structural observed description. The adapter never guesses a route from
+ * structural observed description (the template lives once in
+ * `seam-rejection.ts`). The adapter never guesses a route from
  * the filesystem; routes exist here because the certified seam said so,
  * or they do not exist.
  */
@@ -50,6 +51,11 @@ export interface RouteMetadataEntry {
   readonly segments: readonly (readonly RouteSegmentPart[])[];
 }
 
+/** Rejects this seam with the structural observed description of `route`. */
+function rejected(expected: string, route: unknown): never {
+  throw seamRejected(SEAM_ROUTES_EXPORT, expected, observedShape(route));
+}
+
 /**
  * Reads and validates the `virtual:astro:routes` export's route metadata.
  * Fails closed on every drift: a missing `routes` array, an entry whose
@@ -61,7 +67,7 @@ export interface RouteMetadataEntry {
 export function readRouteMetadata(moduleExports: unknown): readonly RouteMetadataEntry[] {
   const routes = (moduleExports as { routes?: unknown })?.routes;
   if (!Array.isArray(routes)) {
-    throw seamRejected('an array routes export', observedShape(moduleExports));
+    throw seamRejected(SEAM_ROUTES_EXPORT, 'an array routes export', observedShape(moduleExports));
   }
   const entries = routes.map(readEntry);
   assertUniquePatterns(entries);
@@ -82,27 +88,18 @@ function readEntry(route: unknown, index: number): RouteMetadataEntry {
     | null
     | undefined;
   if (typeof data?.route !== 'string' || data.route.length === 0) {
-    throw seamRejected(
-      `route ${index} with a non-empty string routeData.route`,
-      observedShape(route),
-    );
+    rejected(`route ${index} with a non-empty string routeData.route`, route);
   }
   if (typeof data.component !== 'string' || data.component.length === 0) {
-    throw seamRejected(
-      `route ${index} with a non-empty string routeData.component`,
-      observedShape(route),
-    );
+    rejected(`route ${index} with a non-empty string routeData.component`, route);
   }
   const type = readRouteType(data.type, index, route);
   const origin = readRouteOrigin(data.origin, index, route);
   if (typeof data.prerender !== 'boolean') {
-    throw seamRejected(`route ${index} with a boolean routeData.prerender`, observedShape(route));
+    rejected(`route ${index} with a boolean routeData.prerender`, route);
   }
   if (!isStringArray(data.params)) {
-    throw seamRejected(
-      `route ${index} with an array of string routeData.params`,
-      observedShape(route),
-    );
+    rejected(`route ${index} with an array of string routeData.params`, route);
   }
   const segments = readSegments(data.segments, index, route);
   return {
@@ -122,10 +119,7 @@ function readRouteType(
   route: unknown,
 ): (typeof ROUTE_TYPES)[number] {
   if (typeof value !== 'string' || !isRouteType(value)) {
-    throw seamRejected(
-      `route ${index} with routeData.type one of ${ROUTE_TYPES.join(' | ')}`,
-      observedShape(route),
-    );
+    rejected(`route ${index} with routeData.type one of ${ROUTE_TYPES.join(' | ')}`, route);
   }
   return value;
 }
@@ -136,10 +130,7 @@ function readRouteOrigin(
   route: unknown,
 ): (typeof ROUTE_ORIGINS)[number] {
   if (typeof value !== 'string' || !isRouteOrigin(value)) {
-    throw seamRejected(
-      `route ${index} with routeData.origin one of ${ROUTE_ORIGINS.join(' | ')}`,
-      observedShape(route),
-    );
+    rejected(`route ${index} with routeData.origin one of ${ROUTE_ORIGINS.join(' | ')}`, route);
   }
   return value;
 }
@@ -150,14 +141,11 @@ function readSegments(
   route: unknown,
 ): readonly (readonly RouteSegmentPart[])[] {
   if (!Array.isArray(segments)) {
-    throw seamRejected(`route ${index} with an array routeData.segments`, observedShape(route));
+    rejected(`route ${index} with an array routeData.segments`, route);
   }
   return segments.map((segment, segmentIndex) => {
     if (!Array.isArray(segment)) {
-      throw seamRejected(
-        `route ${index} segment ${segmentIndex} as an array of parts`,
-        observedShape(route),
-      );
+      rejected(`route ${index} segment ${segmentIndex} as an array of parts`, route);
     }
     return segment.map((part, partIndex) => {
       const candidate = part as { content?: unknown; dynamic?: unknown; spread?: unknown } | null;
@@ -166,9 +154,9 @@ function readSegments(
         typeof candidate.dynamic !== 'boolean' ||
         typeof candidate.spread !== 'boolean'
       ) {
-        throw seamRejected(
+        rejected(
           `route ${index} segment ${segmentIndex} part ${partIndex} with string content and boolean dynamic, spread`,
-          observedShape(route),
+          route,
         );
       }
       return { content: candidate.content, dynamic: candidate.dynamic, spread: candidate.spread };
@@ -197,22 +185,9 @@ function assertUniquePatterns(entries: readonly RouteMetadataEntry[]): void {
   }
   if (duplicates > 0) {
     throw seamRejected(
+      SEAM_ROUTES_EXPORT,
       `routes with unique patterns (${duplicates} duplicate${duplicates === 1 ? '' : 's'} observed)`,
       `${duplicates} repeated pattern${duplicates === 1 ? '' : 's'}`,
     );
   }
-}
-
-function seamRejected(expected: string, observed: string): AdapterError {
-  const details: AdapterErrorDetails = {
-    seam: SEAM_ROUTES_EXPORT,
-    seamClass: 'fail-closed private' as SeamClass,
-    expected,
-    observed,
-  };
-  return new AdapterError(
-    'seam-rejected',
-    `AstroProjectAdapter seam rejection at ${SEAM_ROUTES_EXPORT}: expected ${expected}; observed ${observed}`,
-    details,
-  );
 }

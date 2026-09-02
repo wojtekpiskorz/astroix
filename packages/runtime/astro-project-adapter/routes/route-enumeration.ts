@@ -15,7 +15,7 @@ import { isEnumeratable } from './routes-payload';
  *
  * Failure containment is the frozen contract's unknown discipline: any
  * per-route failure — a missing or throwing `getStaticPaths`, a garbage
- * result, a hang past the per-route bound, route behavior outside the
+ * result, a hang past the per-wait bound, route behavior outside the
  * supported contract (pagination) — drops that route's `renders` to
  * unknown. Unknown never fires the unrouted marker and never serves a
  * wrong value (#119's silent-never-wrong, restated).
@@ -24,20 +24,25 @@ import { isEnumeratable } from './routes-payload';
  * lifecycle, not to one route's truth — an aborted signal rejects the
  * whole pass with the caller's reason (the runner still closes; the
  * fresh-runner wrapper owns that path).
+ *
+ * This module also owns the lane's per-wait bound (`bounded`): every
+ * runner read an inspection pass awaits — the metadata read included
+ * (review round 1: a hung composition must never mean an unbounded
+ * inspect) — races its work against the lifecycle signal and this bound.
  */
 
-/** Per-route bound on one enumeration wait (import, then the static-paths call). */
-export const DEFAULT_ROUTE_TIMEOUT_MS = 5_000;
+/** Per-wait bound on one runner read (an import, then a static-paths call). */
+export const DEFAULT_WAIT_TIMEOUT_MS = 5_000;
 
-/** Rejects a bounded wait on timeout — never crosses a pass boundary. */
-const ROUTE_TIMEOUT = Symbol('route-enumeration-timeout');
+/** Rejects a bounded wait on timeout unless the caller supplies its own reason. */
+const WAIT_TIMEOUT = Symbol('routes-inspection-wait-timeout');
 
 /** What one enumeration pass needs: the project root (entrypoint key) and the lifecycle bounds. */
 export interface EnumerationOptions {
   readonly projectRoot: string;
   readonly signal?: AbortSignal;
-  /** Defaults to {@link DEFAULT_ROUTE_TIMEOUT_MS}; overridable so tests bound hangs tightly. */
-  readonly routeTimeoutMs?: number;
+  /** Defaults to {@link DEFAULT_WAIT_TIMEOUT_MS}; overridable so tests bound hangs tightly. */
+  readonly waitTimeoutMs?: number;
 }
 
 /**
@@ -71,9 +76,9 @@ async function enumerateRoute(
   entry: RouteMetadataEntry,
   options: EnumerationOptions,
 ): Promise<readonly string[]> {
-  const timeoutMs = options.routeTimeoutMs ?? DEFAULT_ROUTE_TIMEOUT_MS;
+  const waitTimeoutMs = options.waitTimeoutMs ?? DEFAULT_WAIT_TIMEOUT_MS;
   const entrypoint = pathToFileURL(join(options.projectRoot, entry.component)).href;
-  const moduleExports = (await bounded(runner.import(entrypoint), options.signal, timeoutMs)) as
+  const moduleExports = (await bounded(runner.import(entrypoint), options.signal, waitTimeoutMs)) as
     | { getStaticPaths?: unknown }
     | null
     | undefined;
@@ -86,7 +91,7 @@ async function enumerateRoute(
   const result = await bounded(
     Promise.resolve(getStaticPaths({ paginate: unsupportedPaginate, routePattern: entry.pattern })),
     options.signal,
-    timeoutMs,
+    waitTimeoutMs,
   );
   if (!Array.isArray(result)) {
     throw new Error('the route getStaticPaths returned no array');
@@ -124,12 +129,19 @@ function unsupportedPaginate(): never {
 }
 
 /**
- * Bounds one wait: timeout rejects with the internal sentinel (contained
- * by the caller), abort rejects with the signal's reason (pass-level).
- * The losing promise's rejection is deliberately swallowed — abandoned
- * work must not surface as an unhandled rejection after the pass moved on.
+ * Bounds one runner read: timeout rejects with `timeoutReason` (the
+ * internal sentinel by default — enumeration contains it; the metadata
+ * read supplies a rejection that crosses the pass boundary), abort
+ * rejects with the signal's reason (pass-level, always). The losing
+ * promise's rejection is deliberately swallowed — abandoned work must
+ * not surface as an unhandled rejection after the pass moved on.
  */
-async function bounded<T>(work: Promise<T>, signal: AbortSignal | undefined, timeoutMs: number) {
+export async function bounded<T>(
+  work: Promise<T>,
+  signal: AbortSignal | undefined,
+  waitTimeoutMs: number,
+  timeoutReason: unknown = WAIT_TIMEOUT,
+): Promise<T> {
   if (signal?.aborted) throw signal.reason;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let rejectBail: ((reason: unknown) => void) | undefined;
@@ -140,7 +152,7 @@ async function bounded<T>(work: Promise<T>, signal: AbortSignal | undefined, tim
   signal?.addEventListener('abort', onAbort, { once: true });
   const bail = new Promise<never>((_, reject) => {
     rejectBail = reject;
-    timer = setTimeout(() => reject(ROUTE_TIMEOUT), timeoutMs);
+    timer = setTimeout(() => reject(timeoutReason), waitTimeoutMs);
   });
   try {
     return await Promise.race([work, bail]);
