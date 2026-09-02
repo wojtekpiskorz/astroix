@@ -58,9 +58,10 @@ describe('app-shell public surface', () => {
   });
 
   it('exports no stylesheet delivery or astroix-branded runtime values', () => {
-    // chromeSheet (the constructed stylesheet) is the host's delivery
-    // mechanic (src/client/styles.ts) — never re-exported here; anything
-    // astroix-branded at runtime is domain coupling
+    // chromeSheet (the constructed stylesheet) is the HOST's delivery
+    // mechanic (the retired src/client/styles.ts died at the gate; the
+    // Electron renderer adopts the sheet when it lands) — never re-exported
+    // here; anything astroix-branded at runtime is domain coupling
     expect(appShell).not.toHaveProperty('chromeSheet');
     expect(Object.keys(appShell).filter((name) => /astroix/i.test(name))).toEqual([]);
   });

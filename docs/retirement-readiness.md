@@ -164,8 +164,9 @@ is #215's call under its owned paths, not this proof's.
 ## A6 executed — the recorded disposition (#215, lane A6)
 
 The retirement gate ran; this section is the record of what A6 did with
-this report's inventory and suite. The A5 prose above is unchanged
-history; where it says "may start from this proof," it now has.
+this report's inventory and suite. The A5 prose above is history but for
+the row edits this prune carries; where it says "may start from this
+proof," it now has.
 
 **The suite.** The five serverless legs survive as
 `e2e/retirement-readiness/readiness.test.ts` — converted from Playwright
