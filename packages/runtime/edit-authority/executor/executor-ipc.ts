@@ -139,41 +139,52 @@ export function isDomainWritePlan(value: unknown): value is DomainWritePlan {
 function isResource(value: unknown): boolean {
   if (typeof value !== 'object' || value === null) return false;
   const resource = value as Record<string, unknown>;
-  if (
-    !isExactRecord(resource, [
-      'canonicalRoot',
-      'session',
-      'kind',
-      'operations',
-      'displayPath',
-      'baseline',
-      'target',
-    ])
-  ) {
-    return false;
-  }
-  if (typeof resource.canonicalRoot !== 'string' || resource.canonicalRoot.length === 0) {
-    return false;
-  }
-  if (!isSessionRef(resource.session)) return false;
-  if (!isOneOf(resource.kind, RESOURCE_KINDS)) return false;
-  if (
-    !Array.isArray(resource.operations) ||
-    resource.operations.length === 0 ||
-    !resource.operations.every((operation) => isOneOf(operation, OPERATIONS))
-  ) {
-    return false;
-  }
-  if (typeof resource.displayPath !== 'string') return false;
-  if (typeof resource.baseline !== 'object' || resource.baseline === null) return false;
-  const baseline = resource.baseline as Record<string, unknown>;
+  return (
+    isExactRecord(resource, RESOURCE_FIELDS) &&
+    typeof resource.canonicalRoot === 'string' &&
+    resource.canonicalRoot.length > 0 &&
+    isSessionRef(resource.session) &&
+    isOneOf(resource.kind, RESOURCE_KINDS) &&
+    isOperationsList(resource.operations) &&
+    typeof resource.displayPath === 'string' &&
+    isBaseline(resource.baseline) &&
+    isTarget(resource.target)
+  );
+}
+
+/** The granted resource's exact field set — nothing more, nothing missing. */
+const RESOURCE_FIELDS = [
+  'canonicalRoot',
+  'session',
+  'kind',
+  'operations',
+  'displayPath',
+  'baseline',
+  'target',
+] as const;
+
+/** A non-empty duplicate-free list of the permitted operation species. */
+function isOperationsList(value: unknown): boolean {
+  return (
+    Array.isArray(value) &&
+    value.length > 0 &&
+    new Set(value).size === value.length &&
+    value.every((operation) => isOneOf(operation, OPERATIONS))
+  );
+}
+
+/** The revision contract: an exact lowercase-hex SHA-256, or expected-absent with nothing else. */
+function isBaseline(value: unknown): boolean {
+  if (typeof value !== 'object' || value === null) return false;
+  const baseline = value as Record<string, unknown>;
   if (baseline.type === 'sha256') {
-    if (Object.keys(baseline).length !== 2 || typeof baseline.sha256 !== 'string') return false;
-    if (!SHA256_PATTERN.test(baseline.sha256)) return false;
-  } else if (baseline.type !== 'expected-absent' || Object.keys(baseline).length !== 1) {
-    return false;
+    return (
+      Object.keys(baseline).length === 2 &&
+      typeof baseline.sha256 === 'string' &&
+      SHA256_PATTERN.test(baseline.sha256)
+    );
   }
-  return isTarget(resource.target);
+  return baseline.type === 'expected-absent' && Object.keys(baseline).length === 1;
 }
 
 function isTarget(value: unknown): boolean {

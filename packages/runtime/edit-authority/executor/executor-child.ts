@@ -9,6 +9,7 @@ import {
 import {
   EXIT_FAILURE,
   EXIT_LEASE_CONTENTION,
+  type ExecutorChannel,
   executorChannel,
   serveWriteExecutor,
 } from './executor-ipc.ts';
@@ -29,19 +30,23 @@ import { createWriteExecutor, type WriteExecutor } from './write-executor.ts';
  * fenced by construction: it is this same composition, and it cannot
  * obtain the lease while the active executor's process lives.
  *
- * The executor factory is the one injected seam (the #230 boot-gate
- * idiom): the packaged child wires the real `createWriteExecutor`; the
- * process-lane tests fork this same boot-and-serve composition over the
- * real executor wrapped in their deterministic in-flight gate. The
- * runtime pin passes through like `bootControlPlane`'s — the packaged
- * runtime composes the qualified production pin, dev and test
- * compositions declare `currentRuntimePin()` explicitly.
+ * The channel is an explicit input (the `bootControlPlane` shape): the
+ * forked tail and the process-lane runners pass `executorChannel(process)`;
+ * in-process unit tests inject a memory channel over the same boot. The
+ * executor factory is the other injected seam (the #230 boot-gate idiom):
+ * the packaged child wires the real `createWriteExecutor`; the
+ * process-lane tests fork this same boot over the real executor wrapped
+ * in their deterministic in-flight gate. The runtime pin passes through
+ * like `bootControlPlane`'s — the packaged runtime composes the qualified
+ * production pin, dev and test compositions declare `currentRuntimePin()`.
  */
 
 /** sysexits.h EX_CANTCREAT — another live process holds the edit-writer lease. */
 export const EXIT_EDIT_LEASE_CONTENTION = EXIT_LEASE_CONTENTION;
 
 export interface WriteExecutorChildInput {
+  /** The private IPC channel to the spawning control plane. */
+  readonly channel: ExecutorChannel;
   /** Directory holding the fixed private kernel-lease files. */
   readonly privateStateDirectory: string;
   /** The canonical project root this executor writes inside. */
@@ -70,34 +75,50 @@ export interface WriteExecutorChildInput {
  * contention is exit 73, every other failure (including an unqualified
  * runtime pin) is exit 74, never a guess at contention.
  */
-export function bootWriteExecutorChild(input: WriteExecutorChildInput): Promise<void> {
+export async function bootWriteExecutorChild(input: WriteExecutorChildInput): Promise<void> {
   const exitProcess = input.exitProcess ?? ((exitCode: number) => process.exit(exitCode));
-  return new Promise<void>((resolve, reject) => {
-    let leases: ReturnType<typeof createKernelLeaseModule>;
-    try {
-      leases = createKernelLeaseModule({
-        privateStateDirectory: input.privateStateDirectory,
-        qualifiedRuntime: input.qualifiedRuntime ?? QUALIFIED_RUNTIME_PIN,
-      });
-      leases.holdEditWriter();
-    } catch (error) {
-      exitProcess(error instanceof KernelLeaseError ? exitCodeForLeaseError(error) : EXIT_FAILURE);
-      reject(error instanceof Error ? error : new Error(String(error)));
-      return;
-    }
-    const executor =
-      input.createExecutor !== undefined
-        ? input.createExecutor()
-        : createWriteExecutor({ canonicalRoot: input.canonicalRoot, session: input.session });
-    serveWriteExecutor({ channel: executorChannel(process), executor, exitProcess });
-    resolve();
-  });
+  try {
+    const leases = createKernelLeaseModule({
+      privateStateDirectory: input.privateStateDirectory,
+      qualifiedRuntime: input.qualifiedRuntime ?? QUALIFIED_RUNTIME_PIN,
+    });
+    leases.holdEditWriter();
+  } catch (error) {
+    exitProcess(error instanceof KernelLeaseError ? exitCodeForLeaseError(error) : EXIT_FAILURE);
+    throw error instanceof Error ? error : new Error(String(error));
+  }
+  const executor =
+    input.createExecutor !== undefined
+      ? input.createExecutor()
+      : createWriteExecutor({ canonicalRoot: input.canonicalRoot, session: input.session });
+  serveWriteExecutor({ channel: input.channel, executor, exitProcess });
 }
 
 function exitCodeForLeaseError(error: KernelLeaseError): number {
   return error.code === 'ASTROIX_KERNEL_LEASE_UNAVAILABLE'
     ? EXIT_EDIT_LEASE_CONTENTION
     : EXIT_FAILURE;
+}
+
+/** Parses and validates the forked tail's argv boot config; null when unusable. */
+export function parseExecutorChildConfig(
+  argument: string | undefined,
+): WriteExecutorChildInput | null {
+  try {
+    const parsed = JSON.parse(argument ?? 'null') as Partial<WriteExecutorChildInput> | null;
+    if (
+      parsed !== null &&
+      typeof parsed.privateStateDirectory === 'string' &&
+      typeof parsed.canonicalRoot === 'string' &&
+      typeof parsed.session === 'object' &&
+      parsed.session !== null
+    ) {
+      return parsed as WriteExecutorChildInput;
+    }
+  } catch {
+    // a malformed config is the boot failure below
+  }
+  return null;
 }
 
 /** Whether this module is the executed entry (the forked child), not an import. */
@@ -109,25 +130,11 @@ function isDirectExecution(): boolean {
 // JSON from the exact spawner — the control plane's composition (F4/F5
 // wires the packaged path); no wire request can reach this process.
 if (isDirectExecution()) {
-  let config: WriteExecutorChildInput | undefined;
-  try {
-    const parsed = JSON.parse(process.argv[2] ?? 'null') as WriteExecutorChildInput;
-    if (
-      typeof parsed.privateStateDirectory === 'string' &&
-      typeof parsed.canonicalRoot === 'string' &&
-      typeof parsed.session === 'object' &&
-      parsed.session !== null
-    ) {
-      config = parsed;
-    }
-  } catch {
-    // a malformed config is the boot failure below
-  }
-  if (config === undefined) {
+  const config = parseExecutorChildConfig(process.argv[2]);
+  if (config === null) {
     process.exit(EXIT_FAILURE);
   }
-  const boot: WriteExecutorChildInput = config;
-  void bootWriteExecutorChild(boot).catch(() => {
+  void bootWriteExecutorChild({ ...config, channel: executorChannel(process) }).catch(() => {
     // The boot gate already terminated this child; nothing further to decide.
   });
 }

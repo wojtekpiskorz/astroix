@@ -265,7 +265,11 @@ function replacePlanFor(root: string): DomainWritePlan {
 }
 
 /** Awaits the outcome reply for one id — bounded observation polling, never a single-tick assumption. */
-async function waitForReply(channel: MemoryChannel, id: number, timeoutMs = 5_000): Promise<unknown> {
+async function waitForReply(
+  channel: MemoryChannel,
+  id: number,
+  timeoutMs = 5_000,
+): Promise<unknown> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
     const reply = channel.sent.find(
@@ -274,7 +278,8 @@ async function waitForReply(channel: MemoryChannel, id: number, timeoutMs = 5_00
         (message as { id?: number }).id === id,
     );
     if (reply !== undefined) return reply;
-    if (Date.now() > deadline) throw new Error(`timed out waiting for the outcome reply (id ${id})`);
+    if (Date.now() > deadline)
+      throw new Error(`timed out waiting for the outcome reply (id ${id})`);
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
 }

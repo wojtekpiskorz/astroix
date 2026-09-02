@@ -1,5 +1,6 @@
 import { appendFileSync, existsSync, writeFileSync } from 'node:fs';
 import { bootWriteExecutorChild } from '../../edit-authority/executor/executor-child.ts';
+import { executorChannel } from '../../edit-authority/executor/executor-ipc.ts';
 import type { WriteExecutor } from '../../edit-authority/executor/write-executor.ts';
 import { createWriteExecutor } from '../../edit-authority/executor/write-executor.ts';
 import type { WriteOutcome } from '../../edit-authority/executor/write-outcomes.ts';
@@ -71,6 +72,7 @@ function createExecutor(): WriteExecutor {
 }
 
 void bootWriteExecutorChild({
+  channel: executorChannel(process),
   privateStateDirectory: config.privateStateDirectory,
   canonicalRoot: config.canonicalRoot,
   session: config.session,
