@@ -2,7 +2,7 @@
   "name": "@wojciechpiskorz/astroix-runtime",
   "version": "0.0.0",
   "private": true,
-  "description": "The control plane \u2014 deep seams born incrementally per the rewrite DAG (ADR-0006 \u00a79): the canonical project registry persistence first (#221), then the AstroProjectAdapter and its exact-pair certification (#225). Session supervision, project runtime, and edit authority land in their own lanes. The package barrel (index.ts) is owned by a later integration lane.",
+  "description": "The control plane — deep seams born incrementally per the rewrite DAG (ADR-0006 §9): the canonical project registry persistence (#221), the private control-plane boot authority and the lifetime-held kernel leases (#222), then the AstroProjectAdapter and its exact-pair certification (#225). Session supervision, project runtime, and edit authority land in their own lanes. The package barrel (index.ts) is owned by a later integration lane.",
   "type": "module",
   "license": "MIT",
   "engines": {
@@ -10,7 +10,9 @@
   },
   "exports": {
     "./registry": "./registry/project-registry.ts",
-    "./astro-project-adapter": "./astro-project-adapter/composition.ts"
+    "./astro-project-adapter": "./astro-project-adapter/composition.ts",
+    "./kernel-lease": "./kernel-lease/kernel-lease.ts",
+    "./private-boot": "./private-boot/control-plane-boot.ts"
   },
   "sideEffects": false,
   "dependencies": {

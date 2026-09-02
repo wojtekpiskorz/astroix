@@ -50,13 +50,15 @@ export default defineConfig({
       'packages/core/src/**/*.test.{ts,tsx}',
       'packages/protocol/src/**/*.test.{ts,tsx}',
       'packages/app-shell/src/**/*.test.{ts,tsx}',
-      // packages/runtime (#221): tests live under test/<seam>/ per the
-      // ticket's owned paths — deterministic real-filesystem unit tests
-      // (temp dirs, real fsync/rename), no servers, no process lanes yet.
-      // The adapter-certification legs (#225) are NOT here by design: they
-      // are *.certify.ts (real installs, minutes-scale) behind
-      // `npm run certify:adapter` with their own config — the root run
-      // must stay deterministic and network-free.
+      // packages/runtime (#221, #222): tests live under test/<seam>/ per
+      // the tickets' owned paths — deterministic real-filesystem unit tests
+      // (temp dirs, real fsync/rename, real SQLite lease files), plus the
+      // lease/boot process lanes (#222): real forked children over real
+      // private IPC channels, asserted on messages and exit events, never
+      // timing. No servers yet. The adapter-certification legs (#225) are
+      // NOT here by design: they are *.certify.ts (real installs,
+      // minutes-scale) behind `npm run certify:adapter` with their own
+      // config — the root run must stay deterministic and network-free.
       'packages/runtime/test/**/*.test.{ts,tsx}',
       // Behavior-contract schema validators (#217, directive from B1's
       // review): the schemas are pure zod over frozen fixtures — the unit
@@ -82,15 +84,17 @@ export default defineConfig({
       // helpers with colocated unit tests) plus the CRAP tooling layer
       // itself (src/core — complexity + crap, the only src/ survivors of
       // the retirement gate), the registry persistence
-      // (packages/runtime/registry since #221 — deterministic unit tests
-      // over real temp directories; later runtime seams join their own
-      // coverage-tier decisions in their own lanes), and the
-      // AstroProjectAdapter's pure seams (packages/runtime/
-      // astro-project-adapter root modules since #225 — pair gate,
-      // resolution, seam probes, runner accounting, unit-tested with
-      // resolution-layer stubs; composition.ts stays watchlist — its truth
-      // is the real-install certification suite — and certification/ is
-      // evidence machinery, not product), metric honesty,
+      // (packages/runtime/registry since #221), the kernel-lease +
+      // private-boot seams (packages/runtime/{kernel-lease,private-boot}
+      // since #222 — deterministic unit tests over real temp SQLite files
+      // and a real in-memory private-IPC channel; the forked process-lane
+      // children assert the cross-process semantics on top of the same
+      // modules), and the AstroProjectAdapter's pure seams
+      // (packages/runtime/astro-project-adapter root modules since #225 —
+      // pair gate, resolution, seam probes, runner accounting, unit-tested
+      // with resolution-layer stubs; composition.ts stays watchlist — its
+      // truth is the real-install certification suite — and certification/
+      // is evidence machinery, not product) — metric honesty,
       // wayfinder #55. The integration tiers (src/node, src/client) are
       // deleted; no watchlist tier exists under src/ anymore.
       provider: 'v8',
@@ -99,6 +103,8 @@ export default defineConfig({
         'packages/core/**',
         'packages/protocol/**',
         'packages/runtime/registry/**',
+        'packages/runtime/kernel-lease/**',
+        'packages/runtime/private-boot/**',
         'packages/runtime/astro-project-adapter/*.ts',
       ],
       reporter: ['json'],
