@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import { mkdir, readFile, realpath, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { minimalChildEnv } from '../../project-plane/supervision/exact-child.ts';
 import {
   createProjectPlaneSupervisor,
@@ -10,6 +10,7 @@ import {
   type ProjectPlaneSupervisor,
   workerSpawnPlan,
 } from '../../project-plane/supervision/plane-supervisor.ts';
+import { WorkerRejectionError } from '../../project-plane/worker/worker-failure.ts';
 import { cleanupScratch, freePort, makeScratch } from './lane-harness.ts';
 
 // @vitest-environment node — spawns real children with real signals and sockets; no DOM.
@@ -123,6 +124,26 @@ async function markerStamps(markerDir: string, name: string): Promise<bigint[]> 
 
 function crash(controlDir: string): Promise<void> {
   return writeFile(join(controlDir, 'crash'), '', { mode: 0o600 });
+}
+
+/** Awaits one stamp of a marker the stand-in child writes (receipt proof across processes). */
+async function waitForMarker(markerDir: string, name: string): Promise<void> {
+  await vi.waitFor(async () => {
+    if ((await markerStamps(markerDir, name)).length === 0) {
+      throw new Error(`waiting for the ${name} marker`);
+    }
+  });
+}
+
+/** The facet-dispatch rejection assertion: the E6 species carrying its code. */
+async function facetRejection(promise: Promise<unknown>): Promise<string> {
+  try {
+    await promise;
+  } catch (error) {
+    expect(error).toBeInstanceOf(WorkerRejectionError);
+    return (error as WorkerRejectionError).failure.code;
+  }
+  throw new Error('the facet dispatch settled unexpectedly');
 }
 
 function rejectedReady(
@@ -413,6 +434,156 @@ describe('escalation and the reap bounds', () => {
     expect(report.accounting.managedAstroReaped).toBe(false);
     expect(report.accounting.workerReaped).toBe(true);
     expect(JSON.stringify(report)).not.toContain('pid');
+  }, 15_000);
+});
+
+describe('the worker-wire facet — consumer traffic over the supervised wire (#308)', () => {
+  it('dispatches correlated typed inspections (ids ≥ 1) to the supervised worker while the probe keeps id 0', async () => {
+    const lane = await startLane();
+    const rawFrames: unknown[] = [];
+    lane.supervisor.workerWire.on('message', (frame) => rawFrames.push(frame));
+    // The raw listener was bound before readiness: the probe's id-0
+    // answer crossed the supervisor in that window and must NOT cross
+    // the facet — consumer traffic runs alongside it without collision.
+    await lane.supervisor.ready;
+
+    const first = await lane.supervisor.workerWire.dispatch({ kind: 'project' });
+    const second = await lane.supervisor.workerWire.dispatch({ kind: 'routes' });
+    // The stand-in echoes the wire id as the revision and the request's
+    // kind — the correlated answer is provable end-to-end.
+    expect(first).toMatchObject({ kind: 'project', revision: 1 });
+    expect(second).toMatchObject({ kind: 'routes', revision: 2 });
+    expect(rawFrames.map((frame) => (frame as { id?: number }).id)).toEqual([1, 2]);
+    await lane.supervisor.stop();
+  }, 15_000);
+
+  it('binds a raw D5-idiom client: an explicit consumer id through send(), correlated by hand', async () => {
+    const lane = await startLane();
+    await lane.supervisor.ready;
+    const wire = lane.supervisor.workerWire;
+    const answer = new Promise<unknown>((resolve) => {
+      const listener = (message: unknown): void => {
+        const frame = message as { type?: string; id?: number };
+        if (frame?.type === 'inspect-result' && frame.id === 41) {
+          wire.removeListener('message', listener);
+          resolve(message);
+        }
+      };
+      wire.on('message', listener);
+    });
+    expect(wire.send({ type: 'inspect', id: 41, request: { kind: 'content' } })).toBe(true);
+    const frame = (await answer) as {
+      ok?: boolean;
+      result?: { kind?: string; revision?: number };
+    };
+    expect(frame.ok).toBe(true);
+    expect(frame.result).toMatchObject({ kind: 'content', revision: 41 });
+    await lane.supervisor.stop();
+  }, 15_000);
+
+  it("forwards the worker's public event frames to facet subscribers, and the unbind holds", async () => {
+    const lane = await startLane();
+    await lane.supervisor.ready;
+    const events: unknown[] = [];
+    const unsubscribe = lane.supervisor.workerWire.subscribe((event) => events.push(event));
+    await writeFile(join(lane.workerControlDir, 'emit-event'), '', { mode: 0o600 });
+    await vi.waitFor(() => {
+      if (events.length === 0) throw new Error('event frame not yet received');
+    });
+    expect(events).toEqual([{ type: 'invalidation', families: ['styles'], revision: 2 }]);
+
+    unsubscribe();
+    await writeFile(join(lane.workerControlDir, 'emit-event'), 'again', { mode: 0o600 });
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(events).toHaveLength(1); // the unbound subscriber sees nothing further
+    await lane.supervisor.stop();
+  }, 15_000);
+
+  it("refuses the supervisor's reserved traffic at send() and withholds its frames from consumers", async () => {
+    const lane = await startLane();
+    const rawFrames: unknown[] = [];
+    lane.supervisor.workerWire.on('message', (frame) => rawFrames.push(frame));
+    await lane.supervisor.ready;
+    const wire = lane.supervisor.workerWire;
+    expect(wire.send({ type: 'stop' })).toBe(false); // the stop control is the supervisor's
+    expect(wire.send({ type: 'inspect', id: 0, request: { kind: 'project' } })).toBe(false); // id 0 is the probe's
+    expect(wire.send({ type: 'restart' })).toBe(false); // off-union: would be a protocol violation in the child
+
+    // None of it reached the worker: it still serves consumer dispatches.
+    expect(await wire.dispatch({ kind: 'project' })).toMatchObject({ revision: 1 });
+    await lane.supervisor.stop();
+
+    // The supervisor's frames — the probe answer, the close report — never crossed.
+    expect(rawFrames.length).toBeGreaterThan(0);
+    for (const frame of rawFrames) {
+      const wireFrame = frame as { type?: string; id?: number };
+      expect(wireFrame.type).not.toBe('closed');
+      expect(wireFrame.id).not.toBe(0);
+    }
+  }, 15_000);
+
+  it('settles a failed consumer inspection as the structured worker rejection — an answer, not a crash', async () => {
+    const lane = await startLane({ workerBehaviors: { failInspectIds: [1] } });
+    await lane.supervisor.ready;
+    expect(await facetRejection(lane.supervisor.workerWire.dispatch({ kind: 'project' }))).toBe(
+      'inspection-failed',
+    );
+    expect(lane.supervisor.state).toBe('running');
+    expect(await lane.supervisor.workerWire.dispatch({ kind: 'project' })).toMatchObject({
+      revision: 2,
+    });
+    await lane.supervisor.stop();
+  }, 15_000);
+
+  it('rejects post-stop dispatches structured shutdown and dies with the plane: send false, connected false', async () => {
+    const lane = await startLane();
+    await lane.supervisor.ready;
+    const stopping = lane.supervisor.stop(); // the terminal transition is synchronous
+    expect(await facetRejection(lane.supervisor.workerWire.dispatch({ kind: 'project' }))).toBe(
+      'shutdown',
+    );
+    await stopping;
+
+    const wire = lane.supervisor.workerWire;
+    expect(wire.connected).toBe(false);
+    expect(wire.send({ type: 'inspect', id: 5, request: { kind: 'project' } })).toBe(false);
+    expect(await facetRejection(wire.dispatch({ kind: 'project' }))).toBe('shutdown');
+  }, 15_000);
+
+  it('a worker crash mid-dispatch settles the in-flight dispatch structured; the facet dies with the child', async () => {
+    const lane = await startLane({ workerBehaviors: { hangInspectIds: [1] } });
+    await lane.supervisor.ready;
+    const dispatch = lane.supervisor.workerWire.dispatch({ kind: 'project' });
+    await waitForMarker(lane.markerDir, 'worker-inspect-hang'); // the child holds the request unanswered
+    await crash(lane.workerControlDir);
+
+    expect(await facetRejection(dispatch)).toBe('shutdown');
+    expect(lane.supervisor.workerWire.connected).toBe(false);
+    const report = await lane.supervisor.closed;
+    expect(report.reason).toBe('worker-crash');
+    expect(report.outcome).toBe('complete');
+  }, 15_000);
+
+  it('carries no PID, port, or child handle on its surface or its frames', async () => {
+    const lane = await startLane();
+    const rawFrames: unknown[] = [];
+    lane.supervisor.workerWire.on('message', (frame) => rawFrames.push(frame));
+    await lane.supervisor.ready;
+    await lane.supervisor.workerWire.dispatch({ kind: 'project' });
+
+    const wire = lane.supervisor.workerWire;
+    expect(Object.keys(wire).sort()).toEqual([
+      'connected',
+      'dispatch',
+      'on',
+      'removeListener',
+      'send',
+      'subscribe',
+    ]);
+    const serialized = `${JSON.stringify(wire)}${JSON.stringify(rawFrames)}`;
+    expect(serialized).not.toContain('pid');
+    expect(serialized).not.toContain(STAND_IN_WORKER); // no raw child path
+    await lane.supervisor.stop();
   }, 15_000);
 });
 

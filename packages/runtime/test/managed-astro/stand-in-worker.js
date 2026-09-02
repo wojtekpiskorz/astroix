@@ -9,6 +9,13 @@ import { join } from 'node:path';
  * contracts (boot failure, crash-on-control, stop-hang with ignored
  * TERM, an incomplete own-report), never worker behavior — the real
  * boot-and-serve contract is E6's process lane (#230).
+ *
+ * The #308 wire-facet knobs: inspections answer with the request's own
+ * wire id as the revision (correlation provable end-to-end — the probe
+ * keeps id 0), `failInspectIds` answers structured failures for chosen
+ * consumer ids, `hangInspectIds` never answers (a crash settles the
+ * in-flight dispatch), and the `emit-event` control file publishes one
+ * public event frame.
  */
 
 const config = JSON.parse(process.argv[2] ?? '{}');
@@ -55,10 +62,23 @@ if (config.behaviors?.hangStop) {
   process.on('SIGTERM', () => marker('worker-term-ignored'));
 }
 
+const failInspectIds = Array.isArray(config.behaviors?.failInspectIds)
+  ? config.behaviors.failInspectIds
+  : [];
+const hangInspectIds = Array.isArray(config.behaviors?.hangInspectIds)
+  ? config.behaviors.hangInspectIds
+  : [];
+
 if (config.controlDir) {
   watch(config.controlDir, (_event, filename) => {
     if (filename === 'crash' && existsSync(join(config.controlDir, 'crash'))) {
       process.exit(70);
+    }
+    if (filename === 'emit-event' && existsSync(join(config.controlDir, 'emit-event'))) {
+      process.send({
+        type: 'event',
+        event: { type: 'invalidation', families: ['styles'], revision: 2 },
+      });
     }
   });
 }
@@ -80,13 +100,36 @@ process.on('message', (message) => {
       });
       return;
     }
+    // hangInspectIds: receipt is proven, the answer never comes — a
+    // consumer crash-settlement leg settles the in-flight dispatch.
+    if (hangInspectIds.includes(message.id)) {
+      marker('worker-inspect-hang');
+      return;
+    }
+    if (failInspectIds.includes(message.id)) {
+      process.send({
+        type: 'inspect-result',
+        id: message.id,
+        ok: false,
+        failure: {
+          code: 'inspection-failed',
+          message: 'the project inspection failed unexpectedly',
+          adapterCode: null,
+        },
+      });
+      return;
+    }
+    // The correlated answer: the wire id rides the revision, so a
+    // consumer leg proves the id correlation end-to-end (the probe's id
+    // is always 0; consumer traffic is ≥ 1).
+    const kind = typeof message.request?.kind === 'string' ? message.request.kind : 'project';
     process.send({
       type: 'inspect-result',
       id: message.id,
       ok: true,
       result: {
-        kind: 'project',
-        revision: 1,
+        kind,
+        revision: message.id,
         payload: { certified: { astro: '7.2.10', vite: '8.2.2' } },
       },
     });
