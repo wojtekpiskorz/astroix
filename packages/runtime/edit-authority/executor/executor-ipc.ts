@@ -127,13 +127,29 @@ export function isDomainWritePlan(value: unknown): value is DomainWritePlan {
     return (
       Object.keys(record).length === 4 &&
       isResource(record.resource) &&
-      isExactRecord(record.range, ['start', 'end']) &&
-      isNonNegativeInteger((record.range as Record<string, unknown>).start) &&
-      isNonNegativeInteger((record.range as Record<string, unknown>).end) &&
+      isSpliceRange(record.range) &&
       typeof record.replacement === 'string'
     );
   }
   return false;
+}
+
+/**
+ * The splice range exactly as the protocol's `sourceRangeSchema` bounds
+ * it (edits.ts): an exact `{start, end}` record of non-negative integers
+ * with `start < end` — an inverted or empty range is a shape the
+ * planning boundary would never mint, and this gate refuses it before
+ * the core ever splices (an inverted range is not merely unusable, it
+ * silently duplicates bytes if spliced).
+ */
+function isSpliceRange(value: unknown): boolean {
+  if (!isExactRecord(value, ['start', 'end'])) return false;
+  const range = value as Record<string, unknown>;
+  return (
+    isNonNegativeInteger(range.start) &&
+    isNonNegativeInteger(range.end) &&
+    (range.start as number) < (range.end as number)
+  );
 }
 
 function isResource(value: unknown): boolean {

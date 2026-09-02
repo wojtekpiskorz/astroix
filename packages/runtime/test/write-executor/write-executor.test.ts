@@ -485,6 +485,42 @@ describe('final validation — every rejection proves no bytes moved', () => {
     expect(await readFile(path, 'utf8')).toBe(CSS);
     await executor.stop();
   });
+
+  it('an inverted splice range rejects — never duplicates bytes, never reports committed', async () => {
+    const root = await makeProjectRoot();
+    const path = await writeStyles(root, CSS);
+    const splicePlan = (range: { start: number; end: number }): DomainWritePlan => ({
+      operation: 'splice',
+      resource: boundResource({
+        canonicalRoot: root,
+        sessionRef: session('epoch-a', 1),
+        operations: ['splice'],
+        target: { type: 'existing', canonicalPath: path, sha256: digestOf(CSS) },
+      }),
+      range,
+      replacement: 'x',
+    });
+    const executor = createWriteExecutor({ canonicalRoot: root, session: session('epoch-a', 1) });
+    // Both fit inside the verified text with a matching digest — only the
+    // ORDERING is wrong. Slicing an inverted window would duplicate the
+    // overlap (slice(0,30) + 'x' + slice(12)); the core refuses instead.
+    const inverted = await executor.execute(splicePlan({ start: 30, end: 12 }));
+    expect(inverted).toEqual({
+      type: 'rejected',
+      code: 'range-outside-baseline',
+      message: 'the splice range does not fit the verified baseline contents',
+    });
+    // The protocol's sourceRange is strict (`start < end`): an empty range
+    // is a shape planning would never mint — same fence, same refusal.
+    const empty = await executor.execute(splicePlan({ start: 12, end: 12 }));
+    expect(empty).toEqual({
+      type: 'rejected',
+      code: 'range-outside-baseline',
+      message: 'the splice range does not fit the verified baseline contents',
+    });
+    expect(await readFile(path, 'utf8')).toBe(CSS);
+    await executor.stop();
+  });
 });
 
 describe('commit disciplines', () => {

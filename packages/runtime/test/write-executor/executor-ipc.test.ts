@@ -122,6 +122,15 @@ describe('the domain-plan shape gate', () => {
     expect(
       isDomainWritePlan({ operation: 'splice', resource: base, range: { start: 1.5, end: 2 } }),
     ).toBe(false);
+    // Range ordering mirrors the protocol's sourceRange (`start < end`):
+    // an inverted range would silently duplicate bytes if spliced; an
+    // empty one is a shape planning would never mint.
+    expect(
+      isDomainWritePlan({ operation: 'splice', resource: base, range: { start: 9, end: 3 } }),
+    ).toBe(false);
+    expect(
+      isDomainWritePlan({ operation: 'splice', resource: base, range: { start: 5, end: 5 } }),
+    ).toBe(false);
     // Baseline species: sha256 must be lowercase hex; expected-absent carries nothing else.
     expect(
       isDomainWritePlan({

@@ -145,11 +145,18 @@ export function createWriteExecutor(options: WriteExecutorOptions): WriteExecuto
     // ——— byte production ———
     let nextText: string;
     if (plan.operation === 'splice') {
-      // The frozen splice-window contract (packages/core splice-writer):
-      // UTF-16 string indices, end-exclusive. Re-checked against the
-      // bytes final validation just proved — the plan's range was built
-      // in planning's verify window; this closes the executor's own gap.
-      if (world.kind !== 'existing' || plan.range.end > world.text.length) {
+      // The frozen splice-window contract as the protocol bounds it
+      // (edits.ts sourceRange, mirrored by the wire gate): UTF-16 string
+      // indices, end-exclusive, non-negative and ORDERED (`start < end`),
+      // with end inside the bytes final validation just proved. An
+      // inverted range would silently duplicate bytes — it rejects, never
+      // splices; in-process callers get the same fence the wire gate gives.
+      if (
+        world.kind !== 'existing' ||
+        plan.range.start < 0 ||
+        plan.range.start >= plan.range.end ||
+        plan.range.end > world.text.length
+      ) {
         return writeRejection('range-outside-baseline');
       }
       nextText =
