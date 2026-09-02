@@ -28,10 +28,10 @@ const DISCLOSURE_PATTERNS: ReadonlyArray<{ id: string; pattern: RegExp; what: st
   { id: 'node-internal', pattern: /\bnode:internal\//, what: 'a Node internals frame' },
   {
     id: 'absolute-path',
-    pattern: /(?:^|[\s"'`(=])\/[a-z][^/\s]*\//i,
+    pattern: /(?:^|[\s"'`(=:])\/[a-z][^/\s]*\//i,
     what: 'an absolute filesystem path',
   },
-  { id: 'home-relative-path', pattern: /(?:^|[\s"'`(=])~\//, what: 'a home-relative path' },
+  { id: 'home-relative-path', pattern: /(?:^|[\s"'`(=:])~\//, what: 'a home-relative path' },
   { id: 'windows-path', pattern: /[A-Za-z]:[\\/]/, what: 'a Windows drive path' },
   { id: 'unc-path', pattern: /\\\\[^\\/\s]+[\\/]/, what: 'a UNC path' },
   { id: 'pid', pattern: /\bpid\b\s*[:=]?\s*\d+/i, what: 'a process id' },

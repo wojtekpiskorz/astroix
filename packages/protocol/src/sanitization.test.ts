@@ -12,6 +12,9 @@ describe('findDisclosure', () => {
     expect(findDisclosure('/Users/owner/projects/site')).toBe('absolute-path');
     expect(findDisclosure('root at /home/owner/site is gone')).toBe('absolute-path');
     expect(findDisclosure('see /private/var/folders/xyz')).toBe('absolute-path');
+    expect(findDisclosure('see:/Users/owner/site')).toBe('absolute-path');
+    expect(findDisclosure('root:/srv/app failed')).toBe('absolute-path');
+    expect(findDisclosure('prefix:~/notes')).toBe('home-relative-path');
     expect(findDisclosure('/tmp/build')).toBe('absolute-path');
     expect(findDisclosure('mounted under /srv/site')).toBe('absolute-path');
     expect(findDisclosure('staged from /mnt/data/site')).toBe('absolute-path');
