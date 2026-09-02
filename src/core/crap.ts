@@ -15,12 +15,15 @@ import type { FunctionComplexity } from './complexity';
  * CC, per crap4clj/PHPUnit) is computed only where per-function coverage
  * is real — the covered core tier (`packages/core` since #212,
  * `packages/protocol` since #220, the `src/core` CRAP tooling
- * layer, and `packages/runtime/registry` since #221 — deterministic
+ * layer, `packages/runtime/registry` since #221, and the
+ * AstroProjectAdapter's pure seams since #225 — deterministic
  * real-filesystem unit tests over temp directories), covered by unit
  * tests through
  * vitest's istanbul-format JSON. The UI foundation package
  * `packages/app-shell` (#218 — its truth is e2e coverage, not
- * per-function unit tests) lands on a CC-only watchlist; later
+ * per-function unit tests) and the adapter's composition IO seam (#225 —
+ * its truth is the real-install certification suite) land on a CC-only
+ * watchlist; later
  * `packages/runtime` seams beyond the registry decide their own tier in
  * the lane that lands them. A
  * watchlist row has `coverage === null` and `crap === null`, and its gate
@@ -123,12 +126,20 @@ function isCoreFile(relPath: string): boolean {
   // under src/core is this tooling itself); packages/runtime/registry
   // since #221 (deterministic real-filesystem unit tests over temp dirs —
   // the registry seam only; later runtime seams are watchlist until
-  // their lane rules otherwise)
+  // their lane rules otherwise); the AstroProjectAdapter's pure seams
+  // since #225 (pair gate, resolution, seam probes, runner accounting —
+  // deterministic unit tests with resolution-layer stubs) — all except
+  // composition.ts, the adapter's IO seam, whose truth is the
+  // real-install certification suite (`npm run certify:adapter`), not
+  // unit fakes at the behavior layer: it stays on the CC-only watchlist.
   return (
-    relPath.startsWith('src/core/') ||
-    relPath.startsWith('packages/core/') ||
-    relPath.startsWith('packages/protocol/') ||
-    relPath.startsWith('packages/runtime/registry/')
+    (relPath.startsWith('src/core/') ||
+      relPath.startsWith('packages/core/') ||
+      relPath.startsWith('packages/protocol/') ||
+      relPath.startsWith('packages/runtime/registry/') ||
+      (relPath.startsWith('packages/runtime/astro-project-adapter/') &&
+        relPath !== 'packages/runtime/astro-project-adapter/composition.ts')) &&
+    !relPath.startsWith('packages/runtime/astro-project-adapter/certification/')
   );
 }
 

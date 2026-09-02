@@ -27,7 +27,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "certify:adapter": "vitest run --config packages/runtime/astro-project-adapter/certification/vitest.config.ts"
   },
   "devDependencies": {
     "@astrojs/compiler-binding": "^0.4.0",

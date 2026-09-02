@@ -112,7 +112,13 @@ function isRiskScope(relPath) {
     (relPath.endsWith('.ts') || relPath.endsWith('.tsx')) &&
     !relPath.endsWith('.test.ts') &&
     !relPath.endsWith('.test.tsx') &&
-    !relPath.endsWith('.d.ts')
+    !relPath.endsWith('.d.ts') &&
+    // The adapter-certification harness (#225): the `*.certify.ts` legs and
+    // the staging/join machinery under astro-project-adapter/certification/
+    // are the certification suite's own body — evidence machinery over
+    // real installs, never shipped product code.
+    !relPath.endsWith('.certify.ts') &&
+    !relPath.startsWith('packages/runtime/astro-project-adapter/certification/')
   );
 }
 

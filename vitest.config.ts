@@ -53,6 +53,10 @@ export default defineConfig({
       // packages/runtime (#221): tests live under test/<seam>/ per the
       // ticket's owned paths — deterministic real-filesystem unit tests
       // (temp dirs, real fsync/rename), no servers, no process lanes yet.
+      // The adapter-certification legs (#225) are NOT here by design: they
+      // are *.certify.ts (real installs, minutes-scale) behind
+      // `npm run certify:adapter` with their own config — the root run
+      // must stay deterministic and network-free.
       'packages/runtime/test/**/*.test.{ts,tsx}',
       // Behavior-contract schema validators (#217, directive from B1's
       // review): the schemas are pure zod over frozen fixtures — the unit
@@ -77,10 +81,16 @@ export default defineConfig({
       // protocol schemas (packages/protocol since #220 — pure zod + pure
       // helpers with colocated unit tests) plus the CRAP tooling layer
       // itself (src/core — complexity + crap, the only src/ survivors of
-      // the retirement gate), and the registry persistence
+      // the retirement gate), the registry persistence
       // (packages/runtime/registry since #221 — deterministic unit tests
       // over real temp directories; later runtime seams join their own
-      // coverage-tier decisions in their own lanes) — metric honesty,
+      // coverage-tier decisions in their own lanes), and the
+      // AstroProjectAdapter's pure seams (packages/runtime/
+      // astro-project-adapter root modules since #225 — pair gate,
+      // resolution, seam probes, runner accounting, unit-tested with
+      // resolution-layer stubs; composition.ts stays watchlist — its truth
+      // is the real-install certification suite — and certification/ is
+      // evidence machinery, not product), metric honesty,
       // wayfinder #55. The integration tiers (src/node, src/client) are
       // deleted; no watchlist tier exists under src/ anymore.
       provider: 'v8',
@@ -89,6 +99,7 @@ export default defineConfig({
         'packages/core/**',
         'packages/protocol/**',
         'packages/runtime/registry/**',
+        'packages/runtime/astro-project-adapter/*.ts',
       ],
       reporter: ['json'],
       reportsDirectory: 'coverage',
