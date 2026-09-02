@@ -60,7 +60,7 @@ describe('first boot and registration', () => {
       records: [],
       quarantine: null,
     });
-    expect(await registry.projectSummaries()).toEqual([]);
+    expect(await registry.projectSummaries()).toEqual({ ok: true, summaries: [] });
   });
 
   it('registers a project with realpath identity, defaulted display name, and a persisted v1 document', async () => {
@@ -267,7 +267,10 @@ describe('unavailable roots stay visible', () => {
     await rm(root, { recursive: true });
 
     expect(registry.snapshot().records).toHaveLength(1);
-    const summaries = await registry.projectSummaries();
+    const result = await registry.projectSummaries();
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const summaries = result.summaries;
     expect(summaries).toEqual([
       { projectKey: key, displayName: root.split('/').pop(), availability: 'unavailable' },
     ]);
@@ -288,7 +291,8 @@ describe('unavailable roots stay visible', () => {
     const root = await makeProjectRoot('present');
     const registry = await createProjectRegistry(registryDir);
     await registry.execute({ kind: 'register', root });
-    expect((await registry.projectSummaries())[0]?.availability).toBe('available');
+    const available = await registry.projectSummaries();
+    expect(available.ok && available.summaries[0]?.availability === 'available').toBe(true);
   });
 });
 
@@ -474,4 +478,31 @@ describe('close', () => {
     // The snapshot stays readable — it is in-memory truth, not a handle.
     expect(registry.snapshot().records).toHaveLength(1);
   });
+});
+
+it('register rejects an invalid explicit displayName even on the dedupe path', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'astroix-registry-'));
+  const project = join(dir, 'site');
+  await mkdir(project);
+  const registry = await createProjectRegistry(dir);
+  const first = await registry.execute({ kind: 'register', root: project });
+  expect(first.ok).toBe(true);
+  const dup = await registry.execute({
+    kind: 'register',
+    root: project,
+    displayName: 'see /Users/leak',
+  });
+  expect(dup).toMatchObject({ ok: false, code: 'invalid-display-name' });
+  await registry.close();
+});
+
+it('projectSummaries refuses once closed — no post-close filesystem access', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'astroix-registry-'));
+  const project = join(dir, 'site');
+  await mkdir(project);
+  const registry = await createProjectRegistry(dir);
+  await registry.execute({ kind: 'register', root: project });
+  await registry.close();
+  const summaries = await registry.projectSummaries();
+  expect(summaries).toMatchObject({ ok: false, code: 'closed' });
 });
