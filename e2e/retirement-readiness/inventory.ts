@@ -31,7 +31,13 @@ export interface DeletionTarget {
   paths: readonly string[];
   /** What it is, one line. */
   what: string;
-  /** Where the retained replacement evidence lives. */
+  /**
+   * The A5-freeze record of where replacement evidence lived at gate time —
+   * the freeze specs, oracle legs, and retained-ui regression named in rows
+   * below died WITH the runtime at the retirement gate; the retained
+   * evidence today is the frozen corpora, the schema validators, and the
+   * readiness contracts leg.
+   */
   evidence: readonly string[];
   /** Whether #215's owned-path list covers every path. */
   a6Owned: boolean;
