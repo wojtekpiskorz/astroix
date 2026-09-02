@@ -40,6 +40,11 @@ const DISCLOSURE_PATTERNS: ReadonlyArray<{ id: string; pattern: RegExp; what: st
   { id: 'home-relative-path', pattern: /(?:^|[\s"'`(=:])~\//, what: 'a home-relative path' },
   { id: 'unc-path', pattern: /\\\\[^\\/\s]+[\\/]/, what: 'a UNC path' },
   { id: 'pid', pattern: /\bpid\b\s*[:=]?\s*\d+/i, what: 'a process id' },
+  // keyword-anchored like pid: "port 4321" leaks, "10:30" prose stays safe
+  { id: 'port', pattern: /\bport\b\s*[:=]?\s*\d+/i, what: 'a listening port' },
+  // env values: SCREAMING_SNAKE assignments (at least one underscore keeps
+  // prose like "ID=5" out) — the in-character leaks are ASTRO_*/VITE_*/NODE_*
+  { id: 'env-value', pattern: /\b[A-Z][A-Z0-9]*_[A-Z0-9_]{1,}=\S/, what: 'an environment value' },
 ];
 
 /**
@@ -47,9 +52,9 @@ const DISCLOSURE_PATTERNS: ReadonlyArray<{ id: string; pattern: RegExp; what: st
  * shape-clean. Returns the pattern id (not the matched bytes) so callers
  * can report the finding without echoing the potential leak.
  */
-export function findDisclosure(text: string): string | null {
-  for (const { id, pattern } of DISCLOSURE_PATTERNS) {
-    if (pattern.test(text)) return id;
+export function findDisclosure(text: string): { id: string; what: string } | null {
+  for (const { id, pattern, what } of DISCLOSURE_PATTERNS) {
+    if (pattern.test(text)) return { id, what };
   }
   return null;
 }
@@ -68,7 +73,7 @@ export const sanitizedTextSchema = z.string().superRefine((text, ctx) => {
   if (disclosure !== null) {
     ctx.addIssue({
       code: 'custom',
-      message: `public text may not disclose ${disclosure} (ADR-0006 §7 output hygiene)`,
+      message: `public text may not disclose ${disclosure.what} (${disclosure.id}, ADR-0006 §7 output hygiene)`,
     });
   }
 });

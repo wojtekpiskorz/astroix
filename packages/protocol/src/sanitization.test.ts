@@ -9,34 +9,34 @@ import { findDisclosure, sanitizedTextSchema } from './sanitization';
  */
 describe('findDisclosure', () => {
   it('flags leaked absolute filesystem paths — any slash-rooted segment pair', () => {
-    expect(findDisclosure('/Users/owner/projects/site')).toBe('absolute-path');
-    expect(findDisclosure('root at /home/owner/site is gone')).toBe('absolute-path');
-    expect(findDisclosure('see /private/var/folders/xyz')).toBe('absolute-path');
-    expect(findDisclosure('see:/Users/owner/site')).toBe('absolute-path');
-    expect(findDisclosure('root:/srv/app failed')).toBe('absolute-path');
-    expect(findDisclosure('prefix:~/notes')).toBe('home-relative-path');
-    expect(findDisclosure('/tmp/build')).toBe('absolute-path');
-    expect(findDisclosure('mounted under /srv/site')).toBe('absolute-path');
-    expect(findDisclosure('staged from /mnt/data/site')).toBe('absolute-path');
+    expect(findDisclosure('/Users/owner/projects/site')?.id).toBe('absolute-path');
+    expect(findDisclosure('root at /home/owner/site is gone')?.id).toBe('absolute-path');
+    expect(findDisclosure('see /private/var/folders/xyz')?.id).toBe('absolute-path');
+    expect(findDisclosure('see:/Users/owner/site')?.id).toBe('absolute-path');
+    expect(findDisclosure('root:/srv/app failed')?.id).toBe('absolute-path');
+    expect(findDisclosure('prefix:~/notes')?.id).toBe('home-relative-path');
+    expect(findDisclosure('/tmp/build')?.id).toBe('absolute-path');
+    expect(findDisclosure('mounted under /srv/site')?.id).toBe('absolute-path');
+    expect(findDisclosure('staged from /mnt/data/site')?.id).toBe('absolute-path');
   });
 
   it('flags home-relative and Windows paths (drive and UNC)', () => {
-    expect(findDisclosure('~/projects/site')).toBe('home-relative-path');
-    expect(findDisclosure('built from ~/dev/site')).toBe('home-relative-path');
-    expect(findDisclosure('C:\\Users\\owner\\site')).toBe('windows-path');
-    expect(findDisclosure('config D:/dev/site')).toBe('windows-path');
-    expect(findDisclosure('resided on \\\\server\\share\\site')).toBe('unc-path');
+    expect(findDisclosure('~/projects/site')?.id).toBe('home-relative-path');
+    expect(findDisclosure('built from ~/dev/site')?.id).toBe('home-relative-path');
+    expect(findDisclosure('C:\\Users\\owner\\site')?.id).toBe('windows-path');
+    expect(findDisclosure('config D:/dev/site')?.id).toBe('windows-path');
+    expect(findDisclosure('resided on \\\\server\\share\\site')?.id).toBe('unc-path');
   });
 
   it('flags stack frames and node internals', () => {
-    expect(findDisclosure('Error: boom\n    at write (/app/out.js:12:9)')).toBe('stack-frame');
-    expect(findDisclosure('at Object.<anonymous> (internal)).js:1:1)')).toBe('stack-frame');
-    expect(findDisclosure('threw in node:internal/process/task_queues')).toBe('node-internal');
+    expect(findDisclosure('Error: boom\n    at write (/app/out.js:12:9)')?.id).toBe('stack-frame');
+    expect(findDisclosure('at Object.<anonymous> (internal)).js:1:1)')?.id).toBe('stack-frame');
+    expect(findDisclosure('threw in node:internal/process/task_queues')?.id).toBe('node-internal');
   });
 
   it('flags PID references', () => {
-    expect(findDisclosure('child pid 4242 exited')).toBe('pid');
-    expect(findDisclosure('PID: 17')).toBe('pid');
+    expect(findDisclosure('child pid 4242 exited')?.id).toBe('pid');
+    expect(findDisclosure('PID: 17')?.id).toBe('pid');
   });
 
   it('passes sanitized prose — including slash-bearing prose without an absolute shape', () => {
@@ -63,6 +63,25 @@ describe('sanitizedTextSchema', () => {
       const messages = JSON.stringify(leaked.error.issues);
       expect(messages).toContain('absolute-path');
       expect(messages).not.toContain('/Users/owner/site');
+    }
+  });
+});
+
+describe('findDisclosure port and env anchoring', () => {
+  it('flags keyword-anchored ports and SCREAMING_SNAKE env values', () => {
+    expect(findDisclosure('dev server failed: port 4321 already in use')?.id).toBe('port');
+    expect(findDisclosure('bound to PORT=4314')?.id).toBe('port');
+    expect(findDisclosure('failed with ASTRO_TELEMETRY_DISABLED=1 set')?.id).toBe('env-value');
+    expect(findDisclosure('NODE_ENV=production leaked')?.id).toBe('env-value');
+    expect(findDisclosure('aspect ratio 16:9 and time 10:30 are prose')).toBeNull();
+    expect(findDisclosure('the equation ID=5 is prose')).toBeNull();
+  });
+  it('names the finding and its shape in the rejection message', () => {
+    const result = sanitizedTextSchema.safeParse('root:/srv/app failed');
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0]?.message).toContain('an absolute filesystem path');
+      expect(result.error.issues[0]?.message).toContain('absolute-path');
     }
   });
 });
