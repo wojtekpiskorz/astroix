@@ -210,6 +210,7 @@ async function runPass(
   );
   signal?.throwIfAborted();
   const staticRecords = buildCssIndex(await readProjectCssSources(input.seams.projectRoot));
+  signal?.throwIfAborted();
   const mismatch = verifyStylesParity(staticRecords, compiled, {
     requiredScopedFiles: [routeComponent],
   });
