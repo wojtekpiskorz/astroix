@@ -9,7 +9,7 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { classifySqliteBusyShape } from './busy-shape.ts';
+import { classifySqliteBusyShape, errorProperty } from './busy-shape.ts';
 
 /**
  * KernelLeaseModule — the lifetime-held, kernel-backed exclusive writer
@@ -115,8 +115,6 @@ const KERNEL_LEASE_MESSAGES: Record<KernelLeaseErrorCode, string> = {
 
 export class KernelLeaseError extends Error {
   readonly code: KernelLeaseErrorCode;
-  /** Contention is terminal for this process too — a successor process retries, this one does not. */
-  readonly retryable = false;
 
   constructor(code: KernelLeaseErrorCode, message: string = KERNEL_LEASE_MESSAGES[code]) {
     super(message);
@@ -268,7 +266,7 @@ function extensionsAreLocked(database: DatabaseSync): boolean {
   try {
     database.enableLoadExtension(true);
   } catch (error) {
-    return errorPropertyOf(error, 'code') === 'ERR_INVALID_STATE';
+    return errorProperty(error, 'code') === 'ERR_INVALID_STATE';
   }
   return false;
 }
@@ -297,9 +295,4 @@ function translateAcquisitionError(error: unknown, lease: KernelLeaseName): Kern
     'ASTROIX_KERNEL_LEASE_FAILED',
     `${KERNEL_LEASE_MESSAGES.ASTROIX_KERNEL_LEASE_FAILED} (${lease})`,
   );
-}
-
-function errorPropertyOf(error: unknown, key: string): unknown {
-  if (typeof error !== 'object' || error === null) return undefined;
-  return (error as Record<string, unknown>)[key];
 }

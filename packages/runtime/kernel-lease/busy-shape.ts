@@ -20,7 +20,7 @@ export type SqliteBusyShape = 'qualified-contention' | 'unqualified-busy' | 'oth
 const SQLITE_BUSY = 5;
 
 export function classifySqliteBusyShape(error: unknown): SqliteBusyShape {
-  if (errorCodeOf(error) !== 'ERR_SQLITE_ERROR') return 'other';
+  if (errorProperty(error, 'code') !== 'ERR_SQLITE_ERROR') return 'other';
   const errcode = errorProperty(error, 'errcode');
   if (typeof errcode !== 'number' || !Number.isInteger(errcode)) return 'other';
   if ((errcode & 0xff) !== SQLITE_BUSY) return 'other';
@@ -29,12 +29,8 @@ export function classifySqliteBusyShape(error: unknown): SqliteBusyShape {
     : 'unqualified-busy';
 }
 
-function errorCodeOf(error: unknown): unknown {
-  return errorProperty(error, 'code');
-}
-
 /** Reads one own property of a thrown value; node:sqlite errors are plain objects. */
-function errorProperty(error: unknown, key: string): unknown {
+export function errorProperty(error: unknown, key: string): unknown {
   if (typeof error !== 'object' || error === null) return undefined;
   return (error as Record<string, unknown>)[key];
 }
