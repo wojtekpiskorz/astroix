@@ -92,7 +92,10 @@ export default defineConfig({
       // modules), the AstroProjectAdapter's pure seams
       // (packages/runtime/astro-project-adapter root modules since #225 —
       // pair gate, resolution, seam probes, runner accounting, unit-tested
-      // with resolution-layer stubs; composition.ts stays watchlist — its
+      // with resolution-layer stubs; plus the routes inspection seams
+      // (astro-project-adapter/routes since #229 — metadata probe, typed
+      // projection, enumeration, inspector, unit-tested over seam-layer
+      // fakes; composition.ts stays watchlist — its
       // truth is the real-install certification suite — and certification/
       // is evidence machinery, not product), and the styles join's pure
       // seams (astro-project-adapter/styles/join since #226 — the
@@ -118,6 +121,7 @@ export default defineConfig({
         // deterministic unit tests with runner stand-ins and real temp
         // files, same covered-tier decision as E1's pure seams.
         'packages/runtime/astro-project-adapter/content/*.ts',
+        'packages/runtime/astro-project-adapter/routes/**',
       ],
       reporter: ['json'],
       reportsDirectory: 'coverage',
