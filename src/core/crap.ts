@@ -49,7 +49,12 @@ import type { FunctionComplexity } from './complexity';
  * prerequisite — are covered (deterministic units over supervisor/wire
  * fakes); the production launch composition (plane-launch.ts — real
  * spawn plans, real children via the supervisor) is watchlist like the
- * plane's other IO glue (#232). A
+ * plane's other IO glue (#232). The origin/proxy seams since #233 (F1)
+ * split the same way: the virtual-host vocabulary and Host/target
+ * classification, the routing state machine, and the upgrade admission
+ * + handshake reconstruction are covered; the listener composition, the
+ * HTTP stream proxy, the raw upgrade tunnel, and the proxy-health
+ * prober are watchlist (#233). A
  * watchlist row has `coverage === null` and `crap === null`, and its gate
  * metric is CC. (The `src/node` + `src/client` watchlist tiers were
  * deleted with their functions at the retirement gate, #215.)
@@ -190,6 +195,12 @@ const COVERED_PREFIXES: readonly string[] = [
   // and the declared proxy-health prerequisite (deterministic units over
   // supervisor/wire fakes).
   'packages/runtime/project-runtime/',
+  // `packages/runtime/{origin,proxy}` since #233 (F1): the virtual-host
+  // vocabulary and Host/target classification, the routing grant/revoke
+  // state machine, and the upgrade admission + handshake reconstruction —
+  // deterministic pure units; the real socket IO is watchlisted below.
+  'packages/runtime/origin/',
+  'packages/runtime/proxy/',
   // `packages/runtime/astro-project-adapter` since #225: the pure seams —
   // pair gate, resolution, seam probes, runner accounting (#225), the
   // styles join's correspondence join + source walk (#226), the
@@ -230,6 +241,15 @@ const WATCHLIST_EXCEPTION_FILES: ReadonlySet<string> = new Set([
   // the project's own astro CLI lookup, real children through the
   // supervisor; its truth is the supervision process lane.
   'packages/runtime/project-runtime/plane-launch.ts',
+  // #233 (F1): the real socket IO — the listener composition (binds the
+  // loopback server, tracks and revokes sockets), the HTTP stream proxy,
+  // the raw upgrade tunnel, and the proxy-health prober; their truth is
+  // the real-socket focused lane (test/proxy, loopback stand-in
+  // upstreams, OS-assigned ports).
+  'packages/runtime/origin/origin-listener.ts',
+  'packages/runtime/proxy/http-stream.ts',
+  'packages/runtime/proxy/upgrade-tunnel.ts',
+  'packages/runtime/proxy/proxy-health.ts',
 ]);
 
 /**

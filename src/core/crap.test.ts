@@ -297,6 +297,9 @@ describe('toRiskEntry', () => {
       'packages/runtime/project-plane/worker/worker-events.ts',
       'packages/runtime/project-plane/supervision/close-report.ts',
       'packages/runtime/project-runtime/project-runtime.ts',
+      'packages/runtime/origin/virtual-hosts.ts',
+      'packages/runtime/origin/host-router.ts',
+      'packages/runtime/proxy/upgrade-request.ts',
       'packages/runtime/astro-project-adapter/seam-readers.ts',
     ];
     for (const file of covered) {
@@ -315,6 +318,11 @@ describe('toRiskEntry', () => {
       'packages/runtime/project-plane/supervision/plane-supervisor.ts',
       'packages/runtime/project-plane/managed-astro/dev-server.ts',
       'packages/runtime/project-runtime/plane-launch.ts',
+      // #233 (F1): the real socket IO under the new covered prefixes
+      'packages/runtime/origin/origin-listener.ts',
+      'packages/runtime/proxy/http-stream.ts',
+      'packages/runtime/proxy/upgrade-tunnel.ts',
+      'packages/runtime/proxy/proxy-health.ts',
       // the evidence subtree exception, not just the exact files
       'packages/runtime/astro-project-adapter/certification/staging.ts',
     ];
