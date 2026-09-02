@@ -232,7 +232,7 @@ describe('toRiskEntry', () => {
     expect(unloaded).toMatchObject({ metric: 'crap', coverage: 0, value: crapScore(5, 0) });
   });
 
-  it('keeps the CRAP metric on the registry seam: packages/runtime/registry rows are covered-tier, later runtime seams watchlist (#221)', () => {
+  it('keeps the CRAP metric on the registry seam and the boot-authority seams: covered-tier rows, later runtime seams watchlist (#221, #222)', () => {
     const fileCov = {
       statementMap: {
         s0: { start: { line: 4 }, end: { line: 4 } },
@@ -248,9 +248,29 @@ describe('toRiskEntry', () => {
       value: crapScore(5, 0.5),
       stop: 30,
     });
-    // a runtime seam outside the registry prefix has no per-function
+    // the kernel-lease and private-boot seams joined the covered tier in
+    // their own lane (#222): deterministic unit tests over real temp
+    // SQLite lease files and a real in-memory private-IPC channel make
+    // the per-function coverage claim real
+    const leaseRow = toRiskEntry('packages/runtime/kernel-lease/kernel-lease.ts', fn, fileCov);
+    expect(leaseRow).toMatchObject({
+      metric: 'crap',
+      coverage: 0.5,
+      crap: crapScore(5, 0.5),
+      value: crapScore(5, 0.5),
+      stop: 30,
+    });
+    const bootRow = toRiskEntry('packages/runtime/private-boot/control-plane-boot.ts', fn, fileCov);
+    expect(bootRow).toMatchObject({
+      metric: 'crap',
+      coverage: 0.5,
+      crap: crapScore(5, 0.5),
+      value: crapScore(5, 0.5),
+      stop: 30,
+    });
+    // a runtime seam outside the ruled prefixes has no per-function
     // coverage claim yet — CC-only watchlist until its lane rules otherwise
-    const laterSeam = toRiskEntry('packages/runtime/kernel-lease/lease.ts', fn, fileCov);
+    const laterSeam = toRiskEntry('packages/runtime/session-supervisor/supervisor.ts', fn, fileCov);
     expect(laterSeam).toMatchObject({ metric: 'cc', coverage: null, crap: null, stop: 15 });
   });
 

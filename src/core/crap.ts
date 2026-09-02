@@ -15,13 +15,15 @@ import type { FunctionComplexity } from './complexity';
  * CC, per crap4clj/PHPUnit) is computed only where per-function coverage
  * is real — the covered core tier (`packages/core` since #212,
  * `packages/protocol` since #220, the `src/core` CRAP tooling
- * layer, and `packages/runtime/registry` since #221 — deterministic
- * real-filesystem unit tests over temp directories), covered by unit
+ * layer, `packages/runtime/registry` since #221, and the
+ * `packages/runtime/{kernel-lease,private-boot}` boot-authority seams
+ * since #222 — all deterministic real-filesystem unit tests over temp
+ * directories and real temp SQLite lease files), covered by unit
  * tests through
  * vitest's istanbul-format JSON. The UI foundation package
  * `packages/app-shell` (#218 — its truth is e2e coverage, not
  * per-function unit tests) lands on a CC-only watchlist; later
- * `packages/runtime` seams beyond the registry decide their own tier in
+ * `packages/runtime` seams beyond the ruled ones decide their own tier in
  * the lane that lands them. A
  * watchlist row has `coverage === null` and `crap === null`, and its gate
  * metric is CC. (The `src/node` + `src/client` watchlist tiers were
@@ -121,14 +123,20 @@ function isCoreFile(relPath: string): boolean {
   // src/core keeps the CRAP tooling layer — unit-covered (the
   // compatibility shims died at the retirement gate, #215; what remains
   // under src/core is this tooling itself); packages/runtime/registry
-  // since #221 (deterministic real-filesystem unit tests over temp dirs —
-  // the registry seam only; later runtime seams are watchlist until
-  // their lane rules otherwise)
+  // since #221 (deterministic real-filesystem unit tests over temp dirs)
+  // and packages/runtime/{kernel-lease,private-boot} since #222 (the
+  // boot-authority seams: deterministic unit tests over real temp SQLite
+  // lease files and a real in-memory private-IPC channel, with the
+  // forked process lanes asserting the cross-process semantics on the
+  // same modules); later runtime seams are watchlist until their lane
+  // rules otherwise
   return (
     relPath.startsWith('src/core/') ||
     relPath.startsWith('packages/core/') ||
     relPath.startsWith('packages/protocol/') ||
-    relPath.startsWith('packages/runtime/registry/')
+    relPath.startsWith('packages/runtime/registry/') ||
+    relPath.startsWith('packages/runtime/kernel-lease/') ||
+    relPath.startsWith('packages/runtime/private-boot/')
   );
 }
 
