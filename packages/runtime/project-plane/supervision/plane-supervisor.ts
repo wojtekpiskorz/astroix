@@ -9,6 +9,22 @@ import {
 } from './close-report.ts';
 import { type ExactChildPlan, minimalChildEnv } from './exact-child.ts';
 
+// The supervision entry's own contract (the #305 private-boot re-export
+// idiom): `stop()`/`closed` settle with the close report and
+// `PlaneSupervisorOptions.worker`/`managedAstro` are exact-child plans —
+// a consumer of `project-plane/supervision` must be able to name both
+// without reaching around the exports map.
+export {
+  classifySupervisionClose,
+  type SupervisionChild,
+  type SupervisionCleanupCategory,
+  type SupervisionCloseAccounting,
+  type SupervisionCloseFacts,
+  type SupervisionCloseReport,
+  type SupervisionStopReason,
+} from './close-report.ts';
+export { type ExactChildPlan, minimalChildEnv } from './exact-child.ts';
+
 /**
  * The plane supervisor (#231, ADR-0005 process topology + ADR-0006 §8):
  * the control plane's exact-child owner for one project plane. It spawns
@@ -179,8 +195,6 @@ export function createProjectPlaneSupervisor(
   let readySettled = false;
   let workerAnswered = false;
   let workerReport: { readonly outcome: string } | null = null;
-  let workerGoneFlag = false;
-  let devServerGoneFlag = false;
 
   let resolveReady: () => void = () => {};
   let rejectReady: (error: SupervisionBootError) => void = () => {};
@@ -209,12 +223,8 @@ export function createProjectPlaneSupervisor(
   });
 
   const probeAbort = new AbortController();
-  const workerGone = goneOf(workerChild, () => {
-    workerGoneFlag = true;
-  });
-  const devServerGone = goneOf(devServerChild, () => {
-    devServerGoneFlag = true;
-  });
+  const workerGone = goneOf(workerChild);
+  const devServerGone = goneOf(devServerChild);
   const devServerProbe = probeManagedDevServer({
     port: options.devServerPort,
     path: options.readinessPath,
@@ -222,7 +232,10 @@ export function createProjectPlaneSupervisor(
     intervalMs: bounds.probeIntervalMs,
   });
 
-  const startupTimer = setTimeout(() => initiateClose('startup-timeout'), bounds.startupTimeoutMs);
+  const startupTimer = setTimeout(
+    () => void initiateClose('startup-timeout'),
+    bounds.startupTimeoutMs,
+  );
 
   const onWorkerMessage = (message: unknown): void => {
     const wire = message as {
@@ -282,23 +295,28 @@ export function createProjectPlaneSupervisor(
 
   function onChildGone(child: 'worker' | 'managed-astro'): void {
     if (currentState !== 'starting' && currentState !== 'running') return;
-    initiateClose(child === 'worker' ? 'worker-crash' : 'managed-astro-crash');
+    void initiateClose(child === 'worker' ? 'worker-crash' : 'managed-astro-crash');
   }
 
-  function initiateClose(reason: SupervisionCloseReport['reason']): void {
-    if (currentState === 'closing' || currentState === 'closed') return;
-    currentState = 'closing';
-    admissionState = 'revoked';
-    clearTimeout(startupTimer);
-    probeAbort.abort(); // the supervisor's probe sockets close first, before any child is signalled
-    if (!readySettled) {
-      readySettled = true;
-      // A stop that lands before readiness is a cancellation by definition —
-      // the run never became ready (unreachable from `stop()` today, which
-      // only answers 'stopped' once running, but honest if that ever drifts).
-      rejectReady(new SupervisionBootError(reason === 'stopped' ? 'cancelled' : reason));
+  /** The one terminal transition — idempotent: every call settles the SAME close-report promise. */
+  function initiateClose(
+    reason: SupervisionCloseReport['reason'],
+  ): Promise<SupervisionCloseReport> {
+    if (currentState !== 'closing' && currentState !== 'closed') {
+      currentState = 'closing';
+      admissionState = 'revoked';
+      clearTimeout(startupTimer);
+      probeAbort.abort(); // the supervisor's probe sockets close first, before any child is signalled
+      if (!readySettled) {
+        readySettled = true;
+        // A stop that lands before readiness is a cancellation by definition —
+        // the run never became ready (unreachable from `stop()` today, which
+        // only answers 'stopped' once running, but honest if that ever drifts).
+        rejectReady(new SupervisionBootError(reason === 'stopped' ? 'cancelled' : reason));
+      }
     }
     stopCall ??= runClose(reason);
+    return stopCall;
   }
 
   async function runClose(
@@ -310,14 +328,12 @@ export function createProjectPlaneSupervisor(
       terminateAndReap({
         child: workerChild,
         gone: workerGone,
-        isGone: () => workerGoneFlag,
         termGraceMs: bounds.termGraceMs,
         killReapMs: bounds.killReapMs,
       }),
       terminateAndReap({
         child: devServerChild,
         gone: devServerGone,
-        isGone: () => devServerGoneFlag,
         termGraceMs: bounds.termGraceMs,
         killReapMs: bounds.killReapMs,
       }),
@@ -365,36 +381,31 @@ export function createProjectPlaneSupervisor(
       return admissionState;
     },
     ready,
-    stop: () => {
-      initiateClose(currentState === 'running' ? 'stopped' : 'cancelled');
-      return stopCall as Promise<SupervisionCloseReport>;
-    },
+    stop: () => initiateClose(currentState === 'running' ? 'stopped' : 'cancelled'),
     closed,
   };
 }
 
 /** Resolves once when the child is gone (exit or spawn error) — the reap signal. */
-function goneOf(child: ChildProcess, onGone: () => void): Promise<void> {
+function goneOf(child: ChildProcess): Promise<void> {
   return new Promise((resolve) => {
-    const once = (): void => {
-      onGone();
-      resolve();
-    };
-    child.once('exit', once);
-    child.once('error', once);
-    if (child.exitCode !== null || child.signalCode !== null) once();
+    child.once('exit', resolve);
+    child.once('error', resolve);
+    if (child.exitCode !== null || child.signalCode !== null) resolve();
   });
 }
 
-/** Terminates and reaps one exact child: TERM, then KILL when ignored, bounded at every rung. */
+/**
+ * Terminates and reaps one exact child: TERM, then KILL when ignored,
+ * bounded at every rung. An already-gone child needs no branch — `kill()`
+ * on a dead child is a no-op and a resolved `gone` always beats the bound.
+ */
 async function terminateAndReap(input: {
   readonly child: ChildProcess;
   readonly gone: Promise<void>;
-  readonly isGone: () => boolean;
   readonly termGraceMs: number;
   readonly killReapMs: number;
 }): Promise<{ readonly reaped: boolean; readonly escalated: boolean }> {
-  if (input.isGone()) return { reaped: true, escalated: false };
   input.child.kill('SIGTERM');
   if (await raceBound(input.gone, input.termGraceMs)) return { reaped: true, escalated: false };
   input.child.kill('SIGKILL');

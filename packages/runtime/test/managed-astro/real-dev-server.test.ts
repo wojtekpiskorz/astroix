@@ -1,7 +1,5 @@
 import { existsSync } from 'node:fs';
-import { cp, mkdir, mkdtemp, realpath, rm, symlink } from 'node:fs/promises';
-import { createServer } from 'node:net';
-import { tmpdir } from 'node:os';
+import { cp, mkdir, realpath, symlink } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -11,6 +9,7 @@ import {
   createProjectPlaneSupervisor,
   type ProjectPlaneSupervisor,
 } from '../../project-plane/supervision/plane-supervisor.ts';
+import { cleanupScratch, freePort, makeScratch } from './lane-harness.ts';
 
 // @vitest-environment node — boots the real astro dev server as a real child; no DOM.
 /**
@@ -22,32 +21,31 @@ import {
  * the fixture's real content-collection entry and real scoped-style
  * output (`data-astro-cid-*` under the default attribute strategy).
  *
- * The fixture is COPIED (with its installation symlinked in) so the dev
- * server's ordinary caches never touch the tracked fixture while the
- * parallel readiness legs build it — the zero-injection guarantee holds
- * for the fixture either way; this lane never edits it.
+ * The fixture's SOURCES are copied (with the installation symlinked in),
+ * so the project-root caches the dev server writes (`.astro/`, `dist/`)
+ * land in the copy, never in the tracked fixture. The symlink does NOT
+ * isolate the installation's own caches: Vite's dev cache under
+ * `node_modules/.vite/` writes back through the symlink into the shared
+ * installation — tolerated because those cache directories are
+ * hash-namespaced per project root and config, so this copy's cache
+ * cannot collide with the readiness legs' builds of the fixture itself
+ * in the same vitest run. The zero-injection guarantee holds either
+ * way; this lane never edits the tracked fixture.
  */
 
 const FIXTURE = fileURLToPath(new URL('../../../../e2e/fixture/', import.meta.url));
 const STAND_IN_WORKER = fileURLToPath(new URL('./stand-in-worker.js', import.meta.url));
 
-const scratchDirs: string[] = [];
 const supervisors: ProjectPlaneSupervisor[] = [];
 
 afterEach(async () => {
   await Promise.allSettled(supervisors.splice(0).map((supervisor) => supervisor.stop()));
-  await Promise.all(scratchDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+  await cleanupScratch();
 });
 
-async function makeScratch(): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), 'astroix-real-'));
-  scratchDirs.push(dir);
-  return dir;
-}
-
-/** Copies the tracked fixture minus its installation, build output, and caches; links the installation back in. */
+/** Copies the tracked fixture's sources minus its installation, build output, and caches; links the installation back in. */
 async function stagedFixtureCopy(): Promise<string> {
-  const copy = join(await makeScratch(), 'project');
+  const copy = join(await makeScratch('astroix-real-'), 'project');
   await cp(FIXTURE, copy, {
     recursive: true,
     filter: (source) => {
@@ -59,22 +57,6 @@ async function stagedFixtureCopy(): Promise<string> {
   });
   await symlink(join(FIXTURE, 'node_modules'), join(copy, 'node_modules'), 'dir');
   return copy;
-}
-
-async function freePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const server = createServer();
-    server.unref();
-    server.on('error', reject);
-    server.listen(0, '127.0.0.1', () => {
-      const address = server.address();
-      const port = typeof address === 'object' && address !== null ? address.port : undefined;
-      server.close(() => {
-        if (port === undefined) reject(new Error('no ephemeral port'));
-        else resolve(port);
-      });
-    });
-  });
 }
 
 describe("the real managed Astro dev server as the supervisor's sibling", () => {

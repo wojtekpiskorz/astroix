@@ -1,7 +1,5 @@
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
-import { createServer } from 'node:net';
-import { tmpdir } from 'node:os';
+import { mkdir, readFile, realpath, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -12,6 +10,7 @@ import {
   type ProjectPlaneSupervisor,
   workerSpawnPlan,
 } from '../../project-plane/supervision/plane-supervisor.ts';
+import { cleanupScratch, freePort, makeScratch } from './lane-harness.ts';
 
 // @vitest-environment node — spawns real children with real signals and sockets; no DOM.
 /**
@@ -36,11 +35,10 @@ interface Lane {
 }
 
 const lanes: Lane[] = [];
-const scratchDirs: string[] = [];
 
 afterEach(async () => {
   await Promise.allSettled(lanes.splice(0).map((lane) => lane.supervisor.stop()));
-  await Promise.all(scratchDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+  await cleanupScratch();
 });
 
 interface LaneConfig {
@@ -60,30 +58,8 @@ interface LaneConfig {
   astroSnapshotPath?: string;
 }
 
-async function makeScratch(): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), 'astroix-sup-'));
-  scratchDirs.push(dir);
-  return dir;
-}
-
-async function freePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const server = createServer();
-    server.unref();
-    server.on('error', reject);
-    server.listen(0, '127.0.0.1', () => {
-      const address = server.address();
-      const port = typeof address === 'object' && address !== null ? address.port : undefined;
-      server.close(() => {
-        if (port === undefined) reject(new Error('no ephemeral port'));
-        else resolve(port);
-      });
-    });
-  });
-}
-
 async function startLane(config: LaneConfig = {}): Promise<Lane> {
-  const scratch = await makeScratch();
+  const scratch = await makeScratch('astroix-sup-');
   const markerDir = join(scratch, 'markers');
   const workerControlDir = join(scratch, 'worker-control');
   const astroControlDir = join(scratch, 'astro-control');
@@ -284,7 +260,7 @@ describe('crash is terminal — the sibling is cleaned, never restarted', () => 
   }, 15_000);
 
   it('a dev server that cannot even spawn fails closed with a sanitized startup rejection', async () => {
-    const broken = await makeScratch();
+    const broken = await makeScratch('astroix-sup-');
     const markerDir = join(broken, 'markers');
     await mkdir(markerDir);
     const port = await freePort();
@@ -442,7 +418,7 @@ describe('escalation and the reap bounds', () => {
 
 describe('the exact-child spawn discipline over real children', () => {
   it('spawns exact executables with explicit argv into a metacharacter canonical cwd under a poisoned environment', async () => {
-    const scratch = await makeScratch();
+    const scratch = await makeScratch('astroix-sup-');
     const hostileBin = join(scratch, 'hostile-bin');
     await mkdir(hostileBin);
     const hostile = (): string =>
@@ -529,7 +505,7 @@ describe('the exact-child spawn discipline over real children', () => {
 
 describe('the production worker spawn plan', () => {
   it("forks E6's worker-child out of the canonical root, with the bundled-Node override mirroring the dev-server plan", async () => {
-    const scratch = await makeScratch();
+    const scratch = await makeScratch('astroix-sup-');
     const canonical = await realpath(scratch);
 
     const plan = await workerSpawnPlan({ projectRoot: scratch });
