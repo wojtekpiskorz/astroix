@@ -63,7 +63,8 @@ export async function openRegistryStore(directory: string): Promise<RegistryStor
   // already exists — chmod is the enforcement, mkdir the creation.
   await chmod(directory, DIRECTORY_MODE);
   const names: readonly RegistryFileName[] = [REGISTRY_FILE, LAST_KNOWN_GOOD_FILE, QUARANTINE_FILE];
-  for (const name of names) {
+  const tightenTargets: readonly string[] = [...names, ...names.map((n) => `${n}.tmp`)];
+  for (const name of tightenTargets) {
     if (await existsIn(directory, name)) {
       await chmod(join(directory, name), FILE_MODE);
     }
@@ -78,7 +79,7 @@ export async function openRegistryStore(directory: string): Promise<RegistryStor
   };
 }
 
-async function existsIn(directory: string, name: RegistryFileName): Promise<boolean> {
+async function existsIn(directory: string, name: string): Promise<boolean> {
   try {
     await stat(join(directory, name));
     return true;

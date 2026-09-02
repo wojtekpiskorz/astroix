@@ -13,7 +13,12 @@ import {
   type RegistryRecord,
   serializeRegistryDocument,
 } from './document';
-import { allocateProjectKey, canonicalizeRoot, defaultDisplayName } from './identity';
+import {
+  allocateProjectKey,
+  canonicalizeRoot,
+  defaultDisplayName,
+  RootUnavailableError,
+} from './identity';
 import {
   LAST_KNOWN_GOOD_FILE,
   openRegistryStore,
@@ -215,7 +220,11 @@ async function register(
   let canonicalRoot: string;
   try {
     canonicalRoot = await canonicalizeRoot(command.root);
-  } catch {
+  } catch (error) {
+    // identity.ts names RootUnavailableError the only thrown error — a
+    // bare catch would silently reclassify any future divergence as an
+    // unavailable root; system errors propagate instead
+    if (!(error instanceof RootUnavailableError)) throw error;
     return failure('root-unavailable');
   }
   // Alias resolution (ADR-0006 §1): a root symlink or case alias of an

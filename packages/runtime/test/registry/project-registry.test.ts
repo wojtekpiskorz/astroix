@@ -1,4 +1,14 @@
-import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import {
+  access,
+  mkdir,
+  mkdtemp,
+  readFile,
+  realpath,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ProjectKey } from '@wojciechpiskorz/astroix-protocol';
@@ -38,7 +48,6 @@ async function makeProjectRoot(name: string): Promise<string> {
 }
 
 async function modeOf(path: string): Promise<number> {
-  const { stat } = await import('node:fs/promises');
   return (await stat(path)).mode & 0o777;
 }
 
@@ -201,11 +210,9 @@ describe('alias dedupe and key rotation', () => {
     const registry = await createProjectRegistry(registryDir);
     await registry.execute({ kind: 'register', root: onDisk });
     const variant = join(root, 'casesite');
-    const variantResolves = await import('node:fs/promises').then((fs) =>
-      fs.realpath(variant).then(
-        () => true,
-        () => false,
-      ),
+    const variantResolves = await realpath(variant).then(
+      () => true,
+      () => false,
     );
     if (variantResolves) {
       const result = await registry.execute({ kind: 'register', root: variant });
@@ -460,7 +467,6 @@ describe('corrupt and future schemas quarantine', () => {
     expect(restored.ok).toBe(true);
     expect(await readFile(join(registryDir, REGISTRY_FILE), 'utf8')).toBe(snapshotBytes);
     expect(await modeOf(join(registryDir, REGISTRY_FILE))).toBe(0o600);
-    const { access } = await import('node:fs/promises');
     await expect(access(join(registryDir, QUARANTINE_FILE))).rejects.toMatchObject({
       code: 'ENOENT',
     });
