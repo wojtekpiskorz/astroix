@@ -53,3 +53,31 @@ export function sameSession(a: SessionRef, b: SessionRef): boolean {
 export function sha256Hex(bytes: Uint8Array): string {
   return createHash('sha256').update(bytes).digest('hex');
 }
+
+/**
+ * The lowercase-hex SHA-256 species — the digest currency's shape, the
+ * same law the protocol's `sha256HexSchema` bounds on the public wire.
+ * Single-homed here for the hand-rolled gates (#311, moved from the
+ * executor's private copy): the forked executor child loads this module
+ * under type stripping, so the zod schema itself cannot be the runtime
+ * home — plain pattern, plain module.
+ */
+export const SHA256_PATTERN = /^[0-9a-f]{64}$/;
+
+/**
+ * A creation file name is exactly one path segment — never traversal,
+ * separators, or dot names. One law for both halves of edit authority
+ * (#311, hoisted from the byte-identical D4/D5 copies): the table
+ * refuses to issue a grant for a segmented name, and the executor's
+ * structural gate refuses to admit a plan carrying one.
+ */
+export function isFileNameSegment(fileName: string): boolean {
+  return (
+    fileName.length > 0 &&
+    !fileName.includes('/') &&
+    !fileName.includes('\\') &&
+    !fileName.includes('\0') &&
+    fileName !== '.' &&
+    fileName !== '..'
+  );
+}

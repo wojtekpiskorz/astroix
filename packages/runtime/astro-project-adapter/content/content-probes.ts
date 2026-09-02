@@ -1,5 +1,5 @@
-import type { AdapterErrorDetails, SeamClass } from '../adapter-error';
-import { AdapterError, observedShape } from '../adapter-error';
+import type { AdapterError, SeamClass } from '../adapter-error';
+import { observedShape, seamRejection } from '../adapter-error';
 
 /**
  * The fail-closed content probes (#228, the `seam-readers.ts` idiom):
@@ -74,34 +74,15 @@ export interface ServedEntry {
 }
 
 // ——— the probes ———
-
-/**
- * The one seam-rejection construction inside the content pass (the
- * `seam-readers.ts` message template, stated once for this lane —
- * `adapter-error.ts` as a cross-lane consolidation home is a later
- * cleanup): sanitized message, code-specific details, cause kept.
- */
-export function contentSeamRejected(
-  seam: string,
-  seamClass: SeamClass,
-  expected: string,
-  observed: string,
-  cause?: unknown,
-): AdapterError {
-  const details: AdapterErrorDetails = { seam, seamClass, expected, observed };
-  return new AdapterError(
-    'seam-rejected',
-    `AstroProjectAdapter seam rejection at ${seam}: expected ${expected}; observed ${observed}`,
-    details,
-    { cause },
-  );
-}
+// Every rejection below is the single-homed `seamRejection` from
+// `adapter-error.ts` (#311) — this file states no message template of
+// its own.
 
 /** `astro:content#getCollection` — public seam. */
 export function readContentApi(moduleExports: unknown): ContentApiSeams {
   const getCollection = (moduleExports as { getCollection?: unknown })?.getCollection;
   if (typeof getCollection !== 'function') {
-    throw contentSeamRejected(
+    throw seamRejection(
       SEAM_CONTENT_API,
       'public',
       'a function getCollection',
@@ -113,7 +94,7 @@ export function readContentApi(moduleExports: unknown): ContentApiSeams {
 
 /** A `getCollection` call rejecting for a declared collection — the same public seam. */
 export function getCollectionRejection(collection: string, cause: unknown): AdapterError {
-  return contentSeamRejected(
+  return seamRejection(
     SEAM_CONTENT_API,
     'public',
     `getCollection(${collection}) to serve the declared collection`,
@@ -130,7 +111,7 @@ export function getCollectionRejection(collection: string, cause: unknown): Adap
 export function readZodNamespace(moduleExports: unknown): ZodNamespaceSeams {
   const string = (moduleExports as { string?: unknown })?.string;
   if (typeof string !== 'function') {
-    throw contentSeamRejected(
+    throw seamRejection(
       SEAM_ZOD_NAMESPACE,
       'public',
       'a zod namespace with a string method',
@@ -152,7 +133,7 @@ export function moduleEvaluationRejection(
   expected: string,
   cause: unknown,
 ): AdapterError {
-  return contentSeamRejected(
+  return seamRejection(
     seam,
     CONTENT_SEAM_CLASSES[seam],
     expected,
@@ -171,7 +152,7 @@ export function readContentConfig(
 ): ReadonlyMap<string, CollectionDefinitionSeams> {
   const collections = (moduleExports as { collections?: unknown })?.collections;
   if (collections === null || typeof collections !== 'object' || Array.isArray(collections)) {
-    throw contentSeamRejected(
+    throw seamRejection(
       SEAM_CONTENT_CONFIG,
       'fail-closed private',
       'a collections object export',
@@ -181,7 +162,7 @@ export function readContentConfig(
   const definitions = new Map<string, CollectionDefinitionSeams>();
   for (const [name, definition] of Object.entries(collections as Record<string, unknown>)) {
     if (definition === null || typeof definition !== 'object') {
-      throw contentSeamRejected(
+      throw seamRejection(
         SEAM_CONTENT_CONFIG,
         'fail-closed private',
         `collection ${name} with an object definition`,
@@ -200,7 +181,7 @@ export function readContentConfig(
  */
 export function readServedEntries(served: unknown): ServedEntry[] {
   if (!Array.isArray(served)) {
-    throw contentSeamRejected(
+    throw seamRejection(
       SEAM_COLLECTION_ENTRIES,
       'public',
       'an array of entries',
@@ -230,7 +211,7 @@ export function readEntryRecord(entry: unknown): ServedEntry {
     typeof candidate.data !== 'object' ||
     Array.isArray(candidate.data)
   ) {
-    throw contentSeamRejected(
+    throw seamRejection(
       SEAM_COLLECTION_ENTRIES,
       'public',
       'an entry with a string id and an object data',
@@ -251,7 +232,7 @@ function readEntryFilePath(filePath: unknown): string | null {
     filePath.includes('\\') ||
     filePath.split('/').includes('..')
   ) {
-    throw contentSeamRejected(
+    throw seamRejection(
       SEAM_COLLECTION_ENTRIES,
       'public',
       'a project-relative posix filePath',

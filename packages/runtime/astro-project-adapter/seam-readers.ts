@@ -1,5 +1,4 @@
-import type { AdapterErrorDetails, SeamClass } from './adapter-error';
-import { AdapterError, observedShape } from './adapter-error';
+import { observedShape, seamRejection } from './adapter-error';
 
 /**
  * The fail-closed seam probes (ADR-0005, `docs/core-reuse.md` seam
@@ -105,20 +104,9 @@ export interface DevCssSeamEntry {
 }
 
 // ——— the probes ———
-
-function seamRejected(
-  seam: string,
-  seamClass: SeamClass,
-  expected: string,
-  observed: string,
-): AdapterError {
-  const details: AdapterErrorDetails = { seam, seamClass, expected, observed };
-  return new AdapterError('seam-rejected', seamMessage(seam, expected, observed), details);
-}
-
-function seamMessage(seam: string, expected: string, observed: string): string {
-  return `AstroProjectAdapter seam rejection at ${seam}: expected ${expected}; observed ${observed}`;
-}
+// Every rejection below is the single-homed `seamRejection` from
+// `adapter-error.ts` (#311) — this file states no message template of
+// its own.
 
 /** `astro/config#getViteConfig` — public seam. */
 export function readGetViteConfig(
@@ -129,7 +117,7 @@ export function readGetViteConfig(
 ) => (options: { command: string; mode: string }) => Promise<unknown> {
   const getViteConfig = (moduleExports as { getViteConfig?: unknown })?.getViteConfig;
   if (typeof getViteConfig !== 'function') {
-    throw seamRejected(
+    throw seamRejection(
       SEAM_GET_VITE_CONFIG,
       'public',
       'a function getViteConfig',
@@ -145,7 +133,7 @@ export function readViteRuntime(moduleExports: unknown): ViteRuntimeSeams {
   const createServerModuleRunner = (moduleExports as { createServerModuleRunner?: unknown })
     ?.createServerModuleRunner;
   if (typeof createServer !== 'function') {
-    throw seamRejected(
+    throw seamRejection(
       SEAM_VITE_CREATE_SERVER,
       'public',
       'a function createServer',
@@ -153,7 +141,7 @@ export function readViteRuntime(moduleExports: unknown): ViteRuntimeSeams {
     );
   }
   if (typeof createServerModuleRunner !== 'function') {
-    throw seamRejected(
+    throw seamRejection(
       SEAM_VITE_RUNNER_FACTORY,
       'certified exact-pair',
       'a function createServerModuleRunner (experimental at the certified pin)',
@@ -171,7 +159,7 @@ export function readViteRuntime(moduleExports: unknown): ViteRuntimeSeams {
 export function readAstroCssUtil(moduleExports: unknown): (componentId: string) => string {
   const util = (moduleExports as { getDevCSSModuleName?: unknown })?.getDevCSSModuleName;
   if (typeof util !== 'function') {
-    throw seamRejected(
+    throw seamRejection(
       SEAM_ASTRO_CSS_UTIL,
       'fail-closed private',
       'a function getDevCSSModuleName',
@@ -190,7 +178,7 @@ export function readRunnerContract(runner: unknown): ModuleRunnerLike {
     typeof candidate.close !== 'function' ||
     typeof candidate.isClosed !== 'function'
   ) {
-    throw seamRejected(
+    throw seamRejection(
       SEAM_RUNNER_LIFECYCLE,
       'public',
       'an object with functions import, close, isClosed',
@@ -211,7 +199,7 @@ export function readSsrEnvironment(environment: unknown): SsrEnvironmentSeams {
   const pluginContainer = candidate?.pluginContainer as PluginContainerLike | null | undefined;
   const emitter = candidate?.hot?.api?.outsideEmitter as SendListenerAccounting | null | undefined;
   if (graph === null || graph === undefined || typeof graph.getModuleById !== 'function') {
-    throw seamRejected(
+    throw seamRejection(
       SEAM_SSR_ENVIRONMENT,
       'fail-closed private',
       'a module graph with a getModuleById function',
@@ -223,7 +211,7 @@ export function readSsrEnvironment(environment: unknown): SsrEnvironmentSeams {
     pluginContainer === undefined ||
     typeof pluginContainer.resolveId !== 'function'
   ) {
-    throw seamRejected(
+    throw seamRejection(
       SEAM_SSR_ENVIRONMENT,
       'fail-closed private',
       'a plugin container with a resolveId function',
@@ -231,7 +219,7 @@ export function readSsrEnvironment(environment: unknown): SsrEnvironmentSeams {
     );
   }
   if (emitter === null || emitter === undefined || typeof emitter.listenerCount !== 'function') {
-    throw seamRejected(
+    throw seamRejection(
       SEAM_SSR_ENVIRONMENT,
       'fail-closed private',
       'a hot transport outsideEmitter with send listener accounting',
@@ -265,7 +253,7 @@ export function readClientEnvironment(environment: unknown): ClientEnvironmentSe
     pluginContainer === undefined ||
     typeof pluginContainer.resolveId !== 'function'
   ) {
-    throw seamRejected(
+    throw seamRejection(
       SEAM_CLIENT_ENVIRONMENT,
       'fail-closed private',
       'transformRequest, module graph (getModuleByUrl, getModuleById), and plugin container functions',
@@ -282,7 +270,7 @@ export function readTransformedModule(graph: unknown, id: string): { code: strin
     | undefined;
   const code = node?.transformResult?.code;
   if (typeof code !== 'string' || code.length === 0) {
-    throw seamRejected(
+    throw seamRejection(
       SEAM_TRANSFORMED_MODULE,
       'fail-closed private',
       'a transformed module node with non-empty string transformResult.code',
@@ -296,7 +284,7 @@ export function readTransformedModule(graph: unknown, id: string): { code: strin
 export function readRouteEntries(moduleExports: unknown): RouteSeamEntry[] {
   const routes = (moduleExports as { routes?: unknown })?.routes;
   if (!Array.isArray(routes)) {
-    throw seamRejected(
+    throw seamRejection(
       SEAM_ROUTES_EXPORT,
       'fail-closed private',
       'an array routes export',
@@ -311,7 +299,7 @@ export function readRouteEntries(moduleExports: unknown): RouteSeamEntry[] {
       typeof data.component !== 'string' ||
       typeof data.type !== 'string'
     ) {
-      throw seamRejected(
+      throw seamRejection(
         SEAM_ROUTES_EXPORT,
         'fail-closed private',
         `route ${index} with string routeData.route, routeData.component, and routeData.type`,
@@ -326,7 +314,7 @@ export function readRouteEntries(moduleExports: unknown): RouteSeamEntry[] {
 export function readDevCssEntries(moduleExports: unknown): DevCssSeamEntry[] {
   const css = (moduleExports as { css?: unknown })?.css;
   if (!(css instanceof Set)) {
-    throw seamRejected(
+    throw seamRejection(
       SEAM_DEV_CSS_EXPORT,
       'fail-closed private',
       'a Set css export',
@@ -340,7 +328,7 @@ export function readDevCssEntries(moduleExports: unknown): DevCssSeamEntry[] {
       typeof candidate.id !== 'string' ||
       typeof candidate.url !== 'string'
     ) {
-      throw seamRejected(
+      throw seamRejection(
         SEAM_DEV_CSS_EXPORT,
         'fail-closed private',
         `entry ${index} with string content, id, and url`,
@@ -357,7 +345,7 @@ const VITE_CSS_SENTINEL = /__vite__css = ("(?:[^"\\]|\\.)*")/;
 export function readViteClientCss(code: string): string {
   const match = code.match(VITE_CSS_SENTINEL);
   if (match?.[1] === undefined) {
-    throw seamRejected(
+    throw seamRejection(
       SEAM_VITE_CSS_SENTINEL,
       'fail-closed private',
       'a string __vite__css assignment in the transformed module code',
@@ -370,7 +358,7 @@ export function readViteClientCss(code: string): string {
   } catch {
     // fall through to the rejection below — an unreadable sentinel is a drift
   }
-  throw seamRejected(
+  throw seamRejection(
     SEAM_VITE_CSS_SENTINEL,
     'fail-closed private',
     'a JSON string literal assigning __vite__css',

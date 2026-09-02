@@ -1,3 +1,4 @@
+import { isFileNameSegment, SHA256_PATTERN } from '../grants/canonical-bounds.ts';
 import type { DomainWritePlan } from '../planning/write-plans.ts';
 import type { WriteExecutor } from './write-executor.ts';
 import { ExecutorFencedError, type WriteOutcome, writeRejection } from './write-outcomes.ts';
@@ -101,7 +102,6 @@ export function isExecutorWireIn(value: unknown): value is ExecutorWireIn {
 
 const RESOURCE_KINDS = ['content', 'css'] as const;
 const OPERATIONS = ['replace-contents', 'splice', 'create-contents'] as const;
-const SHA256_PATTERN = /^[0-9a-f]{64}$/;
 
 /**
  * Closed structural validation of one dispatched domain write plan —
@@ -231,18 +231,6 @@ function isSessionRef(value: unknown): boolean {
     ref.runtimeEpoch.length > 0 &&
     isNonNegativeInteger(ref.generation) &&
     (ref.generation as number) > 0
-  );
-}
-
-/** A creation file name is exactly one path segment — never traversal, separators, or dot names. */
-function isFileNameSegment(fileName: string): boolean {
-  return (
-    fileName.length > 0 &&
-    !fileName.includes('/') &&
-    !fileName.includes('\\') &&
-    !fileName.includes('\0') &&
-    fileName !== '.' &&
-    fileName !== '..'
   );
 }
 
