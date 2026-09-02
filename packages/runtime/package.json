@@ -11,6 +11,7 @@
   "exports": {
     "./registry": "./registry/project-registry.ts",
     "./astro-project-adapter": "./astro-project-adapter/composition.ts",
+    "./astro-project-adapter/content": "./astro-project-adapter/content/inspect-content.ts",
     "./kernel-lease": "./kernel-lease/kernel-lease.ts",
     "./private-boot": "./private-boot/control-plane-boot.ts"
   },
