@@ -12,6 +12,7 @@
     "./registry": "./registry/project-registry.ts",
     "./astro-project-adapter": "./astro-project-adapter/composition.ts",
     "./astro-project-adapter/styles/join": "./astro-project-adapter/styles/join/route-styles.ts",
+    "./astro-project-adapter/styles/convergence": "./astro-project-adapter/styles/convergence/converged-styles-inspection.ts",
     "./astro-project-adapter/content": "./astro-project-adapter/content/inspect-content.ts",
     "./astro-project-adapter/routes": "./astro-project-adapter/routes/routes-inspection.ts",
     "./kernel-lease": "./kernel-lease/kernel-lease.ts",

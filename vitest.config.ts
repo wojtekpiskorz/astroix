@@ -122,6 +122,13 @@ export default defineConfig({
         // files, same covered-tier decision as E1's pure seams.
         'packages/runtime/astro-project-adapter/content/*.ts',
         'packages/runtime/astro-project-adapter/routes/**',
+        // The styles convergence seams (#227, additive to the join glob):
+        // the parity classifier and the invalidation source are
+        // deterministic units; the IO composition file
+        // (converged-styles-inspection.ts) is watchlist-tiered in crap.ts
+        // but stays collected here like the join's composition files —
+        // metric honesty lives in the tier decision, not the collection.
+        'packages/runtime/astro-project-adapter/styles/convergence/**',
       ],
       reporter: ['json'],
       reportsDirectory: 'coverage',
