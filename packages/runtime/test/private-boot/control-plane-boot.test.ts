@@ -59,6 +59,7 @@ function channelPair(): ChannelPair {
       return true;
     },
     on: (event, listener) => childEvents.on(event, listener),
+    removeListener: (event, listener) => childEvents.removeListener(event, listener),
   };
   return { main, child };
 }

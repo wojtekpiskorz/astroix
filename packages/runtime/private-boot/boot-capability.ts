@@ -101,7 +101,14 @@ export function receiveBootCapability(channel: PrivateIpcChannel): Promise<BootC
       reject(new BootCapabilityError('the private IPC channel closed before the boot capability'));
       return;
     }
+    const detach = (): void => {
+      // settle-once hygiene: without this the stale onMessage re-runs
+      // fromWireMessage on every later IPC message for the process lifetime
+      channel.removeListener('message', onMessage);
+      channel.removeListener('disconnect', onDisconnect);
+    };
     const onMessage = (message: unknown): void => {
+      detach();
       try {
         resolve(BootCapability.fromWireMessage(message));
       } catch (error) {
@@ -109,6 +116,7 @@ export function receiveBootCapability(channel: PrivateIpcChannel): Promise<BootC
       }
     };
     const onDisconnect = (): void => {
+      detach();
       reject(new BootCapabilityError('the private IPC channel closed before the boot capability'));
     };
     channel.on('message', onMessage);

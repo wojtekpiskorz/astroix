@@ -21,6 +21,9 @@ export interface PrivateIpcChannel {
   send(message: unknown): boolean | null;
   on(event: 'message', listener: (message: unknown) => void): unknown;
   on(event: 'disconnect', listener: () => void): unknown;
+  /** Settle-once hygiene for one-shot receives — node channels carry this natively. */
+  removeListener(event: 'message', listener: (message: unknown) => void): unknown;
+  removeListener(event: 'disconnect', listener: () => void): unknown;
 }
 
 /**

@@ -130,7 +130,13 @@ class HeldRegistryAuthority implements RegistryAuthority {
     if (this.ranReleases) return;
     this.ranReleases = true;
     for (const release of this.releases) {
-      release();
+      try {
+        release();
+      } catch {
+        // a buggy listener must not stop the chain — every release runs so
+        // the exit(0) contract holds; the lease itself releases by death
+        // either way (fail-closed)
+      }
     }
   }
 }
