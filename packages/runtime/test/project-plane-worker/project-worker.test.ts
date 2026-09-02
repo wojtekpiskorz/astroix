@@ -2,7 +2,6 @@ import { findDisclosure } from '@wojciechpiskorz/astroix-protocol';
 import { describe, expect, it } from 'vitest';
 import {
   createProjectWorker,
-  mergeSignals,
   type ProjectWorker,
 } from '../../project-plane/worker/project-worker.ts';
 import type { WorkerEvent } from '../../project-plane/worker/worker-events.ts';
@@ -286,16 +285,13 @@ describe('cancellation', () => {
     expect((await worker.dispatch({ kind: 'content' })).revision).toBe(1);
   });
 
-  it('mergeSignals merges caller and lifecycle: either firing aborts with its own reason', () => {
-    const caller = new AbortController();
-    const lifecycle = new AbortController();
-    const merged = mergeSignals([caller.signal, lifecycle.signal]);
-    expect(merged.aborted).toBe(false);
-    const reason = new Error('lifecycle stop');
-    lifecycle.abort(reason);
-    expect(merged.aborted).toBe(true);
-    expect(merged.reason).toBe(reason);
-  });
+  // The caller/lifecycle signal MERGE itself is now the platform's
+  // `AbortSignal.any` (final-round review finding): its observable
+  // behavior is pinned at the dispatch level on both sides — the caller
+  // abort rejects with the caller's own reason identity (test above), a
+  // lifecycle abort settles as the structured shutdown failure (the
+  // shutdown suite), and a live merge reaches the signal-taking branches
+  // un-aborted (test above).
 });
 
 describe('revisioned invalidation publication', () => {

@@ -297,8 +297,11 @@ async function dispatchInspection(
   context: DispatchContext,
 ): Promise<WorkerInspectionResult> {
   context.guard();
+  // The platform merge (Node 24 children; happy-dom implements `any`
+  // too): one platform-managed composite instead of a bespoke
+  // per-dispatch listener pinned on the lifecycle signal.
   const merged =
-    signal === undefined ? context.lifecycle : mergeSignals([signal, context.lifecycle]);
+    signal === undefined ? context.lifecycle : AbortSignal.any([signal, context.lifecycle]);
   merged.throwIfAborted();
 
   const run = runFamilyInspection(request, merged, context);
@@ -417,23 +420,4 @@ function discard(work: Promise<unknown>): void {
   work.catch(() => {
     // the fresh-runner discipline already closed the pass's runner; the abandoned result never publishes
   });
-}
-
-/** Merges abort signals (an environment-independent `AbortSignal.any`). */
-export function mergeSignals(signals: readonly AbortSignal[]): AbortSignal {
-  const controller = new AbortController();
-  for (const signal of signals) {
-    if (signal.aborted) {
-      controller.abort(signal.reason);
-      break;
-    }
-    signal.addEventListener(
-      'abort',
-      () => {
-        controller.abort(signal.reason);
-      },
-      { once: true },
-    );
-  }
-  return controller.signal;
 }
