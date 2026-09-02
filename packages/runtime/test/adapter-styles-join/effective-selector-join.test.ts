@@ -179,6 +179,50 @@ describe('joinEffectiveSelectors (block, rule, ordering, identity)', () => {
     expect(joined.every((record) => record.effectiveSelector === null)).toBe(true);
   });
 
+  it('does not correlate a module whose id embeds a block file inside a longer path (the tail case)', () => {
+    // Both src/pages/index.astro and src/pages/sub/src/pages/index.astro
+    // exist; only the sub file's module is on the route. The short file's
+    // text is a tail of the sub module's id — a substring match would
+    // correlate it with the wrong module; the longest matching file owns
+    // the module, so the short file's block joins null (its module is
+    // absent, the file has no modules of its own on the route).
+    const staticRecords = buildCssIndex([
+      { file: 'src/pages/index.astro', contents: '<style>.a { color: red; }</style>' },
+      {
+        file: 'src/pages/sub/src/pages/index.astro',
+        contents: '<style>.b { color: blue; }</style>',
+      },
+    ]);
+    const joined = joinEffectiveSelectors(staticRecords, [
+      {
+        id: '/root/src/pages/sub/src/pages/index.astro?astro&type=style&index=0&lang.css',
+        url: '/src/pages/sub/src/pages/index.astro?astro&type=style&index=0&lang.css',
+        compiledCss: '.b[data-astro-cid-sub] { color: blue; }',
+      },
+    ]);
+    const bySelector = new Map(joined.map((record) => [record.selector, record.effectiveSelector]));
+    expect(bySelector.get('.b')).toBe('.b[data-astro-cid-sub]');
+    expect(bySelector.get('.a')).toBeNull();
+  });
+
+  it('does not correlate a module whose id embeds a block file mid-segment', () => {
+    // The static file's text appears inside xsrc/pages/index.astro — a
+    // mid-segment embedding does not start a path segment, so the module
+    // stays uncorrelated and the block joins null instead of correlating
+    // a module it does not name.
+    const staticRecords = buildCssIndex([
+      { file: 'src/pages/index.astro', contents: '<style>.a { color: red; }</style>' },
+    ]);
+    const joined = joinEffectiveSelectors(staticRecords, [
+      {
+        id: '/root/src/pages/xsrc/pages/index.astro?astro&type=style&index=0&lang.css',
+        url: '/src/pages/xsrc/pages/index.astro?astro&type=style&index=0&lang.css',
+        compiledCss: '.x[data-astro-cid-x] { color: gray; }',
+      },
+    ]);
+    expect(joined[0]?.effectiveSelector).toBeNull();
+  });
+
   it('reduces compound, descendant, and whitespace-padded compiled selectors to their source form', () => {
     const staticRecords = buildCssIndex([
       {

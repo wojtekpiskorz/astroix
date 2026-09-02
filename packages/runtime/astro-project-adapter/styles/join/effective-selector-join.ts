@@ -38,8 +38,13 @@ const SEAM_JOIN_BLOCK = 'styles join block correspondence (static scoped block �
 const SEAM_JOIN_RULES = 'styles join rule correspondence (count, order, selector identity)';
 const SEAM_JOIN_RULE_SHAPE = 'styles join compiled CSS rule shape';
 
-/** The module-id token that names one compiled scoped-style block. */
-const STYLE_BLOCK_TOKEN = '?astro&type=style&index=';
+/**
+ * The query token that marks a compiled scoped `<style>` block in a
+ * module id (`{file}.astro?astro&type=style&index={N}`) — one compiler
+ * fact, shared by the join's block correlation and the client
+ * transform's scoped-entry filter.
+ */
+export const STYLE_BLOCK_TOKEN = '?astro&type=style&index=';
 
 /**
  * The compiler's scope token — the attribute strategy's
@@ -86,20 +91,27 @@ export interface JoinEffectiveSelectorsOptions {
   readonly requiredScopedFiles?: readonly string[];
 }
 
-/**
- * Joins the static index with the compiled scoped selectors. Scoped
- * records group by `(file, styleBlockIndex)`; each group correlates with
- * its compiled module (`{file}.astro?astro&type=style&index={N}`) by
- * index, then rules correlate by count, order, and selector identity.
- * Files whose blocks have no compiled modules at all are simply not
- * loaded on the route — their scoped records join null (contract shape);
- * a file with SOME compiled modules must have them all.
- */
 /** The join's working copy: same fields, the joined selector still mutable. */
 type MutableSelectorRecord = Omit<EffectiveSelectorRecord, 'effectiveSelector'> & {
   effectiveSelector: string | null;
 };
 
+/** One static scoped block: the `(file, style block)` group and its records, in source order. */
+interface ScopedBlock {
+  readonly file: string;
+  readonly blockIndex: number;
+  readonly records: MutableSelectorRecord[];
+}
+
+/**
+ * Joins the static index with the compiled scoped selectors. Scoped
+ * records group by `(file, styleBlockIndex)`; compiled modules index to
+ * their block by module id; then each block's rules correlate with its
+ * module's compiled rules by count, order, and selector identity. Files
+ * whose blocks have no compiled modules at all are simply not loaded on
+ * the route — their scoped records join null (contract shape); a file
+ * with SOME compiled modules must have them all.
+ */
 export function joinEffectiveSelectors(
   staticRecords: readonly CssRuleRecord[],
   compiledModules: readonly CompiledStyleModule[],
@@ -110,32 +122,13 @@ export function joinEffectiveSelectors(
     ...record,
     effectiveSelector: null,
   }));
-  const blocks = new Map<string, { file: string; blockIndex: number; positions: number[] }>();
-  for (const [position, record] of payload.entries()) {
-    if (!record.scoped || record.styleBlockIndex === null) continue;
-    const key = `${record.file}\0${record.styleBlockIndex}`;
-    const block = blocks.get(key) ?? {
-      file: record.file,
-      blockIndex: record.styleBlockIndex,
-      positions: [],
-    };
-    block.positions.push(position);
-    blocks.set(key, block);
-  }
+  const blocks = groupScopedBlocks(payload);
+  const modulesByBlock = indexStyleBlockModules(compiledModules, blocks);
   const filesOnRoute = new Set(
-    [...blocks.values()]
-      .map((block) => block.file)
-      .filter((file) =>
-        compiledModules.some((module) =>
-          normalizedId(module.id).includes(`${file}${STYLE_BLOCK_TOKEN}`),
-        ),
-      ),
+    [...modulesByBlock.keys()].map((key) => key.slice(0, key.lastIndexOf('\0'))),
   );
-
   for (const block of blocks.values()) {
-    const module = compiledModules.find((candidate) =>
-      carriesBlockIndex(normalizedId(candidate.id), block.file, block.blockIndex),
-    );
+    const module = modulesByBlock.get(blockKey(block.file, block.blockIndex));
     if (module === undefined) {
       if (requiredScopedFiles.has(block.file)) {
         throw blockRejection(
@@ -151,53 +144,131 @@ export function joinEffectiveSelectors(
       }
       continue; // not loaded on this route — the null join is contract shape
     }
-    const selectors = compiledRuleSelectors(module.compiledCss, block);
-    if (selectors.length !== block.positions.length) {
-      throw rulesRejection(
-        `${block.positions.length} compiled rules for block ${block.blockIndex} of ${block.file} (the static rule count)`,
-        `a compiled rule count of ${selectors.length}`,
-      );
-    }
-    for (const [index, position] of block.positions.entries()) {
-      const effectiveSelector = selectors[index];
-      const record = payload[position];
-      if (effectiveSelector === undefined || record === undefined) {
-        throw rulesRejection(
-          `every rule of block ${block.blockIndex} of ${block.file} to pair with a compiled rule in order`,
-          `a walk out of range at rule ${index} (payload position ${position})`,
-        );
-      }
-      if (!SCOPE_TOKEN.test(effectiveSelector)) {
-        throw rulesRejection(
-          `compiled rule ${index} of block ${block.blockIndex} of ${block.file} to carry the compiler's scope token`,
-          'a compiled selector that carries no scope token for a scoped rule',
-        );
-      }
-      if (sourceSelectorOf(effectiveSelector) !== normalizedSelector(record.selector)) {
-        throw rulesRejection(
-          `compiled rule ${index} of block ${block.blockIndex} of ${block.file} to reduce to its source selector`,
-          'a compiled selector that does not reduce to its source selector',
-        );
-      }
-      record.effectiveSelector = effectiveSelector;
-    }
+    correlateStyleBlock(block, module);
   }
   return payload;
 }
 
-/**
- * Whether a module id names `file`'s compiled block `blockIndex`. The
- * block index must end at the id (or at the next query parameter) — a
- * bare substring match would correlate block 1 with block 10.
- */
-function carriesBlockIndex(id: string, file: string, blockIndex: number): boolean {
-  const at = id.indexOf(`${file}${STYLE_BLOCK_TOKEN}`);
-  if (at === -1) return false;
-  const rest = id.slice(at + file.length + STYLE_BLOCK_TOKEN.length);
-  return rest === String(blockIndex) || rest.startsWith(`${blockIndex}&`);
+/** The block map key — `file` cannot contain `\0`, so the split is unambiguous. */
+function blockKey(file: string, blockIndex: number): string {
+  return `${file}\0${blockIndex}`;
 }
 
-function compiledRuleSelectors(css: string, block: StyleBlockIdentity): string[] {
+/** Groups the payload's scoped records by `(file, style block)` — the static side of the correspondence. */
+function groupScopedBlocks(payload: readonly MutableSelectorRecord[]): Map<string, ScopedBlock> {
+  const blocks = new Map<string, ScopedBlock>();
+  for (const record of payload) {
+    if (!record.scoped || record.styleBlockIndex === null) continue;
+    const key = blockKey(record.file, record.styleBlockIndex);
+    const block = blocks.get(key) ?? {
+      file: record.file,
+      blockIndex: record.styleBlockIndex,
+      records: [],
+    };
+    block.records.push(record);
+    blocks.set(key, block);
+  }
+  return blocks;
+}
+
+/**
+ * Indexes the compiled modules by their static style block. A module
+ * correlates with the LONGEST block file its id carries at a path
+ * boundary (`/` before the file, or the id's start): a bare substring
+ * match would correlate `src/pages/index.astro` with a module of
+ * `src/pages/sub/src/pages/index.astro`, and a mid-segment embedding
+ * (`…/xsrc/pages/index.astro`) with a file it does not name. The block
+ * index must end at the id or at the next query parameter, so block 1
+ * never correlates with block 10.
+ */
+function indexStyleBlockModules(
+  compiledModules: readonly CompiledStyleModule[],
+  blocks: Map<string, ScopedBlock>,
+): Map<string, CompiledStyleModule> {
+  const blockFiles = [
+    ...new Set([...blocks.keys()].map((key) => key.slice(0, key.lastIndexOf('\0')))),
+  ].sort((left, right) => right.length - left.length);
+  const modulesByBlock = new Map<string, CompiledStyleModule>();
+  for (const module of compiledModules) {
+    const id = normalizedId(module.id);
+    for (const file of blockFiles) {
+      const at = boundaryIndexOf(id, `${file}${STYLE_BLOCK_TOKEN}`);
+      if (at === -1) continue;
+      const indexMatch = id
+        .slice(at + file.length + STYLE_BLOCK_TOKEN.length)
+        .match(/^(\d+)(?:&|$)/);
+      if (indexMatch === null) continue;
+      modulesByBlock.set(blockKey(file, Number(indexMatch[1])), module);
+      break; // the longest matching file owns the module
+    }
+  }
+  return modulesByBlock;
+}
+
+/** The first occurrence of `needle` in `id` that starts a path segment (`/` before it, or the id's start), or -1. */
+function boundaryIndexOf(id: string, needle: string): number {
+  let at = id.indexOf(needle);
+  while (at > 0 && id[at - 1] !== '/') {
+    at = id.indexOf(needle, at + 1);
+  }
+  return at;
+}
+
+/**
+ * Correlates one scoped block with its compiled module: rules pair by
+ * count, order, and selector identity — every disagreement rejects, the
+ * joined selector is consumed verbatim, and a scope token is stripped
+ * only to VERIFY the compiled selector reduces to its source form.
+ */
+function correlateStyleBlock(block: ScopedBlock, module: CompiledStyleModule): void {
+  const selectors = compiledRuleSelectors(module.compiledCss, block);
+  if (selectors.length !== block.records.length) {
+    throw rulesRejection(
+      `${block.records.length} compiled rules for block ${block.blockIndex} of ${block.file} (the static rule count)`,
+      `a compiled rule count of ${selectors.length}`,
+    );
+  }
+  // Equal rule counts proven above — the positional pairing walks both
+  // sides as dense sequences (iterator values, never indexed lookups),
+  // so the equal-length invariant is the one guard and it is visible
+  // exactly once, four lines up.
+  for (const [record, effectiveSelector, index] of pairPositional(block.records, selectors)) {
+    if (!SCOPE_TOKEN.test(effectiveSelector)) {
+      throw rulesRejection(
+        `compiled rule ${index} of block ${block.blockIndex} of ${block.file} to carry the compiler's scope token`,
+        'a compiled selector that carries no scope token for a scoped rule',
+      );
+    }
+    if (sourceSelectorOf(effectiveSelector) !== normalizedSelector(record.selector)) {
+      throw rulesRejection(
+        `compiled rule ${index} of block ${block.blockIndex} of ${block.file} to reduce to its source selector`,
+        'a compiled selector that does not reduce to its source selector',
+      );
+    }
+    record.effectiveSelector = effectiveSelector;
+  }
+}
+
+/**
+ * Pairs two dense arrays positionally, yielding each pair with its
+ * index. Iterator values only — never indexed lookups — so pairing
+ * equal-length arrays needs no element-existence re-checks.
+ */
+function* pairPositional<T, U>(
+  left: readonly T[],
+  right: readonly U[],
+): Generator<[T, U, number], void, undefined> {
+  const leftValues = left.values();
+  const rightValues = right.values();
+  for (let index = 0; ; index += 1) {
+    const leftNext = leftValues.next();
+    const rightNext = rightValues.next();
+    if (leftNext.done === true || rightNext.done === true) return;
+    yield [leftNext.value, rightNext.value, index];
+  }
+}
+
+function compiledRuleSelectors(css: string, block: ScopedBlock): string[] {
   const selectors: string[] = [];
   try {
     postcss.parse(css).walkRules((rule) => {
@@ -237,11 +308,6 @@ function normalizedSelector(selector: string): string {
 
 function normalizedId(id: string): string {
   return id.replaceAll('\\', '/').replaceAll(/\/{2,}/g, '/');
-}
-
-interface StyleBlockIdentity {
-  readonly file: string;
-  readonly blockIndex: number;
 }
 
 function blockRejection(expected: string, observed: string): AdapterError {

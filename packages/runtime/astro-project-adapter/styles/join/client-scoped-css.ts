@@ -5,7 +5,7 @@ import {
   readViteClientCss,
 } from '../../seam-readers';
 import type { CompiledStyleModule } from './effective-selector-join';
-import { stylesJoinRejected } from './effective-selector-join';
+import { STYLE_BLOCK_TOKEN, stylesJoinRejected } from './effective-selector-join';
 
 /**
  * The client-environment leg of the styles join (#226, ADR-0005): the
@@ -42,9 +42,6 @@ const SEAM_JOIN_MODULE_IDENTITY =
 const SEAM_JOIN_OWNERSHIP =
   'vite client environment module-graph ownership of the transformed scoped style module';
 
-/** The query token that marks a dev-css entry as a compiled scoped `<style>` block. */
-const SCOPED_STYLE_TOKEN = '?astro&type=style&index=';
-
 /**
  * Primes the route's page in the client environment, then transforms
  * every scoped-style dev-css entry there and proves the client module
@@ -70,7 +67,7 @@ export async function transformScopedStyleModules(
   }
   const compiled: CompiledStyleModule[] = [];
   for (const entry of entries) {
-    if (!entry.id.includes(SCOPED_STYLE_TOKEN)) continue;
+    if (!entry.id.includes(STYLE_BLOCK_TOKEN)) continue;
     const transformed = await client.transformRequest(entry.url);
     if (transformed === null) {
       throw stylesJoinRejected(
