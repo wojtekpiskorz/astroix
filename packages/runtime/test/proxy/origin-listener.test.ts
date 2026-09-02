@@ -17,6 +17,7 @@ import {
   rawGet,
   type StandInUpstream,
   startStandInUpstream,
+  waitFor,
 } from './stand-ins.ts';
 
 /**
@@ -569,16 +570,6 @@ function headerOf(headers: string, name: string): string | undefined {
     .split('\r\n')
     .find((candidate) => candidate.toLowerCase().startsWith(`${name.toLowerCase()}:`));
   return line?.slice(line.indexOf(':') + 1).trim();
-}
-
-/** Resolves when `probe` turns true — bounded, never a sleep-race. */
-async function waitFor(probe: () => boolean, timeoutMs = 2000): Promise<void> {
-  const startedAt = Date.now();
-  for (;;) {
-    if (probe()) return;
-    if (Date.now() - startedAt > timeoutMs) throw new Error('waitFor: condition never became true');
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
 }
 
 function onceClosed(socket: Socket): Promise<void> {

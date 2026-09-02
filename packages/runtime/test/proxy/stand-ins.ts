@@ -161,3 +161,13 @@ export function rawExchange(port: number, request: string, timeoutMs = 3000): Pr
 export function rawGet(target: string, hostHeader: string): string {
   return `GET ${target} HTTP/1.1\r\nHost: ${hostHeader}\r\nConnection: close\r\n\r\n`;
 }
+
+/** Resolves when `probe` turns true — the one bounded polling helper for the real-socket legs (never a sleep-race). */
+export async function waitFor(probe: () => boolean, timeoutMs = 3000): Promise<void> {
+  const startedAt = Date.now();
+  for (;;) {
+    if (probe()) return;
+    if (Date.now() - startedAt > timeoutMs) throw new Error('waitFor: condition never became true');
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}

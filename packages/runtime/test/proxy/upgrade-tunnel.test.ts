@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { connect, createServer as createNetServer, type Socket } from 'node:net';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createOriginListener, type OriginListener } from '../../origin/origin-listener.ts';
-import { KEY_A, type StandInUpstream, startStandInUpstream } from './stand-ins.ts';
+import { KEY_A, type StandInUpstream, startStandInUpstream, waitFor } from './stand-ins.ts';
 
 /**
  * The raw HMR handshake fidelity leg (#233 focused tests; ADR-0005
@@ -176,15 +176,6 @@ function rawClient(port: number): Promise<RawClient> {
   });
 }
 
-async function waitForProbe(probe: () => boolean, timeoutMs = 3000): Promise<void> {
-  const startedAt = Date.now();
-  for (;;) {
-    if (probe()) return;
-    if (Date.now() - startedAt > timeoutMs) throw new Error('waitFor: condition never became true');
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-}
-
 /** The stand-in's first connection record — present whenever a leg waits for it first. */
 function firstConnection(standIn: HmrStandIn): { handshake: string; after: string } {
   const record = standIn.connections[0];
@@ -227,7 +218,7 @@ describe('raw HMR upgrade tunnel', () => {
     expect(text).toContain('Sec-WebSocket-Protocol: vite-hmr');
     // The upstream received the client's exact handshake — token, Host,
     // Origin, key, subprotocol, original casing and order.
-    await waitForProbe(() => (standIn.connections[0]?.handshake.length ?? 0) > 0);
+    await waitFor(() => (standIn.connections[0]?.handshake.length ?? 0) > 0);
     const received = firstConnection(standIn);
     expect(received.handshake).toBe(opening(hostname, listener.port).replace(/\r\n\r\n$/, ''));
   });
@@ -244,7 +235,7 @@ describe('raw HMR upgrade tunnel', () => {
     expect(Buffer.from(framed.subarray(headLength))).toEqual(SERVER_FRAME);
     // client -> server frame (masked)
     client.socket.write(MASKED_CLIENT_FRAME);
-    await waitForProbe(() => firstConnection(standIn).after.length >= MASKED_CLIENT_FRAME.length);
+    await waitFor(() => firstConnection(standIn).after.length >= MASKED_CLIENT_FRAME.length);
     expect(firstConnection(standIn).after.slice(0, MASKED_CLIENT_FRAME.length)).toBe(
       MASKED_CLIENT_FRAME.toString('latin1'),
     );

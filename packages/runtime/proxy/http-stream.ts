@@ -19,7 +19,7 @@
 import { type IncomingMessage, type ServerResponse, request as upstreamRequest } from 'node:http';
 import { connect } from 'node:net';
 import type { Duplex } from 'node:stream';
-import { ASTROIX_GENERATED_HEADER, astroixGeneratedHeaders } from '../origin/virtual-hosts.ts';
+import { astroixGeneratedHeaders } from '../origin/virtual-hosts.ts';
 
 /** The loopback upstream an active origin lease bound — the managed dev server's own address. */
 export interface StreamProxyUpstream {
@@ -88,9 +88,4 @@ export function proxyHttpStream(input: HttpStreamProxyInput): void {
 export function sendGeneratedResponse(response: ServerResponse, status: number): void {
   response.writeHead(status, astroixGeneratedHeaders());
   response.end();
-}
-
-/** True when a response came from the listener itself, never the upstream — the health probe's disambiguator. */
-export function isListenerGenerated(headers: IncomingMessage['headers']): boolean {
-  return headers[ASTROIX_GENERATED_HEADER] !== undefined;
 }

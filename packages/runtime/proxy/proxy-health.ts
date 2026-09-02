@@ -15,9 +15,13 @@
  * lease's hostname through the listener's own loopback address; a
  * response the LISTENER did not synthesize (no marker header) is an
  * upstream response, i.e. health. Anything else — a listener-generated
- * 400/404/421, a 502, a refused connection — is unhealthy and retries
- * until the deadline, then rejects (the facade turns that rejection
- * into the terminal `proxy-health` boot error and stops the plane).
+ * 400/404/421, a 502, a refused connection, or a probe that never
+ * completes (a live-but-wedged upstream: head written, body never
+ * ending, or no response at all — every probe is raced against the
+ * remaining deadline and destroyed on the losing side) — is unhealthy
+ * and retries until the deadline, then rejects (the facade turns that
+ * rejection into the terminal `proxy-health` boot error and stops the
+ * plane).
  *
  * THE TERMINALITY LAW (binding, from #310's thread): the check observes
  * the run's `closed` settlement ITSELF; plane death does NOT abort the
@@ -30,11 +34,17 @@
  * deadline, and between every retry, a settled `closed` wins.
  */
 
-import { request as httpRequest } from 'node:http';
+import { type ClientRequest, request as httpRequest } from 'node:http';
 import type { OriginListener } from '../origin/origin-listener.ts';
-import { ASTROIX_GENERATED_HEADER } from '../origin/virtual-hosts.ts';
+import { ASTROIX_GENERATED_HEADER, projectHostname } from '../origin/virtual-hosts.ts';
 
-/** Default bound on the whole check (the facade's health phase cannot hang startup indefinitely). */
+/**
+ * Default bound on the whole check AND every single probe (a probe is
+ * raced against the remaining deadline and destroyed on the losing
+ * side, so a wedged upstream — head written, body never completed, or
+ * no response at all — parks nothing: the facade's health phase cannot
+ * hang startup indefinitely).
+ */
 export const DEFAULT_PROXY_HEALTH_DEADLINE_MS = 5000;
 /** Default retry interval — also the crash-window granularity: a settled `closed` is observed within one interval. */
 export const DEFAULT_PROXY_HEALTH_INTERVAL_MS = 200;
@@ -63,7 +73,7 @@ export interface ProxyHealthCheck {
 export function createProxyHealthCheck(options: ProxyHealthCheckOptions): ProxyHealthCheck {
   const deadlineMs = options.deadlineMs ?? DEFAULT_PROXY_HEALTH_DEADLINE_MS;
   const intervalMs = options.intervalMs ?? DEFAULT_PROXY_HEALTH_INTERVAL_MS;
-  const hostname = `${options.projectKey}.localhost`;
+  const hostname = projectHostname(options.projectKey);
   return {
     check: ({ signal }) =>
       checkHealth({
@@ -96,33 +106,70 @@ async function checkHealth(input: {
     runIsClosed = true;
   }
 
-  const deadlineAt = Date.now() + input.deadlineMs;
-  for (;;) {
-    if (input.signal?.aborted === true || runIsClosed) return neverSettles();
-    if (await probeOnce(input)) return;
-    // The crash window: a plane that died while the probe was failing
-    // settles `closed` here — freeze instead of retrying.
-    await raceClosedOrInterval(closed, input.intervalMs);
-    if (runIsClosed) return neverSettles();
-    if (Date.now() >= deadlineAt) {
-      // One final window before rejecting: a close settling concurrently
-      // with the deadline must still win (setImmediate lets its flag
-      // flush; a microtask race could read stale).
-      await settleNow();
+  // ONE abort discipline per check (the facade's healthPhase idiom):
+  // a single listener destroys whatever probe is current; the probes
+  // themselves never touch the signal, so repeated polling can never
+  // accumulate listeners on the facade-owned abort signal.
+  let currentProbe: ClientRequest | null = null;
+  const onAbort = (): void => {
+    currentProbe?.destroy();
+  };
+  input.signal?.addEventListener('abort', onAbort, { once: true });
+  try {
+    const deadlineAt = Date.now() + input.deadlineMs;
+    for (;;) {
+      if (input.signal?.aborted === true || runIsClosed) return neverSettles();
+      if (
+        await probeOnce(input, deadlineAt, (probe) => {
+          currentProbe = probe;
+        })
+      ) {
+        return;
+      }
+      // The crash window: a plane that died while the probe was failing
+      // settles `closed` here — freeze instead of retrying.
+      await raceClosedOrInterval(closed, input.intervalMs);
       if (runIsClosed) return neverSettles();
-      throw new Error('the proxy health probe did not observe a healthy project route');
+      if (Date.now() >= deadlineAt) {
+        // One final window before rejecting: a close settling concurrently
+        // with the deadline must still win (setImmediate lets its flag
+        // flush; a microtask race could read stale).
+        await settleNow();
+        if (runIsClosed) return neverSettles();
+        throw new Error('the proxy health probe did not observe a healthy project route');
+      }
     }
+  } finally {
+    input.signal?.removeEventListener('abort', onAbort);
   }
 }
 
-/** One round trip through the whole pipe; true only for an upstream-sourced response. */
-function probeOnce(input: {
-  readonly port: number;
-  readonly hostname: string;
-  readonly probePath: string;
-  readonly signal: AbortSignal | undefined;
-}): Promise<boolean> {
+/**
+ * One round trip through the whole pipe; true only for an
+ * upstream-sourced response. The probe is raced against the REMAINING
+ * deadline — a probe that never completes (a live upstream that wrote
+ * the head and stopped, or never answered at all) loses the race, is
+ * destroyed, and reports unhealthy, so a wedged upstream cannot park
+ * the check on a plane that never crashed.
+ */
+function probeOnce(
+  input: { readonly port: number; readonly hostname: string; readonly probePath: string },
+  deadlineAt: number,
+  register: (probe: ClientRequest) => void,
+): Promise<boolean> {
   return new Promise((resolve) => {
+    let settled = false;
+    let completed = false;
+    const finish = (verdict: boolean): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      // Never destroy a request whose exchange completed normally —
+      // only a wedged/in-flight one needs severing.
+      if (!completed) probe.destroy();
+      resolve(verdict);
+    };
+    const timer = setTimeout(() => finish(false), Math.max(deadlineAt - Date.now(), 0));
     const probe = httpRequest(
       {
         host: '127.0.0.1',
@@ -134,22 +181,14 @@ function probeOnce(input: {
       },
       (response) => {
         response.resume(); // the verdict is the response's existence, never its body
-        response.once('end', () =>
-          resolve(response.headers[ASTROIX_GENERATED_HEADER] === undefined),
-        );
+        response.once('end', () => {
+          completed = true;
+          finish(response.headers[ASTROIX_GENERATED_HEADER] === undefined);
+        });
       },
     );
-    probe.on('error', () => resolve(false));
-    if (input.signal !== undefined) {
-      input.signal.addEventListener(
-        'abort',
-        () => {
-          probe.destroy();
-          resolve(false);
-        },
-        { once: true },
-      );
-    }
+    register(probe);
+    probe.on('error', () => finish(false));
     probe.end();
   });
 }

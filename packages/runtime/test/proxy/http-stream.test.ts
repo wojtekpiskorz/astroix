@@ -3,6 +3,7 @@ import { connect, createServer as createNetServer } from 'node:net';
 import type { Duplex } from 'node:stream';
 import { describe, expect, it } from 'vitest';
 import { proxyHttpStream } from '../../proxy/http-stream.ts';
+import { waitFor } from './stand-ins.ts';
 
 /**
  * The synchronous-registration regression leg (#314 review round,
@@ -78,14 +79,4 @@ function portOf(server: { address(): { port: number } | string | null }): number
   const address = server.address();
   if (address === null || typeof address === 'string') throw new Error('server did not bind');
   return address.port;
-}
-
-/** Resolves when `probe` turns true — bounded, never a sleep-race. */
-async function waitFor(probe: () => boolean, timeoutMs = 2000): Promise<void> {
-  const startedAt = Date.now();
-  for (;;) {
-    if (probe()) return;
-    if (Date.now() - startedAt > timeoutMs) throw new Error('waitFor: condition never became true');
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
 }

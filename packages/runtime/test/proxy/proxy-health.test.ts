@@ -1,3 +1,4 @@
+import { createServer as createNetServer } from 'node:net';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createOriginListener, type OriginListener } from '../../origin/origin-listener.ts';
 import {
@@ -164,4 +165,90 @@ describe('createProxyHealthCheck (real listener, real facade seam)', () => {
     expect(outcome).toBe('cancelled');
     await stopped;
   });
+
+  it('rejects at the deadline when a LIVE upstream wedges the probe — the deadline bounds every probe', async () => {
+    // Shape 1: the dev-server stand-in writes the response head and
+    // never completes the body (the hanging route).
+    const wedgedBody = await startStandInUpstream([
+      { path: '/', status: 200, body: 'head-only', contentType: 'text/plain', hanging: true },
+    ]);
+    // Shape 2: a TCP server that accepts the connection and never
+    // answers at all.
+    const silentSockets: import('node:net').Socket[] = [];
+    const wedgedSilent = createNetServer((socket) => {
+      silentSockets.push(socket);
+    });
+    await new Promise<void>((resolve, reject) => {
+      wedgedSilent.once('error', reject);
+      wedgedSilent.listen(0, '127.0.0.1', () => resolve());
+    });
+    const silentPort = (wedgedSilent.address() as { port: number }).port;
+    try {
+      for (const wedgedPort of [wedgedBody.port, silentPort]) {
+        const listener = await createOriginListener();
+        listener.grantProjectLease({
+          projectKey: KEY_A,
+          upstream: { host: '127.0.0.1', port: wedgedPort },
+        });
+        const health = createProxyHealthCheck({
+          listener,
+          projectKey: KEY_A,
+          runClosed: () => null, // a LIVE run: no crash, so the freeze hatch must not fire
+          deadlineMs: 400,
+          intervalMs: 50,
+        });
+        const signal = new CountingAbortSignal();
+        const startedAt = Date.now();
+        // Pre-fix this parked forever on a live plane (the probe never
+        // settled); the fix races every probe against the remaining
+        // deadline and destroys the loser. The signal carries the
+        // caller's abort — the check must leave exactly the listeners
+        // it found (one internal listener for the whole run, removed
+        // on exit), never one per probe.
+        await expect(health.check({ signal: signal as unknown as AbortSignal })).rejects.toThrow(
+          'the proxy health probe did not observe a healthy project route',
+        );
+        expect(Date.now() - startedAt).toBeLessThan(2000);
+        // Listener accounting: the check owns at most ONE listener for
+        // its whole run and removes it on every exit path — never one
+        // per probe (the pre-fix shape left every un-fired abort
+        // listener behind on an unhealthy run).
+        expect(signal.maxObservedListeners).toBeLessThanOrEqual(1);
+        expect(signal.currentListeners).toBe(0);
+        await listener.close();
+      }
+    } finally {
+      await wedgedBody.close();
+      for (const socket of silentSockets) socket.destroy();
+      await new Promise<void>((resolve) => {
+        wedgedSilent.close(() => resolve());
+      });
+    }
+  });
 });
+
+/**
+ * A counting stand-in for the check's structural signal contract — the
+ * happy-dom environment's AbortSignal is not a Node EventTarget, and
+ * exact add/remove accounting is the observable the listener-
+ * accumulation fix needs: at most one listener for the whole check,
+ * removed on every exit path.
+ */
+class CountingAbortSignal {
+  private readonly listeners = new Set<() => void>();
+  private maxListeners = 0;
+  readonly aborted = false;
+  get currentListeners(): number {
+    return this.listeners.size;
+  }
+  get maxObservedListeners(): number {
+    return this.maxListeners;
+  }
+  addEventListener(_type: string, listener: () => void): void {
+    this.listeners.add(listener);
+    this.maxListeners = Math.max(this.maxListeners, this.listeners.size);
+  }
+  removeEventListener(_type: string, listener: () => void): void {
+    this.listeners.delete(listener);
+  }
+}

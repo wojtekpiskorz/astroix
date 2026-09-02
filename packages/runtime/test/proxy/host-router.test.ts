@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createHostRouter } from '../../origin/host-router.ts';
+import { KEY_A, KEY_B } from './stand-ins.ts';
 
 /**
  * The routing state machine's focused tests (#233): exact-hostname
@@ -8,8 +9,6 @@ import { createHostRouter } from '../../origin/host-router.ts';
  * order the ADR-0006 switch protocol forces (revoke before re-grant).
  */
 
-const KEY_A = 'abcdefghijklmnopqrstuvwxyz';
-const KEY_B = 'abcdefghijklmnopqrstuvwxy2';
 const PORT = 4405;
 
 describe('createHostRouter', () => {
