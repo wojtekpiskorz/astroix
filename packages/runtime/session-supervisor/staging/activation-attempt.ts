@@ -279,10 +279,7 @@ export function createActivationAttempt(input: {
       // The run converges on its own failed startup (the E8 law); the
       // idempotent stop is the rollback discipline's belt-and-braces, and
       // the run's one report settles `closed`.
-      void run
-        .stop()
-        .then((report) => settleOutcome({ kind: 'failed', failure, report }))
-        .catch(() => settleOutcome({ kind: 'failed', failure, report: neverSpawnedReport() }));
+      void stopCandidate((report) => settleOutcome({ kind: 'failed', failure, report }));
       throw new ActivationFailedError(failure);
     },
   );
