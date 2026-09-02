@@ -136,6 +136,22 @@ describe('page-size ceilings and budget clamping', () => {
     }
   });
 
+  it('treats a non-finite offset (NaN) as invalid input — clamps to the start, not a vanished walk', () => {
+    const items = itemsOf(8, 10);
+    const page = boundedPage({
+      items,
+      offset: Number.NaN,
+      budget: 'lifecycleJsonBytes',
+      envelopeFor: listEnvelopeFor,
+    });
+    expect(page.kind).toBe('page');
+    if (page.kind !== 'page') return;
+    // the failure mode was a zero-item page with a null continuation —
+    // the mirror of the page-size hole; NaN must clamp to the start
+    expect(page.items).toEqual(items.slice(0, 1));
+    expect(page.continuation).toBe(1);
+  });
+
   it('paginates a collection that could never fit whole — every page within budget, walk to completion', () => {
     const items = itemsOf(300, 1020);
     const collected: string[] = [];

@@ -270,6 +270,8 @@ describe('toRiskEntry', () => {
     });
     // a runtime seam outside the ruled prefixes has no per-function
     // coverage claim yet — CC-only watchlist until its lane rules otherwise
+    // (#236 ruled only staging/ + clients/; the supervisor's fence (F5)
+    // and commit/revocation (F6) subtrees are still unruled territory)
     const laterSeam = toRiskEntry('packages/runtime/session-supervisor/supervisor.ts', fn, fileCov);
     expect(laterSeam).toMatchObject({ metric: 'cc', coverage: null, crap: null, stop: 15 });
   });
@@ -311,6 +313,11 @@ describe('toRiskEntry', () => {
       // seams (sse).
       'packages/runtime/api/pagination/page-contract.ts',
       'packages/runtime/sse/sse-admission.ts',
+      // #236 (F4): one representative per new covered prefix — the
+      // staged activation state machine (staging) and the
+      // document-bound client registry (clients).
+      'packages/runtime/session-supervisor/staging/session-supervisor.ts',
+      'packages/runtime/session-supervisor/clients/session-clients.ts',
     ];
     for (const file of covered) {
       expect(toRiskEntry(file, fn, fileCov).metric).toBe('crap');

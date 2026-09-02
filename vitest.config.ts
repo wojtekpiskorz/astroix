@@ -190,6 +190,18 @@ export default defineConfig({
         // under test/sse (through the REAL origin listener, OS-assigned
         // loopback ports, open streams over raw sockets).
         'packages/runtime/sse/**',
+        // The session-supervisor staging + client seams (#236, F4,
+        // additive): the staged activation state machine (generation
+        // reservation, private candidate readiness, rollback, the commit
+        // linearization's state side, crash observation) and the
+        // document-bound client registry (one editor, three diagnostics,
+        // navigation/renderer/session revocation, the menu-action
+        // currency envelope) are deterministic units over run fakes —
+        // same covered-tier decision as the facade seams. The fence (F5
+        // #237) and commit/revocation (F6 #238) subtrees land their own
+        // globs.
+        'packages/runtime/session-supervisor/staging/**',
+        'packages/runtime/session-supervisor/clients/**',
       ],
       reporter: ['json'],
       reportsDirectory: 'coverage',

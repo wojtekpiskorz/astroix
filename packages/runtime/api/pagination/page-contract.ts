@@ -81,7 +81,13 @@ function fitsBudget(bytes: number, budget: ByteLimitName): boolean {
  * next offset or `null` at completion.
  */
 export function boundedPage<T>(input: BoundedPageInput<T>): BoundedPage<T> {
-  const offset = Math.max(0, Math.floor(input.offset));
+  // A non-finite offset clamps to 0 — the same direction as the negative
+  // clamp. Nonsense never becomes "nothing": a NaN through Math.max would
+  // skip the empty-page branch (NaN <= 0 is false) and answer a zero-item
+  // completed walk — the mirror of the page-size hole the hint guard
+  // closed. Today the offset is always a self-minted continuation; the
+  // guard holds the law for the future cursor-exposed composition too.
+  const offset = Number.isFinite(input.offset) ? Math.max(0, Math.floor(input.offset)) : 0;
   const available = input.items.length - offset;
   const emptyBytes = envelopeBytes(input.envelopeFor([]));
   if (available <= 0) {
