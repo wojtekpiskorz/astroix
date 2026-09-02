@@ -204,7 +204,7 @@ two pruned docs) are exempt by name, and the root manifest is asserted
 private with no publication fields.
 
 **The post-gate counts ledger** (emitted live by leg 4 on the A6 branch;
-`npm test` = 260 vitest tests, `npm run test:e2e` = 1 spec):
+`npm test` = 264 vitest tests, `npm run test:e2e` = 1 spec):
 
 | lane | kind | count |
 | --- | --- | --- |
