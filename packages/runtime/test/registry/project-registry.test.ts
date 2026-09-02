@@ -1,5 +1,6 @@
 import {
   access,
+  chmod,
   mkdir,
   mkdtemp,
   readFile,
@@ -351,6 +352,10 @@ describe('crash shapes at load', () => {
     await registry.execute({ kind: 'register', root });
     await registry.close();
     await writeFile(join(registryDir, `${REGISTRY_FILE}.tmp`), '{"schemaVer');
+    // unconditional loose precondition — writeFile's default mode is only
+    // 0644 under umask 022; chmod makes the tightening assertion bite
+    // under any umask (mirrors the sibling store.test.ts precondition)
+    await chmod(join(registryDir, `${REGISTRY_FILE}.tmp`), 0o644);
     const reopened = await createProjectRegistry(registryDir);
     expect(reopened.snapshot().status).toBe('ok');
     expect(reopened.snapshot().records).toHaveLength(1);
