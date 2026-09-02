@@ -226,6 +226,31 @@ describe('final validation — every rejection proves no bytes moved', () => {
     await executor.stop();
   });
 
+  it('an internal symlink stays editable — the grant bound its resolved inside-root canonical, and the write lands there', async () => {
+    const root = await makeProjectRoot();
+    const table = await openTable(root);
+    await makeDir(root, 'src/styles');
+    const real = join(root, 'src/styles/real.css');
+    await writeFile(real, CSS, 'utf8');
+    // The symlink is internal: its target resolves inside the root, so
+    // issuance binds the RESOLVED canonical and the executor writes it.
+    await symlink(real, join(root, 'src/styles/link.css'));
+    const plan = await cssReplacePlan(
+      table,
+      session('epoch-a', 1),
+      'src/styles/link.css',
+      CSS,
+      '.hero { color: blue; }\n',
+    );
+    const executor = createWriteExecutor({ canonicalRoot: root, session: session('epoch-a', 1) });
+    expect(await executor.execute(plan)).toEqual({
+      type: 'committed',
+      revision: digestOf('.hero { color: blue; }\n'),
+    });
+    expect(await readFile(real, 'utf8')).toBe('.hero { color: blue; }\n');
+    await executor.stop();
+  });
+
   it('an external canonical target is denied containment even with a matching baseline — target-moved', async () => {
     const root = await makeProjectRoot();
     const outside = await makeProjectRoot();
