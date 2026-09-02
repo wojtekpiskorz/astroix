@@ -1,6 +1,6 @@
 import type { ProjectWorker, WorkerCloseReport, WorkerStopReason } from './project-worker.ts';
 import type { WorkerEvent } from './worker-events.ts';
-import { branchFailure, WorkerRejectionError } from './worker-failure.ts';
+import { branchFailure, malformedRequestFailure, WorkerRejectionError } from './worker-failure.ts';
 import { isWorkerInspectionRequest, type WorkerInspectionResult } from './worker-request.ts';
 
 /**
@@ -156,16 +156,7 @@ export function serveProjectWorker(input: ServeProjectWorkerInput): void {
 
   const serveInspect = async (id: number, request: unknown): Promise<void> => {
     if (!isWorkerInspectionRequest(request)) {
-      send({
-        type: 'inspect-result',
-        id,
-        ok: false,
-        failure: {
-          code: 'malformed-request',
-          message:
-            'the request is not one of the typed project, content, routes, or styles inspection requests',
-        },
-      });
+      send({ type: 'inspect-result', id, ok: false, failure: malformedRequestFailure() });
       return;
     }
     try {
