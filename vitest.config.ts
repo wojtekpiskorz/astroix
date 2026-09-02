@@ -89,14 +89,19 @@ export default defineConfig({
       // since #222 — deterministic unit tests over real temp SQLite files
       // and a real in-memory private-IPC channel; the forked process-lane
       // children assert the cross-process semantics on top of the same
-      // modules), and the AstroProjectAdapter's pure seams
+      // modules), the AstroProjectAdapter's pure seams
       // (packages/runtime/astro-project-adapter root modules since #225 —
       // pair gate, resolution, seam probes, runner accounting, unit-tested
       // with resolution-layer stubs; composition.ts stays watchlist — its
       // truth is the real-install certification suite — and certification/
-      // is evidence machinery, not product) — metric honesty,
-      // wayfinder #55. The integration tiers (src/node, src/client) are
-      // deleted; no watchlist tier exists under src/ anymore.
+      // is evidence machinery, not product), and the styles join's pure
+      // seams (astro-project-adapter/styles/join since #226 — the
+      // correspondence join, the source walk, and the shared rejection
+      // helper are deterministic units; the client-environment IO
+      // composition files are watchlist-tiered in crap.ts) — metric
+      // honesty, wayfinder #55. The integration tiers (src/node,
+      // src/client) are deleted; no watchlist tier exists under src/
+      // anymore.
       provider: 'v8',
       include: [
         'src/core/**',
@@ -106,6 +111,7 @@ export default defineConfig({
         'packages/runtime/kernel-lease/**',
         'packages/runtime/private-boot/**',
         'packages/runtime/astro-project-adapter/*.ts',
+        'packages/runtime/astro-project-adapter/styles/join/**',
       ],
       reporter: ['json'],
       reportsDirectory: 'coverage',
