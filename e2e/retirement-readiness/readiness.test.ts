@@ -1,45 +1,41 @@
 import { execSync } from 'node:child_process';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { chromium, expect, test } from '@playwright/test';
-import { skipWithoutChromium } from './contract-oracle/live-capture.ts';
-import { MAIN_PORT, withOracleServer } from './contract-oracle/oracle-server.ts';
-import { validateContractFamilies } from './retirement-readiness/contracts.ts';
-import { assembleCountsLedger, formatCountsLedger } from './retirement-readiness/counts.ts';
-import { inventoryGaps, reconcileInventory } from './retirement-readiness/inventory.ts';
-import { compareOracleEvidence } from './retirement-readiness/oracle-comparison.ts';
+import { expect, test } from 'vitest';
+import { validateContractFamilies } from './contracts.ts';
+import { assembleCountsLedger, formatCountsLedger } from './counts.ts';
+import { inventoryGaps, reconcileInventory } from './inventory.ts';
 
 /**
- * The retirement-readiness suite (#214, lane A5, ADR-0010): the aggregate
- * proof that the plain canonical fixture, the frozen B1/B2 contracts, the
- * retained app-shell presentation, and the non-vacuous gate inventory
- * TOGETHER cover every behavior the legacy integration still held — the
- * deletion-eligibility proof A6 (#215) starts from. Six legs:
+ * The retirement-readiness suite, retained past the gate (#215, lane A6,
+ * ADR-0010): the five serverless legs of the A5 aggregate proof
+ * (`e2e/retirement-readiness.spec.ts`, #214), converted from Playwright to
+ * vitest when the oracle world died at the retirement gate. Leg 6 (the live
+ * disposable-oracle comparison) could not outlive the runtime it booted and
+ * is gone; what these legs held at the gate they still hold after it:
  *
- *   1. contracts (serverless)  — every family validates through its schema
- *      and re-derives through the RETAINED core, never legacy source.
+ *   1. contracts (serverless)  — every frozen family validates through its
+ *      schema and re-derives through the RETAINED core (packages/core).
  *   2. retained UI (serverless)— the presentation surface carries zero
  *      runtime couplings and its mount lane runs green over contract data.
  *   3. fixture (serverless)    — the canonical fixture is plain and its
- *      production build carries zero astroix bytes (AC-5).
+ *      production build carries zero astroix bytes.
  *   4. counts (serverless)    — every unit/contract/fixture lane is
- *      enumerated and non-empty (AC-4); the ledger is emitted for the
- *      evidence report.
- *   5. inventory (serverless) — the evidence report names every deletion
- *      target and reconciles with #215's owned paths (AC-6).
- *   6. oracle (@oracle-boot)  — one disposable-oracle boot comparing live
- *      evidence against the frozen contracts (AC-2: the oracle is used
- *      ONLY for this comparison; the canonical fixture itself stays plain).
+ *      enumerated and non-empty.
+ *   5. inventory (serverless) — the evidence report and the typed deletion
+ *      inventory stay in agreement, and every deletion target the gate
+ *      authorized is actually gone from the tree.
  *
- * Proof only: this suite deletes nothing, changes no frozen corpus bytes,
- * and creates no replacement runtime.
+ * The frozen corpora are no longer re-derivable — contract truth stopped
+ * being re-derivable at the gate and became the frozen standard the web
+ * host (#240) is judged against. Validating the standard is exactly these
+ * legs' job.
  */
 
 const FIXTURE = join('e2e', 'fixture');
 const PRESENTATION_DIR = join('packages', 'app-shell', 'src', 'presentation');
 
 test('contracts: every frozen family validates and re-derives through the retained core', () => {
-  test.setTimeout(60_000);
   const ledger = validateContractFamilies();
   const families = ledger.map((row) => row.family).sort();
   expect(families).toEqual(['conflict', 'edit', 'inspection', 'output-byte', 'route', 'selector']);
@@ -56,11 +52,9 @@ test('contracts: every frozen family validates and re-derives through the retain
 });
 
 test('retained UI: the presentation surface is uncoupled and runs over contract-shaped data', () => {
-  test.setTimeout(180_000);
-
   // (a) the coupling scan: the presentation surface's runtime modules carry
   // no /__astroix URL, no fetch, no browser transport, no Vite handle —
-  // data and callbacks in, contract-shaped rendering out (AC-3).
+  // data and callbacks in, contract-shaped rendering out.
   const forbidden: ReadonlyArray<{ token: string; what: string }> = [
     { token: '__astroix', what: 'a direct /__astroix endpoint reference' },
     { token: 'fetch(', what: 'a fetch call' },
@@ -108,11 +102,9 @@ test('retained UI: the presentation surface is uncoupled and runs over contract-
   console.info(
     `[readiness] presentation mount lane: ${summary.numPassedTests} tests green, 0 coupling offenders`,
   );
-});
+}, 240_000);
 
 test('fixture: the canonical fixture is plain and its production build carries zero astroix bytes', () => {
-  test.setTimeout(240_000);
-
   // plainness: no astroix dependency, import, or registration anywhere in
   // the tracked fixture. The fixture's own package NAME ("astroix-e2e-
   // fixture") is not injection — the checks are structural: source bytes,
@@ -154,10 +146,10 @@ test('fixture: the canonical fixture is plain and its production build carries z
     'the fixture lockfile resolves no astroix package',
   ).toBe(false);
 
-  // the clean production build (AC-5). PINNED COMPOSITION of
-  // e2e/plain-build.spec.ts (owned by #215's lane, deliberately not
-  // imported): build, walk dist/, assert zero astroix bytes — the two must
-  // move together, like the scrub's pinned copy in oracle-comparison.ts.
+  // the clean production build. PINNED COMPOSITION of
+  // e2e/plain-build.spec.ts (the named no-product-E2E lane, deliberately
+  // not imported): build, walk dist/, assert zero astroix bytes — the two
+  // must move together.
   execSync('npm run build', { cwd: FIXTURE, stdio: 'pipe' });
   const dist = join(FIXTURE, 'dist');
   const files: string[] = [];
@@ -175,10 +167,9 @@ test('fixture: the canonical fixture is plain and its production build carries z
   console.info(
     `[readiness] canonical fixture: plain, ${files.length} built files, zero astroix bytes`,
   );
-});
+}, 360_000);
 
 test('counts: every unit, contract, and fixture lane is recorded and non-empty', () => {
-  test.setTimeout(180_000);
   const ledger = assembleCountsLedger(); // throws on any empty lane
   for (const kind of ['unit', 'contract', 'fixture'] as const) {
     expect(
@@ -187,44 +178,18 @@ test('counts: every unit, contract, and fixture lane is recorded and non-empty',
     ).toBeGreaterThan(0);
   }
   console.info(`[readiness] counts ledger (total ${ledger.total}):\n${formatCountsLedger(ledger)}`);
-});
+}, 180_000);
 
-test('inventory: the evidence report names every deletion target and reconciles with A6', () => {
-  const reconciliation = reconcileInventory(); // throws on drift
+test('inventory: the evidence report names every deletion target and the gate actually deleted them', () => {
+  const reconciliation = reconcileInventory(); // throws on drift or resurrection
   expect(reconciliation.targets).toBeGreaterThan(0);
   const gaps = inventoryGaps();
   console.info(
-    `[readiness] inventory: ${reconciliation.targets} targets, ${reconciliation.a6OwnedCoverage} owned by #215, ${gaps.length} reconciliation gaps (${gaps.map((gap) => gap.id).join(', ')})`,
+    `[readiness] inventory: ${reconciliation.targets} targets, ${reconciliation.a6OwnedCoverage} owned by #215, ${gaps.length} reconciliation gaps resolved by A6 (${gaps.map((gap) => gap.id).join(', ')})`,
   );
   // every gap must be carried in the report's reconciliation section
   const report = readFileSync(join('docs', 'retirement-readiness.md'), 'utf8');
   for (const gap of gaps) {
     expect(report, `the report must carry the ${gap.id} gap`).toContain(`target:${gap.id}`);
   }
-});
-
-test('oracle: a live disposable oracle still matches the frozen contracts', {
-  tag: '@oracle-boot',
-}, async () => {
-  skipWithoutChromium();
-  test.setTimeout(240_000);
-  await withOracleServer('main', MAIN_PORT, async (handle) => {
-    // a real document load first — and the browser STAYS OPEN through the
-    // comparison: the scoped style module enters the client module graph
-    // only once a browser fetches it, and the join the index payload
-    // serves is tied to that live graph (B1's seam)
-    const browser = await chromium.launch();
-    try {
-      const page = await browser.newPage();
-      await page.goto(handle.base, { waitUntil: 'load' });
-      const rows = await compareOracleEvidence(handle);
-      for (const row of rows) {
-        expect(row.held, `oracle comparison: ${row.what}`).toBe(true);
-      }
-      console.info('[readiness] oracle comparison rows held:', rows.map((row) => row.what).length);
-      await page.close();
-    } finally {
-      await browser.close();
-    }
-  });
 });

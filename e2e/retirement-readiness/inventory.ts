@@ -15,6 +15,12 @@ import { join } from 'node:path';
  * proof ran. Gaps — targets the retirement decision requires but #215 does
  * not own — are first-class data, not footnotes: they surface in the PR
  * body and the report so A6 starts with an explicit contract.
+ *
+ * Past the gate (#215, lane A6): the gaps G1–G4 were executed by the A6
+ * PR itself under the disclosed-seams authorization (the readiness
+ * report's reconciliation section is the authority), and the
+ * reconciliation below now ASSERTS the deletion rather than the
+ * pre-deletion tree — see `reconcileInventory`.
  */
 
 /** One deletion target for A6. */
@@ -252,11 +258,20 @@ export interface Reconciliation {
 }
 
 /**
- * Holds three artifacts in agreement: this inventory, the evidence report,
- * and #215's owned paths. The report names every target with the exact
- * token `` `target:<id>` `` — that token is the reconciliation protocol, so
- * a renamed slug must move with its report row. Throws with a named
- * finding on any disagreement or dangling path; returns the summary.
+ * Holds three artifacts in agreement — this inventory, the evidence
+ * report, and the post-gate tree — and asserts the gate actually
+ * happened. The report names every target with the exact token
+ * `` `target:<id>` `` — that token is the reconciliation protocol, so a
+ * renamed slug must move with its report row. Past the retirement gate
+ * (#215, lane A6) the existence check is INVERTED from the A5 proof: then,
+ * every non-glob path had to exist (the targets were named before they
+ * died); now every deletion target's paths must be GONE — a resurrected
+ * `src/index.ts` or a recreated `.changeset/` fails here, which is what
+ * keeps this suite the durable record of the deletion instead of a
+ * one-shot proof. The section-scoped survivors (`package.json`,
+ * `crap-baseline.json`, and the two docs pruned by section, not deleted)
+ * are exempted by name and carry their own post-gate shape checks.
+ * Throws with a named finding on any disagreement; returns the summary.
  */
 export function reconcileInventory(): Reconciliation {
   const report = readFileSync(join(process.cwd(), REPORT_PATH), 'utf8');
@@ -282,16 +297,47 @@ export function reconcileInventory(): Reconciliation {
     throw new Error(`report names targets absent from the inventory: ${unknown.join(', ')}`);
   }
 
-  // every non-glob path in the inventory exists in the tree today
-  const dangling: string[] = [];
+  // every deletion target is actually deleted: exact paths and `/**`
+  // roots must be absent from the tree, except the named section-scoped
+  // survivors (checked for shape below, not existence). Two path entries
+  // of `target:legacy-e2e-and-oracle-specs` are skipped: `e2e/*.spec.ts`
+  // and `playwright.config.ts` — plain-build.spec.ts and its runner
+  // deliberately survive as the named no-product-E2E lane (ADR-0010's
+  // interval; the CI step is named, never presented as product E2E).
+  const SURVIVORS = new Set([
+    'package.json',
+    'crap-baseline.json',
+    'docs/agents/release-loop.md',
+    'docs/manual-smoke.md',
+  ]);
+  const DELIBERATE_LANE_SURVIVORS = new Set(['e2e/*.spec.ts', 'playwright.config.ts']);
+  const resurrected: string[] = [];
   for (const target of DELETION_TARGETS) {
     for (const path of target.paths) {
-      if (path.includes('*')) continue;
-      if (!existsSync(join(process.cwd(), path))) dangling.push(`${target.id}: ${path}`);
+      if (SURVIVORS.has(path) || DELIBERATE_LANE_SURVIVORS.has(path)) continue;
+      const exact = path.endsWith('/**') ? path.slice(0, -3) : path;
+      if (existsSync(join(process.cwd(), exact))) resurrected.push(`${target.id}: ${path}`);
     }
   }
-  if (dangling.length > 0) {
-    throw new Error(`inventory names paths absent from the tree: ${dangling.join(', ')}`);
+  if (resurrected.length > 0) {
+    throw new Error(
+      `deletion targets still present after the retirement gate: ${resurrected.join(', ')}`,
+    );
+  }
+
+  // the surviving root manifest carries its post-gate shape: private,
+  // with no publishable surface left (target:root-manifest, #215 AC-1)
+  const manifest = JSON.parse(readFileSync(join(process.cwd(), 'package.json'), 'utf8')) as Record<
+    string,
+    unknown
+  >;
+  if (manifest.private !== true) {
+    throw new Error('package.json is not private — the root must expose no publishable artifact');
+  }
+  for (const field of ['exports', 'files', 'publishConfig', 'keywords']) {
+    if (manifest[field] !== undefined) {
+      throw new Error(`package.json still carries the publication field "${field}"`);
+    }
   }
 
   return {

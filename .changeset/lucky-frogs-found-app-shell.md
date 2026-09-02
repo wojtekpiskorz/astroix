@@ -1,5 +1,0 @@
----
-'@wojciechpiskorz/astroix': patch
----
-
-Extracted the domain-deaf UI foundation into the `packages/app-shell` workspace member (`@wojciechpiskorz/astroix-app-shell`): the shadcn/Base UI primitive set, `components.json` and the theme entry (`chrome.css`), the `cn` helper and mobile hook, and the generic CodeMirror infrastructure (`codemirror.ts`, markdown editor and toolbar) moved verbatim, and the live integration keeps building through one-line compatibility re-exports at the legacy `src/client` paths until the retirement gate (ADR-0010). The public surface is generic UI/editor contracts only — no `/__astroix` fetches, Vite hot usage, Astro imports, server handles, project paths, or legacy endpoint types. shadcn regeneration now targets `packages/app-shell` (components.json moved with the aliases); TypeScript, Vitest discovery, Biome, and the CRAP risk scope cover the new location, with the generated `components/ui` tier still watch-only and the rest of the package a CC-only watchlist. No runtime behavior changed.

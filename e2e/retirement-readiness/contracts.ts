@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { z } from 'zod';
 import { parseEntryDraft, serializeEntry } from '../../packages/core/src/entry-writer.ts';
+import { toIssueRecords } from '../../packages/core/src/form-tree.ts';
 import { resolveActiveEntry } from '../../packages/core/src/route-resolver.ts';
 import { spliceText } from '../../packages/core/src/splice-writer.ts';
 import { editFixtureSchemas } from '../behavior-contracts/schema/edit-contract.ts';
@@ -349,6 +350,60 @@ function validateEdit(checks: Checks): void {
     'content-validate: the never-gated proof wrote the invalid data verbatim',
     validate.advisoryWrite.response.status === 200 &&
       validate.advisoryWrite.after.contents === validate.advisoryWrite.written.contents,
+  );
+
+  // the served records' shape is the retained mapper's contract: the
+  // deleted REST layer produced content-validate's issue records through
+  // packages/core's toIssueRecords, so post-gate the mapper's rules are
+  // re-derived here and held against the frozen records — path segments
+  // join by '.', non-string/number path keys drop (a symbol is a
+  // PropertyKey the filter still refuses), non-string codes fall back to
+  // 'unknown', non-string messages stringify. Every branch the frozen
+  // records depend on is exercised (which also keeps the function's
+  // per-function unit coverage real from this suite's owned paths;
+  // packages/core's own suite is outside this suite's ownership).
+  const mapped = toIssueRecords([
+    {
+      path: ['title'],
+      code: 'too_small',
+      message: 'Too small: expected string to have >=3 characters',
+    },
+    {
+      path: ['tags', 1],
+      code: 'invalid_type',
+      message: 'Invalid input: expected string, received number',
+    },
+    {
+      path: [Symbol('dropped'), 'kept', 7],
+      code: 42,
+      message: { nested: true },
+    },
+  ]);
+  checks.that('content-validate: paths join by code unit', mapped[0]?.path === 'title');
+  checks.that(
+    'content-validate: mixed string/number segments join in order',
+    mapped[1]?.path === 'tags.1',
+  );
+  checks.that(
+    'content-validate: non-path keys drop and the remaining segments still join',
+    mapped[2]?.path === 'kept.7',
+  );
+  checks.that(
+    'content-validate: non-string codes fall back to unknown',
+    mapped[2]?.code === 'unknown',
+  );
+  checks.that(
+    'content-validate: non-string messages stringify',
+    mapped[2]?.message === '[object Object]',
+  );
+  checks.that(
+    'content-validate: every frozen record is a valid mapper output shape',
+    validate.invalid.response.issues.every(
+      (record) =>
+        typeof record.path === 'string' &&
+        typeof record.code === 'string' &&
+        typeof record.message === 'string',
+    ),
   );
 
   // the 400 taxonomy with the disk proven untouched

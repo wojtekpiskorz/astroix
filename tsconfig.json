@@ -21,8 +21,6 @@
     "e2e/behavior-contracts/schema/*.test.ts",
     "e2e/retirement-readiness",
     "playwright.config.ts",
-    "tsup.config.ts",
-    "vite.chrome.config.ts",
     "vitest.config.ts"
   ]
 }

@@ -1,6 +1,6 @@
 # Retirement readiness — the evidence report
 
-Status: **passed** (2026-09-01, lane A5, [#214](https://github.com/wojtekpiskorz/astroix/issues/214); ADR-0010's retirement gate)
+Status: **passed** (2026-09-01, lane A5, [#214](https://github.com/wojtekpiskorz/astroix/issues/214); ADR-0010's retirement gate) · **gate executed** (2026-09-01, lane A6, [#215](https://github.com/wojtekpiskorz/astroix/issues/215) — see [the recorded disposition](#a6-executed--the-recorded-disposition-215-lane-a6) at the end)
 
 This report is the durable record of the retirement-readiness proof. It is
 not hand-maintained folklore: the readiness suite
@@ -159,3 +159,63 @@ serverless legs (1–5) are the natural seed of A6's named no-product-E2E
 state — the corpus validation, coupling scan, counts discipline, and
 fixture build check all survive deletion unchanged — but the disposition
 is #215's call under its owned paths, not this proof's.
+
+## A6 executed — the recorded disposition (#215, lane A6)
+
+The retirement gate ran; this section is the record of what A6 did with
+this report's inventory and suite. The A5 prose above is unchanged
+history; where it says "may start from this proof," it now has.
+
+**The suite.** The five serverless legs survive as
+`e2e/retirement-readiness/readiness.test.ts` — converted from Playwright
+to vitest, running under the root vitest config (`npm test`); the
+presentation mounts keep their own spawned config. The Playwright
+aggregate (`e2e/retirement-readiness.spec.ts`), leg 6
+(`oracle-comparison.ts`), the freeze specs, the retained-UI regression,
+the disposable-oracle machinery, and `e2e/ports.ts` (its every consumer
+died) are deleted. Exactly one Playwright spec survives —
+`e2e/plain-build.spec.ts`, the **named no-product-E2E lane** in CI
+(ADR-0010's interval clause: the step is named, honest, and cannot pass
+an empty product-E2E slot; Playwright fails a config matching zero
+specs). The corpus stays frozen: contract truth is no longer
+re-derivable, and the schema validators plus legs 1 and 4 keep it
+validated and non-vacuous.
+
+**The gaps.** All four were executed by the A6 PR under the
+disclosed-seams authorization this report's reconciliation section
+recorded: G1 — the seven `src/core` re-export shims deleted (the CRAP
+tooling `complexity.ts`/`crap.ts` stays, not a shim); G2 —
+`scripts/oracle.mjs` + `scripts/oracle.d.mts` deleted with their callers;
+G3 — `e2e/contract-oracle/**`, `e2e/oracle.mjs`, `e2e/oracle.d.mts`
+deleted; G4 — `crap-baseline.json` verified stale-key-clean (its only
+entry is a live `packages/core` function; nothing to drop), with
+`scripts/crap.mjs`'s tier labels synced to the post-gate tree.
+
+**The reconciliation, inverted.** `e2e/retirement-readiness/inventory.ts`
+still holds the 15 rows and the slug protocol, but its existence check
+flipped: every deletion target's paths must now be **absent** (a
+resurrected `src/index.ts` or recreated `.changeset/` fails readiness),
+the section-scoped survivors (`package.json`, `crap-baseline.json`, the
+two pruned docs) are exempt by name, and the root manifest is asserted
+private with no publication fields.
+
+**The post-gate counts ledger** (emitted live by leg 4 on the A6 branch;
+`npm test` = 260 vitest tests, `npm run test:e2e` = 1 spec):
+
+| lane | kind | count |
+| --- | --- | --- |
+| `unit:src` | unit | 67 |
+| `unit:packages/core` | unit | 114 |
+| `unit:packages/app-shell` | unit | 39 |
+| `contract:schema-validators` | contract | 35 |
+| `contract:inspection-corpus` | contract | 7 fixtures |
+| `contract:edit-corpus` | contract | 8 fixtures |
+| `contract:readiness-mount` | contract | 4 |
+| `fixture:plain-build` | fixture | 1 |
+| `fixture:readiness` | fixture | 5 |
+
+The unit drop from A5's ledger is the deletion itself: `src/` keeps only
+the CRAP tooling layer's 67 tests (from 150), and the freeze suites'
+9 oracle-boot tests, the retained-UI regression's 2, and the readiness
+aggregate's 6 Playwright tests are gone with the runtime they booted —
+replaced by the 5 serverless legs and the named single-spec lane above.

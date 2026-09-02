@@ -13,8 +13,8 @@
  *   npm run preflight           full-scope ratchet: every run evaluates all of
  *                               src/ + packages/ against the baseline —
  *                               CRAP >= 30 in the covered core tier, CC >= 15
- *                               in the CC-only watchlist (src/node,
- *                               src/client, packages/app-shell), any new
+ *                               in the CC-only watchlist
+ *                               (packages/app-shell), any new
  *                               breach fails (the diff only annotates)
  *   npm run crap:ci             CI recompute: full table to crap-table.md for
  *                               the advisory reviewer prompt; never exits nonzero
@@ -24,8 +24,9 @@
  *                               tightens and drops only, refuses new violators
  *
  * Metric honesty: CRAP (CC² × (1−cov)³ + CC) only where per-function coverage
- * is real (src/core + packages/core, unit-tested); src/node, src/client, and
- * packages/app-shell are a CC-only watchlist. The pure math lives in
+ * is real (src/core + packages/core, unit-tested); packages/app-shell is a
+ * CC-only watchlist (the src/node + src/client watchlist tiers were deleted
+ * with their functions at the retirement gate, #215). The pure math lives in
  * src/core/{complexity,crap}.ts — the
  * CRAP tooling layer, which is where those two files stay while the
  * editing-domain modules live in packages/core (#212: the tooling layer owns
@@ -253,7 +254,7 @@ function renderTable(entries) {
 }
 
 function headerLine() {
-  return `stops: CRAP >= ${GATE_STOPS.coreCrapStop} (src/core, packages/core) · CC >= ${GATE_STOPS.watchlistCcStop} (src/node, src/client, packages/app-shell) · pre-commit warns CC >= ${PRECOMMIT_CC_WARN} · generated ui/ is watch-only`;
+  return `stops: CRAP >= ${GATE_STOPS.coreCrapStop} (src/core, packages/core) · CC >= ${GATE_STOPS.watchlistCcStop} (packages/app-shell) · pre-commit warns CC >= ${PRECOMMIT_CC_WARN} · generated ui/ is watch-only`;
 }
 
 // ——— modes ———
@@ -402,7 +403,7 @@ function modeCi() {
   lines.push('# crap4ts report (recomputed by CI — the source of truth; local runs are advisory)');
   lines.push('');
   lines.push(
-    `CC per function (ESLint-classic counting, pinned in \`src/core/complexity.test.ts\`); CRAP = CC² × (1−cov)³ + CC where per-function coverage is real (\`src/core\` + \`packages/core\`, unit tests); \`src/node\` + \`src/client\` + \`packages/app-shell\` are a CC-only watchlist (their truth is e2e coverage). Uncle Bob bands: <=5 low, <30 moderate, >=30 high.`,
+    `CC per function (ESLint-classic counting, pinned in \`src/core/complexity.test.ts\`); CRAP = CC² × (1−cov)³ + CC where per-function coverage is real (\`src/core\` + \`packages/core\`, unit tests); \`packages/app-shell\` is a CC-only watchlist (its truth is e2e coverage). Uncle Bob bands: <=5 low, <30 moderate, >=30 high.`,
   );
   if (coverage === null)
     lines.push(
@@ -411,7 +412,7 @@ function modeCi() {
     );
   lines.push('');
   lines.push(
-    `Hard stops (preflight, baseline-ratcheted): CRAP >= ${GATE_STOPS.coreCrapStop} (src/core, packages/core) · CC >= ${GATE_STOPS.watchlistCcStop} (src/node, src/client, packages/app-shell). Pre-commit warns at CC >= ${PRECOMMIT_CC_WARN}.`,
+    `Hard stops (preflight, baseline-ratcheted): CRAP >= ${GATE_STOPS.coreCrapStop} (src/core, packages/core) · CC >= ${GATE_STOPS.watchlistCcStop} (packages/app-shell). Pre-commit warns at CC >= ${PRECOMMIT_CC_WARN}.`,
   );
   lines.push('');
   lines.push('| file | function | cc | cov | crap | band | in-PR |');

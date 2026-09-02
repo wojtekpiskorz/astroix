@@ -1,16 +1,15 @@
 # Release Loop Ops
 
-Rewritten for the Electron parent-app rewrite (lane A1, [#210](https://github.com/wojtekpiskorz/astroix/issues/210); rulings [#200](https://github.com/wojtekpiskorz/astroix/issues/200)/[#207](https://github.com/wojtekpiskorz/astroix/issues/207), ADR-0008/ADR-0010).
+Rewritten for the Electron parent-app rewrite (lane A1, [#210](https://github.com/wojtekpiskorz/astroix/issues/210); rulings [#200](https://github.com/wojtekpiskorz/astroix/issues/200)/[#207](https://github.com/wojtekpiskorz/astroix/issues/207), ADR-0008/ADR-0010). The dormant npm-loop sections were deleted at the retirement gate ([#215](https://github.com/wojtekpiskorz/astroix/issues/215), lane A6) together with the machinery they described.
 
-## Publication is paused
+## Publication machinery is deleted
 
-**npm publication — stable and snapshot — is paused by the rewrite.** The npm-migration lane (A2) pauses it mechanically; the retirement gate then deletes Changesets, publint, npm artifact staging, the integration release workflows, and these instructions' subject matter. Until then:
+**There is no npm release loop.** The retirement gate (#215, lane A6, ADR-0010) deleted Changesets, the stable and snapshot release workflows, the npm artifact checks (publint, chrome artifact, dist graph), the npm-pack staging scripts, and the `ci:publish` chain, and made the root package private with no publishable artifact. The every-code-PR changeset convention died with the machinery.
 
-- Do not publish, and do not merge a Version Packages PR expecting a release; the loop below is **dormant provenance**, kept only while the workflow files still exist so no session fumbles the machinery if it fires.
-- Changesets remain only as the every-code-PR-changeset convention; their accumulated queue is never released.
-- The desktop app's workspace will carry the private `@wojciechpiskorz/astroix@0.1.0` manifest (unpublished); npm stays dormant.
+- Do not publish, and do not reintroduce publication tooling — npm stays dormant through the pre-alpha; treat such requests as wontfix with a pointer to `docs/spec.md`.
+- The desktop app's workspace will carry the private `@wojciechpiskorz/astroix@0.1.0` manifest (unpublished) when its lane creates it.
 
-If a release workflow does fire during the pause, treat it as an incident: approve nothing beyond what CI needs, and file the finding.
+The deleted workflows exist only in git history; if anything resembling a release run ever appears, treat it as an incident: approve nothing beyond what CI needs, and file the finding.
 
 ## Pre-alpha delivery (the loop that matters)
 
@@ -22,14 +21,3 @@ Delivery is the packaged unsigned macOS artifact (ADR-0008), at candidate checkp
 4. Passing promotes **the same bytes** to the final tag/release — there is never a post-smoke rebuild. Record release evidence (per-step results, checksum, environment) and create the git tag. A discovered defect returns to its own implementation lane and produces a new candidate.
 
 Qualification detail (resource discovery, process topology/cleanup, security settings, launch lifecycle, hostile Service Worker, reproducibility comparison) is ADR-0008's candidate gate — it runs here, not on feature PRs.
-
-## Dormant npm-loop mechanics (provenance)
-
-While `.github/workflows/release.yml` and `ci:publish` still exist, for reference only:
-
-- `action_required` bot runs: approve per run with `gh api -X POST repos/wojtekpiskorz/astroix/actions/runs/<id>/approve`; find ids with `gh run list --branch changeset-release/main`.
-- Version Packages PRs merged merge-commit style, never squash; the `changeset-release/main` branch is never deleted while the loop exists.
-- Actions brownouts (~15–25 min, self-recovering; #99): empty-commit nudge → close/reopen the PR → after recovery, rebase onto the target and force-push (fresh `synchronize` first; old SHAs' events are gone).
-- The repo setting **Allow GitHub Actions to create and approve pull requests** must stay on for the bot PR to appear.
-
-These mechanics are deleted by the retirement lane; do not invest in them.

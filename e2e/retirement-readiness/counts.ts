@@ -3,19 +3,23 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 /**
- * The counts ledger (#214, AC-4): enumerates every quality lane the
- * retirement decision rests on — unit, contract, and fixture — and asserts
- * each is NON-EMPTY. Vacuity is the failure mode this exists to make
- * impossible: a lane whose tests disappeared (a deleted suite, a broken
- * discovery pattern, an emptied corpus) fails readiness instead of passing
- * greenly.
+ * The counts ledger (#214, AC-4; retained past the gate by #215, lane A6):
+ * enumerates every quality lane the retired tree rests on — unit,
+ * contract, and fixture — and asserts each is NON-EMPTY. Vacuity is the
+ * failure mode this exists to make impossible: a lane whose tests
+ * disappeared (a deleted suite, a broken discovery pattern, an emptied
+ * corpus) fails readiness instead of passing greenly. The lane set is the
+ * post-retirement one: the freeze suites, the retained-UI regression, and
+ * the Playwright readiness aggregate died at the gate with the runtime
+ * they booted; the frozen corpora, the schema validators, the retained
+ * packages, and the plain-fixture smoke carry the counts now.
  *
  * Enumeration is authoritative, not hand-maintained: the vitest lanes come
- * from `vitest list --json` (the runner's own collection), the Playwright
- * lanes from a static count over the authored spec files (the specs declare
- * their tests with `test(...)` at the top level; the aggregate run itself
- * is `npm run test:e2e`'s exit code), and the contract corpus from the
- * frozen directories on disk.
+ * from `vitest list --json` (the runner's own collection, per config), the
+ * Playwright lane from a static count over the authored spec file (the
+ * spec declares its tests with `test(...)` at the top level; the aggregate
+ * run itself is `npm run test:e2e`'s exit code), and the contract corpus
+ * from the frozen directories on disk.
  */
 
 /** One lane's row in the ledger. */
@@ -41,8 +45,8 @@ interface VitestListEntry {
   file: string;
 }
 
-function listVitest(): readonly VitestListEntry[] {
-  const stdout = execFileSync('npx', ['vitest', 'list', '--json', '--config', 'vitest.config.ts'], {
+function listVitest(config = 'vitest.config.ts'): readonly VitestListEntry[] {
+  const stdout = execFileSync('npx', ['vitest', 'list', '--json', '--config', config], {
     cwd: ROOT,
     encoding: 'utf8',
     maxBuffer: 32 * 1024 * 1024,
@@ -78,13 +82,14 @@ function countJsonFiles(dir: string): number {
  */
 export function assembleCountsLedger(): CountsLedger {
   const vitest = listVitest();
+  const mount = listVitest('e2e/retirement-readiness/vitest.config.ts');
 
   const rows: LaneRow[] = [
-    // unit lanes (vitest): the retained pure modules and the shims still under test
+    // unit lanes (vitest, root config): the retained pure modules + the tooling
     {
       lane: 'unit:src',
       kind: 'unit',
-      what: 'vitest tests under src/ (the CRAP tooling layer + integration-era units still running)',
+      what: 'vitest tests under src/ (the CRAP tooling layer — complexity + crap, the only src/ survivors of the gate)',
       count: countBy(vitest, 'src/'),
     },
     {
@@ -99,7 +104,7 @@ export function assembleCountsLedger(): CountsLedger {
       what: 'vitest tests under packages/app-shell/src (foundation + retained presentation widgets)',
       count: countBy(vitest, 'packages/app-shell/src/'),
     },
-    // contract lanes: the versioned validators, the frozen corpus, the freeze suites
+    // contract lanes: the versioned validators, the frozen corpus, the mounts
     {
       lane: 'contract:schema-validators',
       kind: 'contract',
@@ -119,30 +124,23 @@ export function assembleCountsLedger(): CountsLedger {
       count: countJsonFiles('edit'),
     },
     {
-      lane: 'contract:freeze-suites',
+      lane: 'contract:readiness-mount',
       kind: 'contract',
-      what: 'Playwright tests in the freeze specs (byte-exact oracle re-derivation, chromium-gated)',
-      count:
-        countSpecTests('contracts-inspection.spec.ts') + countSpecTests('contracts-edit.spec.ts'),
+      what: 'vitest mounts under the readiness config (retained widgets over schema-validated contract data)',
+      count: mount.length,
     },
-    // fixture lanes: the canonical plain fixture and its oracle boots
+    // fixture lanes: the canonical plain fixture and this suite's own legs
     {
       lane: 'fixture:plain-build',
       kind: 'fixture',
-      what: 'Playwright tests in the serverless plain-fixture build smoke',
+      what: 'Playwright tests in the serverless plain-fixture build smoke (the named no-product-E2E lane)',
       count: countSpecTests('plain-build.spec.ts'),
-    },
-    {
-      lane: 'fixture:retained-ui',
-      kind: 'fixture',
-      what: 'Playwright tests in the retained-UI regression (real chrome over adapters, oracle boot)',
-      count: countSpecTests('retained-ui.spec.ts'),
     },
     {
       lane: 'fixture:readiness',
       kind: 'fixture',
-      what: 'Playwright tests in this readiness suite',
-      count: countSpecTests('retirement-readiness.spec.ts'),
+      what: 'vitest legs in this readiness suite',
+      count: countSpecTests(join('retirement-readiness', 'readiness.test.ts')),
     },
   ];
 

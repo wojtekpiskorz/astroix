@@ -22,16 +22,11 @@ jobs:
     # coding-plan quota (ready_for_review re-triggers once the PR goes live).
     # Fork PRs skip too: GitHub withholds secrets and write perms from them,
     # so a run there can only fail red and read like a broken gate.
-    # Version Packages PRs skip as well: the diff is generated from changesets
-    # already reviewed on their source PRs, and cc-action's non-human-actor
-    # guard fails the run red anyway, but only after paying for checkout,
-    # install, and crap:ci. Keyed on the changesets branch prefix, not the
-    # actor, because a human reopen passes the guard and would burn a full
-    # review on generated output.
+    # (The changesets-generated Version Packages PR skip died with the
+    # retirement gate, #215 — Changesets is gone, so no such PR can exist.)
     if: >-
       ${{ !github.event.pull_request.draft &&
-      github.event.pull_request.head.repo.fork == false &&
-      !startsWith(github.event.pull_request.head.ref, 'changeset-release/') }}
+      github.event.pull_request.head.repo.fork == false }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:

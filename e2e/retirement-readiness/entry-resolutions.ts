@@ -9,18 +9,17 @@ import type { RouteResolutionFixture } from '../behavior-contracts/schema/inspec
  * The readiness legs' one shared composition (#214): builds the entry-
  * resolution table the way the frozen route-resolution contract froze it —
  * collections index, seen-set dedup, holder collections, candidate pick,
- * and the unrouted truth — through the RETAINED resolver. Both legs call
- * this over their own inputs (the frozen payloads serverless, the live
- * oracle payloads in the comparison leg) and deep-compare the result
- * against the frozen rows, so the two legs cannot silently diverge on the
- * composition itself.
+ * and the unrouted truth — through the RETAINED resolver. The surviving
+ * contracts leg calls this over the frozen payloads and deep-compares the
+ * result against the frozen rows.
  *
- * The composition's third copy lives in `e2e/contract-oracle/live-
- * capture.ts` (the B-lane capture pipeline — outside this suite's owned
- * paths, deliberately untouched: the readiness proof's independence claim
- * is about not reusing the capture pipeline). Whether the table itself
- * belongs beside the resolver in `packages/core` is a ticket question for
- * the owner, recorded on the PR.
+ * The composition's other copies (the B-lane capture pipeline in
+ * `e2e/contract-oracle/live-capture.ts`, and the live-oracle comparison
+ * leg's use) died at the retirement gate with the runtime they booted
+ * (#215, lane A6) — this is now the only reader of the frozen
+ * route-resolution rows. Whether the table itself belongs beside the
+ * resolver in `packages/core` is a ticket question for the owner,
+ * recorded on the PR.
  */
 
 /** The walked collection listing the composition consumes (payload shape). */
