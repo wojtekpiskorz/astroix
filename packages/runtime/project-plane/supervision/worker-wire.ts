@@ -12,6 +12,13 @@ import type { WorkerInspectionRequest, WorkerInspectionResult } from '../worker/
  * one child the supervisor spawned and retains (divergent revisions from
  * any other worker would break the revision contract).
  *
+ * The two consumer id regimes are INDEPENDENT by contract: dispatch()
+ * allocates upward from FIRST_CONSUMER_WIRE_ID with no ceiling, a raw
+ * channel client picks its ids by hand, and neither allocator sees the
+ * other — a raw id colliding with a live dispatch() id would settle the
+ * wrong promise. Raw consumers own that collision discipline (the same
+ * law as D5's executor raw channel).
+ *
  * The id reservation is honest and one-way: the supervisor's readiness
  * probe owns wire id {@link SUPERVISOR_PROBE_WIRE_ID}, the `stop`
  * control, and the `closed` report — none of them cross the facet, in

@@ -118,7 +118,7 @@ async function rejectionCode(promise: Promise<unknown>): Promise<string> {
   throw new Error('the dispatch settled unexpectedly');
 }
 
-describe('the id reservation — the supervisor’s traffic never crosses', () => {
+describe('the id reservation - the supervisor traffic never crosses', () => {
   it('refuses the stop control, the probe id, and off-union junk: send reports false and nothing is forwarded', () => {
     const fake = fakeSupervisedWire();
     expect(fake.wire.send({ type: 'stop' })).toBe(false);
