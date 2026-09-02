@@ -22,8 +22,11 @@ function digest(tag: string, value: unknown): string {
     .digest('hex');
 }
 
+/** The collection truth a revision digests — everything but the revision itself. */
+export type CollectionTruth = Omit<ContentCollectionResult, 'revision'>;
+
 /** The collection revision — over entry ids, file baselines, and the schema truth. */
-export function collectionRevision(collection: ContentCollectionResult): string {
+export function collectionRevision(collection: CollectionTruth): string {
   return digest(COLLECTION_REVISION_TAG, {
     name: collection.name,
     schema: { declared: collection.schema.declared, fields: collection.schema.fields },
@@ -37,7 +40,7 @@ export function collectionRevision(collection: ContentCollectionResult): string 
 
 /** The pass revision — over every collection revision and diagnostic, name-ordered. */
 export function passRevision(
-  collections: readonly ContentCollectionResult[],
+  collections: readonly Readonly<ContentCollectionResult>[],
   diagnostics: readonly ContentCompatibilityDiagnostic[],
 ): string {
   return digest(PASS_REVISION_TAG, {

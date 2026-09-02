@@ -1,3 +1,4 @@
+import { observedShape } from '../adapter-error';
 import type { CollectionDefinitionSeams, ZodNamespaceSeams } from './content-probes';
 import type { ContentCompatibilityCode, ContentCompatibilityDiagnostic } from './content-result';
 
@@ -28,9 +29,11 @@ const CONTENT_LAYER_TYPE = 'content_layer';
 export interface ZodSchemaLike {
   safeParseAsync(data: unknown): Promise<{
     success: boolean;
-    error?: {
-      issues?: Iterable<{ path?: readonly PropertyKey[]; code?: unknown; message: unknown }>;
-    };
+    /**
+     * The failure issues — zod's contract populates them on every
+     * failure (an array, so an issue-less failure is detectable).
+     */
+    error?: { issues?: Array<{ path?: readonly PropertyKey[]; code?: unknown; message: unknown }> };
   }>;
 }
 
@@ -73,7 +76,7 @@ export function classifyCollectionCategory(
       diagnostic: compatDiagnostic(name, 'unsupported-collection-shape', {
         expected:
           'a content-layer collection (type content_layer, produced by defineCollection with a loader)',
-        observed: observedType(definition.type),
+        observed: observedShape(definition.type),
       }),
     };
   }
@@ -89,7 +92,7 @@ export function classifyCollectionCategory(
       outcome: 'unsupported',
       diagnostic: compatDiagnostic(name, 'unknown-loader', {
         expected: 'the certified glob loader (an object with name glob-loader and a load function)',
-        observed: observedType(loader),
+        observed: observedShape(loader),
       }),
     };
   }
@@ -128,7 +131,7 @@ export async function loadCollectionSchema(
       diagnostic: compatDiagnostic(name, 'unknown-schema-shape', {
         expected:
           'the declared schema to be a zod schema instance (with _zod.def and safeParseAsync)',
-        observed: observedType(declared),
+        observed: observedShape(declared),
       }),
     };
   }
@@ -168,7 +171,7 @@ async function resolveFactorySchema(
         observed:
           invocationError !== undefined
             ? 'a schema factory invocation rejection'
-            : observedType(resolved),
+            : observedShape(resolved),
       }),
     };
   }
@@ -204,17 +207,4 @@ export function compatDiagnostic(
   shape: { expected: string; observed: string },
 ): ContentCompatibilityDiagnostic {
   return { code, collection, expected: shape.expected, observed: shape.observed };
-}
-
-/** A structural type description for the unsupported shapes (type facts, never values). */
-export function observedType(value: unknown): string {
-  if (value === null) return 'null';
-  if (value === undefined) return 'undefined';
-  if (Array.isArray(value)) return 'array';
-  if (typeof value === 'function') return 'function';
-  const type = typeof value;
-  if (type !== 'object') return `typeof ${type}`;
-  return `object with own properties ${Object.keys(value as Record<string, unknown>)
-    .slice(0, 5)
-    .join(', ')}`;
 }

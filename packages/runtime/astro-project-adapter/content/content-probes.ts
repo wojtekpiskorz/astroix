@@ -18,12 +18,25 @@ import { AdapterError, observedShape } from '../adapter-error';
  * cannot produce certified results.
  */
 
-// ——— the seam inventory ———
+// ——— the seam inventory (named per docs/core-reuse.md's table) ———
 
-const SEAM_CONTENT_API = 'astro:content export getCollection()';
-const SEAM_ZOD_NAMESPACE = 'astro/zod root export';
-const SEAM_CONTENT_CONFIG = 'content config module src/content.config.ts collections export';
+export const SEAM_CONTENT_API = 'astro:content export getCollection()';
+export const SEAM_ZOD_NAMESPACE = 'astro/zod root export';
+export const SEAM_CONTENT_CONFIG = 'content config module src/content.config.ts collections export';
 const SEAM_COLLECTION_ENTRIES = 'astro:content getCollection() entry export';
+
+/** The content seams an evaluation rejection can name — the constants' union, stated once. */
+export type ContentSeamName =
+  | typeof SEAM_CONTENT_API
+  | typeof SEAM_ZOD_NAMESPACE
+  | typeof SEAM_CONTENT_CONFIG;
+
+/** Each evaluation-rejection seam's class — carried once, next to its name. */
+const CONTENT_SEAM_CLASSES: Record<ContentSeamName, SeamClass> = {
+  [SEAM_CONTENT_API]: 'public',
+  [SEAM_ZOD_NAMESPACE]: 'public',
+  [SEAM_CONTENT_CONFIG]: 'fail-closed private',
+};
 
 // ——— the structural likes handed to the pass ———
 
@@ -123,25 +136,17 @@ export function readZodNamespace(moduleExports: unknown): ZodNamespaceSeams {
  * paths).
  */
 export function moduleEvaluationRejection(
-  seam:
-    | 'astro:content export getCollection()'
-    | 'astro/zod root export'
-    | 'content config module src/content.config.ts collections export',
+  seam: ContentSeamName,
   expected: string,
   cause: unknown,
 ): AdapterError {
-  return seamRejected(seam, seamClassOf(seam), expected, 'a module evaluation rejection', cause);
-}
-
-function seamClassOf(
-  seam:
-    | 'astro:content export getCollection()'
-    | 'astro/zod root export'
-    | 'content config module src/content.config.ts collections export',
-): SeamClass {
-  return seam === 'content config module src/content.config.ts collections export'
-    ? 'fail-closed private'
-    : 'public';
+  return seamRejected(
+    seam,
+    CONTENT_SEAM_CLASSES[seam],
+    expected,
+    'a module evaluation rejection',
+    cause,
+  );
 }
 
 /**

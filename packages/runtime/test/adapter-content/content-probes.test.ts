@@ -8,6 +8,9 @@ import {
   readEntryRecord,
   readServedEntries,
   readZodNamespace,
+  SEAM_CONTENT_API,
+  SEAM_CONTENT_CONFIG,
+  SEAM_ZOD_NAMESPACE,
 } from '../../astro-project-adapter/content/content-probes';
 
 /**
@@ -115,10 +118,12 @@ describe('readContentConfig (content config export, fail-closed private)', () =>
 describe('moduleEvaluationRejection (the import surface)', () => {
   it('wraps an evaluation rejection for each content seam with the cause kept', () => {
     const cause = new Error('vite could not resolve');
+    // The constants are the seam names' single source — asserted here so
+    // a renamed constant can never silently desync from a seam string.
     for (const [seam, seamClass] of [
-      ['astro:content export getCollection()', 'public'],
-      ['astro/zod root export', 'public'],
-      ['content config module src/content.config.ts collections export', 'fail-closed private'],
+      [SEAM_CONTENT_API, 'public'],
+      [SEAM_ZOD_NAMESPACE, 'public'],
+      [SEAM_CONTENT_CONFIG, 'fail-closed private'],
     ] as const) {
       const error = moduleEvaluationRejection(seam, 'a module', cause);
       expect(error.code).toBe('seam-rejected');

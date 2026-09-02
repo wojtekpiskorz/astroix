@@ -323,6 +323,33 @@ describe('inspectContent (the pass)', () => {
     expect((arrayData as AdapterError)?.code).toBe('seam-rejected');
   });
 
+  it('refuses a schema failure without issue records rather than reading it as a clean pass', async () => {
+    const { project, composition } = await stagedPass();
+    // A schema that fails safeParseAsync with no issues would serialize
+    // like a validation-clean entry; zod's contract never does this —
+    // the pass treats the shape as unreachable and fails loudly.
+    (project.collections as Record<string, unknown>).lying = {
+      type: 'content_layer',
+      loader: { name: 'glob-loader', load: async () => {} },
+      schema: {
+        _zod: { def: { type: 'object' } },
+        safeParseAsync: async () => ({ success: false }),
+      },
+    };
+    await writeEntry(project, 'src/content/lying/entry.md', '---\ntitle: L\n---\n\nx\n');
+    project.store.set('lying', [
+      { id: 'entry', filePath: 'src/content/lying/entry.md', data: { title: 'L' }, body: 'x' },
+    ]);
+    const rejection = await inspectContent(composition).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    expect(rejection).toBeInstanceOf(Error);
+    expect((rejection as Error).message).toContain('failed validation without issue records');
+    expect(composition.runners.at(-1)?.closed).toBe(true);
+    expect(composition.emitter.listenerCount('send')).toBe(0);
+  });
+
   it('wraps a getCollection rejection for a declared collection as the public seam', async () => {
     const { project, composition } = await stagedPass();
     const collections = project.collections as Record<string, unknown>;

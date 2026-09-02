@@ -14,6 +14,9 @@ import {
   readContentConfig,
   readServedEntries,
   readZodNamespace,
+  SEAM_CONTENT_API,
+  SEAM_CONTENT_CONFIG,
+  SEAM_ZOD_NAMESPACE,
   type ServedEntry,
   type ZodNamespaceSeams,
 } from './content-probes';
@@ -24,7 +27,7 @@ import type {
   ContentInspectionResult,
   ContentSchemaResult,
 } from './content-result';
-import { collectionRevision, passRevision } from './content-revisions';
+import { type CollectionTruth, collectionRevision, passRevision } from './content-revisions';
 import { readEntryBaseline } from './entry-baselines';
 import {
   classifyCollectionCategory,
@@ -101,14 +104,10 @@ async function runContentPass(
     else collections.push(inspected.result);
   }
 
-  const revisioned = collections.map((collection) => ({
-    ...collection,
-    revision: collectionRevision(collection),
-  }));
   return {
-    collections: revisioned,
+    collections,
     diagnostics,
-    revision: passRevision(revisioned, diagnostics),
+    revision: passRevision(collections, diagnostics),
   };
 }
 
@@ -136,15 +135,14 @@ async function inspectCollection(
   for (const entry of codeUnitSortedById(entries)) {
     entryResults.push(await inspectEntry(entry, context.projectRoot, schema.loaded));
   }
-  return {
-    outcome: 'result',
-    result: {
-      name,
-      entries: entryResults,
-      schema: schemaResult(schema.loaded),
-      revision: '',
-    },
+  // The collection's own truth carries its revision — no placeholder a
+  // later stage must remember to replace.
+  const truth: CollectionTruth = {
+    name,
+    entries: entryResults,
+    schema: schemaResult(schema.loaded),
   };
+  return { outcome: 'result', result: { ...truth, revision: collectionRevision(truth) } };
 }
 
 /** One entry: the served projection beside its file baseline and real-schema validation. */
@@ -173,7 +171,16 @@ async function validateWithProjectSchema(
   rawData: unknown,
 ): Promise<ContentEntryResult['issues']> {
   const parsed = await schema.safeParseAsync(rawData);
-  return parsed.success ? [] : toIssueRecords(parsed.error?.issues ?? []);
+  if (parsed.success) return [];
+  const issues = parsed.error?.issues;
+  if (issues === undefined || issues.length === 0) {
+    // zod's contract populates issues on every failure; an issue-less
+    // failure would serialize like a clean pass, which is a verdict the
+    // schema never produced. Unreachable with the certified zod — fail
+    // loudly rather than invent or silence a verdict.
+    throw new Error('the project schema failed validation without issue records');
+  }
+  return toIssueRecords(issues);
 }
 
 function schemaResult(schema: LoadedCollectionSchema): ContentSchemaResult {
@@ -196,7 +203,7 @@ async function importContentApi(runner: ModuleRunnerLike): Promise<unknown> {
     return await runner.import('astro:content');
   } catch (cause) {
     throw moduleEvaluationRejection(
-      'astro:content export getCollection()',
+      SEAM_CONTENT_API,
       'the astro:content module with a getCollection export',
       cause,
     );
@@ -208,7 +215,7 @@ async function importZodNamespace(runner: ModuleRunnerLike): Promise<unknown> {
     return await runner.import('astro/zod');
   } catch (cause) {
     throw moduleEvaluationRejection(
-      'astro/zod root export',
+      SEAM_ZOD_NAMESPACE,
       'the astro/zod module (the project zod namespace)',
       cause,
     );
@@ -225,7 +232,7 @@ async function loadDefinitions(
     moduleExports = await runner.import(configId);
   } catch (cause) {
     throw moduleEvaluationRejection(
-      'content config module src/content.config.ts collections export',
+      SEAM_CONTENT_CONFIG,
       'the content config module (src/content.config.ts) with a collections export',
       cause,
     );
