@@ -101,6 +101,12 @@ export function assembleCountsLedger(): CountsLedger {
       count: countBy(vitest, 'packages/core/src/'),
     },
     {
+      lane: 'unit:packages/protocol',
+      kind: 'unit',
+      what: 'vitest tests under packages/protocol/src (the protocol v1 wire schemas, envelopes, and limits, #220)',
+      count: countBy(vitest, 'packages/protocol/src/'),
+    },
+    {
       lane: 'unit:packages/app-shell',
       kind: 'unit',
       what: 'vitest tests under packages/app-shell/src (foundation + retained presentation widgets)',
