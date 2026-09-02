@@ -103,6 +103,12 @@ export function spawnWriteExecutor(input: SpawnWriteExecutorInput): WriteExecuto
     resolveStop = resolve;
   });
 
+  // A send() on a torn-down channel asynchronously emits 'error'
+  // (ERR_IPC_CHANNEL_CLOSED) on the child; without a listener that event
+  // is unhandled and kills the control plane. Channel death is fully
+  // observed through the exit path below — this listener only keeps the
+  // EventEmitter from escalating an already-handled condition.
+  child.on('error', () => {});
   const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => {
     child.on('exit', (code, signal) => resolve({ code, signal }));
   });
