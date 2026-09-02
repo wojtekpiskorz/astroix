@@ -134,6 +134,17 @@ export default defineConfig({
         // temp roots — same covered-tier decision as the registry seam
         // (#221), recorded in crap.ts.
         'packages/runtime/edit-authority/**',
+        // The project-plane worker seams (#230, additive): the worker's
+        // dispatch/revision/invalidation/cleanup state machine, its typed
+        // request/failure/event contracts, and the IPC serving loop are
+        // deterministic units (dispatch-boundary fakes + real forked
+        // children — the #222 process-lane idiom), same covered-tier
+        // decision as kernel-lease/private-boot. The real IO glue
+        // (composition-runtime.ts, worker-child.ts) is watchlist-tiered in
+        // crap.ts but stays collected here like the adapter's composition
+        // files — metric honesty lives in the tier decision, not the
+        // collection.
+        'packages/runtime/project-plane/**',
       ],
       reporter: ['json'],
       reportsDirectory: 'coverage',

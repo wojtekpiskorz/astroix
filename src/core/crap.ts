@@ -34,7 +34,11 @@ import type { FunctionComplexity } from './complexity';
  * the lane that lands them. The styles convergence seams since #227
  * (parity classifier + revisioned invalidation source) join the covered
  * tier; its converged-inspection IO composition is watchlist like the
- * join's (#227). A
+ * join's (#227). The project-plane worker seams since #230 (dispatch/
+ * revision/invalidation/cleanup state machine + typed contracts + the
+ * IPC serving loop) join the covered tier; the real IO glue
+ * (composition-runtime.ts, worker-child.ts) is watchlist like the
+ * adapter's composition (#230). A
  * watchlist row has `coverage === null` and `crap === null`, and its gate
  * metric is CC. (The `src/node` + `src/client` watchlist tiers were
  * deleted with their functions at the retirement gate, #215.)
@@ -162,6 +166,17 @@ function isCoreFile(relPath: string): boolean {
     relPath === 'packages/runtime/astro-project-adapter/styles/join/route-styles.ts' ||
     relPath ===
       'packages/runtime/astro-project-adapter/styles/convergence/converged-styles-inspection.ts';
+  // The project-plane worker seams since #230: the dispatch/revision/
+  // invalidation/cleanup state machine, the typed request/failure/event
+  // contracts, and the IPC serving loop are covered (deterministic units
+  // over dispatch-boundary fakes + real forked children, the #222
+  // process-lane idiom). The real IO glue — composition-runtime.ts (boots
+  // the adapter's composition server) and worker-child.ts (the forked
+  // entry) — is watchlist like the adapter's composition.ts: its truth is
+  // the real-install certification suite and the packaged runtime.
+  const projectPlaneWatchlist =
+    relPath === 'packages/runtime/project-plane/composition/composition-runtime.ts' ||
+    relPath === 'packages/runtime/project-plane/worker/worker-child.ts';
   return (
     (relPath.startsWith('src/core/') ||
       relPath.startsWith('packages/core/') ||
@@ -170,6 +185,7 @@ function isCoreFile(relPath: string): boolean {
       relPath.startsWith('packages/runtime/kernel-lease/') ||
       relPath.startsWith('packages/runtime/private-boot/') ||
       relPath.startsWith('packages/runtime/edit-authority/') ||
+      (relPath.startsWith('packages/runtime/project-plane/worker/') && !projectPlaneWatchlist) ||
       (relPath.startsWith('packages/runtime/astro-project-adapter/') && !adapterWatchlist)) &&
     !relPath.startsWith('packages/runtime/astro-project-adapter/certification/')
   );
