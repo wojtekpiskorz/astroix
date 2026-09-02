@@ -2,9 +2,11 @@ import { css as cssLang } from '@codemirror/lang-css';
 import { EditorView } from '@codemirror/view';
 import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
+import { EditorHeader } from '../../../../packages/app-shell/src/presentation/editor-header';
+import { RangeChips } from '../../../../packages/app-shell/src/presentation/range-chips';
 import { fetchFileContents, putFileRangeEdit } from '../../editor/api';
 import { createEditorView, replaceDoc, revealRange } from '../../editor/codemirror';
-import { type WriteStatus, WriteStatusBadge } from '../../editor/write-status-badge';
+import type { WriteStatus } from '../../editor/write-status-badge';
 import { INDEX_PAYLOAD_KEY } from './api';
 import { type EditorSpec, useCssStore } from './store';
 
@@ -166,37 +168,9 @@ export function RuleEditor({ spec }: { spec: EditorSpec }) {
 
   return (
     <div data-astroix-editor="view" className="flex min-h-0 flex-1 flex-col">
-      <div className="flex items-center gap-2 border-b border-slate-800 px-3 py-2 text-xs">
-        <code className="truncate text-slate-300">{spec.file}</code>
-        <WriteStatusBadge status={status} />
-        <button
-          type="button"
-          onClick={closeEditor}
-          aria-label="close editor"
-          className="ml-auto rounded px-1 text-slate-500 hover:bg-slate-800"
-        >
-          ×
-        </button>
-      </div>
+      <EditorHeader title={spec.file} status={status} onClose={closeEditor} />
       {spec.ranges.length > 1 && (
-        <div className="flex flex-wrap gap-1 border-b border-slate-800 px-3 py-1.5">
-          {spec.ranges.map((r, index) => (
-            <button
-              type="button"
-              key={r.label}
-              data-astroix-range-chip={index}
-              aria-pressed={index === activeIndex}
-              onClick={() => jumpTo(index)}
-              className={
-                index === activeIndex
-                  ? 'rounded bg-sky-500 px-1.5 py-0.5 text-[10px] font-medium text-slate-950'
-                  : 'rounded bg-slate-800 px-1.5 py-0.5 text-[10px] text-slate-400'
-              }
-            >
-              {r.label}
-            </button>
-          ))}
-        </div>
+        <RangeChips ranges={spec.ranges} activeIndex={activeIndex} onJump={jumpTo} />
       )}
       <div ref={hostRef} className="min-h-0 flex-1 overflow-hidden" />
     </div>

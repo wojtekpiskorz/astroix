@@ -1,11 +1,13 @@
 import { useEffect, useRef } from 'react';
+import { ContentPaneState } from '../../../../packages/app-shell/src/presentation/content-pane-state';
+import { EditorHeader } from '../../../../packages/app-shell/src/presentation/editor-header';
 import type { CollectionEntryRecord, CollectionRecord } from '../../../core/collections';
 import type { FormFieldNode } from '../../../core/form-tree';
 import { MarkdownEditor } from '../../editor/markdown-editor';
-import { WriteStatusBadge } from '../../editor/write-status-badge';
 import { useCollections, useContentSchema } from './api';
 import { ContentForm } from './content-form';
 import { useContentStore } from './store';
+import { useAdvisoryValidation } from './use-advisory-validation';
 import { useAutoWrite } from './use-auto-write';
 
 /** The active entry's record in the payload — null when not found. */
@@ -36,7 +38,9 @@ interface PaneEditorProps {
  * raw file parse (never the payload projection), keyed by the truth's seq —
  * the mount read, a 409's disk reload (the typed edit drops, Impl #10) and
  * an external change accepted while clean each remount them; the payload's
- * entry record reaches the loop as the change signal only.
+ * entry record reaches the loop as the change signal only. The form and
+ * its frame are the moved prop-driven widgets; the write loop and the
+ * advisory-validation roundtrip (its adapter hook) stay here.
  */
 function PaneEditor({ collection, entry, fields }: PaneEditorProps) {
   // refs, not state: a change in either half reports through the seam without
@@ -45,6 +49,7 @@ function PaneEditor({ collection, entry, fields }: PaneEditorProps) {
   const dataRef = useRef<unknown>(undefined);
   const autoWrite = useAutoWrite({ file: entry.filePath, fields, payloadSignal: entry });
   const truth = autoWrite.truth;
+  const validation = useAdvisoryValidation(collection, truth?.seq);
 
   // the raw truth re-seeds the refs during render, ahead of the remounted
   // halves' mount emissions (children's effects fire before this component's):
@@ -65,18 +70,16 @@ function PaneEditor({ collection, entry, fields }: PaneEditorProps) {
 
   return (
     <div data-astroix-content-pane="form" className="flex min-h-0 flex-1 flex-col">
-      <div className="flex items-center gap-2 border-b border-border px-3 py-2 text-xs">
-        <code className="truncate text-muted-foreground">
-          {collection}/{entry.id}
-        </code>
-        <WriteStatusBadge status={autoWrite.status} />
-      </div>
+      <EditorHeader title={`${collection}/${entry.id}`} status={autoWrite.status} />
       {truth === null ? (
-        <div className="flex min-h-0 flex-1 items-center justify-center px-4 text-center text-xs text-muted-foreground">
-          {autoWrite.status === 'error'
-            ? 'The entry file could not be read — the write loop is down.'
-            : 'Reading the entry file…'}
-        </div>
+        <ContentPaneState
+          state={autoWrite.status === 'error' ? 'error' : 'reading'}
+          message={
+            autoWrite.status === 'error'
+              ? 'The entry file could not be read — the write loop is down.'
+              : 'Reading the entry file…'
+          }
+        />
       ) : (
         <>
           <div className="min-h-0 flex-1 overflow-y-auto">
@@ -86,8 +89,11 @@ function PaneEditor({ collection, entry, fields }: PaneEditorProps) {
               fields={fields}
               entryData={truth.data}
               projectionData={entry.data}
+              issues={validation.issues}
+              onFlushValidation={validation.flush}
               onValuesChange={(values) => {
                 dataRef.current = values;
+                validation.notify(values);
                 emit();
               }}
             />
@@ -140,25 +146,20 @@ export function ContentEditorPane() {
 
   if (syncing || picked === null) {
     return (
-      <div
-        data-astroix-content-pane={syncing ? 'syncing' : 'empty'}
-        className="flex min-h-0 flex-1 items-center justify-center px-4 text-center text-xs text-muted-foreground"
-      >
-        {syncing
-          ? 'Waiting for the content sync…'
-          : 'No entry open — pick one in the Content list.'}
-      </div>
+      <ContentPaneState
+        state={syncing ? 'syncing' : 'empty'}
+        message={
+          syncing
+            ? 'Waiting for the content sync…'
+            : 'No entry open — pick one in the Content list.'
+        }
+      />
     );
   }
 
   if (schemaPending || schema === undefined) {
     return (
-      <div
-        data-astroix-content-pane="syncing"
-        className="flex min-h-0 flex-1 items-center justify-center px-4 text-center text-xs text-muted-foreground"
-      >
-        Walking the {picked.collection} schema…
-      </div>
+      <ContentPaneState state="syncing" message={`Walking the ${picked.collection} schema…`} />
     );
   }
 
