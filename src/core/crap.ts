@@ -60,7 +60,15 @@ import type { FunctionComplexity } from './complexity';
  * client-binding table, the authority strip, the bounded envelope
  * validation, and the sanitized error responses are covered
  * (deterministic pure units); the reserved-handler socket composition
- * is watchlist like the plane's other IO glue (#234). A
+ * is watchlist like the plane's other IO glue (#234). The
+ * session-supervisor staging + client seams since #236 (F4) — the
+ * staged activation state machine (generation reservation, private
+ * candidate readiness, rollback, the commit linearization's state side,
+ * crash observation) and the document-bound client registry (one
+ * editor, three diagnostics, navigation/renderer/session revocation,
+ * the menu-action currency envelope) — are covered (deterministic
+ * units over run fakes); the fence (F5) and commit/revocation (F6)
+ * subtrees rule their own tiers when their lanes land. A
  * watchlist row has `coverage === null` and `crap === null`, and its gate
  * metric is CC. (The `src/node` + `src/client` watchlist tiers were
  * deleted with their functions at the retirement gate, #215.)
@@ -223,6 +231,17 @@ const COVERED_PREFIXES: readonly string[] = [
   // inspection seams (#229) — deterministic unit tests with
   // resolution-layer stubs.
   'packages/runtime/astro-project-adapter/',
+  // `packages/runtime/session-supervisor/{staging,clients}` since #236
+  // (F4): the staged activation state machine (runtime epochs, generation
+  // reservation, private candidate readiness, rollback, the commit
+  // linearization's state side, crash observation) and the
+  // document-bound client registry (the authoritative-editor/diagnostic
+  // role caps, navigation/renderer/session revocation, the menu-action
+  // currency envelope) — deterministic units over run fakes. The fence
+  // (F5 #237) and commit/revocation (F6 #238) subtrees under
+  // session-supervisor/ stay watchlist until their lanes rule.
+  'packages/runtime/session-supervisor/staging/',
+  'packages/runtime/session-supervisor/clients/',
 ];
 
 /**
