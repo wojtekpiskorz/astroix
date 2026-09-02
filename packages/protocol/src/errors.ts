@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { sha256HexSchema } from './edits';
+import { BYTE_LIMIT_NAMES } from './limits';
 import { sanitizedTextSchema } from './sanitization';
 
 /**
@@ -66,15 +67,12 @@ export const unsupportedProtocolVersionDetailsSchema = z.strictObject({
 });
 
 export const payloadTooLargeDetailsSchema = z.strictObject({
-  /** Which ADR-0006 §7 limit was exceeded. */
-  limit: z.enum([
-    'lifecycleJsonBytes',
-    'editRequestBytes',
-    'editableResourceBytes',
-    'inspectionResponseBytes',
-    'sseEventBytes',
-    'errorDetailsBytes',
-  ]),
+  /**
+   * Which ADR-0006 §7 limit was exceeded — derived from `LIMITS`
+   * (`BYTE_LIMIT_NAMES`), so a new byte cap extends this enum with the
+   * constant instead of drifting from it.
+   */
+  limit: z.enum(BYTE_LIMIT_NAMES),
   receivedBytes: z.number().int().nonnegative(),
 });
 

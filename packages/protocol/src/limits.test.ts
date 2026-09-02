@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { byteLength, envelopeBytes, LIMITS, withinByteLimit } from './limits';
+import { BYTE_LIMIT_NAMES, byteLength, envelopeBytes, LIMITS, withinByteLimit } from './limits';
 
 /**
  * The limits traceability test (#220 AC: limits encode the ADR numbers —
@@ -34,6 +34,19 @@ describe('LIMITS — one statement of every ruled number', () => {
     expect(LIMITS.requestCapabilityBits).toBe(256);
     expect(LIMITS.authoritativeSseClients).toBe(1);
     expect(LIMITS.diagnosticSseClients).toBe(3);
+  });
+
+  it('derives the byte-limit name set from LIMITS — the single statement the details enum reads', () => {
+    expect([...BYTE_LIMIT_NAMES].sort()).toEqual([
+      'editRequestBytes',
+      'editableResourceBytes',
+      'errorDetailsBytes',
+      'inspectionResponseBytes',
+      'lifecycleJsonBytes',
+      'sseEventBytes',
+    ]);
+    const byteKeys = Object.keys(LIMITS).filter((name) => name.endsWith('Bytes'));
+    expect(BYTE_LIMIT_NAMES).toHaveLength(byteKeys.length); // a seventh cap joins both or neither
   });
 });
 

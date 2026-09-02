@@ -59,6 +59,23 @@ describe('projectSummarySchema', () => {
     }
   });
 
+  it('puts the display name behind the disclosure guard like every public free-text field', () => {
+    expect(
+      projectSummarySchema.safeParse({
+        projectKey: key,
+        displayName: '~/sites/leak',
+        availability: 'available',
+      }).success,
+    ).toBe(false);
+    expect(
+      projectSummarySchema.safeParse({
+        projectKey: key,
+        displayName: 'site /srv/leak',
+        availability: 'available',
+      }).success,
+    ).toBe(false);
+  });
+
   it('rejects an empty display name and off-enum availability', () => {
     expect(
       projectSummarySchema.safeParse({

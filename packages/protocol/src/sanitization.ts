@@ -8,23 +8,32 @@ import { z } from 'zod';
  * typed fields, so no field exists that could carry a root, a port, a
  * PID, an environment value, or a stack. This module is the second line
  * of defense: a disclosure-shape guard over the free text that does
- * appear (error messages, diagnostic messages, failure messages).
+ * appear (error messages, diagnostic messages, failure messages, display
+ * names).
  *
- * The guard is deliberately shape-based, not semantic: it flags text that
- * *looks like* an absolute filesystem path, a Windows drive path, a stack
- * frame, a `node:internal` frame, or a PID reference. Sanitized prose
- * ("the project root is unavailable") passes; a leaked
- * `/Users/owner/projects/site` fails.
+ * The guard is deliberately shape-based, not semantic, and fails closed:
+ * it flags text that *looks like* any POSIX absolute path (a slash-rooted
+ * segment pair, wherever it sits — `/Users/…`, `/srv/…`, `/mnt/…`), a
+ * home-relative path (`~/…`), a Windows drive path (`C:\\…`, `D:/…`), a
+ * UNC path (`\\\\server\\share`), a stack frame, a `node:internal`
+ * frame, or a PID reference. Sanitized prose ("the project root is
+ * unavailable") passes; prose merely containing slashes without an
+ * absolute shape ("and/or", "1/2") passes too.
  */
+// Order matters for reporting precision: a stack frame's `(/app/x.js:1:2)`
+// tail also carries an absolute-path shape, and the more specific finding
+// wins. Detection itself is order-independent — every pattern runs.
 const DISCLOSURE_PATTERNS: ReadonlyArray<{ id: string; pattern: RegExp; what: string }> = [
-  {
-    id: 'absolute-path',
-    pattern: /(?:^|[\s"'`(=])\/(?:Users|home|var|tmp|etc|opt|private)\//,
-    what: 'an absolute filesystem root',
-  },
-  { id: 'windows-path', pattern: /[A-Za-z]:[\\/]/, what: 'a Windows drive path' },
   { id: 'stack-frame', pattern: /(?:^|\n)\s*at\s+[^\n(]*\(/, what: 'a stack trace' },
   { id: 'node-internal', pattern: /\bnode:internal\//, what: 'a Node internals frame' },
+  {
+    id: 'absolute-path',
+    pattern: /(?:^|[\s"'`(=])\/[a-z][^/\s]*\//i,
+    what: 'an absolute filesystem path',
+  },
+  { id: 'home-relative-path', pattern: /(?:^|[\s"'`(=])~\//, what: 'a home-relative path' },
+  { id: 'windows-path', pattern: /[A-Za-z]:[\\/]/, what: 'a Windows drive path' },
+  { id: 'unc-path', pattern: /\\\\[^\\/\s]+[\\/]/, what: 'a UNC path' },
   { id: 'pid', pattern: /\bpid\b\s*[:=]?\s*\d+/i, what: 'a process id' },
 ];
 

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { LIMITS } from './limits';
+import { sanitizedTextSchema } from './sanitization';
 
 /**
  * Registry wire records (ADR-0006 §1 "Registered-project identity and
@@ -38,7 +39,8 @@ export const projectAvailabilitySchema = z.enum(['available', 'unavailable']);
  */
 export const projectSummarySchema = z.strictObject({
   projectKey: projectKeySchema,
-  displayName: z.string().min(1),
+  /** Behind the disclosure guard with every other public free-text field. */
+  displayName: sanitizedTextSchema,
   availability: projectAvailabilitySchema,
 });
 

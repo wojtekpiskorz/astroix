@@ -8,6 +8,7 @@ import {
 } from './commands';
 import { publicErrorSchema } from './errors';
 import { sessionRefSchema } from './session';
+import { protocolVersionSchema } from './version';
 
 /**
  * The three envelopes of protocol v1 (ADR-0006 §7): request, response, and
@@ -28,7 +29,7 @@ export const requestIdSchema = z.string().min(1);
 
 export const requestEnvelopeSchema = z
   .strictObject({
-    protocolVersion: z.literal(1),
+    protocolVersion: protocolVersionSchema,
     requestId: requestIdSchema,
     session: sessionRefSchema.optional(),
     command: commandSchema,
@@ -45,7 +46,7 @@ export const requestEnvelopeSchema = z
 
 export const responseEnvelopeSchema = z
   .strictObject({
-    protocolVersion: z.literal(1),
+    protocolVersion: protocolVersionSchema,
     requestId: requestIdSchema,
     session: sessionRefSchema.optional(),
     result: resultSchema,
@@ -66,7 +67,7 @@ export const responseEnvelopeSchema = z
  * closed `error` union sanitizes everything else by construction.
  */
 export const errorEnvelopeSchema = z.strictObject({
-  protocolVersion: z.literal(1),
+  protocolVersion: protocolVersionSchema,
   requestId: requestIdSchema,
   session: sessionRefSchema.optional(),
   error: publicErrorSchema,

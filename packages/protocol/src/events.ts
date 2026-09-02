@@ -4,6 +4,7 @@ import { inspectionKindSchema, resourceRevisionSchema } from './inspection';
 import { sanitizedTextSchema } from './sanitization';
 import { sessionRefSchema } from './session';
 import { sessionSnapshotSchema } from './session-state';
+import { protocolVersionSchema } from './version';
 
 /**
  * SSE event frames (ADR-0006 §7: events are SSE at `/__astroix/events` —
@@ -47,7 +48,7 @@ export const EVENT_SESSION_PRESENCE: Record<SseEventType, SessionPresence> = {
 
 export const sseEventEnvelopeSchema = z
   .strictObject({
-    protocolVersion: z.literal(1),
+    protocolVersion: protocolVersionSchema,
     session: sessionRefSchema.optional(),
     event: sseEventSchema,
   })

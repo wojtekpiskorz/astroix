@@ -59,14 +59,18 @@ export const LIMITS = {
   requestCapabilityBits: 256,
 } as const;
 
-/** Every key of {@link LIMITS} that names a byte budget. */
-export type ByteLimitName =
-  | 'lifecycleJsonBytes'
-  | 'editRequestBytes'
-  | 'editableResourceBytes'
-  | 'inspectionResponseBytes'
-  | 'sseEventBytes'
-  | 'errorDetailsBytes';
+/**
+ * Every key of {@link LIMITS} that names a byte budget — derived, not
+ * hand-listed, so a seventh `*Bytes` cap joins this type (and the
+ * `payload-too-large` details enum, which reads {@link BYTE_LIMIT_NAMES})
+ * automatically instead of drifting.
+ */
+export type ByteLimitName = Extract<keyof typeof LIMITS, `${string}Bytes`>;
+
+/** The runtime list of byte-limit names — the same derivation, for zod enums. */
+export const BYTE_LIMIT_NAMES: readonly ByteLimitName[] = (
+  Object.keys(LIMITS) as ByteLimitName[]
+).filter((name) => name.endsWith('Bytes'));
 
 const encoder = new TextEncoder();
 

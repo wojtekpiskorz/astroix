@@ -8,16 +8,21 @@ import { findDisclosure, sanitizedTextSchema } from './sanitization';
  * exercises the free-text disclosure guard that backs it).
  */
 describe('findDisclosure', () => {
-  it('flags leaked absolute filesystem roots (macOS and Linux shapes)', () => {
+  it('flags leaked absolute filesystem paths — any slash-rooted segment pair', () => {
     expect(findDisclosure('/Users/owner/projects/site')).toBe('absolute-path');
     expect(findDisclosure('root at /home/owner/site is gone')).toBe('absolute-path');
     expect(findDisclosure('see /private/var/folders/xyz')).toBe('absolute-path');
     expect(findDisclosure('/tmp/build')).toBe('absolute-path');
+    expect(findDisclosure('mounted under /srv/site')).toBe('absolute-path');
+    expect(findDisclosure('staged from /mnt/data/site')).toBe('absolute-path');
   });
 
-  it('flags Windows drive paths', () => {
+  it('flags home-relative and Windows paths (drive and UNC)', () => {
+    expect(findDisclosure('~/projects/site')).toBe('home-relative-path');
+    expect(findDisclosure('built from ~/dev/site')).toBe('home-relative-path');
     expect(findDisclosure('C:\\Users\\owner\\site')).toBe('windows-path');
     expect(findDisclosure('config D:/dev/site')).toBe('windows-path');
+    expect(findDisclosure('resided on \\\\server\\share\\site')).toBe('unc-path');
   });
 
   it('flags stack frames and node internals', () => {
@@ -31,10 +36,12 @@ describe('findDisclosure', () => {
     expect(findDisclosure('PID: 17')).toBe('pid');
   });
 
-  it('passes sanitized prose', () => {
+  it('passes sanitized prose — including slash-bearing prose without an absolute shape', () => {
     expect(findDisclosure('the project root is unavailable')).toBe(null);
     expect(findDisclosure('candidate startup exceeded its deadline')).toBe(null);
     expect(findDisclosure('the route did not render this entry')).toBe(null);
+    expect(findDisclosure('either/or is prose, not a path')).toBe(null);
+    expect(findDisclosure('a 1/2 ratio is fine')).toBe(null);
   });
 });
 

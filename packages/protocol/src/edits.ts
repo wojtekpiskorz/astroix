@@ -67,7 +67,14 @@ export const resourceGrantSchema = z.strictObject({
   baseline: revisionContractSchema,
 });
 
-/** Character offsets into the resource's current bytes, end-exclusive; start precedes end. */
+/**
+ * Offsets into the resource's current **string contents** — JavaScript
+ * string indices (UTF-16 code units), end-exclusive; start precedes end.
+ * The unit matches the frozen splice-window contract exactly
+ * (`e2e/behavior-contracts` `sourceRange` over the file's string content,
+ * re-derived by `packages/core`'s splice-writer): not UTF-8 byte offsets,
+ * which the envelope caps count in a different space.
+ */
 export const sourceRangeSchema = z
   .strictObject({
     start: z.number().int().nonnegative(),
