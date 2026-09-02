@@ -93,9 +93,9 @@ export interface StylesInspectionInput {
   /** Rejects the inspection with the caller's reason at pass and leg boundaries. */
   readonly signal?: AbortSignal;
   /**
-   * Bound on immediate fresh re-passes per inspection (default 1). Each
-   * attempt is a complete fresh-runner pass with full verification — a
-   * mismatch or race discards the attempt; only strict parity publishes.
+   * Total passes per inspection (default 1: one pass, zero re-passes).
+   * Each attempt is a complete fresh-runner pass with full verification —
+   * a mismatch or race discards the attempt; only strict parity publishes.
    */
   readonly attempts?: number;
 }

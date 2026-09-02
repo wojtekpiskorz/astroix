@@ -4,9 +4,13 @@ import type { ViteServerLike } from '../../seam-readers';
 /**
  * The revisioned styles invalidation source (#227, ADR-0005 §"subscribe()
  * emits revisioned invalidations"; CONTEXT.md "reindex"): the composition
- * server's own watcher, filtered to the style-truth inputs — exactly the
- * `.astro`/`.css` files the static source walk reads — with every
- * accepted event minting the next monotonic invalidation revision.
+ * server's own watcher, filtered to the style-truth inputs — every
+ * `.astro`/`.css` file under the project root, deliberately wider than
+ * the static source walk's `src` subtree — with every accepted event
+ * minting the next monotonic invalidation revision. The width is the safe
+ * direction: a root-level stylesheet mints a revision the index cannot
+ * reflect and costs one discarded raced pass — over-invalidation, never
+ * under.
  *
  * The source is the freshness half of the convergence protocol: watcher
  * liveness NEVER implies convergence (the B2 lesson, #217 — some
