@@ -144,7 +144,7 @@ export const DELETION_TARGETS: readonly DeletionTarget[] = [
     what: 'The delivery-lane staging scripts: the publish-shaped local link, the npm-pack lane, and the source-mode lane.',
     evidence: [
       "ADR-0001's three e2e delivery lanes die at the retirement gate (ADR-0010)",
-      'the only remaining oracle consumer (the freeze suites) uses prepare-local-link; both die together in this inventory',
+      'the remaining oracle consumers (the freeze suites and the retained-UI regression — all themselves deletion targets) use prepare-local-link; both die together in this inventory',
     ],
     a6Owned: true,
   },
