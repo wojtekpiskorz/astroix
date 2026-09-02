@@ -16,7 +16,9 @@
     "./astro-project-adapter/content": "./astro-project-adapter/content/inspect-content.ts",
     "./astro-project-adapter/routes": "./astro-project-adapter/routes/routes-inspection.ts",
     "./kernel-lease": "./kernel-lease/kernel-lease.ts",
-    "./private-boot": "./private-boot/control-plane-boot.ts"
+    "./private-boot": "./private-boot/control-plane-boot.ts",
+    "./project-plane/composition": "./project-plane/composition/composition-runtime.ts",
+    "./project-plane/worker": "./project-plane/worker/project-worker.ts"
   },
   "sideEffects": false,
   "dependencies": {
