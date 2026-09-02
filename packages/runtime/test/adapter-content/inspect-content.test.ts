@@ -139,6 +139,22 @@ describe('inspectContent (the pass)', () => {
     expect(composition.runners.at(-1)?.closed).toBe(true);
   });
 
+  it('fails closed when astro:content itself does not evaluate', async () => {
+    const { composition } = await stagedPass();
+    composition.modules.delete('astro:content');
+    const rejection = await inspectContent(composition).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    expect(rejection).toBeInstanceOf(AdapterError);
+    expect((rejection as AdapterError).details).toMatchObject({
+      seam: 'astro:content export getCollection()',
+      observed: 'a module evaluation rejection',
+    });
+    expect(composition.runners.at(-1)?.closed).toBe(true);
+    expect(composition.emitter.listenerCount('send')).toBe(0);
+  });
+
   it('diagnoses unknown loaders, legacy shapes, and unsupported schemas per collection — the rest stays certified', async () => {
     const { project, composition } = await stagedPass();
     const collections = project.collections as Record<
