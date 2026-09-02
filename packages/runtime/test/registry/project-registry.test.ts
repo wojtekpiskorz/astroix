@@ -354,6 +354,9 @@ describe('crash shapes at load', () => {
     const reopened = await createProjectRegistry(registryDir);
     expect(reopened.snapshot().status).toBe('ok');
     expect(reopened.snapshot().records).toHaveLength(1);
+    // the reopen's tightening loop covered the loose-temp branch too:
+    // writeFile created it 0644, the boot must leave it 0600 (#209 gate)
+    expect(await modeOf(join(registryDir, `${REGISTRY_FILE}.tmp`))).toBe(0o600);
   });
 
   it('quarantines a torn (externally damaged) current document and restores from the snapshot', async () => {
