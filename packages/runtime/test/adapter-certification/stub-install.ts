@@ -1,7 +1,6 @@
 import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { ExactPair } from '../../astro-project-adapter/certified-pair';
 
 /**
  * The resolution-layer stub (#225): a fake project installation — a
@@ -32,6 +31,3 @@ export async function stageStubInstall(pair: { astro: string; vite: string }): P
 export async function removeStubInstalls(roots: readonly string[]): Promise<void> {
   await Promise.all(roots.map((root) => rm(root, { force: true, recursive: true })));
 }
-
-/** The certified pair as a stub, for positives at the resolution layer. */
-export const CERTIFIED_STUB_PAIR: ExactPair = { astro: '7.2.10', vite: '8.2.2' };

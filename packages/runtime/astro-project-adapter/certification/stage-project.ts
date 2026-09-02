@@ -46,16 +46,26 @@ export interface HookObservation {
   readonly processLocalConfigSetupCount: number;
 }
 
+/**
+ * Reads the observable integration's append-only log. A missing log is
+ * the normal pre-boot state (the managed-server wait polls before the
+ * first execution lands) and reads as zero observations; every other
+ * failure — an unreadable file, a corrupt line — propagates, so a broken
+ * harness fails named instead of masquerading as "no hook executed"
+ * (#129/#206 evidence discipline).
+ */
 export async function readHookLog(hookLog: string): Promise<HookObservation[]> {
+  let contents: string;
   try {
-    const contents = await readFile(hookLog, 'utf8');
-    return contents
-      .split('\n')
-      .filter((line) => line.length > 0)
-      .map((line) => JSON.parse(line) as HookObservation);
-  } catch {
-    return [];
+    contents = await readFile(hookLog, 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+    throw error;
   }
+  return contents
+    .split('\n')
+    .filter((line) => line.length > 0)
+    .map((line) => JSON.parse(line) as HookObservation);
 }
 
 /**
