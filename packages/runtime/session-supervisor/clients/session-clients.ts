@@ -32,9 +32,13 @@ export {
  * A binding dies on the exact events ADR-0006 §3 names: a new top-level
  * navigation of its `webContents` (`navigated`), renderer loss
  * (`rendererLost`), debugger detach or any host-driven cause (`revoke`),
- * and session replacement (`revokeSession` — the supervisor's commit
- * linearization calls it for the outgoing session). The Electron host
- * lane (#246) owns WHEN these fire; this registry owns what they mean.
+ * and the retirement of the session its `SessionRef` names
+ * (`revokeSession` — the supervisor calls it for the outgoing session at
+ * commit, for a crashed active session, and for every attempt that ends
+ * without committing: within this registry's truth, authority NEVER
+ * outlives the reference it was bound to). The Electron host lane (#246)
+ * owns WHEN the host-driven events fire; this registry owns what they
+ * mean.
  *
  * The `webContentsId` is Electron's integer identity and `navigationId`
  * the host's per-`webContents` top-level navigation counter — both

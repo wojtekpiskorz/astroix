@@ -5,6 +5,11 @@ import {
   sessionSnapshotSchema,
 } from '@wojciechpiskorz/astroix-protocol';
 import { describe, expect, it } from 'vitest';
+import { createHostCapabilityGrants } from '../../api/http/host-capability.ts';
+import {
+  type ClientDocument,
+  createSessionClients,
+} from '../../session-supervisor/clients/session-clients.ts';
 import {
   type ActivationAttempt,
   ActivationFailedError,
@@ -473,6 +478,173 @@ describe('crash observation — no automatic restart, ever', () => {
     await flush();
 
     expect(begunOf(supervisor.begin(PROJECT_A)).ref.generation).toBe(2);
+  });
+});
+
+describe('authority retirement — authority never outlives its session', () => {
+  /** The document the retirement legs bind at (distinct per webContents). */
+  const doc = (webContentsId: number): ClientDocument => ({ webContentsId, navigationId: 1 });
+
+  /** A supervisor wired with observable grants + clients — the retirement legs' fixture. */
+  function wired() {
+    const control = candidateRuntime();
+    const grants = createHostCapabilityGrants();
+    const clients = createSessionClients();
+    const supervisor = createSessionSupervisor({
+      startCandidate: control.startCandidate,
+      runtimeEpoch: 'epoch-236',
+      hostCapabilities: grants,
+      clients,
+    });
+    return { supervisor, control, grants, clients };
+  }
+
+  /** Binds one diagnostic at a reference — the editor cap belongs to the active-session legs. */
+  function bindDiagnostic(
+    clients: ReturnType<typeof createSessionClients>,
+    document: ClientDocument,
+    sessionRef: ActivationAttempt['ref'],
+  ): string {
+    const bound = clients.bind({ role: 'diagnostic', document, sessionRef });
+    if (bound.kind !== 'bound') throw new Error(`expected the diagnostic binding: ${bound.reason}`);
+    return bound.capability;
+  }
+
+  it('a default-constructed supervisor runs the full cycle on its private grants + clients defaults', async () => {
+    // The options doc promises private defaults; this leg pins that the
+    // default path is real — the linearization mints and revokes through a
+    // default-constructed table without breaking the cycle.
+    const control = candidateRuntime();
+    const supervisor = createSessionSupervisor({
+      startCandidate: control.startCandidate,
+      runtimeEpoch: 'epoch-236',
+    });
+    const first = await staged(supervisor, control);
+    await first.candidate.commit();
+    const second = await staged(supervisor, control, PROJECT_B);
+    await second.candidate.commit();
+    expect(supervisor.snapshot().active).toEqual({
+      ref: { runtimeEpoch: 'epoch-236', generation: 2 },
+      projectKey: PROJECT_B,
+      state: 'ready',
+    });
+  });
+
+  it('a crashed active session takes its client bindings and its host capability with it', async () => {
+    const wired_ = wired();
+    const first = await staged(wired_.supervisor, wired_.control);
+    await first.candidate.commit();
+    const ref1 = first.attempt.ref;
+
+    const editor = wired_.clients.bind({ role: 'editor', document: doc(7), sessionRef: ref1 });
+    if (editor.kind !== 'bound') throw new Error('unreachable');
+    const cookie = wired_.grants.current({ host: 'project', projectKey: PROJECT_A });
+    if (cookie === null) throw new Error('expected the commit to mint a capability');
+    // pre-crash: both live
+    expect(
+      wired_.clients.authorize({
+        capability: editor.capability,
+        document: doc(7),
+        sessionRef: ref1,
+      }),
+    ).toEqual({ kind: 'authorized', role: 'editor' });
+
+    runOf(wired_.control, 1).closeWith(completeReport('worker-crash'));
+    await flush();
+
+    expect(wired_.supervisor.snapshot().active).toBeUndefined();
+    expect(
+      wired_.clients.authorize({
+        capability: editor.capability,
+        document: doc(7),
+        sessionRef: ref1,
+      }),
+    ).toEqual({ kind: 'rejected', reason: 'no-binding' });
+    expect(wired_.grants.verify(cookie, { host: 'project', projectKey: PROJECT_A })).toBe(false);
+  });
+
+  it('an attempt that fails without committing retires its reference\u2019s bindings — and only those', async () => {
+    const wired_ = wired();
+    const first = await staged(wired_.supervisor, wired_.control);
+    await first.candidate.commit();
+    const editor = wired_.clients.bind({
+      role: 'editor',
+      document: doc(7),
+      sessionRef: first.attempt.ref,
+    });
+    if (editor.kind !== 'bound') throw new Error('unreachable');
+
+    const second = begunOf(wired_.supervisor.begin(PROJECT_B));
+    const candidateBinding = bindDiagnostic(wired_.clients, doc(8), second.ref);
+    expect(
+      wired_.clients.authorize({
+        capability: candidateBinding,
+        document: doc(8),
+        sessionRef: second.ref,
+      }).kind,
+    ).toBe('authorized');
+
+    runOf(wired_.control, 2).failReady('worker-crash');
+    await rejectionOf(second.ready);
+    await second.closed;
+
+    // the dead candidate reference's binding refuses…
+    expect(
+      wired_.clients.authorize({
+        capability: candidateBinding,
+        document: doc(8),
+        sessionRef: second.ref,
+      }),
+    ).toEqual({ kind: 'rejected', reason: 'no-binding' });
+    // …while the still-active session's editor is untouched
+    expect(
+      wired_.clients.authorize({
+        capability: editor.capability,
+        document: doc(7),
+        sessionRef: first.attempt.ref,
+      }),
+    ).toEqual({ kind: 'authorized', role: 'editor' });
+  });
+
+  it('a rolled-back candidate retires its reference\u2019s bindings', async () => {
+    const wired_ = wired();
+    const first = await staged(wired_.supervisor, wired_.control);
+    await first.candidate.commit();
+
+    const second = await staged(wired_.supervisor, wired_.control, PROJECT_B);
+    const candidateBinding = bindDiagnostic(wired_.clients, doc(8), second.attempt.ref);
+
+    const rolling = second.candidate.rollback('drain-timeout');
+    runOf(wired_.control, 2).closeWith(completeReport('stopped'));
+    await rolling;
+
+    expect(
+      wired_.clients.authorize({
+        capability: candidateBinding,
+        document: doc(8),
+        sessionRef: second.attempt.ref,
+      }),
+    ).toEqual({ kind: 'rejected', reason: 'no-binding' });
+  });
+
+  it('a cancelled attempt retires its reference\u2019s bindings the same way', async () => {
+    const wired_ = wired();
+    const first = await staged(wired_.supervisor, wired_.control);
+    await first.candidate.commit();
+
+    const second = begunOf(wired_.supervisor.begin(PROJECT_B));
+    const candidateBinding = bindDiagnostic(wired_.clients, doc(8), second.ref);
+    const cancelling = second.cancel('user');
+    runOf(wired_.control, 2).closeWith(completeReport('cancelled'));
+    await cancelling;
+
+    expect(
+      wired_.clients.authorize({
+        capability: candidateBinding,
+        document: doc(8),
+        sessionRef: second.ref,
+      }),
+    ).toEqual({ kind: 'rejected', reason: 'no-binding' });
   });
 });
 

@@ -6,7 +6,10 @@ import type {
   SessionRef,
   SessionSnapshot,
 } from '@wojciechpiskorz/astroix-protocol';
-import type { HostCapabilityGrants } from '../../api/http/host-capability.ts';
+import {
+  createHostCapabilityGrants,
+  type HostCapabilityGrants,
+} from '../../api/http/host-capability.ts';
 import type { SupervisionCloseReport } from '../../project-plane/supervision/close-report.ts';
 import {
   shutdownFailure,
@@ -80,10 +83,13 @@ export { mintRuntimeEpoch } from './runtime-epoch.ts';
  *   proof it never minted (the declared-seam precedent of E8's
  *   proxy-health).
  * - **Crash observation**: an active run that closes without a
- *   replacement clears the active session and records a sanitized
- *   failure — there is **no automatic project restart** (the ticket's
- *   migration policy); a failed activation is retried only by an
- *   explicit new `begin`.
+ *   replacement clears the active session, records a sanitized failure,
+ *   and retires the crashed session's authority (client bindings, project
+ *   host capability) — there is **no automatic project restart** (the
+ *   ticket's migration policy); a failed activation is retried only by an
+ *   explicit new `begin`. The same law covers every attempt that ends
+ *   without committing: its reserved reference will never become active,
+ *   so its bindings die with it — authority never outlives its session.
  *
  * Deferred to their owning lanes, declared so the boundary is explicit:
  * `revoke`/deactivation and the external commit ordering — F6 (#238);
@@ -137,9 +143,16 @@ export interface SessionSupervisorOptions {
   readonly startCandidate: StartCandidateRun;
   /** The epoch of this control-plane lifetime; defaults to a fresh mint. */
   readonly runtimeEpoch?: string;
-  /** The project host-capability grants committed activations mint into; defaults to a private table. */
+  /**
+   * The project host-capability grants committed activations mint into
+   * and crashed sessions are revoked from; defaults to a private table.
+   * A composition wiring the HTTP dispatch passes THE shared table (F2's
+   * grants) — a private default's mints would be invisible to cookie
+   * verification, so the default is a construction convenience, never a
+   * composition choice.
+   */
   readonly hostCapabilities?: HostCapabilityGrants;
-  /** The document-bound client registry whose session bindings commit revokes; defaults to a private registry. */
+  /** The document-bound client registry whose session bindings the supervisor retires; defaults to a private registry. */
   readonly clients?: SessionClients;
 }
 
@@ -162,7 +175,7 @@ interface AttemptContext {
 /** Builds the staged-activation supervisor. */
 export function createSessionSupervisor(options: SessionSupervisorOptions): SessionSupervisor {
   const runtimeEpoch = options.runtimeEpoch ?? mintRuntimeEpoch();
-  const hostCapabilities = options.hostCapabilities;
+  const hostCapabilities = options.hostCapabilities ?? createHostCapabilityGrants();
   const clients = options.clients ?? createSessionClients();
   const listeners = new Set<SessionListener>();
 
@@ -204,11 +217,18 @@ export function createSessionSupervisor(options: SessionSupervisorOptions): Sess
     }
   };
 
-  /** Observes one active run's asynchronous close: without a replacement it is a crash — no restart, ever. */
+  /**
+   * Observes one active run's asynchronous close: without a replacement
+   * it is a crash — no restart, ever — and the crashed session's
+   * authority dies with it (its client bindings and its project host
+   * capability; authority never outlives the session that minted it).
+   */
   const observeActiveClose = (entry: ActiveEntry): void => {
     void entry.run.closed.then((report) => {
       if (active !== entry) return; // replaced already: authority moved, the report is history
       active = null;
+      clients.revokeSession(entry.ref);
+      hostCapabilities.revoke({ host: 'project', projectKey: entry.projectKey });
       const category: SessionFailure['category'] =
         report.reason === 'startup-timeout' ? 'startup-timeout' : 'crash';
       lastFailure = { category, message: FAILURE_MESSAGES[category] };
@@ -239,18 +259,23 @@ export function createSessionSupervisor(options: SessionSupervisorOptions): Sess
         // session's report is internal history, the completion lane F7
         // reports post-commit outcomes).
         clients.revokeSession(outgoing.ref);
-        hostCapabilities?.revoke({ host: 'project', projectKey: outgoing.projectKey });
+        hostCapabilities.revoke({ host: 'project', projectKey: outgoing.projectKey });
         outgoing.run.stop().catch(() => {});
       }
       const entry: ActiveEntry = { ref: ctx.ref, projectKey: ctx.projectKey, run: ctx.run };
       active = entry;
-      hostCapabilities?.mint({ host: 'project', projectKey: entry.projectKey });
+      hostCapabilities.mint({ host: 'project', projectKey: entry.projectKey });
       observeActiveClose(entry);
       notify();
     },
     attemptEnded: (end) => {
       if (attemptCtx === null) return;
+      const deadRef = attemptCtx.ref;
       attemptCtx = null;
+      // The attempt ended without committing: its reference will never
+      // become active, so any binding minted against it dies with it —
+      // authority never outlives the reference it was bound to.
+      clients.revokeSession(deadRef);
       if (end.kind === 'failed') {
         lastFailure = end.failure;
       } else if (end.kind === 'rolled-back') {
