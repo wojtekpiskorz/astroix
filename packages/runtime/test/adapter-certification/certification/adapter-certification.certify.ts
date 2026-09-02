@@ -32,6 +32,7 @@ import {
 } from '../../../astro-project-adapter/fresh-runner';
 import { resolveInstalledPair } from '../../../astro-project-adapter/installed-pair';
 import { certifyPairBeforeConfig } from '../../../astro-project-adapter/pair-gate';
+import { readRouteMetadata } from '../../../astro-project-adapter/routes/route-metadata';
 import { createRoutesInspector } from '../../../astro-project-adapter/routes/routes-inspection';
 import type { RouteInfo } from '../../../astro-project-adapter/routes/routes-payload';
 import {
@@ -229,17 +230,19 @@ it('certifies the routes inspection shape over the real install (#299 seam)', as
   const composition = await createCompositionServer(attribute.root);
   try {
     // The raw seam first (fresh runner): astro injects its internal routes
-    // into `virtual:astro:routes` — real output carrying the origin field
-    // the inspector's projection routes on, not a lane fake.
+    // into `virtual:astro:routes` — real output carrying the `origin` field
+    // the inspector's projection routes on (internal excluded, project
+    // kept), not a lane fake.
     const seamPass = await withFreshRunner(
       {
         createServerModuleRunner: composition.seams.vite.createServerModuleRunner,
         ssrEnvironment: composition.server.environments.ssr,
       },
-      async (runner) => readRouteEntries(await runner.import('virtual:astro:routes')),
+      async (runner) => readRouteMetadata(await runner.import('virtual:astro:routes')),
     );
     assertRunnerEvidence(seamPass.evidence);
-    expect(seamPass.result.some((route) => !route.component.startsWith('src/'))).toBe(true);
+    expect(seamPass.result.some((route) => route.origin === 'internal')).toBe(true);
+    expect(seamPass.result.some((route) => route.origin === 'project')).toBe(true);
 
     // The product inspector (#229): typed projection (project page routes
     // only — the internal origin excluded) plus the managed
@@ -266,14 +269,10 @@ it('certifies the routes inspection shape over the real install (#299 seam)', as
 
 it('joins contract-shaped styles under the where strategy', async () => {
   const where = await stageAndInstall('where', 'append');
-  // Managed-first (#206 topology order) for the routes enumeration below:
-  // the managed dev server owns the content sync — the data store the
-  // enumeration's `getStaticPaths` reads read. Without it the composition
-  // reads an unsynced (empty) store and enumeration knowably reports
-  // `renders: []` — the store's truth at that moment, which is exactly
-  // why the runtime gates readiness on the managed server's
-  // prerequisites (#232) — so this leg gives the where install the same
-  // managed-first step the attribute install's legs already run.
+  // Managed-first for the routes enumeration below (topology per the
+  // file header): without the managed dev server the composition's
+  // `getStaticPaths` reads an unsynced (empty) store and honestly
+  // reports `renders: []` — the readiness argument #232 encodes.
   await runManagedDevServer({ projectRoot: where.root, hookLog: where.hookLog });
   const composition = await createCompositionServer(where.root);
   try {
