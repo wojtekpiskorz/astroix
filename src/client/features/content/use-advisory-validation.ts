@@ -60,7 +60,19 @@ export function useAdvisoryValidation(collection: string, resetKey: unknown) {
     if (timer.current !== undefined) clearTimeout(timer.current);
     runToken.current += 1; // drops any in-flight roundtrip
     setIssues({});
-  }, [resetKey]);
+    // children's effects run first: the remounted form's mount emission has
+    // already called notify and armed the debounce with the NEW truth's
+    // values — the clearTimeout above would kill exactly that baseline
+    // validation (the legacy in-form loop always re-validated on remount).
+    // Re-arm it against the notified draft so a 409/external-truth reload
+    // shows the fresh baseline's issues, not an empty panel.
+    if (latestDraft.current !== undefined) {
+      timer.current = setTimeout(
+        () => void runValidation(collection, latestDraft.current, runToken, setIssues),
+        VALIDATE_DEBOUNCE_MS,
+      );
+    }
+  }, [resetKey, collection]);
 
   useEffect(() => {
     return () => {
