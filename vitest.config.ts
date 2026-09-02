@@ -145,6 +145,14 @@ export default defineConfig({
         // files — metric honesty lives in the tier decision, not the
         // collection.
         'packages/runtime/project-plane/**',
+        // The project-runtime facade seams (#232, additive): the
+        // sequencing/redaction state machine and the declared proxy-health
+        // prerequisite are deterministic units over supervisor/wire fakes —
+        // same covered-tier decision as the worker seams. The real IO glue
+        // (plane-launch.ts) is watchlist-tiered in crap.ts but stays
+        // collected here like the plane's other composition files —
+        // metric honesty lives in the tier decision, not the collection.
+        'packages/runtime/project-runtime/**',
       ],
       reporter: ['json'],
       reportsDirectory: 'coverage',

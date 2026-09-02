@@ -43,7 +43,13 @@ import type { FunctionComplexity } from './complexity';
  * child environment, the close-report classifier, and the managed
  * dev-server spawn plan — are covered; their real process IO
  * (plane-supervisor.ts, the dev-server readiness probe) is watchlist
- * like the plane's other IO glue (#231). A
+ * like the plane's other IO glue (#231). The project-runtime facade
+ * seams since #232 — the start/ready/inspect/subscribe/stop sequencing
+ * and redaction state machine plus the declared proxy-health
+ * prerequisite — are covered (deterministic units over supervisor/wire
+ * fakes); the production launch composition (plane-launch.ts — real
+ * spawn plans, real children via the supervisor) is watchlist like the
+ * plane's other IO glue (#232). A
  * watchlist row has `coverage === null` and `crap === null`, and its gate
  * metric is CC. (The `src/node` + `src/client` watchlist tiers were
  * deleted with their functions at the retirement gate, #215.)
@@ -190,6 +196,15 @@ function isCoreFile(relPath: string): boolean {
     relPath === 'packages/runtime/project-plane/worker/worker-child.ts' ||
     relPath === 'packages/runtime/project-plane/supervision/plane-supervisor.ts' ||
     relPath === 'packages/runtime/project-plane/managed-astro/dev-server.ts';
+  // The project-runtime facade seams since #232: the pure
+  // sequencing/redaction layer over the injected launch + health seams
+  // and the declared proxy-health prerequisite are covered (deterministic
+  // units over supervisor/wire fakes); the production launch composition
+  // (plane-launch.ts — canonical-root resolution, the project's own astro
+  // CLI lookup, real children through the supervisor) is watchlist like
+  // the plane's other IO glue: its truth is the supervision process lane
+  // over the same ingredients.
+  const projectRuntimeWatchlist = relPath === 'packages/runtime/project-runtime/plane-launch.ts';
   return (
     (relPath.startsWith('src/core/') ||
       relPath.startsWith('packages/core/') ||
@@ -199,6 +214,7 @@ function isCoreFile(relPath: string): boolean {
       relPath.startsWith('packages/runtime/private-boot/') ||
       relPath.startsWith('packages/runtime/edit-authority/') ||
       (relPath.startsWith('packages/runtime/project-plane/') && !projectPlaneWatchlist) ||
+      (relPath.startsWith('packages/runtime/project-runtime/') && !projectRuntimeWatchlist) ||
       (relPath.startsWith('packages/runtime/astro-project-adapter/') && !adapterWatchlist)) &&
     !relPath.startsWith('packages/runtime/astro-project-adapter/certification/')
   );

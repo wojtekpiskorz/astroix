@@ -23,7 +23,8 @@
     "./project-plane/composition": "./project-plane/composition/composition-runtime.ts",
     "./project-plane/worker": "./project-plane/worker/project-worker.ts",
     "./project-plane/managed-astro": "./project-plane/managed-astro/dev-server.ts",
-    "./project-plane/supervision": "./project-plane/supervision/plane-supervisor.ts"
+    "./project-plane/supervision": "./project-plane/supervision/plane-supervisor.ts",
+    "./project-runtime": "./project-runtime/project-runtime.ts"
   },
   "sideEffects": false,
   "dependencies": {
