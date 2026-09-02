@@ -37,11 +37,6 @@ export type SessionScopedEventType = Extract<
   'session-state' | 'invalidation' | 'diagnostic'
 >;
 
-/** The event types whose frames are session-scoped — derived from the protocol's own presence table. */
-export function isSessionScopedEventType(type: SseEventType): type is SessionScopedEventType {
-  return type !== 'registry-changed';
-}
-
 /** A session-scoped event type's frames carry the exact pair (ADR-0006 §3); `null` means the idle frame. */
 export type SessionScopedEvent = Extract<SseEvent, { readonly type: SessionScopedEventType }>;
 

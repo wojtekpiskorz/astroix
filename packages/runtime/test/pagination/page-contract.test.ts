@@ -116,6 +116,26 @@ describe('page-size ceilings and budget clamping', () => {
     }
   });
 
+  it('treats a non-finite requested page size (NaN, Infinity) as invalid input — not an empty completed walk', () => {
+    const items = itemsOf(8, 10);
+    for (const requestedPageSize of [Number.NaN, Number.POSITIVE_INFINITY]) {
+      const page = boundedPage({
+        items,
+        offset: 0,
+        requestedPageSize,
+        budget: 'lifecycleJsonBytes',
+        envelopeFor: listEnvelopeFor,
+      });
+      expect(page.kind, `requested ${requestedPageSize}`).toBe('page');
+      if (page.kind !== 'page') return;
+      // the pre-guard failure mode was a zero-item page with a null
+      // continuation — the collection silently vanishing behind a
+      // "completed" walk; NaN must clamp to one carried item instead
+      expect(page.items, `requested ${requestedPageSize}`).toEqual(items.slice(0, 1));
+      expect(page.continuation, `requested ${requestedPageSize}`).toBe(1);
+    }
+  });
+
   it('paginates a collection that could never fit whole — every page within budget, walk to completion', () => {
     const items = itemsOf(300, 1020);
     const collected: string[] = [];
