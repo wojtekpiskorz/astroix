@@ -16,7 +16,7 @@ if [ -x node_modules/.bin/biome ]; then
   # tsc has no staged mode: it reads the whole working tree, so an unstaged
   # broken edit can block a clean staged commit — accepted trade-off (the
   # typecheck tier is deterministic, like biome, not a heuristic like the
-  # CC scan). The .ts/.tsx gate spares docs/changeset-only commits the run.
+  # CC scan). The .ts/.tsx gate spares pure-prose commits the run (the changeset-only class died at the retirement gate, #215).
   if git diff --cached --name-only | grep -qE '\.(ts|tsx)$'; then
     npm run typecheck || {
       echo "astroix: commit blocked by typecheck — fix the errors, then retry"

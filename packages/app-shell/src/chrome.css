@@ -11,7 +11,6 @@
  */
 @import "tailwindcss" source(none);
 @source "./";
-@source "../../../src/client/";
 
 /*
  * shadcn foundation, style base-nova (issue #44): the canonical template

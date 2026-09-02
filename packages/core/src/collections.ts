@@ -1,6 +1,6 @@
 /**
  * The collections payload contract (spec Impl #4 — read side): one definition
- * in core, consumed by the node REST layer (`src/node/content.ts`), the chrome
+ * in core, consumed by the protocol/runtime layer; the retired node REST
  * (`features/content/api.ts`) and the e2e specs — the `IndexPayloadRecord`
  * arrangement (core/matcher.ts), which the index side already follows.
  */
