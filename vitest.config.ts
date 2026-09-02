@@ -178,6 +178,18 @@ export default defineConfig({
         // under test/http-api (through the REAL origin listener,
         // OS-assigned loopback ports).
         'packages/runtime/api/**',
+        // The SSE seams (#235, F3, additive): the admission core, the
+        // stream hub, and the frame writer are deterministic pure
+        // units (covered tier) — the hub over recorder sinks, the
+        // admission over the same real grants/binding tables F2's lane
+        // composes. The real IO — the surface composition that mounts
+        // the events route beside the F2 fallback behind F1's
+        // handleReserved hook — is watchlist-tiered in crap.ts but
+        // stays collected here like the plane's other composition
+        // files: its behavior truth is the real-socket focused lane
+        // under test/sse (through the REAL origin listener, OS-assigned
+        // loopback ports, open streams over raw sockets).
+        'packages/runtime/sse/**',
       ],
       reporter: ['json'],
       reportsDirectory: 'coverage',

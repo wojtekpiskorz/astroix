@@ -213,8 +213,20 @@ const COVERED_PREFIXES: readonly string[] = [
   // client-binding table, the authority strip, the bounded envelope
   // validation, and the sanitized error responses — deterministic pure
   // units; the reserved-handler socket composition is watchlisted below.
+  // #235 (F3) added the bounded pagination seams under the same tree
+  // (api/pagination — the page math and the protocol-typed page
+  // builders, deterministic pure units over the envelopeBytes idiom).
   'packages/runtime/api/http/',
   'packages/runtime/api/errors/',
+  'packages/runtime/api/pagination/',
+  // `packages/runtime/sse` since #235 (F3): the SSE pure seams — the
+  // admission core (route/Host/capability/Origin/Fetch-Metadata/binding/
+  // role/SessionRef laws over the same F2 spine, imported read-only),
+  // the stream hub (caps, delivery matrix, generation watermark,
+  // revocation scopes — deterministic units over recorder sinks), and
+  // the frame writer (cap enforcement at the transport); the events
+  // surface socket composition is watchlisted below.
+  'packages/runtime/sse/',
   // `packages/runtime/astro-project-adapter` since #225: the pure seams —
   // pair gate, resolution, seam probes, runner accounting (#225), the
   // styles join's correspondence join + source walk (#226), the
@@ -270,6 +282,12 @@ const WATCHLIST_EXCEPTION_FILES: ReadonlySet<string> = new Set([
   // (test/http-api, through the REAL origin listener, OS-assigned
   // loopback ports).
   'packages/runtime/api/http/reserved-handler.ts',
+  // #235 (F3): the SSE surface's real socket IO — the events-route
+  // composition behind F1's handleReserved hook (SSE head, open stream
+  // sink/close, fallback delegation); its truth is the real-socket
+  // focused lane (test/sse, through the REAL origin listener,
+  // OS-assigned loopback ports, open streams over raw sockets).
+  'packages/runtime/sse/sse-surface.ts',
 ]);
 
 /**

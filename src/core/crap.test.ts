@@ -306,6 +306,11 @@ describe('toRiskEntry', () => {
       // (api/errors).
       'packages/runtime/api/http/api-dispatch.ts',
       'packages/runtime/api/errors/error-responses.ts',
+      // #235 (F3): one representative per new covered prefix — the
+      // bounded pagination seams (api/pagination) and the SSE pure
+      // seams (sse).
+      'packages/runtime/api/pagination/page-contract.ts',
+      'packages/runtime/sse/sse-admission.ts',
     ];
     for (const file of covered) {
       expect(toRiskEntry(file, fn, fileCov).metric).toBe('crap');
@@ -330,6 +335,8 @@ describe('toRiskEntry', () => {
       'packages/runtime/proxy/proxy-health.ts',
       // #234 (F2): the API surface's reserved-handler socket composition
       'packages/runtime/api/http/reserved-handler.ts',
+      // #235 (F3): the SSE surface's events-route socket composition
+      'packages/runtime/sse/sse-surface.ts',
       // the evidence subtree exception, not just the exact files
       'packages/runtime/astro-project-adapter/certification/staging.ts',
     ];
