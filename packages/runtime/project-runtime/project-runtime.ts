@@ -146,7 +146,13 @@ export interface ProjectRuntimeOptions {
 export interface ProjectRun {
   /** Resolves after every readiness prerequisite; rejects with {@link ProjectRunBootError} on every terminal startup outcome. */
   readonly ready: Promise<void>;
-  /** Dispatches one typed inspection to THE supervised worker; settles with its revisioned typed result. */
+  /**
+   * Dispatches one typed inspection to THE supervised worker; settles with
+   * its revisioned typed result. Lawful before `ready` settles: work
+   * dispatched mid-start queues on the launch and settles (or rejects with
+   * the structured shutdown failure) once the plane arrives — readiness
+   * gates observation, not dispatch.
+   */
   inspect(request: WorkerInspectionRequest): Promise<WorkerInspectionResult>;
   /** Subscribes to the run's public events (revisioned invalidations, structured diagnostics); the return unbinds. */
   subscribe(listener: (event: WorkerEvent) => void): () => void;

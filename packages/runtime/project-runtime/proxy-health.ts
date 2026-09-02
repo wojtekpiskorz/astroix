@@ -18,6 +18,12 @@
  * when the caller stops the run mid-check. No origin URL, port, or any
  * other plane detail crosses it — F1 closes over its own listener state
  * when it injects the check.
+ *
+ * Plane death does NOT abort this signal: only the caller's stop() does.
+ * A plane that crashes between plane.ready and this check's settlement
+ * leaves the check running on a dead plane — F1's injected check must
+ * observe the run's own terminality (the `closed` settlement) itself,
+ * or a crash-mid-check will be misreported as a proxy-health failure.
  */
 
 /**
