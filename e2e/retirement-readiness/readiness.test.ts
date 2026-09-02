@@ -1,5 +1,5 @@
 import { execSync } from 'node:child_process';
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test } from 'vitest';
 import { validateContractFamilies } from './contracts.ts';
@@ -17,7 +17,9 @@ import { inventoryGaps, reconcileInventory } from './inventory.ts';
  *   1. contracts (serverless)  — every frozen family validates through its
  *      schema and re-derives through the RETAINED core (packages/core).
  *   2. retained UI (serverless)— the presentation surface carries zero
- *      runtime couplings and its mount lane runs green over contract data.
+ *      runtime couplings; the presentation mounts run as a sibling file
+ *      in this same vitest run (failures fail npm test; the counts leg
+ *      holds the lane non-empty).
  *   3. fixture (serverless)    — the canonical fixture is plain and its
  *      production build carries zero astroix bytes.
  *   4. counts (serverless)    — every unit/contract/fixture lane is
@@ -84,25 +86,20 @@ test('retained UI: the presentation surface is uncoupled and runs over contract-
   expect(scanned.length, 'the coupling scan must cover real surface').toBeGreaterThan(0);
   expect(offenders, 'the presentation surface must stay runtime-uncoupled').toEqual([]);
 
-  // (b) the mount lane: run the readiness presentation mounts (this
-  // directory's own vitest lane) and require a green, NON-EMPTY run —
-  // the widgets literally run against schema-validated contract data.
-  // The JSON reporter is parsed (numPassedTests), never vitest's human
-  // summary text — a vitest bump rewording prose cannot redden this leg.
-  const output = execSync(
-    'npx vitest run --config e2e/retirement-readiness/vitest.config.ts --reporter=json',
-    { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] },
-  );
-  const summary = JSON.parse(output) as { numPassedTests?: number; numTotalTests?: number };
+  // (b) the mount lane: the presentation mounts run as a sibling file in
+  // THIS SAME vitest run (presentation-mount.test.tsx joins the root
+  // config — advisory round 1 on #291 deleted the vitest-spawns-vitest
+  // detour the Playwright era needed), so a mount failure fails `npm
+  // test` directly; the counts leg's non-empty mount row is the vacuity
+  // tripwire that keeps the lane from silently disappearing.
   expect(
-    summary.numPassedTests,
-    `the presentation mount lane must pass (output: ${output.slice(-400)})`,
-  ).toBe(summary.numTotalTests);
-  expect(summary.numPassedTests).toBeGreaterThan(0);
+    existsSync(join(import.meta.dirname, 'presentation-mount.test.tsx')),
+    'the presentation mount file must exist in this run',
+  ).toBe(true);
   console.info(
-    `[readiness] presentation mount lane: ${summary.numPassedTests} tests green, 0 coupling offenders`,
+    '[readiness] presentation mount lane: sibling file in this run; 0 coupling offenders',
   );
-}, 240_000);
+});
 
 test('fixture: the canonical fixture is plain and its production build carries zero astroix bytes', () => {
   // plainness: no astroix dependency, import, or registration anywhere in

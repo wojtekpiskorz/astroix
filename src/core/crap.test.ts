@@ -266,16 +266,17 @@ describe('toRiskEntry', () => {
     expect(e).toMatchObject({ metric: 'cc', value: 5, stop: 15, watchOnly: false });
   });
 
-  it('marks generated ui/ rows watch-only: visible, never gated', () => {
+  it('no longer grants watch-only at the legacy src/client ui/ path (retirement gate, #215)', () => {
+    // the compatibility window closed with the integration: a file at the
+    // dead prefix is an ordinary watchlist row, never the ungated tier —
+    // re-adding the prefix must be a deliberate tier decision, not a leftover
     const e = toRiskEntry('src/client/components/ui/button.tsx', fn, undefined);
     expect(e).toMatchObject({
       metric: 'cc',
       value: 5,
-      stop: Number.POSITIVE_INFINITY,
-      watchOnly: true,
+      stop: 15,
+      watchOnly: false,
     });
-    expect(evaluateGate([e], {})).toEqual({ violations: [], grandfathered: [], improved: [] });
-    expect(mergeBaseline({}, [e]).next).toEqual({});
   });
 
   it('degrades to a CC-only row when the coverage run itself failed (null, not undefined)', () => {

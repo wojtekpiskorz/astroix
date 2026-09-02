@@ -12,14 +12,15 @@ import type { FunctionComplexity } from './complexity';
  * `scripts/crap.mjs`.
  *
  * Metric honesty is the load-bearing rule: full CRAP (CC² × (1−coverage)³ +
- * CC, per crap4clj/PHPUnit) is computed only where per-function coverage is
- * real — the covered core tier (`packages/core` since #212, plus the `src/core`
- * CRAP tooling layer and compatibility shims), covered by unit tests through
- * vitest's istanbul-format JSON. `src/node`, `src/client`, and the UI
- * foundation package `packages/app-shell` (#218 — its truth is e2e coverage,
- * not per-function unit tests) land on a CC-only watchlist. A
+ * CC, per crap4clj/PHPUnit) is computed only where per-function coverage
+ * is real — the covered core tier (`packages/core` since #212, plus the
+ * `src/core` CRAP tooling layer), covered by unit tests through
+ * vitest's istanbul-format JSON. The UI foundation package
+ * `packages/app-shell` (#218 — its truth is e2e coverage, not
+ * per-function unit tests) lands on a CC-only watchlist. A
  * watchlist row has `coverage === null` and `crap === null`, and its gate
- * metric is CC.
+ * metric is CC. (The `src/node` + `src/client` watchlist tiers were
+ * deleted with their functions at the retirement gate, #215.)
  *
  * Per-function coverage is derived from istanbul statement counters inside
  * the function's line range (the technique both CRAP tools verified during
@@ -52,7 +53,7 @@ export interface RiskEntry extends FunctionComplexity {
   value: number;
   /** The hard stop this row is gated against, derived with its metric in toRiskEntry. */
   stop: number;
-  /** The generated tier (shadcn `components/ui/` — legacy `src/client/` and `packages/app-shell/src/`): visible, never gated (stop is Infinity). */
+  /** The generated tier (shadcn `components/ui/` under `packages/app-shell/src/`): visible, never gated (stop is Infinity). */
   watchOnly: boolean;
   coverage: number | null;
   crap: number | null;
@@ -61,7 +62,7 @@ export interface RiskEntry extends FunctionComplexity {
 export interface GateStops {
   /** Hard stop: CRAP ≥ this in the covered core tier (src/core, packages/core). */
   coreCrapStop: number;
-  /** Hard stop: CC ≥ this in src/node + src/client (complexity-only proxy). */
+  /** Hard stop: CC ≥ this in the CC-only watchlist (packages/app-shell — complexity-only proxy). */
   watchlistCcStop: number;
 }
 
@@ -110,18 +111,15 @@ export function touchedFunctions(
 
 /** The layer where per-function unit coverage is real — CRAP's only honest home. */
 function isCoreFile(relPath: string): boolean {
-  // packages/core since #212; src/core keeps the CRAP tooling layer and the
-  // compatibility shims — both unit-covered or coverage-honest (a shim the
-  // tests never load reads 0%, CRAP stays trivially under the stop)
+  // packages/core since #212; src/core keeps the CRAP tooling layer —
+  // unit-covered (the compatibility shims died at the retirement gate,
+  // #215; what remains under src/core is this tooling itself)
   return relPath.startsWith('src/core/') || relPath.startsWith('packages/core/');
 }
 
-/** The shadcn-generated tier: regenerated per ADR-0002, never hand-edited — visible in reports, never gated (owner ruling 2026-08-28, #62). The set moved to packages/app-shell (#218); the src/client prefix stays for the compatibility window (one-line re-export shims hold no functions, an accidental regeneration at the legacy path must not start gating). */
+/** The shadcn-generated tier: regenerated per ADR-0002, never hand-edited — visible in reports, never gated (owner ruling 2026-08-28, #62). The set lives at packages/app-shell (#218); the legacy src/client prefix died with the integration at the retirement gate (#215). */
 export function isWatchOnlyFile(relPath: string): boolean {
-  return (
-    relPath.startsWith('packages/app-shell/src/components/ui/') ||
-    relPath.startsWith('src/client/components/ui/')
-  );
+  return relPath.startsWith('packages/app-shell/src/components/ui/');
 }
 
 /**

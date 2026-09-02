@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 /**
@@ -248,6 +248,29 @@ export function inventoryGaps(): readonly DeletionTarget[] {
   return DELETION_TARGETS.filter((target) => !target.a6Owned);
 }
 
+/**
+ * Deletion-target paths that survive the gate BY NAME (checked for
+ * post-gate shape, never for absence): the section-scoped docs, the root
+ * manifest (asserted private), and the ratchet baseline (asserted
+ * stale-key-clean by preflight itself).
+ */
+const SURVIVORS = new Set([
+  'package.json',
+  'crap-baseline.json',
+  'docs/agents/release-loop.md',
+  'docs/manual-smoke.md',
+]);
+
+/**
+ * The named no-product-E2E lane's own paths (ADR-0010's interval): the
+ * Playwright runner and the glob it matches. `playwright.config.ts` is a
+ * straight existence exemption; `e2e/*.spec.ts` is NOT — the surviving
+ * spec set is asserted to equal exactly the one named smoke below.
+ */
+const DELIBERATE_LANE_SURVIVORS = new Set(['playwright.config.ts']);
+const E2E_SPECS_GLOB = 'e2e/*.spec.ts';
+const NAMED_NO_PRODUCT_E2E_SPEC = 'e2e/plain-build.spec.ts';
+
 const REPORT_PATH = join('docs', 'retirement-readiness.md');
 
 export interface Reconciliation {
@@ -298,23 +321,16 @@ export function reconcileInventory(): Reconciliation {
   }
 
   // every deletion target is actually deleted: exact paths and `/**`
-  // roots must be absent from the tree, except the named section-scoped
-  // survivors (checked for shape below, not existence). Two path entries
-  // of `target:legacy-e2e-and-oracle-specs` are skipped: `e2e/*.spec.ts`
-  // and `playwright.config.ts` — plain-build.spec.ts and its runner
-  // deliberately survive as the named no-product-E2E lane (ADR-0010's
-  // interval; the CI step is named, never presented as product E2E).
-  const SURVIVORS = new Set([
-    'package.json',
-    'crap-baseline.json',
-    'docs/agents/release-loop.md',
-    'docs/manual-smoke.md',
-  ]);
-  const DELIBERATE_LANE_SURVIVORS = new Set(['e2e/*.spec.ts', 'playwright.config.ts']);
+  // roots must be absent from the tree, except the named survivors
+  // (checked for shape below, not existence) and the named lane's runner.
+  // The `e2e/*.spec.ts` glob is skipped here only because it gets a
+  // STRICTER check of its own right after: the surviving spec set must
+  // equal exactly the one named no-product-E2E smoke.
   const resurrected: string[] = [];
   for (const target of DELETION_TARGETS) {
     for (const path of target.paths) {
-      if (SURVIVORS.has(path) || DELIBERATE_LANE_SURVIVORS.has(path)) continue;
+      if (SURVIVORS.has(path) || DELIBERATE_LANE_SURVIVORS.has(path) || path === E2E_SPECS_GLOB)
+        continue;
       const exact = path.endsWith('/**') ? path.slice(0, -3) : path;
       if (existsSync(join(process.cwd(), exact))) resurrected.push(`${target.id}: ${path}`);
     }
@@ -322,6 +338,20 @@ export function reconcileInventory(): Reconciliation {
   if (resurrected.length > 0) {
     throw new Error(
       `deletion targets still present after the retirement gate: ${resurrected.join(', ')}`,
+    );
+  }
+
+  // the interval's named lane is EXACTLY one spec: the glob above is not
+  // a wholesale exemption. Anything else surviving under e2e/*.spec.ts
+  // means an oracle-era spec resurrected — or product E2E landing without
+  // its web-host ruling — and fails the reconciliation.
+  const survivingSpecs = readdirSync(join(process.cwd(), 'e2e'))
+    .filter((name) => name.endsWith('.spec.ts'))
+    .map((name) => join('e2e', name))
+    .sort();
+  if (survivingSpecs.length !== 1 || survivingSpecs[0] !== NAMED_NO_PRODUCT_E2E_SPEC) {
+    throw new Error(
+      `the no-product-E2E interval's spec set must be exactly [${NAMED_NO_PRODUCT_E2E_SPEC}], found: [${survivingSpecs.join(', ')}]`,
     );
   }
 

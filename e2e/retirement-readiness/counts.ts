@@ -14,12 +14,15 @@ import { join } from 'node:path';
  * they booted; the frozen corpora, the schema validators, the retained
  * packages, and the plain-fixture smoke carry the counts now.
  *
- * Enumeration is authoritative, not hand-maintained: the vitest lanes come
- * from `vitest list --json` (the runner's own collection, per config), the
- * Playwright lane from a static count over the authored spec file (the
- * spec declares its tests with `test(...)` at the top level; the aggregate
- * run itself is `npm run test:e2e`'s exit code), and the contract corpus
- * from the frozen directories on disk.
+ * Enumeration is authoritative, not hand-maintained: every vitest lane —
+ * units, validators, mounts, and this suite's own legs — comes from one
+ * `vitest list --json` over the root config (the runner's own collection;
+ * the presentation mounts were folded into the root run in advisory round
+ * 1 on #291, retiring the spawned second config and its second listing).
+ * The single Playwright lane is counted statically over its authored spec
+ * file (the spec declares its tests with `test(...)` at the top level;
+ * the aggregate run itself is `npm run test:e2e`'s exit code), and the
+ * contract corpus from the frozen directories on disk.
  */
 
 /** One lane's row in the ledger. */
@@ -45,8 +48,8 @@ interface VitestListEntry {
   file: string;
 }
 
-function listVitest(config = 'vitest.config.ts'): readonly VitestListEntry[] {
-  const stdout = execFileSync('npx', ['vitest', 'list', '--json', '--config', config], {
+function listVitest(): readonly VitestListEntry[] {
+  const stdout = execFileSync('npx', ['vitest', 'list', '--json', '--config', 'vitest.config.ts'], {
     cwd: ROOT,
     encoding: 'utf8',
     maxBuffer: 32 * 1024 * 1024,
@@ -60,7 +63,7 @@ function countBy(entries: readonly VitestListEntry[], prefix: string): number {
   return entries.filter((entry) => entry.file.startsWith(join(ROOT, prefix))).length;
 }
 
-// --- the playwright lanes (authored specs, statically counted) ---
+// --- the playwright lane (one authored spec, statically counted) ---
 
 function countSpecTests(specFile: string): number {
   const text = readFileSync(join(ROOT, 'e2e', specFile), 'utf8');
@@ -82,10 +85,9 @@ function countJsonFiles(dir: string): number {
  */
 export function assembleCountsLedger(): CountsLedger {
   const vitest = listVitest();
-  const mount = listVitest('e2e/retirement-readiness/vitest.config.ts');
 
   const rows: LaneRow[] = [
-    // unit lanes (vitest, root config): the retained pure modules + the tooling
+    // unit lanes (vitest): the retained pure modules + the tooling
     {
       lane: 'unit:src',
       kind: 'unit',
@@ -126,8 +128,8 @@ export function assembleCountsLedger(): CountsLedger {
     {
       lane: 'contract:readiness-mount',
       kind: 'contract',
-      what: 'vitest mounts under the readiness config (retained widgets over schema-validated contract data)',
-      count: mount.length,
+      what: 'vitest mounts in presentation-mount.test.tsx (retained widgets over schema-validated contract data; a root-run sibling since advisory round 1 on #291)',
+      count: countBy(vitest, 'e2e/retirement-readiness/presentation-mount.test.tsx'),
     },
     // fixture lanes: the canonical plain fixture and this suite's own legs
     {
@@ -140,7 +142,7 @@ export function assembleCountsLedger(): CountsLedger {
       lane: 'fixture:readiness',
       kind: 'fixture',
       what: 'vitest legs in this readiness suite',
-      count: countSpecTests(join('retirement-readiness', 'readiness.test.ts')),
+      count: countBy(vitest, 'e2e/retirement-readiness/readiness.test.ts'),
     },
   ];
 

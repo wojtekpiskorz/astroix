@@ -439,7 +439,7 @@ function modeCi() {
     lines.push('');
   }
   lines.push(
-    `Baseline: \`${relative(ROOT, BASELINE_PATH)}\` — entries tighten or drop via \`npm run crap -- --update-baseline\`, never grow. Rows marked ·gen (shadcn-generated \`components/ui/\` — \`src/client/components/ui/\` and \`packages/app-shell/src/components/ui/\`) are watch-only: visible, never gated.`,
+    `Baseline: \`${relative(ROOT, BASELINE_PATH)}\` — entries tighten or drop via \`npm run crap -- --update-baseline\`, never grow. Rows marked ·gen (shadcn-generated \`components/ui/\` under \`packages/app-shell/src/components/ui/\` — the legacy src/client prefix died at the retirement gate, #215) are watch-only: visible, never gated.`,
   );
 
   writeFileSync(join(ROOT, 'crap-table.md'), `${lines.join('\n')}\n`);

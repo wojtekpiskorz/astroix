@@ -56,11 +56,15 @@ export default defineConfig({
       'e2e/behavior-contracts/schema/**/*.test.ts',
       // The retirement-readiness serverless legs (#214; retained past the
       // gate by #215, lane A6): corpora validation, retained-UI coupling
-      // scan + mounts, fixture plainness + zero-byte build, counts, and
-      // the deletion inventory. The presentation mounts stay under this
-      // directory's own vitest.config.ts (spawned by leg 2) — only the
-      // aggregate legs join the root run.
+      // scan, fixture plainness + zero-byte build, counts, and the
+      // deletion inventory — plus the presentation mounts, folded into
+      // the same root run (advisory round 1 on #291: the mounts had a
+      // dedicated spawned config only because a Playwright aggregate
+      // couldn't host vitest; the aggregate is vitest now). Mount
+      // failures fail npm test directly; the counts leg's non-empty
+      // mount row is the vacuity tripwire.
       'e2e/retirement-readiness/readiness.test.ts',
+      'e2e/retirement-readiness/presentation-mount.test.tsx',
     ],
     coverage: {
       // The CRAP coverage term is honest only where per-function unit coverage

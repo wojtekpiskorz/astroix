@@ -168,17 +168,21 @@ history; where it says "may start from this proof," it now has.
 
 **The suite.** The five serverless legs survive as
 `e2e/retirement-readiness/readiness.test.ts` — converted from Playwright
-to vitest, running under the root vitest config (`npm test`); the
-presentation mounts keep their own spawned config. The Playwright
-aggregate (`e2e/retirement-readiness.spec.ts`), leg 6
+to vitest, running under the root vitest config (`npm test`) — and the
+presentation mounts (`presentation-mount.test.tsx`) join that same root
+run as a sibling file (advisory round 1 on the A6 PR deleted the
+vitest-spawns-vitest detour the Playwright era needed; the dedicated
+mount config is gone). The Playwright aggregate
+(`e2e/retirement-readiness.spec.ts`), leg 6
 (`oracle-comparison.ts`), the freeze specs, the retained-UI regression,
 the disposable-oracle machinery, and `e2e/ports.ts` (its every consumer
 died) are deleted. Exactly one Playwright spec survives —
 `e2e/plain-build.spec.ts`, the **named no-product-E2E lane** in CI
 (ADR-0010's interval clause: the step is named, honest, and cannot pass
 an empty product-E2E slot; Playwright fails a config matching zero
-specs). The corpus stays frozen: contract truth is no longer
-re-derivable, and the schema validators plus legs 1 and 4 keep it
+specs — and the inventory reconciliation pins the surviving spec set to
+exactly that one file). The corpus stays frozen: contract truth is no
+longer re-derivable, and the schema validators plus legs 1 and 4 keep it
 validated and non-vacuous.
 
 **The gaps.** All four were executed by the A6 PR under the
