@@ -88,14 +88,6 @@ const BOOT_MESSAGES: Record<ProjectRunBootErrorCode, string> = {
   'launch-failed': 'the project plane could not be launched for the requested project',
 };
 
-/** The supervisor's own boot codes — everything `plane.ready` can reject with (E7's closed set). */
-const SUPERVISOR_BOOT_CODES: readonly SupervisionBootErrorCode[] = [
-  'cancelled',
-  'startup-timeout',
-  'worker-crash',
-  'managed-astro-crash',
-];
-
 /** The sanitized terminal-startup rejection `ready` settles with — the facade's one boot-error shape. */
 export class ProjectRunBootError extends Error {
   constructor(readonly code: ProjectRunBootErrorCode) {
@@ -107,10 +99,12 @@ export class ProjectRunBootError extends Error {
 /** Maps a plane-readiness rejection to the facade's boot error: the supervisor's code through, anything else launch-shaped. */
 function toBootError(error: unknown): ProjectRunBootError {
   const code = (error as { readonly code?: unknown } | null)?.code;
-  if (
-    typeof code === 'string' &&
-    SUPERVISOR_BOOT_CODES.includes(code as SupervisionBootErrorCode)
-  ) {
+  // The supervisor's boot codes are admitted by membership in the
+  // compiler-forced BOOT_MESSAGES key set — the Record's own exhaustiveness
+  // is the allowlist, so a future E7 boot code template compiles here for
+  // free instead of drifting silently in a hand-listed array. hasOwn, not
+  // `in`: the prototype chain makes 'constructor' in obj true.
+  if (typeof code === 'string' && Object.hasOwn(BOOT_MESSAGES, code)) {
     return new ProjectRunBootError(code as SupervisionBootErrorCode);
   }
   return new ProjectRunBootError('launch-failed');
