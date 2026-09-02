@@ -453,8 +453,16 @@ function childWireChannel(child: ChildProcess): WorkerChannel {
     },
     send(message: unknown): boolean | null {
       // Every message crossing this adapter is a validated wire object —
-      // the facet gates sends against the closed union before here.
-      return child.send(message as object);
+      // the facet gates sends against the closed union before here. On
+      // this Node line, send() after the child EXITS throws
+      // ERR_IPC_CHANNEL_CLOSED while `connected` still reads true (the
+      // exit→disconnect observation race); the catch keeps refusal
+      // channel-shaped — false, never a throw.
+      try {
+        return child.send(message as object);
+      } catch {
+        return false;
+      }
     },
     on(event, listener) {
       if (event === 'message') child.on('message', listener as (message: unknown) => void);

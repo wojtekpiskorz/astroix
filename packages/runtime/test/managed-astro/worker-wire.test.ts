@@ -30,6 +30,8 @@ interface FakeWire {
   setConnected(connected: boolean): void;
   /** Makes the channel report backpressure: send() → false while still connected. */
   backpressure(on: boolean): void;
+  /** The next send refuses by THROWING while `connected` still reads true — the ERR_IPC_CHANNEL_CLOSED exit-race shape. */
+  throwOnNextSend(): void;
   /** The next send dies racing itself: the channel closes as it refuses the message. */
   dieOnNextSend(): void;
 }
@@ -39,6 +41,7 @@ function fakeSupervisedWire(): FakeWire {
   let connected = true;
   let backpressured = false;
   let dieOnNextSend = false;
+  let throwOnNextSend = false;
   let closing = false;
   const sent: unknown[] = [];
   const channel: WorkerChannel = {
@@ -46,6 +49,10 @@ function fakeSupervisedWire(): FakeWire {
       return connected;
     },
     send(message: unknown) {
+      if (throwOnNextSend) {
+        throwOnNextSend = false;
+        throw new Error('simulated ERR_IPC_CHANNEL_CLOSED');
+      }
       if (dieOnNextSend) {
         dieOnNextSend = false;
         connected = false;
@@ -91,6 +98,9 @@ function fakeSupervisedWire(): FakeWire {
     },
     dieOnNextSend: () => {
       dieOnNextSend = true;
+    },
+    throwOnNextSend: () => {
+      throwOnNextSend = true;
     },
   };
 }
@@ -192,6 +202,16 @@ describe('correlated dispatch', () => {
     fake.dieOnNextSend();
     expect(await rejectionCode(fake.wire.dispatch({ kind: 'project' }))).toBe('shutdown');
     expect(fake.sent).toEqual([]); // nothing left the process — never-sent, never pending
+  });
+
+  it('a send that refuses by THROWING (the exit race: connected still true) rejects structured', async () => {
+    const fake = fakeSupervisedWire();
+    fake.throwOnNextSend();
+    // The empirically observed shape: send() THROWS ERR_IPC_CHANNEL_CLOSED
+    // in the exit→disconnect window while `connected` still reads true.
+    expect(fake.wire.connected).toBe(true);
+    expect(await rejectionCode(fake.wire.dispatch({ kind: 'project' }))).toBe('shutdown');
+    expect(fake.sent).toEqual([]); // the message never left — never-sent, never a raw error
   });
 });
 

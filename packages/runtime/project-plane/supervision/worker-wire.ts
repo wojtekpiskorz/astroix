@@ -113,6 +113,10 @@ export function createSupervisedWorkerWire(source: SupervisedWireSource): Superv
     if (wire?.type === 'inspect-result') {
       settleCorrelated(message);
     } else if (wire?.type === 'event') {
+      // The payload rides unvalidated by design: the worker child is the
+      // trusted producer of its own public events (E6 composes them from
+      // closed shapes on the child side, equally unvalidated outbound) —
+      // a hostile child is outside this wire's threat model.
       for (const listener of eventListeners)
         listener((message as { readonly event: WorkerEvent }).event);
     }
@@ -168,17 +172,27 @@ export function createSupervisedWorkerWire(source: SupervisedWireSource): Superv
         const id = nextId;
         nextId += 1;
         pending.set(id, { resolve, reject });
+        const neverSent = (): void => {
+          pending.delete(id);
+          reject(shutdownRejection());
+        };
         // The executor-spawn backpressure law (D5): `send() === false`
         // ALONE is backpressure — the message is queued and will be
         // delivered — so the dispatch stays pending. Only false on a
-        // channel that is no longer connected is a never-sent, and that
-        // rejects structured; every other death path is settled by
-        // `markDead`.
-        const sent = source.channel.send({ type: 'inspect', id, request });
-        if (sent === false && !source.channel.connected) {
-          pending.delete(id);
-          reject(shutdownRejection());
+        // channel that is no longer connected is a never-sent, and a
+        // synchronous THROW is the never-sent too — a channel
+        // implementation may refuse by throwing inside the exit race,
+        // where the message never left this process; both reject
+        // structured, never a raw error. Every other death path is
+        // settled by `markDead`.
+        let sent: boolean | null = false;
+        try {
+          sent = source.channel.send({ type: 'inspect', id, request });
+        } catch {
+          neverSent();
+          return;
         }
+        if (sent === false && !source.channel.connected) neverSent();
       }),
     subscribe(listener) {
       eventListeners.add(listener);
