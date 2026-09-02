@@ -2,18 +2,41 @@ import { type ChildProcess, spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { canonicalProjectRoot } from '../../astro-project-adapter/installed-pair.ts';
 import { probeManagedDevServer } from '../managed-astro/dev-server.ts';
+import type { WorkerChannel } from '../worker/worker-ipc.ts';
 import {
   classifySupervisionClose,
   type SupervisionChild,
   type SupervisionCloseReport,
 } from './close-report.ts';
 import { type ExactChildPlan, minimalChildEnv } from './exact-child.ts';
+import {
+  createSupervisedWorkerWire,
+  SUPERVISOR_PROBE_WIRE_ID,
+  type SupervisedWorkerWire,
+} from './worker-wire.ts';
 
 // The supervision entry's own contract (the #305 private-boot re-export
-// idiom): `stop()`/`closed` settle with the close report and
-// `PlaneSupervisorOptions.worker`/`managedAstro` are exact-child plans —
-// a consumer of `project-plane/supervision` must be able to name both
-// without reaching around the exports map.
+// idiom): `stop()`/`closed` settle with the close report,
+// `PlaneSupervisorOptions.worker`/`managedAstro` are exact-child plans,
+// and the worker-wire facet's vocabulary — E6's structural channel, the
+// wire unions, the typed inspection requests/results, the events, and
+// the rejection species a facet consumer catches — is nameable here —
+// a consumer of `project-plane/supervision` must be able to name all of
+// it without reaching around the exports map.
+export type { WorkerEvent } from '../worker/worker-events.ts';
+export {
+  type WorkerFailure,
+  WorkerRejectionError,
+} from '../worker/worker-failure.ts';
+export type {
+  WorkerChannel,
+  WorkerWireIn,
+  WorkerWireOut,
+} from '../worker/worker-ipc.ts';
+export type {
+  WorkerInspectionRequest,
+  WorkerInspectionResult,
+} from '../worker/worker-request.ts';
 export {
   classifySupervisionClose,
   type SupervisionChild,
@@ -24,6 +47,7 @@ export {
   type SupervisionStopReason,
 } from './close-report.ts';
 export { type ExactChildPlan, minimalChildEnv } from './exact-child.ts';
+export type { SupervisedWorkerWire } from './worker-wire.ts';
 
 /**
  * The plane supervisor (#231, ADR-0005 process topology + ADR-0006 §8):
@@ -68,8 +92,8 @@ export const DEFAULT_TERM_GRACE_MS = 5000;
 /** Bound on observing the exit after SIGKILL (ADR-0006 §8 forced reap). */
 export const DEFAULT_KILL_REAP_MS = 2000;
 
-/** The wire id of the supervisor's one readiness probe (E6's wire: integer ≥ 0). */
-const WORKER_PROBE_ID = 0;
+/** The wire id of the supervisor's one readiness probe (E6's wire: integer ≥ 0) — the reservation the worker-wire facet derives its consumer-id floor from. */
+const WORKER_PROBE_ID = SUPERVISOR_PROBE_WIRE_ID;
 
 export type PlaneSupervisorState = 'starting' | 'running' | 'closing' | 'closed';
 /**
@@ -123,6 +147,15 @@ export interface ProjectPlaneSupervisor {
   readonly admission: PlaneAdmissionState;
   /** Settles when both children are ready; rejects with a {@link SupervisionBootError} on every terminal startup outcome. */
   readonly ready: Promise<void>;
+  /**
+   * The supervised worker's private wire as a consumer binds it (#308):
+   * E6's `WorkerChannel` plus correlated typed dispatch and event
+   * subscription over THE supervised child. Consumer traffic rides ids
+   * ≥ 1; the probe (id 0), the stop control, and the close report stay
+   * the supervisor's. The facet dies with the worker child — and no
+   * `ChildProcess`, PID, or port crosses it.
+   */
+  readonly workerWire: SupervisedWorkerWire;
   /** Begins the terminal close; idempotent — every call settles with the one close report. */
   stop(): Promise<SupervisionCloseReport>;
   /** Settles with the close report after cleanup completes. */
@@ -225,6 +258,16 @@ export function createProjectPlaneSupervisor(
   const probeAbort = new AbortController();
   const workerGone = goneOf(workerChild);
   const devServerGone = goneOf(devServerChild);
+  // The worker-wire facet (#308): the consumer view of the child's
+  // channel, born inside the closure and dying with the child. The
+  // closing gate is the supervisor's own terminal transition — from the
+  // instant any close path begins, consumer dispatches reject as
+  // structured shutdown, exactly like the worker's own in-plane guard.
+  const workerWire = createSupervisedWorkerWire({
+    channel: childWireChannel(workerChild),
+    gone: workerGone,
+    closing: () => currentState === 'closing' || currentState === 'closed',
+  });
   const devServerProbe = probeManagedDevServer({
     port: options.devServerPort,
     path: options.readinessPath,
@@ -381,6 +424,7 @@ export function createProjectPlaneSupervisor(
       return admissionState;
     },
     ready,
+    workerWire,
     stop: () => initiateClose(currentState === 'running' ? 'stopped' : 'cancelled'),
     closed,
   };
@@ -393,6 +437,43 @@ function goneOf(child: ChildProcess): Promise<void> {
     child.once('error', resolve);
     if (child.exitCode !== null || child.signalCode !== null) resolve();
   });
+}
+
+/**
+ * The worker child's IPC channel as E6's structural `WorkerChannel` —
+ * the facet's transport and the ONLY place the `ChildProcess` is
+ * touched for the wire: neither the adapter nor the child crosses the
+ * supervisor's surface, only the facet does (ADR-0005: the worker's
+ * wire is private IPC; ADR-0006 §7: no PID crosses).
+ */
+function childWireChannel(child: ChildProcess): WorkerChannel {
+  return {
+    get connected(): boolean {
+      return child.connected === true;
+    },
+    send(message: unknown): boolean | null {
+      // Every message crossing this adapter is a validated wire object —
+      // the facet gates sends against the closed union before here. On
+      // this Node line, send() after the child EXITS throws
+      // ERR_IPC_CHANNEL_CLOSED while `connected` still reads true (the
+      // exit→disconnect observation race); the catch keeps refusal
+      // channel-shaped — false, never a throw.
+      try {
+        return child.send(message as object);
+      } catch {
+        return false;
+      }
+    },
+    on(event, listener) {
+      if (event === 'message') child.on('message', listener as (message: unknown) => void);
+      else child.on('disconnect', listener as () => void);
+    },
+    removeListener(event, listener) {
+      if (event === 'message')
+        child.removeListener('message', listener as (message: unknown) => void);
+      else child.removeListener('disconnect', listener as () => void);
+    },
+  };
 }
 
 /**
