@@ -17,12 +17,15 @@ import type { FunctionComplexity } from './complexity';
  * `packages/protocol` since #220, the `src/core` CRAP tooling
  * layer, `packages/runtime/registry` since #221, and the
  * `packages/runtime/{kernel-lease,private-boot}` boot-authority seams
- * since #222 — all deterministic real-filesystem unit tests over temp
- * directories and real temp SQLite lease files), covered by unit
+ * since #222 and the AstroProjectAdapter's pure seams since #225 — all
+ * deterministic real-filesystem unit tests over temp directories and
+ * real temp SQLite lease files), covered by unit
  * tests through
  * vitest's istanbul-format JSON. The UI foundation package
  * `packages/app-shell` (#218 — its truth is e2e coverage, not
- * per-function unit tests) lands on a CC-only watchlist; later
+ * per-function unit tests) and the adapter's composition IO seam (#225 —
+ * its truth is the real-install certification suite) land on a CC-only
+ * watchlist; later
  * `packages/runtime` seams beyond the ruled ones decide their own tier in
  * the lane that lands them. A
  * watchlist row has `coverage === null` and `crap === null`, and its gate
@@ -123,20 +126,27 @@ function isCoreFile(relPath: string): boolean {
   // src/core keeps the CRAP tooling layer — unit-covered (the
   // compatibility shims died at the retirement gate, #215; what remains
   // under src/core is this tooling itself); packages/runtime/registry
-  // since #221 (deterministic real-filesystem unit tests over temp dirs)
-  // and packages/runtime/{kernel-lease,private-boot} since #222 (the
+  // since #221 (deterministic real-filesystem unit tests over temp dirs);
+  // packages/runtime/{kernel-lease,private-boot} since #222 (the
   // boot-authority seams: deterministic unit tests over real temp SQLite
   // lease files and a real in-memory private-IPC channel, with the
   // forked process lanes asserting the cross-process semantics on the
-  // same modules); later runtime seams are watchlist until their lane
-  // rules otherwise
+  // same modules); the AstroProjectAdapter's pure seams
+  // since #225 (pair gate, resolution, seam probes, runner accounting —
+  // deterministic unit tests with resolution-layer stubs) — all except
+  // composition.ts, the adapter's IO seam, whose truth is the
+  // real-install certification suite (`npm run certify:adapter`), not
+  // unit fakes at the behavior layer: it stays on the CC-only watchlist.
   return (
-    relPath.startsWith('src/core/') ||
-    relPath.startsWith('packages/core/') ||
-    relPath.startsWith('packages/protocol/') ||
-    relPath.startsWith('packages/runtime/registry/') ||
-    relPath.startsWith('packages/runtime/kernel-lease/') ||
-    relPath.startsWith('packages/runtime/private-boot/')
+    (relPath.startsWith('src/core/') ||
+      relPath.startsWith('packages/core/') ||
+      relPath.startsWith('packages/protocol/') ||
+      relPath.startsWith('packages/runtime/registry/') ||
+      relPath.startsWith('packages/runtime/kernel-lease/') ||
+      relPath.startsWith('packages/runtime/private-boot/') ||
+      (relPath.startsWith('packages/runtime/astro-project-adapter/') &&
+        relPath !== 'packages/runtime/astro-project-adapter/composition.ts')) &&
+    !relPath.startsWith('packages/runtime/astro-project-adapter/certification/')
   );
 }
 
