@@ -94,7 +94,7 @@ Rewritten for the Electron parent-app rewrite (lane A1, [#210](https://github.co
 | Term | Meaning |
 | --- | --- |
 | **core-first** | The rule that `docs/core-reuse.md` governs: if Astro/Vite core provides a mechanism (within its seam classes), we don't build our own. |
-| **preflight** | The local CRAP hard stop (`npm run preflight`): a baseline ratchet over `src/` + `packages/core` + `packages/app-shell` (future workspace packages join in their landing PR) — every run fails any new stop breach, complexity or coverage regression alike; the agent runs it before `gh pr create`. |
+| **preflight** | The local CRAP hard stop (`npm run preflight`): a baseline ratchet over `src/` + `packages/core` + `packages/protocol` + `packages/app-shell` (future workspace packages join in their landing PR) — every run fails any new stop breach, complexity or coverage regression alike; the agent runs it before `gh pr create`. |
 | **baseline ratchet** | `crap-baseline.json`: calibrated once, then only tightens or drops. New stop-breachers fail preflight; the baseline never absorbs them. |
 | **watchlist** | The CC-only risk tier for tiers where per-function unit coverage is not real; the generated `components/ui/` folder is watch-only — visible, never gated. |
 | **metric honesty** | The principle that CRAP is computed only where per-function coverage is real (the pure core); everywhere else stays a CC watchlist. |

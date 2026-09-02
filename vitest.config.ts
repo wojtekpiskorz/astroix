@@ -48,6 +48,7 @@ export default defineConfig({
     include: [
       'src/**/*.test.{ts,tsx}',
       'packages/core/src/**/*.test.{ts,tsx}',
+      'packages/protocol/src/**/*.test.{ts,tsx}',
       'packages/app-shell/src/**/*.test.{ts,tsx}',
       // Behavior-contract schema validators (#217, directive from B1's
       // review): the schemas are pure zod over frozen fixtures — the unit
@@ -68,13 +69,15 @@ export default defineConfig({
     ],
     coverage: {
       // The CRAP coverage term is honest only where per-function unit coverage
-      // is real: the pure editing modules (packages/core since #212) plus the
-      // CRAP tooling layer itself (src/core — complexity + crap, the only
-      // src/ survivors of the retirement gate) — metric honesty, wayfinder
-      // #55. The integration tiers (src/node, src/client) are deleted; no
-      // watchlist tier exists under src/ anymore.
+      // is real: the pure editing modules (packages/core since #212), the
+      // protocol schemas (packages/protocol since #220 — pure zod + pure
+      // helpers with colocated unit tests) plus the CRAP tooling layer
+      // itself (src/core — complexity + crap, the only src/ survivors of
+      // the retirement gate) — metric honesty, wayfinder #55. The
+      // integration tiers (src/node, src/client) are deleted; no watchlist
+      // tier exists under src/ anymore.
       provider: 'v8',
-      include: ['src/core/**', 'packages/core/**'],
+      include: ['src/core/**', 'packages/core/**', 'packages/protocol/**'],
       reporter: ['json'],
       reportsDirectory: 'coverage',
     },

@@ -1,0 +1,18 @@
+{
+  "name": "@wojciechpiskorz/astroix-protocol",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Protocol v1 — the closed, versioned wire contract shared by the app shell and the runtime: schemas, envelopes, limits, and generation-scoped query keys (#220, ADR-0006 §7)",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=24"
+  },
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "sideEffects": false,
+  "dependencies": {
+    "zod": "^4.3.6"
+  }
+}

@@ -13,8 +13,9 @@ import type { FunctionComplexity } from './complexity';
  *
  * Metric honesty is the load-bearing rule: full CRAP (CC² × (1−coverage)³ +
  * CC, per crap4clj/PHPUnit) is computed only where per-function coverage
- * is real — the covered core tier (`packages/core` since #212, plus the
- * `src/core` CRAP tooling layer), covered by unit tests through
+ * is real — the covered core tier (`packages/core` since #212,
+ * `packages/protocol` since #220, plus the `src/core` CRAP tooling
+ * layer), covered by unit tests through
  * vitest's istanbul-format JSON. The UI foundation package
  * `packages/app-shell` (#218 — its truth is e2e coverage, not
  * per-function unit tests) lands on a CC-only watchlist. A
@@ -60,7 +61,7 @@ export interface RiskEntry extends FunctionComplexity {
 }
 
 export interface GateStops {
-  /** Hard stop: CRAP ≥ this in the covered core tier (src/core, packages/core). */
+  /** Hard stop: CRAP ≥ this in the covered core tier (src/core, packages/core, packages/protocol). */
   coreCrapStop: number;
   /** Hard stop: CC ≥ this in the CC-only watchlist (packages/app-shell — complexity-only proxy). */
   watchlistCcStop: number;
@@ -111,10 +112,16 @@ export function touchedFunctions(
 
 /** The layer where per-function unit coverage is real — CRAP's only honest home. */
 function isCoreFile(relPath: string): boolean {
-  // packages/core since #212; src/core keeps the CRAP tooling layer —
-  // unit-covered (the compatibility shims died at the retirement gate,
-  // #215; what remains under src/core is this tooling itself)
-  return relPath.startsWith('src/core/') || relPath.startsWith('packages/core/');
+  // packages/core since #212; packages/protocol since #220 (pure zod
+  // schemas + pure helpers with colocated unit tests — the covered tier);
+  // src/core keeps the CRAP tooling layer — unit-covered (the
+  // compatibility shims died at the retirement gate, #215; what remains
+  // under src/core is this tooling itself)
+  return (
+    relPath.startsWith('src/core/') ||
+    relPath.startsWith('packages/core/') ||
+    relPath.startsWith('packages/protocol/')
+  );
 }
 
 /** The shadcn-generated tier: regenerated per ADR-0002, never hand-edited — visible in reports, never gated (owner ruling 2026-08-28, #62). The set lives at packages/app-shell (#218); the legacy src/client prefix died with the integration at the retirement gate (#215). */
