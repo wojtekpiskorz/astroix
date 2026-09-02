@@ -16,7 +16,7 @@ import { z } from 'zod';
  * segment pair, wherever it sits — `/Users/…`, `/srv/…`, `/mnt/…`), a
  * home-relative path (`~/…`), a Windows drive path (`C:\\…`, `D:/…`), a
  * UNC path (`\\\\server\\share`), a stack frame, a `node:internal`
- * frame, or a PID reference. Sanitized prose ("the project root is
+ * frame, a PID or port reference, or an environment value. Sanitized prose ("the project root is
  * unavailable") passes; prose merely containing slashes without an
  * absolute shape ("and/or", "1/2") passes too.
  */
