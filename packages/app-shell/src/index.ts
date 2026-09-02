@@ -5,8 +5,9 @@
  * breakpoint hook, and the generic CodeMirror infrastructure (view
  * construction + the markdown editor and its toolbar). It deliberately
  * exports no CSS, content, route, or project-domain APIs — the theme
- * entry (`src/chrome.css`) is consumed by the host through its own
- * stylesheet adoption, never through this barrel.
+ * entry (`src/chrome.css`) has no consumer today (the Electron renderer
+ * adopts it through its own stylesheet construction when it lands, G/H
+ * lanes), never through this barrel.
  */
 export * from './components/ui/button';
 export * from './components/ui/checkbox';
