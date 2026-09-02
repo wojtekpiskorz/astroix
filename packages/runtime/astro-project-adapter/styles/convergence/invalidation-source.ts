@@ -1,4 +1,4 @@
-import { relative, sep } from 'node:path';
+import { isAbsolute, relative, sep } from 'node:path';
 import type { ViteServerLike } from '../../seam-readers';
 
 /**
@@ -111,6 +111,20 @@ function unwatch(watcher: ViteServerLike['watcher'], listener: (file: unknown) =
 }
 
 /**
+ * Whether a `path.relative` result stays a descendant of the root:
+ * climb-outs (`..`) and the root itself are outside it, and so is an
+ * ABSOLUTE result — Windows `relative` across drives returns one
+ * (`relative('C:\\proj', 'D:\\x.css') === 'D:\\x.css'`), and letting it
+ * through would mint an absolute path into an event, exactly the
+ * ADR-0006 §7 disclosure this module exists to prevent. The predicate is
+ * the platform's own `isAbsolute` (review round 1, #303): on Windows it
+ * catches the drive-letter form; posix `relative` never returns absolute.
+ */
+export function isProjectRelativePath(relativeFile: string): boolean {
+  return !isAbsolute(relativeFile) && !relativeFile.startsWith('..') && relativeFile !== '';
+}
+
+/**
  * The project-relative posix path of a watcher file, or null when the
  * file is not a style-truth input: outside the project root, not
  * `.astro`/`.css`, or inside a dot directory or `node_modules` (the
@@ -119,7 +133,7 @@ function unwatch(watcher: ViteServerLike['watcher'], listener: (file: unknown) =
  */
 function styleTruthFile(projectRoot: string, file: string): string | null {
   const projectFile = relative(projectRoot, file).split(sep).join('/');
-  if (projectFile.startsWith('..') || projectFile === '') return null;
+  if (!isProjectRelativePath(projectFile)) return null;
   const segments = projectFile.split('/');
   for (const segment of segments) {
     if (segment.startsWith('.') || segment === 'node_modules') return null;

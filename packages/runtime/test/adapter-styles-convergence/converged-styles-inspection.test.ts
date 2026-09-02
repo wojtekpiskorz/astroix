@@ -152,6 +152,35 @@ describe('createConvergedStylesInspection (fresh-runner discipline)', () => {
     expect(h.runners[0]?.isClosed()).toBe(true);
     expect(h.hotEmitter.listenerCount('send')).toBe(0);
   });
+
+  it("rejects with the caller's reason when the signal fires during the route-css import — never a mismatch", async () => {
+    // Review round 1 (#303): an import rejection observed while the signal
+    // fired is the cancellation, not a transient — classifying it as
+    // module-presence would burn attempts and return a mismatch outcome
+    // for an inspection the caller already abandoned. The transport-shaped
+    // rejection the abort causes must surface the CALLER's reason.
+    const h = await harness();
+    const inspector = createConvergedStylesInspection({ server: h.server, seams: h.seams });
+    const reason = new Error('cancelled mid-import');
+    const controller = new AbortController();
+    h.css.onDevCssImport = () => controller.abort(reason);
+    h.setDevCssImport(() => {
+      if (controller.signal.aborted)
+        return Promise.reject(new Error('the runner transport closed'));
+      return new Promise<never>((_resolve, reject) => {
+        controller.signal.addEventListener(
+          'abort',
+          () => reject(new Error('the runner transport closed')),
+          { once: true },
+        );
+      });
+    });
+    await expect(
+      inspector.inspect({ routeComponent: ROUTE_COMPONENT, signal: controller.signal }),
+    ).rejects.toBe(reason);
+    expect(h.runners[0]?.isClosed()).toBe(true);
+    expect(h.hotEmitter.listenerCount('send')).toBe(0);
+  });
 });
 
 describe('createConvergedStylesInspection (the convergence protocol)', () => {

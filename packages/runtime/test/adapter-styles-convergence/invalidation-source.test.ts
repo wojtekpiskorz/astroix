@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { ViteServerLike } from '../../astro-project-adapter/seam-readers';
 import {
   createStylesInvalidationSource,
+  isProjectRelativePath,
   type StylesInvalidation,
 } from '../../astro-project-adapter/styles/convergence/invalidation-source';
 
@@ -138,5 +139,18 @@ describe('createStylesInvalidationSource', () => {
     };
     const source = createStylesInvalidationSource(serverOver(onOnly), PROJECT_ROOT);
     expect(() => source.dispose()).not.toThrow();
+  });
+
+  it('rejects an absolute relative() result — the Windows cross-drive disclosure guard', () => {
+    // Review round 1 (#303): Windows `relative` across drives returns an
+    // ABSOLUTE path (`relative('C:\proj', 'D:\x.css') === 'D:\x.css'`),
+    // which must never mint an event (ADR-0006 §7). Posix CI cannot make
+    // `relative` return absolute, so this leg injects one through the same
+    // post-relativization guard the source uses; on Windows the platform's
+    // own `isAbsolute` behind that guard catches the drive-letter form.
+    expect(isProjectRelativePath('/etc/exploit.css')).toBe(false);
+    expect(isProjectRelativePath('../climb-out.css')).toBe(false);
+    expect(isProjectRelativePath('')).toBe(false);
+    expect(isProjectRelativePath('src/pages/index.astro')).toBe(true);
   });
 });

@@ -83,7 +83,6 @@ export interface ConvergenceHarness {
   readonly runners: FakeRunner[];
   /** Overrides the dev-css import behavior — the module set the route pass observes. */
   setDevCssImport(impl: () => Promise<unknown>): void;
-  readonly runnerFactoryCalls: number[];
   /** Fires a watcher `change` for a project-relative file (the invalidation event). */
   fireWatcherChange(relativeFile: string): void;
   /** Rewrites the scoped selector in the fixture page's style block on disk (no watcher event). */
@@ -132,7 +131,6 @@ export async function convergenceHarness(
     }),
   };
   const runners: FakeRunner[] = [];
-  const runnerFactoryCalls: number[] = [];
 
   // The style transform pops the schedule, and both the transform result
   // and the graph's cached code derive from the same current value — the
@@ -190,7 +188,6 @@ export async function convergenceHarness(
     vite: {
       createServer: async () => server,
       createServerModuleRunner: () => {
-        runnerFactoryCalls.push(runnerFactoryCalls.length + 1);
         const runner = new FakeRunner(emitter, options.runnerBehavior ?? {}, async () => {
           css.onDevCssImport?.();
           return devCssImportRef.current();
@@ -210,7 +207,6 @@ export async function convergenceHarness(
     hotEmitter: emitter,
     css,
     runners,
-    runnerFactoryCalls,
     setDevCssImport: (impl: () => Promise<unknown>) => {
       devCssImportRef.current = impl;
     },

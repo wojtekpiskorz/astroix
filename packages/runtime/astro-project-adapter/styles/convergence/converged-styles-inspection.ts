@@ -201,7 +201,7 @@ async function runPass(
   signal: AbortSignal | undefined,
 ): Promise<PassData> {
   signal?.throwIfAborted();
-  const cssSet = await importRouteCssSet(runner, input.seams, routeComponent);
+  const cssSet = await importRouteCssSet(runner, input.seams, routeComponent, signal);
   if (cssSet.kind === 'mismatch') return cssSet;
   const compiled = await transformScopedStyleModules(
     input.server.environments.client,
@@ -226,12 +226,17 @@ async function runPass(
  * rejection means the route's compiled-CSS set is unavailable — a
  * `module-presence` mismatch (retryable; the cause is preserved for the
  * runtime plane's logs), while the export-shape check stays the
- * fail-closed seam probe it is in #226.
+ * fail-closed seam probe it is in #226. Cancellation is the caller's
+ * (E5's idiom, routes-inspection.ts): an import rejection observed while
+ * the signal fired is the abort, not a transient — the caller's reason
+ * rejects the pass instead of burning attempts on a mismatch outcome for
+ * an inspection the caller already abandoned.
  */
 async function importRouteCssSet(
   runner: ModuleRunnerLike,
   seams: ProjectRuntimeSeams,
   routeComponent: string,
+  signal: AbortSignal | undefined,
 ): Promise<
   | { readonly kind: 'entries'; readonly entries: readonly DevCssSeamEntry[] }
   | { readonly kind: 'mismatch'; readonly mismatch: StylesMismatch }
@@ -240,6 +245,7 @@ async function importRouteCssSet(
   try {
     moduleExports = await runner.import(seams.getDevCSSModuleName(routeComponent));
   } catch (cause) {
+    if (signal?.aborted) signal.throwIfAborted();
     return {
       kind: 'mismatch',
       mismatch: {
