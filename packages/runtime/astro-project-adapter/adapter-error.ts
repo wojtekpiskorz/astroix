@@ -82,6 +82,32 @@ export class AdapterError extends Error {
   }
 }
 
+/**
+ * The seam-rejection construction, single-homed (#311, hoisted from the
+ * per-lane copies of #225/#228/#229): the sanitized message template
+ * stated exactly once for every seam the adapter probes — seam, expected
+ * shape, observed description — with the seam's class and the mismatch
+ * riding in the code-specific details, and the upstream cause kept when
+ * there is one. A lane probing a new seam rejects through this and
+ * nothing else, so the format can never drift between surfaces.
+ */
+export function seamRejection(
+  seam: string,
+  seamClass: SeamClass,
+  expected: string,
+  observed: string,
+  cause?: unknown,
+): AdapterError {
+  const details: AdapterErrorDetails = { seam, seamClass, expected, observed };
+  const message = `AstroProjectAdapter seam rejection at ${seam}: expected ${expected}; observed ${observed}`;
+  // The options object rides only when a cause exists — installing an
+  // undefined `cause` key is observable (`'cause' in error`), and the
+  // no-cause construction sites never passed options.
+  return cause === undefined
+    ? new AdapterError('seam-rejected', message, details)
+    : new AdapterError('seam-rejected', message, details, { cause });
+}
+
 /** A structural observed-shape description for seam rejections — type facts, never values. */
 export function observedShape(value: unknown): string {
   if (value === null) return 'null';

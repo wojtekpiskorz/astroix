@@ -274,6 +274,60 @@ describe('toRiskEntry', () => {
     expect(laterSeam).toMatchObject({ metric: 'cc', coverage: null, crap: null, stop: 15 });
   });
 
+  it('pins the covered-tier dispatch table: every covered prefix stays CRAP-metric, every watchlist exception stays CC-metric (#311)', () => {
+    const fileCov = {
+      statementMap: {
+        s0: { start: { line: 4 }, end: { line: 4 } },
+        s1: { start: { line: 5 }, end: { line: 5 } },
+      },
+      s: { s0: 1, s1: 0 },
+    };
+    // One representative per covered-prefix entry — the data-driven
+    // rewrite (#311) is behavior-identical only if this enumeration holds:
+    // a lane flipping its tier decision moves its row between these two
+    // expectations and must do so here deliberately.
+    const covered = [
+      'src/core/crap.ts',
+      'packages/core/src/matcher.ts',
+      'packages/protocol/src/envelopes.ts',
+      'packages/runtime/registry/document.ts',
+      'packages/runtime/kernel-lease/kernel-lease.ts',
+      'packages/runtime/private-boot/control-plane-boot.ts',
+      'packages/runtime/edit-authority/grants/grant-table.ts',
+      'packages/runtime/project-plane/worker/worker-dispatch.ts',
+      'packages/runtime/project-plane/supervision/close-report.ts',
+      'packages/runtime/project-runtime/project-run.ts',
+      'packages/runtime/astro-project-adapter/seam-readers.ts',
+    ];
+    for (const file of covered) {
+      expect(toRiskEntry(file, fn, fileCov).metric).toBe('crap');
+    }
+    // Every watchlist exception file — real IO composition under a
+    // covered prefix: coverage handed to the row is ignored (metric
+    // honesty), so the exception must hold even with fileCov present.
+    const watchlist = [
+      'packages/runtime/astro-project-adapter/composition.ts',
+      'packages/runtime/astro-project-adapter/styles/join/client-scoped-css.ts',
+      'packages/runtime/astro-project-adapter/styles/join/route-styles.ts',
+      'packages/runtime/astro-project-adapter/styles/convergence/converged-styles-inspection.ts',
+      'packages/runtime/project-plane/composition/composition-runtime.ts',
+      'packages/runtime/project-plane/worker/worker-child.ts',
+      'packages/runtime/project-plane/supervision/plane-supervisor.ts',
+      'packages/runtime/project-plane/managed-astro/dev-server.ts',
+      'packages/runtime/project-runtime/plane-launch.ts',
+      // the evidence subtree exception, not just the exact files
+      'packages/runtime/astro-project-adapter/certification/staging.ts',
+    ];
+    for (const file of watchlist) {
+      expect(toRiskEntry(file, fn, fileCov)).toMatchObject({
+        metric: 'cc',
+        coverage: null,
+        crap: null,
+        stop: 15,
+      });
+    }
+  });
+
   it('derives watchlist rows: no coverage term even when handed one, cc stop', () => {
     const e = toRiskEntry('src/node/rest.ts', fn, { statementMap: {}, s: {} });
     expect(e).toMatchObject({

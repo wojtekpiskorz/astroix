@@ -4,6 +4,7 @@ import {
   ADAPTER_ERROR_CODES,
   AdapterError,
   observedShape,
+  seamRejection,
 } from '../../astro-project-adapter/adapter-error';
 import { uncertifiedPairError } from '../../astro-project-adapter/certified-pair';
 
@@ -117,6 +118,44 @@ describe('the real composition paths', () => {
     const error = uncertifiedPairError({ astro: '9.9.9', vite: '0.0.0' });
     expect(findDisclosure(error.message)).toBeNull();
     expect(JSON.stringify(error.details)).not.toMatch(/\/[a-z][^/]*\//i);
+  });
+});
+
+describe('seamRejection (the single-homed template, #311)', () => {
+  it('states the seam-rejection message and details exactly once for every surface', () => {
+    // The format every lane's probes previously copied — now pinned here,
+    // at the one home, so a drift in any surface fails this row first.
+    const error = seamRejection(
+      'virtual:astro:routes export',
+      'fail-closed private',
+      'an array routes export',
+      'object with own properties routes',
+    );
+    expect(error.code).toBe('seam-rejected');
+    expect(error.name).toBe('AdapterError');
+    expect(error.message).toBe(
+      'AstroProjectAdapter seam rejection at virtual:astro:routes export: expected an array routes export; observed object with own properties routes',
+    );
+    expect(error.details).toEqual({
+      seam: 'virtual:astro:routes export',
+      seamClass: 'fail-closed private',
+      expected: 'an array routes export',
+      observed: 'object with own properties routes',
+    });
+  });
+
+  it('keeps the upstream cause when there is one and installs no cause key when there is not', () => {
+    const cause = new Error('ENOENT: no such file');
+    expect(seamRejection('s', 'public', 'e', 'o', cause).cause).toBe(cause);
+    const bare = seamRejection('s', 'public', 'e', 'o');
+    expect(bare.cause).toBeUndefined();
+    expect('cause' in bare).toBe(false);
+  });
+
+  it('goes through the construction guard like every adapter diagnostic', () => {
+    expect(() => seamRejection('s', 'public', 'a module at /Users/dev/x', 'o')).toThrow(
+      'refused: message may not disclose an absolute filesystem path',
+    );
   });
 });
 
