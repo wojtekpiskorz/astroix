@@ -294,9 +294,9 @@ describe('toRiskEntry', () => {
       'packages/runtime/kernel-lease/kernel-lease.ts',
       'packages/runtime/private-boot/control-plane-boot.ts',
       'packages/runtime/edit-authority/grants/grant-table.ts',
-      'packages/runtime/project-plane/worker/worker-dispatch.ts',
+      'packages/runtime/project-plane/worker/worker-events.ts',
       'packages/runtime/project-plane/supervision/close-report.ts',
-      'packages/runtime/project-runtime/project-run.ts',
+      'packages/runtime/project-runtime/project-runtime.ts',
       'packages/runtime/astro-project-adapter/seam-readers.ts',
     ];
     for (const file of covered) {
