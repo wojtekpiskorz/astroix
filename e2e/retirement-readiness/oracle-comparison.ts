@@ -1,10 +1,6 @@
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import {
-  hasCandidateRoutes,
-  pickNavigableCandidate,
-} from '../../packages/core/src/route-resolver.ts';
 import { spliceText } from '../../packages/core/src/splice-writer.ts';
 import type {
   CssSpliceFixture,
@@ -17,6 +13,7 @@ import type {
   RouteResolutionFixture,
   RoutesFixture,
 } from '../behavior-contracts/schema/inspection-contract.ts';
+import { recomputeEntryResolutions } from './entry-resolutions.ts';
 
 /**
  * The readiness live-comparison leg (#214, AC-1/AC-2): runs against a
@@ -100,7 +97,13 @@ async function postJson<T>(
   return { status: response.status, body: (await response.json()) as T };
 }
 
-/** Relativize astro's `image()` projection (`/@fs<root>/src/...` → `/src/...`) — the corpus's scrub. */
+/**
+ * Relativize astro's `image()` projection (`/@fs<root>/src/...` → `/src/...`).
+ * PINNED COPY of `scrubAbsolutePaths` in `e2e/contract-oracle/live-capture.ts`
+ * (outside this suite's owned paths, deliberately not imported): the two
+ * must move together — a scrub change on either side re-churns what the
+ * deep-compares see against the frozen bytes.
+ */
 function scrubAbsolutePaths<T>(value: T, root: string): T {
   const scrub = (node: unknown): unknown => {
     if (typeof node === 'string') {
@@ -169,31 +172,9 @@ export async function compareOracleEvidence(
   );
   const frozenHello = frozenRawTruth.reads.find((read) => read.file === helloPath);
 
-  // route resolution recomputed through the RETAINED resolver over live payloads
-  const collectionsIndex = Object.fromEntries(
-    liveCollections.map((collection) => [
-      collection.name,
-      collection.entries.map((entry) => entry.id),
-    ]),
-  );
-  const seen = new Set<string>();
-  const recomputed: RouteResolutionFixture['entryResolutions'] = [];
-  for (const collection of liveCollections) {
-    for (const entry of collection.entries) {
-      if (seen.has(entry.id)) continue;
-      seen.add(entry.id);
-      const hasCandidates = hasCandidateRoutes(entry.id, liveRoutes);
-      recomputed.push({
-        entryId: entry.id,
-        holderCollections: Object.keys(collectionsIndex).filter((name) =>
-          collectionsIndex[name]?.includes(entry.id),
-        ),
-        candidateUrl: pickNavigableCandidate(entry.id, liveRoutes, collectionsIndex),
-        hasCandidateRoutes: hasCandidates,
-        unrouted: !hasCandidates,
-      });
-    }
-  }
+  // route resolution recomputed through the RETAINED resolver over live
+  // payloads (the shared composition both readiness legs deep-compare with)
+  const recomputed = recomputeEntryResolutions(liveCollections, liveRoutes);
 
   // --- write side: reproduce the frozen css-splice cycle ---
   const baseline = await getJson<{ contents: string }>(

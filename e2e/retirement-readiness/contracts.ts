@@ -1,34 +1,14 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import type { z } from 'zod';
 import { parseEntryDraft, serializeEntry } from '../../packages/core/src/entry-writer.ts';
-import {
-  type CollectionsIndex,
-  hasCandidateRoutes,
-  pickNavigableCandidate,
-  type RouteInfo,
-  resolveActiveEntry,
-} from '../../packages/core/src/route-resolver.ts';
+import { resolveActiveEntry } from '../../packages/core/src/route-resolver.ts';
 import { spliceText } from '../../packages/core/src/splice-writer.ts';
-import type {
-  ContentBodyWriteFixture,
-  ContentValidateFixture,
-  ContentWriteFixture,
-  CssScopedSpliceFixture,
-  CssSpliceFixture,
-  EditConflictFixture,
-  EditNegativesFixture,
-} from '../behavior-contracts/schema/edit-contract.ts';
 import { editFixtureSchemas } from '../behavior-contracts/schema/edit-contract.ts';
-import type {
-  CollectionsFixture,
-  ContentSchemasFixture,
-  CssIndexFixture,
-  RawTruthFixture,
-  RouteResolutionFixture,
-  RoutesFixture,
-} from '../behavior-contracts/schema/inspection-contract.ts';
+import type { CssIndexFixture } from '../behavior-contracts/schema/inspection-contract.ts';
 import { fixtureSchemas } from '../behavior-contracts/schema/inspection-contract.ts';
+import { buildCollectionsIndex, recomputeEntryResolutions } from './entry-resolutions.ts';
 
 /**
  * The readiness contracts leg (#214, AC-1): validates EVERY frozen B1/B2
@@ -103,24 +83,32 @@ function readFixture(relative: string): string {
   return readFileSync(join(CONTRACTS_DIR, relative), 'utf8');
 }
 
-function parseInspection<K extends keyof typeof fixtureSchemas>(name: string): unknown {
+/** Each frozen inspection fixture's parsed shape, keyed by fixture name. */
+type InspectionFixtureData = {
+  [K in keyof typeof fixtureSchemas]: z.infer<(typeof fixtureSchemas)[K]>;
+};
+
+/** Each frozen edit fixture's parsed shape, keyed by fixture name. */
+type EditFixtureData = {
+  [K in keyof typeof editFixtureSchemas]: z.infer<(typeof editFixtureSchemas)[K]>;
+};
+
+function parseInspection<K extends keyof typeof fixtureSchemas>(name: K): InspectionFixtureData[K] {
   const raw: unknown = JSON.parse(readFixture(`inspection/${name}`));
-  const schema = fixtureSchemas[name as K];
-  const result = schema.safeParse(raw);
+  const result = fixtureSchemas[name].safeParse(raw);
   if (!result.success) {
     throw new Error(`inspection fixture ${name} fails its schema: ${result.error.message}`);
   }
-  return result.data;
+  return result.data as InspectionFixtureData[K];
 }
 
-function parseEdit<K extends keyof typeof editFixtureSchemas>(name: string): unknown {
+function parseEdit<K extends keyof typeof editFixtureSchemas>(name: K): EditFixtureData[K] {
   const raw: unknown = JSON.parse(readFixture(`edit/${name}`));
-  const schema = editFixtureSchemas[name as K];
-  const result = schema.safeParse(raw);
+  const result = editFixtureSchemas[name].safeParse(raw);
   if (!result.success) {
     throw new Error(`edit fixture ${name} fails its schema: ${result.error.message}`);
   }
-  return result.data;
+  return result.data as EditFixtureData[K];
 }
 
 function sha256(text: string): string {
@@ -131,7 +119,8 @@ function sha256(text: string): string {
 class Checks {
   readonly done: string[] = [];
   constructor(readonly family: ContractFamily) {}
-  that(what: string, condition: boolean): void {
+  /** Asserts `condition` and narrows it for the caller (the throw is the failure). */
+  that(what: string, condition: boolean): asserts condition {
     if (!condition) throw new Error(`${this.family}: ${what}`);
     this.done.push(what);
   }
@@ -140,9 +129,9 @@ class Checks {
 // --- per-family validation over the parsed, schema-validated fixtures ---
 
 function validateInspection(checks: Checks): void {
-  const collections = parseInspection('collections.json') as CollectionsFixture;
-  const schemas = parseInspection('content-schemas.json') as ContentSchemasFixture;
-  const rawTruth = parseInspection('raw-truth.json') as RawTruthFixture;
+  const collections = parseInspection('collections.json');
+  const schemas = parseInspection('content-schemas.json');
+  const rawTruth = parseInspection('raw-truth.json');
 
   // collections: served order is code-unit sorted, entries id-sorted, paths confined
   const names = collections.collections.map((collection) => collection.name);
@@ -191,8 +180,8 @@ function validateInspection(checks: Checks): void {
 }
 
 function validateSelector(checks: Checks): void {
-  const attribute = parseInspection('css-index.attribute.json') as CssIndexFixture;
-  const where = parseInspection('css-index.where.json') as CssIndexFixture;
+  const attribute = parseInspection('css-index.attribute.json');
+  const where = parseInspection('css-index.where.json');
 
   for (const [name, corpus, cidForm] of [
     ['attribute', attribute, '[data-astro-cid-'],
@@ -232,9 +221,9 @@ function validateSelector(checks: Checks): void {
 }
 
 function validateRoute(checks: Checks): void {
-  const routes = parseInspection('routes.json') as RoutesFixture;
-  const resolution = parseInspection('route-resolution.json') as RouteResolutionFixture;
-  const collections = parseInspection('collections.json') as CollectionsFixture;
+  const routes = parseInspection('routes.json');
+  const resolution = parseInspection('route-resolution.json');
+  const collections = parseInspection('collections.json');
 
   checks.that(
     'the route payload enumerates the canonical patterns',
@@ -255,32 +244,9 @@ function validateRoute(checks: Checks): void {
 
   // route resolution re-derived through the RETAINED resolver over the
   // frozen payloads — the replacement's truth, not the legacy runtime's
-  const collectionsIndex: CollectionsIndex = Object.fromEntries(
-    collections.collections.map((collection) => [
-      collection.name,
-      collection.entries.map((entry) => entry.id),
-    ]),
-  );
-  const routeInfos: ReadonlyArray<RouteInfo> = routes.routes.map((route) => ({ ...route }));
-  const seen = new Set<string>();
-  const recomputed = [] as RouteResolutionFixture['entryResolutions'];
-  for (const collection of collections.collections) {
-    for (const entry of collection.entries) {
-      if (seen.has(entry.id)) continue;
-      seen.add(entry.id);
-      const holders = Object.keys(collectionsIndex).filter((name) =>
-        (collectionsIndex[name] ?? []).includes(entry.id),
-      );
-      const hasCandidates = hasCandidateRoutes(entry.id, routeInfos);
-      recomputed.push({
-        entryId: entry.id,
-        holderCollections: holders,
-        candidateUrl: pickNavigableCandidate(entry.id, routeInfos, collectionsIndex),
-        hasCandidateRoutes: hasCandidates,
-        unrouted: !hasCandidates,
-      });
-    }
-  }
+  // (the shared composition both readiness legs deep-compare with)
+  const collectionsIndex = buildCollectionsIndex(collections.collections);
+  const recomputed = recomputeEntryResolutions(collections.collections, routes.routes);
   checks.that(
     'the retained route resolver reproduces every frozen entry resolution',
     JSON.stringify(recomputed) === JSON.stringify(resolution.entryResolutions),
@@ -289,7 +255,7 @@ function validateRoute(checks: Checks): void {
     'every frozen url probe resolves through the retained resolver',
     resolution.urlProbes.every(
       (probe) =>
-        JSON.stringify(resolveActiveEntry(routeInfos, probe.url, collectionsIndex)) ===
+        JSON.stringify(resolveActiveEntry(routes.routes, probe.url, collectionsIndex)) ===
         JSON.stringify(probe.resolved ?? null),
     ),
   );
@@ -304,12 +270,12 @@ function validateRoute(checks: Checks): void {
 }
 
 function validateEdit(checks: Checks): void {
-  const splice = parseEdit('css-splice.json') as CssSpliceFixture;
-  const scoped = parseEdit('css-scoped-splice.json') as CssScopedSpliceFixture;
-  const frontmatter = parseEdit('content-frontmatter-write.json') as ContentWriteFixture;
-  const body = parseEdit('content-body-write.json') as ContentBodyWriteFixture;
-  const validate = parseEdit('content-validate.json') as ContentValidateFixture;
-  const negatives = parseEdit('edit-negatives.json') as EditNegativesFixture;
+  const splice = parseEdit('css-splice.json');
+  const scoped = parseEdit('css-scoped-splice.json');
+  const frontmatter = parseEdit('content-frontmatter-write.json');
+  const body = parseEdit('content-body-write.json');
+  const validate = parseEdit('content-validate.json');
+  const negatives = parseEdit('edit-negatives.json');
 
   // css splice: the retained splice-writer re-derives the frozen after bytes
   const spliced = spliceText(splice.baseline.contents, {
@@ -351,7 +317,6 @@ function validateEdit(checks: Checks): void {
       `${name}: the baseline parses through the retained entry-writer`,
       baseline !== null,
     );
-    if (baseline === null) return;
     const written = serializeEntry({
       raw: fixture.baseline.contents,
       baseline,
@@ -399,8 +364,8 @@ function validateEdit(checks: Checks): void {
 
 function validateConflict(checks: Checks): void {
   for (const [name, fixture] of [
-    ['css-conflict', parseEdit('css-conflict.json') as EditConflictFixture],
-    ['content-conflict', parseEdit('content-conflict.json') as EditConflictFixture],
+    ['css-conflict', parseEdit('css-conflict.json')],
+    ['content-conflict', parseEdit('content-conflict.json')],
   ] as const) {
     checks.that(`${name}: the stale attempt is refused with 409`, fixture.response.status === 409);
     checks.that(
@@ -426,8 +391,8 @@ function validateConflict(checks: Checks): void {
 function validateOutputBytes(checks: Checks): void {
   // the splice window: every byte outside the range survives identically
   for (const [name, fixture] of [
-    ['css-splice', parseEdit('css-splice.json') as CssSpliceFixture],
-    ['css-scoped-splice', parseEdit('css-scoped-splice.json') as CssScopedSpliceFixture],
+    ['css-splice', parseEdit('css-splice.json')],
+    ['css-scoped-splice', parseEdit('css-scoped-splice.json')],
   ] as const) {
     const prefix = fixture.baseline.contents.slice(0, fixture.edit.range.start);
     const suffix = fixture.baseline.contents.slice(fixture.edit.range.end);
@@ -437,8 +402,8 @@ function validateOutputBytes(checks: Checks): void {
     );
   }
   // whole-file writes: posted bytes equal disk bytes, frontmatter surgical
-  const frontmatter = parseEdit('content-frontmatter-write.json') as ContentWriteFixture;
-  const body = parseEdit('content-body-write.json') as ContentBodyWriteFixture;
+  const frontmatter = parseEdit('content-frontmatter-write.json');
+  const body = parseEdit('content-body-write.json');
   checks.that(
     'content-frontmatter-write: every preserved line is byte-identical in baseline and written bytes',
     frontmatter.preserved.every(
@@ -452,7 +417,7 @@ function validateOutputBytes(checks: Checks): void {
       body.after.contents.startsWith(body.preservedPrefix),
   );
   // conflicts and negatives leave the disk exactly as the race left it
-  const negatives = parseEdit('edit-negatives.json') as EditNegativesFixture;
+  const negatives = parseEdit('edit-negatives.json');
   checks.that(
     'edit-negatives: no negative ever touched the disk',
     negatives.disk.before.contents === negatives.disk.after.contents,
@@ -476,8 +441,12 @@ const FAMILY_VALIDATORS: Record<ContractFamily, (checks: Checks) => void> = {
  */
 export function validateContractFamilies(): readonly FamilyReadiness[] {
   // every fixture parses through its schema before any family logic runs
-  for (const name of Object.keys(fixtureSchemas)) parseInspection(name);
-  for (const name of Object.keys(editFixtureSchemas)) parseEdit(name);
+  for (const name of Object.keys(fixtureSchemas) as Array<keyof typeof fixtureSchemas>) {
+    parseInspection(name);
+  }
+  for (const name of Object.keys(editFixtureSchemas) as Array<keyof typeof editFixtureSchemas>) {
+    parseEdit(name);
+  }
 
   // total coverage: every frozen manifest file belongs to at least one family
   const manifestFiles = [

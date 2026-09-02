@@ -85,21 +85,21 @@ test('retained UI: the presentation surface is uncoupled and runs over contract-
   // (b) the mount lane: run the readiness presentation mounts (this
   // directory's own vitest lane) and require a green, NON-EMPTY run —
   // the widgets literally run against schema-validated contract data.
-  const output = execSync('npx vitest run --config e2e/retirement-readiness/vitest.config.ts', {
-    encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-  // strip vitest's ANSI color codes before parsing the summary (the ESC
-  // byte is built at runtime — biome keeps control chars out of literals)
-  const ansi = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, 'g');
-  const plain = output.replace(ansi, '');
-  const passed = /Tests\s+(\d+)\s+passed/.exec(plain)?.[1];
+  // The JSON reporter is parsed (numPassedTests), never vitest's human
+  // summary text — a vitest bump rewording prose cannot redden this leg.
+  const output = execSync(
+    'npx vitest run --config e2e/retirement-readiness/vitest.config.ts --reporter=json',
+    { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] },
+  );
+  const summary = JSON.parse(output) as { numPassedTests?: number; numTotalTests?: number };
   expect(
-    passed,
-    `the presentation mount lane must pass (output: ${plain.slice(-400)})`,
-  ).toBeDefined();
-  expect(Number(passed)).toBeGreaterThan(0);
-  console.info(`[readiness] presentation mount lane: ${passed} tests green, 0 coupling offenders`);
+    summary.numPassedTests,
+    `the presentation mount lane must pass (output: ${output.slice(-400)})`,
+  ).toBe(summary.numTotalTests);
+  expect(summary.numPassedTests).toBeGreaterThan(0);
+  console.info(
+    `[readiness] presentation mount lane: ${summary.numPassedTests} tests green, 0 coupling offenders`,
+  );
 });
 
 test('fixture: the canonical fixture is plain and its production build carries zero astroix bytes', () => {
