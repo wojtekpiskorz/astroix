@@ -24,19 +24,34 @@ import type { GrantedResource } from '../grants/grant-table.ts';
  */
 
 /**
- * The verified world state one commit proceeds from: the current text of
- * an existing target (the exact bytes the digest proved) plus its
- * preserved mode, or the confirmed-absent creation slot.
+ * The verified world state one commit proceeds from — the PROVEN commit
+ * target, not a re-reading of the plan: the existing variant carries the
+ * canonical path validation re-resolved (realpath-equal to the grant's
+ * binding and contained in the root), the exact bytes the digest proved,
+ * and the permission bits the replacement preserves; the creation variant
+ * carries the canonical parent and file name of the confirmed-absent
+ * slot. The commit discipline binds to these and nothing else — there is
+ * no second read of the plan's target fields between validation and the
+ * write.
  */
 export type FinalValidation =
   | {
       readonly ok: true;
       readonly kind: 'existing';
+      /** The re-resolved canonical path the digest and link checks ran against. */
+      readonly canonicalPath: string;
       readonly text: string;
       /** The target's current permission bits — the replacement preserves them exactly. */
       readonly mode: number;
     }
-  | { readonly ok: true; readonly kind: 'creation' }
+  | {
+      readonly ok: true;
+      readonly kind: 'creation';
+      /** The re-resolved canonical parent the expected-absent check ran under. */
+      readonly canonicalParent: string;
+      /** The single file segment whose absence was just proven. */
+      readonly fileName: string;
+    }
   | { readonly ok: false; code: FinalValidationCode; message: string };
 
 /** The world-half rejection codes (the session/grant/operation halves live in the executor core). */
@@ -91,7 +106,13 @@ export async function validateExistingTarget(resource: GrantedResource): Promise
   if (info.nlink > 1) return invalid('hard-linked-target');
   const bytes = await readFile(canonical);
   if (sha256Hex(bytes) !== baseline.sha256) return invalid('changed-baseline');
-  return { ok: true, kind: 'existing', text: bytes.toString('utf8'), mode: info.mode & 0o7777 };
+  return {
+    ok: true,
+    kind: 'existing',
+    canonicalPath: canonical,
+    text: bytes.toString('utf8'),
+    mode: info.mode & 0o7777,
+  };
 }
 
 /** Repeats the full world check for one granted creation slot. */
@@ -112,7 +133,9 @@ export async function validateCreationTarget(resource: GrantedResource): Promise
   try {
     await lstat(join(parent, target.fileName));
   } catch (error) {
-    if (isNoEntity(error)) return { ok: true, kind: 'creation' };
+    if (isNoEntity(error)) {
+      return { ok: true, kind: 'creation', canonicalParent: parent, fileName: target.fileName };
+    }
     throw error;
   }
   return invalid('target-exists');

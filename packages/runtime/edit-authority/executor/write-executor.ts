@@ -166,15 +166,17 @@ export function createWriteExecutor(options: WriteExecutorOptions): WriteExecuto
     }
 
     // ——— the commit discipline ———
+    // Binding to what validation PROVED, never a re-reading of the plan's
+    // target: checkFacts already established the operation/target species
+    // coherence, the validation dispatch ran the matching world check,
+    // and FinalValidation carries the exact canonical target (path or
+    // parent+name) the checks proved — so the commit discriminates on the
+    // proven kind alone and there is no second coherence branch here.
     try {
-      if (plan.operation === 'create-contents') {
-        if (resource.target.type !== 'creation') return writeRejection('operation-target-mismatch');
-        await createExclusive(resource.target.canonicalParent, resource.target.fileName, nextText);
+      if (world.kind === 'creation') {
+        await createExclusive(world.canonicalParent, world.fileName, nextText);
       } else {
-        if (resource.target.type !== 'existing' || world.kind !== 'existing') {
-          return writeRejection('operation-target-mismatch');
-        }
-        await replaceExisting(resource.target.canonicalPath, nextText, world.mode);
+        await replaceExisting(world.canonicalPath, nextText, world.mode);
       }
     } catch (error) {
       if (error instanceof CommitError) return writeFailure(error.code);
