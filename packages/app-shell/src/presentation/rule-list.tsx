@@ -1,22 +1,33 @@
-import { type IndexPayloadRecord, matchRules } from '../../../core/matcher';
-import type { Selection } from '../../store';
-import { useCssStore } from './store';
+import type { RuleFileTargetView, RuleMatchView } from './types';
 
 /**
- * The rule list: on selection, the matcher runs over the index payload
- * against the canvas element (its own document context). Presentation shows
+ * The rule list (#219, lane C2): the CSS vertical's inspection list,
+ * extracted from the integration-era app shell as a prop-driven widget. The owner
+ * (adapter or replacement host) runs the matcher over the index payload
+ * against its own selection and passes the positioned matches in — the
+ * widget holds no payload, no canvas element, no store. Presentation shows
  * source-space selectors — the cid hash lives only in effective selectors
  * and is never displayed.
  */
-export function RuleList({
-  payload,
-  selection,
-}: {
-  payload: IndexPayloadRecord[] | undefined;
-  selection: Selection | null;
-}) {
-  const openEditor = useCssStore((state) => state.openEditor);
-  if (selection === null) {
+
+interface RuleListProps {
+  /**
+   * The matcher's positioned output (inspection data): matched rules sorted
+   * by specificity with the cascade winner marked. `null` = the index
+   * payload is still loading.
+   */
+  matches: readonly RuleMatchView[] | null;
+  /** Whether the app shell holds a canvas selection (presentation-only state). */
+  hasSelection: boolean;
+  /**
+   * Edit intent: a rule click assembles its file's target — every place that
+   * file styles the current selection — and hands it to the owner.
+   */
+  onOpenFile: (target: RuleFileTargetView) => void;
+}
+
+export function RuleList({ matches, hasSelection, onOpenFile }: RuleListProps) {
+  if (!hasSelection) {
     return (
       <section data-astroix-rules="no-selection" className="text-slate-500">
         <h2 className="mb-1 text-xs font-semibold tracking-widest text-slate-500 uppercase">
@@ -26,7 +37,7 @@ export function RuleList({
       </section>
     );
   }
-  if (payload === undefined) {
+  if (matches === null) {
     return (
       <section data-astroix-rules="loading" className="text-slate-500">
         <h2 className="mb-1 text-xs font-semibold tracking-widest text-slate-500 uppercase">
@@ -36,8 +47,6 @@ export function RuleList({
       </section>
     );
   }
-
-  const matches = matchRules(payload, selection.element);
   if (matches.length === 0) {
     return (
       <section data-astroix-rules="empty" className="text-slate-500">
@@ -54,11 +63,11 @@ export function RuleList({
     placesPerFile.set(match.record.file, (placesPerFile.get(match.record.file) ?? 0) + 1);
   }
 
-  const openRule = (match: (typeof matches)[number]): void => {
+  const openRule = (match: RuleMatchView): void => {
     // the editor shows the whole file; the chips jump between every place
     // that file styles the current selection
     const fileMatches = matches.filter((m) => m.record.file === match.record.file);
-    openEditor({
+    onOpenFile({
       file: match.record.file,
       ranges: fileMatches.map((m) => ({
         start: m.record.range.start,
