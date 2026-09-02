@@ -3,7 +3,8 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { type EntryDraft, parseEntryDraft } from '@wojciechpiskorz/astroix-core';
 import type { AdapterError } from '../adapter-error';
-import { CONTENT_CONFIG_MODULE, contentSeamRejected, SEAM_CONTENT_CONFIG } from './content-probes';
+import { seamRejection } from '../adapter-error';
+import { CONTENT_CONFIG_MODULE, SEAM_CONTENT_CONFIG } from './content-probes';
 
 /**
  * The per-entry and per-config baseline reads (#228): the source files'
@@ -65,7 +66,7 @@ export async function readConfigBaseline(projectRoot: string): Promise<string> {
     const bytes = await readFile(join(projectRoot, CONTENT_CONFIG_MODULE));
     return createHash('sha256').update(bytes).digest('hex');
   } catch (cause) {
-    throw contentSeamRejected(
+    throw seamRejection(
       SEAM_CONTENT_CONFIG,
       'fail-closed private',
       `a readable content config module (${CONTENT_CONFIG_MODULE})`,
@@ -76,7 +77,7 @@ export async function readConfigBaseline(projectRoot: string): Promise<string> {
 }
 
 function baselineRejection(filePath: string, cause: unknown): AdapterError {
-  return contentSeamRejected(
+  return seamRejection(
     'astro:content entry source file',
     'fail-closed private',
     `a readable entry source file (${filePath})`,

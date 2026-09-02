@@ -141,83 +141,114 @@ export function touchedFunctions(
   );
 }
 
+// ——— the covered-tier dispatch, as data (#311) ———
+// Each lane's tier decision is one entry below, never another clause in a
+// boolean: a covered tree adds a prefix, an IO-composition file whose
+// truth is a certification suite or a process lane (not unit fakes) adds
+// an exact path to the watchlist exceptions, an evidence subtree adds a
+// watchlist prefix. The per-lane history rides beside its entries.
+
+/**
+ * Trees where per-function unit coverage is real — CRAP's only honest
+ * home. Everything else under the risk roots is a CC-only watchlist row.
+ */
+const COVERED_PREFIXES: readonly string[] = [
+  // `src/core` — this tooling layer itself, unit-covered (it stayed here
+  // when the editing modules moved to packages/core, #212; the
+  // compatibility shims died at the retirement gate, #215).
+  'src/core/',
+  // `packages/core` since #212 and `packages/protocol` since #220: pure
+  // modules with colocated unit tests.
+  'packages/core/',
+  'packages/protocol/',
+  // `packages/runtime/registry` since #221: deterministic real-filesystem
+  // unit tests over temp directories.
+  'packages/runtime/registry/',
+  // `packages/runtime/{kernel-lease,private-boot}` since #222: the
+  // boot-authority seams — deterministic unit tests over real temp SQLite
+  // lease files and a real in-memory private-IPC channel, with the forked
+  // process lanes asserting the cross-process semantics on the same
+  // modules.
+  'packages/runtime/kernel-lease/',
+  'packages/runtime/private-boot/',
+  // `packages/runtime/edit-authority` — the grant/planning seams since
+  // #223 (pure grant lifecycle and planning logic over real temp roots,
+  // the registry seam's covered-tier decision) and the executor since
+  // #224 (the serialized write discipline, same deterministic-units
+  // ruling).
+  'packages/runtime/edit-authority/',
+  // `packages/runtime/project-plane` since #230/#231: the worker seams —
+  // the dispatch/revision/invalidation/cleanup state machine, the typed
+  // contracts, and the IPC serving loop (deterministic units over
+  // dispatch-boundary fakes + real forked children, the #222 process-lane
+  // idiom) — plus the supervision/managed-astro pure decision logic
+  // (exact-child spawn plans, the minimal child environment, the
+  // close-report classifier, the managed dev-server spawn plan).
+  'packages/runtime/project-plane/',
+  // `packages/runtime/project-runtime` since #232: the facade's pure
+  // sequencing/redaction layer over the injected launch + health seams
+  // and the declared proxy-health prerequisite (deterministic units over
+  // supervisor/wire fakes).
+  'packages/runtime/project-runtime/',
+  // `packages/runtime/astro-project-adapter` since #225: the pure seams —
+  // pair gate, resolution, seam probes, runner accounting (#225), the
+  // styles join's correspondence join + source walk (#226), the
+  // convergence parity classifier + revisioned invalidation source
+  // (#227), the content inspection seams (#228), and the routes
+  // inspection seams (#229) — deterministic unit tests with
+  // resolution-layer stubs.
+  'packages/runtime/astro-project-adapter/',
+];
+
+/**
+ * Watchlist exception files under a covered prefix: real IO composition
+ * whose behavioral truth is a certification suite or a process lane, not
+ * unit fakes at the behavior layer — CC-only rows (metric honesty).
+ */
+const WATCHLIST_EXCEPTION_FILES: ReadonlySet<string> = new Set([
+  // #225: the adapter's IO seam — its truth is the real-install
+  // certification suite (`npm run certify:adapter`).
+  'packages/runtime/astro-project-adapter/composition.ts',
+  // #226: the styles join's client-environment IO composition — same
+  // truth as composition.ts (route-styles.ts stays the join's internal
+  // leg).
+  'packages/runtime/astro-project-adapter/styles/join/client-scoped-css.ts',
+  'packages/runtime/astro-project-adapter/styles/join/route-styles.ts',
+  // #227: the converged-styles inspection's IO composition — watchlist
+  // for the same reason as the join's.
+  'packages/runtime/astro-project-adapter/styles/convergence/converged-styles-inspection.ts',
+  // #230: the plane's real IO glue — composition-runtime.ts boots the
+  // adapter's composition server, worker-child.ts is the forked entry;
+  // their truth is the certification suite and the packaged runtime.
+  'packages/runtime/project-plane/composition/composition-runtime.ts',
+  'packages/runtime/project-plane/worker/worker-child.ts',
+  // #231: the real process IO — plane-supervisor.ts spawns, signals, and
+  // reaps; dev-server.ts probes the managed dev server's readiness.
+  'packages/runtime/project-plane/supervision/plane-supervisor.ts',
+  'packages/runtime/project-plane/managed-astro/dev-server.ts',
+  // #232: the production launch composition — canonical-root resolution,
+  // the project's own astro CLI lookup, real children through the
+  // supervisor; its truth is the supervision process lane.
+  'packages/runtime/project-runtime/plane-launch.ts',
+]);
+
+/**
+ * Watchlist exception subtrees: evidence machinery kept off the covered
+ * tier wholesale.
+ */
+const WATCHLIST_EXCEPTION_PREFIXES: readonly string[] = [
+  // #297: the certification harness — real-install evidence machinery
+  // over the canonical fixture, never shipped product code (the report
+  // layer already keeps it out of risk scope; this keeps the tier
+  // decision true for any caller of the tier dispatch itself).
+  'packages/runtime/astro-project-adapter/certification/',
+];
+
 /** The layer where per-function unit coverage is real — CRAP's only honest home. */
 function isCoreFile(relPath: string): boolean {
-  // packages/core since #212; packages/protocol since #220 (pure zod
-  // schemas + pure helpers with colocated unit tests — the covered tier);
-  // src/core keeps the CRAP tooling layer — unit-covered (the
-  // compatibility shims died at the retirement gate, #215; what remains
-  // under src/core is this tooling itself); packages/runtime/registry
-  // since #221 (deterministic real-filesystem unit tests over temp dirs);
-  // packages/runtime/{kernel-lease,private-boot} since #222 (the
-  // boot-authority seams: deterministic unit tests over real temp SQLite
-  // lease files and a real in-memory private-IPC channel, with the
-  // forked process lanes asserting the cross-process semantics on the
-  // same modules); the AstroProjectAdapter's pure seams
-  // since #225 (pair gate, resolution, seam probes, runner accounting —
-  // deterministic unit tests with resolution-layer stubs) — all except
-  // composition.ts, the adapter's IO seam, whose truth is the
-  // real-install certification suite (`npm run certify:adapter`), not
-  // unit fakes at the behavior layer: it stays on the CC-only watchlist.
-  // The styles join's pure seams since #226 (correspondence join, source
-  // walk, shared rejection helper — deterministic units; the
-  // client-environment IO composition files stay watchlist like
-  // composition.ts: their behavior-layer truth is the certification
-  // suite, the units only exercise their own rejection wiring). The
-  // styles convergence seams since #227 (parity classifier + revisioned
-  // invalidation source — deterministic units; the converged-inspection
-  // IO composition is watchlist for the same reason). The
-  // edit-authority grant/planning seams since #223: pure grant lifecycle
-  // and planning logic over real temp roots (same covered-tier decision
-  // as the registry seam, #221) — the executor lane (D5) decides its own
-  // tier when it lands.
-  const adapterWatchlist =
-    relPath === 'packages/runtime/astro-project-adapter/composition.ts' ||
-    relPath === 'packages/runtime/astro-project-adapter/styles/join/client-scoped-css.ts' ||
-    relPath === 'packages/runtime/astro-project-adapter/styles/join/route-styles.ts' ||
-    relPath ===
-      'packages/runtime/astro-project-adapter/styles/convergence/converged-styles-inspection.ts';
-  // The project-plane worker seams since #230: the dispatch/revision/
-  // invalidation/cleanup state machine, the typed request/failure/event
-  // contracts, and the IPC serving loop are covered (deterministic units
-  // over dispatch-boundary fakes + real forked children, the #222
-  // process-lane idiom). The real IO glue — composition-runtime.ts (boots
-  // the adapter's composition server) and worker-child.ts (the forked
-  // entry) — is watchlist like the adapter's composition.ts: its truth is
-  // the real-install certification suite and the packaged runtime.
-  // The plane supervision + managed-astro seams since #231: the pure
-  // decision logic (exact-child plans, the minimal child environment,
-  // the close-report classifier, the managed dev-server spawn plan) is
-  // covered (deterministic units + the real-child supervision lane); the
-  // real process IO — plane-supervisor.ts (spawns, signals, reaps) and
-  // the dev-server readiness probe — is watchlist for the same reason.
-  const projectPlaneWatchlist =
-    relPath === 'packages/runtime/project-plane/composition/composition-runtime.ts' ||
-    relPath === 'packages/runtime/project-plane/worker/worker-child.ts' ||
-    relPath === 'packages/runtime/project-plane/supervision/plane-supervisor.ts' ||
-    relPath === 'packages/runtime/project-plane/managed-astro/dev-server.ts';
-  // The project-runtime facade seams since #232: the pure
-  // sequencing/redaction layer over the injected launch + health seams
-  // and the declared proxy-health prerequisite are covered (deterministic
-  // units over supervisor/wire fakes); the production launch composition
-  // (plane-launch.ts — canonical-root resolution, the project's own astro
-  // CLI lookup, real children through the supervisor) is watchlist like
-  // the plane's other IO glue: its truth is the supervision process lane
-  // over the same ingredients.
-  const projectRuntimeWatchlist = relPath === 'packages/runtime/project-runtime/plane-launch.ts';
-  return (
-    (relPath.startsWith('src/core/') ||
-      relPath.startsWith('packages/core/') ||
-      relPath.startsWith('packages/protocol/') ||
-      relPath.startsWith('packages/runtime/registry/') ||
-      relPath.startsWith('packages/runtime/kernel-lease/') ||
-      relPath.startsWith('packages/runtime/private-boot/') ||
-      relPath.startsWith('packages/runtime/edit-authority/') ||
-      (relPath.startsWith('packages/runtime/project-plane/') && !projectPlaneWatchlist) ||
-      (relPath.startsWith('packages/runtime/project-runtime/') && !projectRuntimeWatchlist) ||
-      (relPath.startsWith('packages/runtime/astro-project-adapter/') && !adapterWatchlist)) &&
-    !relPath.startsWith('packages/runtime/astro-project-adapter/certification/')
-  );
+  if (WATCHLIST_EXCEPTION_FILES.has(relPath)) return false;
+  if (WATCHLIST_EXCEPTION_PREFIXES.some((prefix) => relPath.startsWith(prefix))) return false;
+  return COVERED_PREFIXES.some((prefix) => relPath.startsWith(prefix));
 }
 
 /** The shadcn-generated tier: regenerated per ADR-0002, never hand-edited — visible in reports, never gated (owner ruling 2026-08-28, #62). The set lives at packages/app-shell (#218); the legacy src/client prefix died with the integration at the retirement gate (#215). */

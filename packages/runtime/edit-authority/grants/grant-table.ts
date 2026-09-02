@@ -12,6 +12,7 @@ import {
 import {
   isCanonicalDescendant,
   isCreationParent,
+  isFileNameSegment,
   sameSession,
   sha256Hex,
 } from './canonical-bounds';
@@ -527,18 +528,6 @@ function operationsAreSubset(
     requested.length > 0 &&
     new Set(requested).size === requested.length &&
     requested.every((operation) => species.includes(operation))
-  );
-}
-
-/** A creation file name is exactly one path segment — never traversal, separators, or dot names. */
-function isFileNameSegment(fileName: string): boolean {
-  return (
-    fileName.length > 0 &&
-    !fileName.includes('/') &&
-    !fileName.includes('\\') &&
-    !fileName.includes('\0') &&
-    fileName !== '.' &&
-    fileName !== '..'
   );
 }
 
