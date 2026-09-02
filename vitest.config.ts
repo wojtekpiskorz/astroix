@@ -129,6 +129,11 @@ export default defineConfig({
         // but stays collected here like the join's composition files —
         // metric honesty lives in the tier decision, not the collection.
         'packages/runtime/astro-project-adapter/styles/convergence/**',
+        // The edit-authority grant and planning seams (#223): pure grant
+        // lifecycle + planning logic with its filesystem truth over real
+        // temp roots — same covered-tier decision as the registry seam
+        // (#221), recorded in crap.ts.
+        'packages/runtime/edit-authority/**',
       ],
       reporter: ['json'],
       reportsDirectory: 'coverage',

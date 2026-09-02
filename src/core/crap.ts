@@ -151,7 +151,11 @@ function isCoreFile(relPath: string): boolean {
   // suite, the units only exercise their own rejection wiring). The
   // styles convergence seams since #227 (parity classifier + revisioned
   // invalidation source — deterministic units; the converged-inspection
-  // IO composition is watchlist for the same reason).
+  // IO composition is watchlist for the same reason). The
+  // edit-authority grant/planning seams since #223: pure grant lifecycle
+  // and planning logic over real temp roots (same covered-tier decision
+  // as the registry seam, #221) — the executor lane (D5) decides its own
+  // tier when it lands.
   const adapterWatchlist =
     relPath === 'packages/runtime/astro-project-adapter/composition.ts' ||
     relPath === 'packages/runtime/astro-project-adapter/styles/join/client-scoped-css.ts' ||
@@ -165,6 +169,7 @@ function isCoreFile(relPath: string): boolean {
       relPath.startsWith('packages/runtime/registry/') ||
       relPath.startsWith('packages/runtime/kernel-lease/') ||
       relPath.startsWith('packages/runtime/private-boot/') ||
+      relPath.startsWith('packages/runtime/edit-authority/') ||
       (relPath.startsWith('packages/runtime/astro-project-adapter/') && !adapterWatchlist)) &&
     !relPath.startsWith('packages/runtime/astro-project-adapter/certification/')
   );
