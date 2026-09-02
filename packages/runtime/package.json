@@ -2,14 +2,16 @@
   "name": "@wojciechpiskorz/astroix-runtime",
   "version": "0.0.0",
   "private": true,
-  "description": "The control plane — deep seams born incrementally per the rewrite DAG (ADR-0006 §9): the canonical project registry persistence first (#221); session supervision, project runtime, and edit authority land in their own lanes. The package barrel (index.ts) is owned by a later integration lane.",
+  "description": "The control plane — deep seams born incrementally per the rewrite DAG (ADR-0006 §9): the canonical project registry persistence (#221), then the private control-plane boot authority and the lifetime-held kernel leases (#222); session supervision, project runtime, and edit authority land in their own lanes. The package barrel (index.ts) is owned by a later integration lane.",
   "type": "module",
   "license": "MIT",
   "engines": {
     "node": ">=24"
   },
   "exports": {
-    "./registry": "./registry/project-registry.ts"
+    "./registry": "./registry/project-registry.ts",
+    "./kernel-lease": "./kernel-lease/kernel-lease.ts",
+    "./private-boot": "./private-boot/control-plane-boot.ts"
   },
   "sideEffects": false,
   "dependencies": {
