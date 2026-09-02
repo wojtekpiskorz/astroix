@@ -93,18 +93,8 @@ function readEntry(route: unknown, index: number): RouteMetadataEntry {
       observedShape(route),
     );
   }
-  if (typeof data.type !== 'string' || !isRouteType(data.type)) {
-    throw seamRejected(
-      `route ${index} with routeData.type one of ${ROUTE_TYPES.join(' | ')}`,
-      observedShape(route),
-    );
-  }
-  if (typeof data.origin !== 'string' || !isRouteOrigin(data.origin)) {
-    throw seamRejected(
-      `route ${index} with routeData.origin one of ${ROUTE_ORIGINS.join(' | ')}`,
-      observedShape(route),
-    );
-  }
+  const type = readRouteType(data.type, index, route);
+  const origin = readRouteOrigin(data.origin, index, route);
   if (typeof data.prerender !== 'boolean') {
     throw seamRejected(`route ${index} with a boolean routeData.prerender`, observedShape(route));
   }
@@ -118,12 +108,40 @@ function readEntry(route: unknown, index: number): RouteMetadataEntry {
   return {
     pattern: data.route,
     component: data.component,
-    type: data.type,
-    origin: data.origin,
+    type,
+    origin,
     prerender: data.prerender,
     params: [...data.params],
     segments,
   };
+}
+
+function readRouteType(
+  value: unknown,
+  index: number,
+  route: unknown,
+): (typeof ROUTE_TYPES)[number] {
+  if (typeof value !== 'string' || !isRouteType(value)) {
+    throw seamRejected(
+      `route ${index} with routeData.type one of ${ROUTE_TYPES.join(' | ')}`,
+      observedShape(route),
+    );
+  }
+  return value;
+}
+
+function readRouteOrigin(
+  value: unknown,
+  index: number,
+  route: unknown,
+): (typeof ROUTE_ORIGINS)[number] {
+  if (typeof value !== 'string' || !isRouteOrigin(value)) {
+    throw seamRejected(
+      `route ${index} with routeData.origin one of ${ROUTE_ORIGINS.join(' | ')}`,
+      observedShape(route),
+    );
+  }
+  return value;
 }
 
 function readSegments(

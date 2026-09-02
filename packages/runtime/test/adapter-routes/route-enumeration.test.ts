@@ -170,6 +170,28 @@ describe('enumerateRenders', () => {
       }),
     ).rejects.toBe('cancelled-wait');
   });
+
+  it('rejects a pending wait when the signal fires while it is genuinely in flight', async () => {
+    const controller = new AbortController();
+    const modules = new Map(fixtureRouteModules()).set('src/pages/blog/[slug].astro', {
+      getStaticPaths: () =>
+        new Promise<Array<{ params: { slug: string } }>>((resolve) => {
+          // The route's static paths are still being computed (a real
+          // getCollection read takes time) when the lifecycle cancels.
+          setTimeout(() => resolve([{ params: { slug: 'too-late' } }]), 60);
+        }),
+    });
+    setTimeout(() => controller.abort('cancelled-in-flight'), 10);
+    const fake = runner({ modules });
+    await expect(
+      enumerateRenders(fake, fixtureRouteMetadata(), {
+        ...OPTIONS,
+        signal: controller.signal,
+      }),
+    ).rejects.toBe('cancelled-in-flight');
+    // The abandoned route never settled the pass: the next route was not loaded.
+    expect(fake.importedIds).toEqual([entrypointOf('src/pages/blog/[slug].astro')]);
+  });
 });
 
 describe('render extraction', () => {
