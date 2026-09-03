@@ -46,7 +46,8 @@ export interface ClientCapabilityRequestDetails {
   readonly url: string;
   readonly webContentsId?: number;
   readonly resourceType?: string;
-  readonly requestHeaders: Record<string, string>;
+  /** Electron's real header shape: singular and array values both occur on the seam. */
+  readonly requestHeaders: Record<string, string | string[]>;
 }
 
 /** The one filter the injection registers — HTTP(S) only, per the seam's law. */

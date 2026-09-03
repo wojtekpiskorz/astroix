@@ -76,9 +76,18 @@ describe('installClientCapabilityInjection — the after-construction seam', () 
       url: `${OWNED_ORIGIN}/__astroix/api/v1/`,
       webContentsId: 7,
       resourceType: 'xhr',
-      requestHeaders: { 'X-ASTROIX-CLIENT': 'forged-renderer-value', Accept: 'application/json' },
+      requestHeaders: {
+        'X-ASTROIX-CLIENT': 'forged-renderer-value',
+        Accept: 'application/json',
+        // An array-valued header rides verbatim — the seam's real shape.
+        'X-Multi-Value': ['one', 'two'],
+      },
     });
-    expect(forwarded).toEqual({ 'x-astroix-client': CAPABILITY, Accept: 'application/json' });
+    expect(forwarded).toEqual({
+      'x-astroix-client': CAPABILITY,
+      Accept: 'application/json',
+      'X-Multi-Value': ['one', 'two'],
+    });
   });
 
   it('strips the forged header at a foreign origin even with a live binding (no secret leak)', () => {

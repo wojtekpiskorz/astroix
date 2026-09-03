@@ -29,13 +29,14 @@ import { CLIENT_CAPABILITY_HEADER } from '@wojciechpiskorz/astroix-runtime/api/h
  * case-insensitive spelling of the client header is removed, and the
  * canonical lowercase name is set to `injectable` when one exists. A new
  * object — the input is never mutated; every other header rides verbatim
- * (name bytes included, so Chromium's casing survives untouched).
+ * (name bytes included, so Chromium's casing survives untouched, and
+ * array-valued headers stay array-valued — the seam's real shape).
  */
 export function rewriteClientCapabilityHeader(
-  headers: Readonly<Record<string, string>>,
+  headers: Readonly<Record<string, string | string[]>>,
   injectable: string | null,
-): Record<string, string> {
-  const rewritten: Record<string, string> = {};
+): Record<string, string | string[]> {
+  const rewritten: Record<string, string | string[]> = {};
   for (const [name, value] of Object.entries(headers)) {
     if (name.toLowerCase() === CLIENT_CAPABILITY_HEADER) continue;
     rewritten[name] = value;

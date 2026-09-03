@@ -100,6 +100,8 @@ interface HarnessEvent {
 class HarnessRun {
   readonly child: ChildProcess;
   readonly events: HarnessEvent[] = [];
+  /** The child's stderr tail, bounded — a harness crash must surface as error text, never an opaque timeout (#129's law). */
+  readonly stderrLines: string[] = [];
   private readonly waiters: {
     match: (event: HarnessEvent) => boolean;
     resolve: (event: HarnessEvent) => void;
@@ -135,7 +137,15 @@ class HarnessRun {
       }
     };
     this.child.stdout?.on('data', pump);
-    this.child.stderr?.on('data', () => {});
+    // Capture the full stderr, tail-bounded — the red-run diagnosis law
+    // (#129: keep the error text; truncation ate the one unexplained red).
+    this.child.stderr?.on('data', (chunk: Buffer) => {
+      for (const raw of chunk.toString('utf8').split('\n')) {
+        const line = raw.trim();
+        if (line.length > 0) this.stderrLines.push(line);
+      }
+      while (this.stderrLines.length > 50) this.stderrLines.shift();
+    });
     // The quit write can race the child's own exit (the destroy-target
     // leg leaves no windows, and Electron's default window-all-closed
     // behavior is to quit): a dead-pipe write must stay a swallowed
@@ -161,7 +171,8 @@ class HarnessRun {
           if (at !== -1) this.waiters.splice(at, 1);
           reject(
             new Error(
-              `timed out waiting for ${what}; events so far:\n${JSON.stringify(this.events)}`,
+              `timed out waiting for ${what}; events so far:\n${JSON.stringify(this.events)}` +
+                `\nchild stderr tail:\n${this.stderrLines.slice(-20).join('\n') || '(empty)'}`,
             ),
           );
         }, 30_000),
