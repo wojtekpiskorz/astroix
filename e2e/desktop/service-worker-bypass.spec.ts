@@ -1,11 +1,11 @@
-import { type ChildProcess, spawn } from 'node:child_process';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { createServer as createTcpServer, type Socket, type Server as TcpServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { build, createServer as createViteServer, type ViteDevServer } from 'vite';
+import { createServer as createViteServer, type ViteDevServer } from 'vite';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { buildHarnessMain, type HarnessEvent, HarnessRun, REPO } from './harness-kit.ts';
 
 /**
  * The service-worker bypass real-Electron lane (#247, H5 focused
@@ -36,11 +36,9 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
  */
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const REPO = join(HERE, '..', '..');
 const HARNESS_ENTRY = join(REPO, 'apps/desktop/src/service-worker/bypass-harness.ts');
 const FIXTURE_ROOT = join(HERE, 'fixtures', 'hostile-service-worker');
 const HMR_MODULE = join(FIXTURE_ROOT, 'hmr-mod.js');
-const ELECTRON = join(REPO, 'node_modules', '.bin', 'electron');
 
 /** One recorded request the origin served (or beacons the hostile SW sent). */
 interface OriginRecorder {
@@ -133,177 +131,50 @@ async function freePort(): Promise<number> {
   return address.port;
 }
 
-interface HarnessEvent {
-  readonly kind: string;
-  readonly [field: string]: unknown;
-}
-
-/** One spawned harness run: the line protocol over the real Electron main. */
-class HarnessRun {
-  readonly child: ChildProcess;
-  readonly events: HarnessEvent[] = [];
-  /** The child's stderr tail, bounded — a harness crash must surface as error text, never an opaque timeout (#129's law). */
-  readonly stderrLines: string[] = [];
-  private readonly waiters: {
-    match: (event: HarnessEvent, seq: number) => boolean;
-    resolve: (event: HarnessEvent) => void;
-    timer: ReturnType<typeof setTimeout>;
-  }[] = [];
-
+/**
+ * This lane's run over the shared kit: the `astroix-sw-harness: ` report
+ * prefix plus the repeated-probe discipline — every probe waits for ITS
+ * OWN response (the next `kind`/`targetId` event, never a stale earlier
+ * one) and surfaces a harness error instead of a silent stale read.
+ */
+class SwHarnessRun extends HarnessRun {
   constructor(bundle: string) {
-    this.child = spawn(ELECTRON, [bundle], {
-      cwd: REPO,
-      env: { ...process.env, ELECTRON_ENABLE_LOGGING: '0' },
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-    const pump = (chunk: Buffer): void => {
-      for (const raw of chunk.toString('utf8').split('\n')) {
-        const line = raw.trim();
-        if (!line.startsWith('astroix-sw-harness: ')) continue;
-        let event: HarnessEvent;
-        try {
-          event = JSON.parse(line.slice('astroix-sw-harness: '.length)) as HarnessEvent;
-        } catch {
-          continue;
-        }
-        const seq = this.events.length;
-        this.events.push(event);
-        for (let index = 0; index < this.waiters.length; index += 1) {
-          const waiter = this.waiters[index];
-          if (waiter?.match(event, seq)) {
-            clearTimeout(waiter.timer);
-            this.waiters.splice(index, 1);
-            waiter.resolve(event);
-            index -= 1;
-          }
-        }
-      }
-    };
-    this.child.stdout?.on('data', pump);
-    // Capture the full stderr, tail-bounded — the red-run diagnosis law
-    // (#129: keep the error text; truncation ate the one unexplained red).
-    this.child.stderr?.on('data', (chunk: Buffer) => {
-      for (const raw of chunk.toString('utf8').split('\n')) {
-        const line = raw.trim();
-        if (line.length > 0) this.stderrLines.push(line);
-      }
-      while (this.stderrLines.length > 50) this.stderrLines.shift();
-    });
-    // The quit write can race the child's own exit: a dead-pipe write
-    // must stay a swallowed event, never an unhandled EPIPE.
-    this.child.stdin?.on('error', () => {});
-  }
-
-  send(command: Record<string, unknown>): void {
-    if (this.child.stdin?.writable) {
-      this.child.stdin.write(`${JSON.stringify(command)}\n`);
-    }
-  }
-
-  /** Waits for the FIRST event (already seen included) matching `match`. */
-  waitFor(match: (event: HarnessEvent) => boolean, what: string): Promise<HarnessEvent> {
-    const already = this.events.find(match);
-    if (already !== undefined) return Promise.resolve(already);
-    return new Promise((resolve, reject) => {
-      const waiter = {
-        match: (event: HarnessEvent): boolean => match(event),
-        resolve,
-        timer: setTimeout(() => {
-          const at = this.waiters.indexOf(waiter);
-          if (at !== -1) this.waiters.splice(at, 1);
-          reject(
-            new Error(
-              `timed out waiting for ${what}; events so far:\n${JSON.stringify(this.events)}` +
-                `\nchild stderr tail:\n${this.stderrLines.slice(-20).join('\n') || '(empty)'}`,
-            ),
-          );
-        }, 30_000),
-      };
-      this.waiters.push(waiter);
-    });
+    super({ bundle, reportPrefix: 'astroix-sw-harness: ' });
   }
 
   /**
-   * Sends one command and waits for ITS OWN event (see `probe`), returning
-   * the whole event — for reports whose payload is the event itself, not a
-   * probe `result` field (the authority-state snapshot).
+   * Sends one command and waits for ITS OWN event, returning the whole
+   * event — for reports whose payload is the event itself, not a probe
+   * `result` field (the authority-state snapshot), typed by the caller.
    */
-  async probeEvent(
+  async probeEvent<T>(
     command: Record<string, unknown>,
     kind: string,
     targetId: string,
     what: string,
-  ): Promise<HarnessEvent> {
+  ): Promise<T> {
     const seqFloor = this.events.length;
     this.send(command);
-    return new Promise<HarnessEvent>((resolve, reject) => {
-      const waiter = {
-        match: (candidate: HarnessEvent, seq: number): boolean =>
-          candidate.kind === kind && candidate.targetId === targetId && seq >= seqFloor,
-        resolve,
-        timer: setTimeout(() => {
-          const at = this.waiters.indexOf(waiter);
-          if (at !== -1) this.waiters.splice(at, 1);
-          reject(
-            new Error(
-              `timed out waiting for ${what}; events so far:\n${JSON.stringify(this.events)}` +
-                `\nchild stderr tail:\n${this.stderrLines.slice(-20).join('\n') || '(empty)'}`,
-            ),
-          );
-        }, 30_000),
-      };
-      this.waiters.push(waiter);
-    });
+    const event = await this.waitForNext(
+      (candidate, seq) =>
+        candidate.kind === kind && candidate.targetId === targetId && seq >= seqFloor,
+      what,
+    );
+    return event as T;
   }
 
-  /**
-   * Sends one command and waits for ITS OWN response — the next event
-   * of `kind` for `targetId`, never a stale earlier one (repeated
-   * probes with the same shape are this lane's norm).
-   */
-  async probe(
+  /** Sends one command and waits for ITS OWN response, typed by the caller. */
+  async probe<T>(
     command: Record<string, unknown>,
     kind: string,
     targetId: string,
     what: string,
-  ): Promise<Record<string, unknown>> {
-    const seqFloor = this.events.length;
-    this.send(command);
-    const event = await new Promise<HarnessEvent>((resolve, reject) => {
-      const waiter = {
-        match: (candidate: HarnessEvent, seq: number): boolean =>
-          candidate.kind === kind && candidate.targetId === targetId && seq >= seqFloor,
-        resolve,
-        timer: setTimeout(() => {
-          const at = this.waiters.indexOf(waiter);
-          if (at !== -1) this.waiters.splice(at, 1);
-          reject(
-            new Error(
-              `timed out waiting for ${what}; events so far:\n${JSON.stringify(this.events)}` +
-                `\nchild stderr tail:\n${this.stderrLines.slice(-20).join('\n') || '(empty)'}`,
-            ),
-          );
-        }, 30_000),
-      };
-      this.waiters.push(waiter);
-    });
+  ): Promise<T> {
+    const event = await this.probeEvent<HarnessEvent>(command, kind, targetId, what);
     if (event.error !== undefined) {
       throw new Error(`${what} failed in the harness: ${String(event.error)}`);
     }
-    return (event.result ?? {}) as Record<string, unknown>;
-  }
-
-  async stop(): Promise<void> {
-    if (this.child.exitCode !== null) return;
-    this.send({ op: 'quit' });
-    await Promise.race([
-      new Promise((resolve) => this.child.once('exit', resolve)),
-      new Promise((resolve) => setTimeout(resolve, 5000)),
-    ]);
-    if (this.child.exitCode === null) {
-      this.child.kill('SIGKILL');
-      await new Promise((resolve) => this.child.once('exit', resolve));
-    }
+    return (event.result ?? {}) as T;
   }
 }
 
@@ -348,7 +219,7 @@ interface AuthorityState {
 }
 
 let origin: Awaited<ReturnType<typeof startHostileOrigin>>;
-let run: HarnessRun;
+let run: SwHarnessRun;
 let bundlePath: string;
 let scratchDir: string;
 let hmrModuleOriginal: string;
@@ -366,28 +237,8 @@ beforeAll(async () => {
   origin = await startHostileOrigin();
   hmrModuleOriginal = await readFile(HMR_MODULE, 'utf8');
   scratchDir = await mkdtemp(join(tmpdir(), 'astroix-sw-harness-'));
-  await build({
-    root: REPO,
-    configFile: false,
-    logLevel: 'silent',
-    build: {
-      target: 'node20',
-      outDir: scratchDir,
-      emptyOutDir: true,
-      minify: false,
-      lib: {
-        entry: HARNESS_ENTRY,
-        formats: ['es'],
-        fileName: () => 'harness.js',
-      },
-      rollupOptions: {
-        external: (id) => id === 'electron' || id.startsWith('node:'),
-        output: { entryFileNames: 'harness.js' },
-      },
-    },
-  });
-  bundlePath = join(scratchDir, 'harness.js');
-  run = new HarnessRun(bundlePath);
+  bundlePath = await buildHarnessMain(HARNESS_ENTRY, scratchDir);
+  run = new SwHarnessRun(bundlePath);
   await run.waitFor((event) => event.kind === 'ready', 'the harness ready line');
 }, 180_000);
 
@@ -435,12 +286,12 @@ describe('the service-worker bypass — real Electron, real Vite origin, real ho
     expect(registered).toMatchObject({ active: true, state: 'activated' });
     await expect.poll(() => origin.recorder.beacons).toContain('installed');
     await expect.poll(() => origin.recorder.beacons).toContain('activated');
-    const liveState = (await run.probe(
+    const liveState = await run.probe<SwState>(
       { op: 'sw-state', targetId: 't1' },
       'sw-state',
       't1',
       'the live SW state',
-    )) as unknown as SwState;
+    );
     expect(liveState.registration).toBe(true);
     expect(liveState.activeState).toBe('activated');
     expect(liveState.caches).toContain('hostile-cache');
@@ -455,12 +306,12 @@ describe('the service-worker bypass — real Electron, real Vite origin, real ho
         String(event.url).includes('reload=1'),
       'the bypassed reload',
     );
-    const reloadedState = (await run.probe(
+    const reloadedState = await run.probe<SwState>(
       { op: 'sw-state', targetId: 't1' },
       'sw-state',
       't1',
       'the reloaded SW state',
-    )) as unknown as SwState;
+    );
     // The controller FLAG may persist across reloads (a claimed client
     // lineage keeps it) — control is not interception. The load-bearing
     // law is the bytes: the reloaded document is the REAL app document.
@@ -468,50 +319,50 @@ describe('the service-worker bypass — real Electron, real Vite origin, real ho
     expect(reloadedState.bodyStart).not.toContain('SPOOFED-BY-HOSTILE-SW');
 
     // App, reserved-namespace API, and canvas documents: all real bytes.
-    const app = (await run.probe(
+    const app = await run.probe<FetchProbe>(
       { op: 'fetch-probe', targetId: 't1', path: '/' },
       'fetch-probe',
       't1',
       'the app document fetch',
-    )) as unknown as FetchProbe;
+    );
     expect(app.spoofed).toBe(false);
     expect(app.body).toContain('REAL-APP-DOCUMENT');
-    const api = (await run.probe(
+    const api = await run.probe<FetchProbe>(
       { op: 'fetch-probe', targetId: 't1', path: '/__astroix/api/v1/ping' },
       'fetch-probe',
       't1',
       'the API fetch',
-    )) as unknown as FetchProbe;
+    );
     expect(api.spoofed).toBe(false);
     expect(api.body).toBe('{"real":true}');
-    const canvasDoc = (await run.probe(
+    const canvasDoc = await run.probe<FetchProbe>(
       { op: 'fetch-probe', targetId: 't1', path: '/canvas.html' },
       'fetch-probe',
       't1',
       'the canvas document fetch',
-    )) as unknown as FetchProbe;
+    );
     expect(canvasDoc.spoofed).toBe(false);
     expect(canvasDoc.body).toContain('REAL-CANVAS-DOCUMENT');
 
     // The SSE stream: the server's real events, never a spoofed body.
-    const sse = (await run.probe(
+    const sse = await run.probe<SseProbe>(
       { op: 'sse-probe', targetId: 't1' },
       'sse-probe',
       't1',
       'the SSE probe',
-    )) as unknown as SseProbe;
+    );
     expect(sse.endedBy).toBe('messages');
     expect(sse.events).toEqual(['SERVER-SSE-ONE', 'SERVER-SSE-TWO']);
 
     // The canvas iframe: same-origin direct DOM intact, its own fetches real.
     let canvas: CanvasState | undefined;
     for (let attempt = 0; attempt < 20 && canvas === undefined; attempt += 1) {
-      const state = (await run.probe(
+      const state = await run.probe<CanvasState>(
         { op: 'canvas-state', targetId: 't1' },
         'canvas-state',
         't1',
         'the canvas state',
-      )) as unknown as CanvasState;
+      );
       if (state.probe !== null) canvas = state;
       else await new Promise((resolve) => setTimeout(resolve, 250));
     }
@@ -532,12 +383,12 @@ describe('the service-worker bypass — real Electron, real Vite origin, real ho
       'the editor bind on the bypassed target',
     );
     expect(String((bound.outcome as { capability: string }).capability).length).toBeGreaterThan(0);
-    const authorityState = (await run.probeEvent(
+    const authorityState = await run.probeEvent<AuthorityState>(
       { op: 'authority-state', targetId: 't1' },
       'authority-state',
       't1',
       'the authority state',
-    )) as unknown as AuthorityState;
+    );
     expect(authorityState.readiness.ready).toBe(true);
     expect(authorityState.readiness.guardState).toBe('bypassed');
     expect(authorityState.injectable).not.toBe(null);
@@ -545,22 +396,16 @@ describe('the service-worker bypass — real Electron, real Vite origin, real ho
     expect(authorityState.actions.indexOf('bypass-set')).toBeLessThan(
       authorityState.actions.indexOf('navigation-started'),
     );
-    expect(authorityState.actions.indexOf('attached')).toBeLessThan(
-      authorityState.actions.indexOf('navigation-started'),
-    );
-    expect(authorityState.actions.indexOf('bypass-set')).toBeLessThan(
-      authorityState.actions.indexOf('navigation-started'),
-    );
     expect(authorityState.actions).not.toContain('navigation-refused');
   }, 120_000);
 
   it('keeps the native Vite HMR WebSocket functional under the bypass', async () => {
-    const before = (await run.probe(
+    const before = await run.probe<HmrState>(
       { op: 'hmr-state', targetId: 't1' },
       'hmr-state',
       't1',
       'the pre-edit HMR state',
-    )) as unknown as HmrState;
+    );
     expect(before.label).toBe('hmr-v1');
     expect(before.updates).toBe(0);
     // The real WebSocket handshake happened at the network layer (no
@@ -572,12 +417,12 @@ describe('the service-worker bypass — real Electron, real Vite origin, real ho
     await writeFile(HMR_MODULE, hmrModuleOriginal.replace('hmr-v1', 'hmr-v2'));
     let delivered = false;
     for (let attempt = 0; attempt < 40 && !delivered; attempt += 1) {
-      const state = (await run.probe(
+      const state = await run.probe<HmrState>(
         { op: 'hmr-state', targetId: 't1' },
         'hmr-state',
         't1',
         'the post-edit HMR state',
-      )) as unknown as HmrState;
+      );
       if (state.label === 'hmr-v2' && state.updates >= 1) delivered = true;
       else await new Promise((resolve) => setTimeout(resolve, 500));
     }
@@ -599,12 +444,12 @@ describe('the service-worker bypass — real Electron, real Vite origin, real ho
         event.failureKind === 'debugger-detached',
       'the API-detach fail-closed event',
     );
-    const state = (await run.probeEvent(
+    const state = await run.probeEvent<AuthorityState>(
       { op: 'authority-state', targetId: 't1' },
       'authority-state',
       't1',
       'the post-detach authority state',
-    )) as unknown as AuthorityState;
+    );
     expect(state.readiness.ready).toBe(false);
     expect(state.readiness.guardState).toBe('compromised');
     expect(state.injectable).toBe(null);
@@ -660,12 +505,12 @@ describe('the service-worker bypass — real Electron, real Vite origin, real ho
         run.events.indexOf(event) > run.events.indexOf(rebound),
       'the DevTools fail-closed event',
     );
-    const devtoolsState = (await run.probeEvent(
+    const devtoolsState = await run.probeEvent<AuthorityState>(
       { op: 'authority-state', targetId: 't1' },
       'authority-state',
       't1',
       'the post-DevTools authority state',
-    )) as unknown as AuthorityState;
+    );
     expect(devtoolsState.readiness.ready).toBe(false);
     expect(devtoolsState.readiness.guardState).toBe('compromised');
     expect(devtoolsState.injectable).toBe(null);
@@ -711,24 +556,24 @@ describe('the service-worker bypass — real Electron, real Vite origin, real ho
       secondCapability,
     );
     // The document stayed real through it all — the SW never took it.
-    const finalState = (await run.probe(
+    const finalState = await run.probe<SwState>(
       { op: 'sw-state', targetId: 't1' },
       'sw-state',
       't1',
       'the final SW state',
-    )) as unknown as SwState;
+    );
     expect(finalState.appMarker).toBe('REAL-APP-DOCUMENT');
   }, 120_000);
 
   it('clears SW state only after unload — and proves the contrast: no cleanup leaves a controlling SW; a fresh partition never sees one', async () => {
     const t1Partition = partitionOf('t1');
     // The SW state is REALLY live on t1's partition right now.
-    const beforeClose = (await run.probe(
+    const beforeClose = await run.probe<SwState>(
       { op: 'sw-state', targetId: 't1' },
       'sw-state',
       't1',
       'the pre-close SW state',
-    )) as unknown as SwState;
+    );
     expect(beforeClose.registration).toBe(true);
     expect(beforeClose.caches).toContain('hostile-cache');
 
@@ -752,12 +597,12 @@ describe('the service-worker bypass — real Electron, real Vite origin, real ho
       (event) => event.kind === 'loaded' && event.targetId === 'reuse-clean',
       'the cleaned-partition load',
     );
-    const cleaned = (await run.probe(
+    const cleaned = await run.probe<SwState>(
       { op: 'sw-state', targetId: 'reuse-clean' },
       'sw-state',
       'reuse-clean',
       'the cleaned-partition SW state',
-    )) as unknown as SwState;
+    );
     expect(cleaned.registration).toBe(false);
     expect(cleaned.controller).toBe(false);
     expect(cleaned.caches).toEqual([]);
@@ -789,28 +634,28 @@ describe('the service-worker bypass — real Electron, real Vite origin, real ho
       (event) => event.kind === 'loaded' && event.targetId === 'ctl',
       'the controlled reload',
     );
-    const controlled = (await run.probe(
+    const controlled = await run.probe<SwState>(
       { op: 'sw-state', targetId: 'ctl' },
       'sw-state',
       'ctl',
       'the controlled SW state',
-    )) as unknown as SwState;
+    );
     expect(controlled.controller).toBe(true);
     expect(controlled.appMarker).toBe(null);
     expect(controlled.bodyStart.startsWith('SPOOFED-BY-HOSTILE-SW')).toBe(true);
-    const intercepted = (await run.probe(
+    const intercepted = await run.probe<FetchProbe>(
       { op: 'fetch-probe', targetId: 'ctl', path: '/__astroix/api/v1/ping' },
       'fetch-probe',
       'ctl',
       'the intercepted API fetch',
-    )) as unknown as FetchProbe;
+    );
     expect(intercepted.spoofed).toBe(true);
-    const spoofedSse = (await run.probe(
+    const spoofedSse = await run.probe<SseProbe>(
       { op: 'sse-probe', targetId: 'ctl' },
       'sse-probe',
       'ctl',
       'the spoofed SSE probe',
-    )) as unknown as SseProbe;
+    );
     expect(spoofedSse.events).not.toEqual(['SERVER-SSE-ONE', 'SERVER-SSE-TWO']);
     // Non-vacuity at the wire: the worker really intercepted traffic.
     await expect
@@ -839,12 +684,12 @@ describe('the service-worker bypass — real Electron, real Vite origin, real ho
       (event) => event.kind === 'loaded' && event.targetId === 'reuse-dirty',
       'the uncleared-partition load',
     );
-    const survived = (await run.probe(
+    const survived = await run.probe<SwState>(
       { op: 'sw-state', targetId: 'reuse-dirty' },
       'sw-state',
       'reuse-dirty',
       'the uncleared-partition SW state',
-    )) as unknown as SwState;
+    );
     expect(survived.registration).toBe(true);
     expect(survived.controller).toBe(true);
     expect(survived.caches).toContain('hostile-cache');
@@ -869,12 +714,12 @@ describe('the service-worker bypass — real Electron, real Vite origin, real ho
       (event) => event.kind === 'loaded' && event.targetId === 'fresh',
       'the fresh target load',
     );
-    const freshState = (await run.probe(
+    const freshState = await run.probe<SwState>(
       { op: 'sw-state', targetId: 'fresh' },
       'sw-state',
       'fresh',
       'the fresh target SW state',
-    )) as unknown as SwState;
+    );
     expect(freshState.registration).toBe(false);
     expect(freshState.controller).toBe(false);
     expect(freshState.caches).toEqual([]);

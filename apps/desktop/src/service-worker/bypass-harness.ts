@@ -389,35 +389,12 @@ async function main(): Promise<void> {
   }
 
   // The command table — one small handler per op, dispatched by lookup.
+  // The mapped type derives every signature from the `HarnessCommand`
+  // union itself, so the table's totality is a compile error when
+  // broken: a missing op or a handler that takes or returns the wrong
+  // shape no longer typechecks.
   const commands: {
-    readonly open: typeof open;
-    readonly load: typeof load;
-    readonly 'register-hostile-sw': (
-      command: Extract<HarnessCommand, { op: 'register-hostile-sw' }>,
-    ) => Promise<void>;
-    readonly 'sw-state': (command: Extract<HarnessCommand, { op: 'sw-state' }>) => Promise<void>;
-    readonly 'fetch-probe': (
-      command: Extract<HarnessCommand, { op: 'fetch-probe' }>,
-    ) => Promise<void>;
-    readonly 'sse-probe': (command: Extract<HarnessCommand, { op: 'sse-probe' }>) => Promise<void>;
-    readonly 'canvas-state': (
-      command: Extract<HarnessCommand, { op: 'canvas-state' }>,
-    ) => Promise<void>;
-    readonly 'hmr-state': (command: Extract<HarnessCommand, { op: 'hmr-state' }>) => Promise<void>;
-    readonly 'bind-editor': typeof bindEditor;
-    readonly 'authority-state': typeof authorityState;
-    readonly 'open-devtools': (
-      command: Extract<HarnessCommand, { op: 'open-devtools' }>,
-    ) => Promise<void>;
-    readonly 'close-devtools': (
-      command: Extract<HarnessCommand, { op: 'close-devtools' }>,
-    ) => Promise<void>;
-    readonly 'detach-debugger': (
-      command: Extract<HarnessCommand, { op: 'detach-debugger' }>,
-    ) => Promise<void>;
-    readonly reactivate: typeof reactivate;
-    readonly 'close-target': typeof closeTarget;
-    readonly quit: () => Promise<void>;
+    readonly [K in HarnessCommand as K['op']]: (command: K) => Promise<void>;
   } = {
     open,
     load,
@@ -455,8 +432,9 @@ async function main(): Promise<void> {
   };
 
   async function handle(command: HarnessCommand): Promise<void> {
-    // The one dispatch point: the table's key set is exactly the
-    // command union's ops, so every member is total by construction.
+    // The one dispatch point: the mapped table's key set is exactly the
+    // command union's ops (enforced by the type); the cast is only the
+    // correlated-union call TS cannot express for a checked-union key.
     const handler = commands[command.op] as (command: HarnessCommand) => Promise<void>;
     await handler(command);
   }

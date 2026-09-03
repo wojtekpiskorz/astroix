@@ -181,13 +181,15 @@ export function createDebuggerGuard(options: DebuggerGuardOptions): DebuggerGuar
     }
     options.onStep?.('attached');
     // A detach that raced the sequence already compromised the guard —
-    // every later step reports that failure instead of a second one.
+    // every later step reports that failure instead of a second one,
+    // and no step is SENT after the compromise is observed.
     try {
       await options.debugger.sendCommand(NETWORK_ENABLE_COMMAND);
     } catch (error) {
       if (wasCompromised()) return { ok: false, failure: recordedFailure() };
       return compromise('network-enable-failed', error);
     }
+    if (wasCompromised()) return { ok: false, failure: recordedFailure() };
     options.onStep?.('network-enabled');
     try {
       await options.debugger.sendCommand(BYPASS_SERVICE_WORKER_COMMAND, { bypass: true });
@@ -228,9 +230,19 @@ export function createDebuggerGuard(options: DebuggerGuardOptions): DebuggerGuar
         });
       }
       if (state === 'bypassed') return Promise.resolve({ ok: true });
-      if (activation !== null && state === 'activating') return activation;
-      activation = runActivation();
-      return activation;
+      // Share the in-flight activation REGARDLESS of state: a mid-flight
+      // compromise (the detach listener fires while a step is pending)
+      // must not let a retry start a parallel run whose failure paths
+      // would report a second, wrong-kind compromise. The slot clears
+      // when this run settles and is still the current one — the next
+      // call after a compromise is a clean, sequential re-run.
+      if (activation !== null) return activation;
+      const current = runActivation();
+      activation = current;
+      void current.finally(() => {
+        if (activation === current) activation = null;
+      });
+      return current;
     },
     state: () => state,
     isBypassActive: () => state === 'bypassed',

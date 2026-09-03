@@ -247,6 +247,84 @@ describe('createDebuggerGuard — the fail-closed CDP bypass sequence', () => {
     expect(guard.state()).toBe('compromised');
   });
 
+  it('shares the in-flight activation across retries — a mid-flight compromise never runs two sequences in parallel', async () => {
+    // A controllable Network.enable: the step pends until the test
+    // releases it, so the compromise can land mid-activation.
+    const detachHandlers: ((reason: string) => void)[] = [];
+    let releaseEnable: (() => void) | null = null;
+    const calls: string[] = [];
+    const seam: DebuggerSeam = {
+      attach: () => {
+        calls.push('attach');
+      },
+      sendCommand: (method) => {
+        calls.push(method);
+        if (method === NETWORK_ENABLE_COMMAND) {
+          return new Promise((resolve) => {
+            releaseEnable = () => resolve({});
+          });
+        }
+        return Promise.resolve({});
+      },
+      detach: () => {},
+      onDetach: (handler) => {
+        detachHandlers.push(handler);
+        return () => {
+          const at = detachHandlers.indexOf(handler);
+          if (at !== -1) detachHandlers.splice(at, 1);
+        };
+      },
+      onDevtoolsOpened: () => () => {},
+      closeDevtools: () => {},
+    };
+    const failures: string[] = [];
+    const guard = createDebuggerGuard({
+      debugger: seam,
+      onCompromised: (failure) => {
+        failures.push(failure.kind);
+      },
+    });
+
+    // Two concurrent activations: the second MUST ride the first —
+    // one attach, one pending enable, never a parallel sequence.
+    const first = guard.activate();
+    const second = guard.activate();
+    expect(second).toBe(first);
+    expect(calls).toEqual(['attach', NETWORK_ENABLE_COMMAND]);
+
+    // The compromise lands mid-activation (the detach listener fires
+    // while Network.enable pends); the pending step then settles.
+    for (const handler of [...detachHandlers]) handler('replaced with another debugger');
+    (releaseEnable as (() => void) | null)?.();
+    const compromised = await first;
+    expect(compromised.ok).toBe(false);
+    if (!compromised.ok) expect(compromised.failure.kind).toBe('debugger-detached');
+    // Exactly one compromise report — the settled shared run reported
+    // the detach, and no parallel run existed to misreport it.
+    expect(failures).toEqual(['debugger-detached']);
+    expect(guard.state()).toBe('compromised');
+
+    // The retry AFTER the settle is a clean, sequential second run —
+    // the slot was cleared, so it re-runs the whole sequence alone
+    // (including its OWN pending enable, released here).
+    // The compromised first run sent no bypass command after the detach
+    // was observed; the retry alone completes the second sequence.
+    const retryPending = guard.activate();
+    expect(calls).toEqual(['attach', NETWORK_ENABLE_COMMAND, 'attach', NETWORK_ENABLE_COMMAND]);
+    (releaseEnable as (() => void) | null)?.();
+    const retry = await retryPending;
+    expect(retry).toEqual({ ok: true });
+    expect(guard.isBypassActive()).toBe(true);
+    expect(calls).toEqual([
+      'attach',
+      NETWORK_ENABLE_COMMAND,
+      'attach',
+      NETWORK_ENABLE_COMMAND,
+      BYPASS_SERVICE_WORKER_COMMAND,
+    ]);
+    expect(failures).toEqual(['debugger-detached']);
+  });
+
   it('compromises fail-closed when DevTools opens: kicked off, slot cleaned, one report, recovery after', async () => {
     const fake = fakeDebugger();
     const failures: string[] = [];
