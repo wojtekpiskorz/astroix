@@ -60,6 +60,12 @@ export default defineConfig({
       // minutes-scale) behind `npm run certify:adapter` with their own
       // config — the root run must stay deterministic and network-free.
       'packages/runtime/test/**/*.test.{ts,tsx}',
+      // The client-authority seam (#246, H4): the ticket's owned paths
+      // place this seam under packages/runtime/src/ with COLOCATED tests
+      // (the packages/core / packages/protocol idiom, not the runtime
+      // test/<seam> idiom) — a pure module composed over the REAL settled
+      // F2/F4 tables, deterministic and network-free.
+      'packages/runtime/src/client-authority/**/*.test.{ts,tsx}',
       // apps/desktop (#243, H1): the thin Electron host's main-process
       // units — deterministic fakes at the injected Electron seams, plus
       // the real-forked control-plane child process lane (the #222 idiom:
@@ -69,6 +75,11 @@ export default defineConfig({
       // its own config, like certify:adapter — the root run stays
       // deterministic and network-free.
       'apps/desktop/src/main/**/*.test.{ts,tsx}',
+      // The document-authority desktop units (#246, H4): the injection
+      // policy and webRequest adapter over structural Electron seams —
+      // deterministic fakes, same tier as the main-process units above
+      // (the real-Electron leg is e2e/desktop behind the smoke config).
+      'apps/desktop/src/document-authority/**/*.test.{ts,tsx}',
       // Behavior-contract schema validators (#217, directive from B1's
       // review): the schemas are pure zod over frozen fixtures — the unit
       // doctrine's home, no browser needed. The corpus bytes stay owned by
@@ -251,6 +262,12 @@ export default defineConfig({
         // directories (the registry-store discipline).
         'packages/runtime/session-supervisor/completion/**',
         'packages/runtime/session-supervisor/tombstone/**',
+        // The client-authority seam (#246, H4, additive): the both-truths
+        // document-authority join over F2's HTTP binding table and F4's
+        // supervisor-side client registry — a pure module with
+        // deterministic colocated unit tests, same covered-tier decision
+        // as the client registry it composes.
+        'packages/runtime/src/client-authority/**',
       ],
       reporter: ['json'],
       reportsDirectory: 'coverage',
