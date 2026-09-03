@@ -35,12 +35,12 @@ export interface ControlledEdit {
   calls(): number;
 }
 
-/** One edit whose queue execution the test settles by hand. */
 /** A valid committed outcome — the digest currency's shape, built like production builds it. */
 export function committed(): WriteOutcome {
   return { type: 'committed', revision: sha256Hex(new TextEncoder().encode('landed')) };
 }
 
+/** One edit whose queue execution the test settles by hand. */
 export function controlledEdit(key: string): ControlledEdit {
   let calls = 0;
   let settleOutcome: (outcome: WriteOutcome) => void = () => {};

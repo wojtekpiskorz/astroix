@@ -161,7 +161,6 @@ function expectOldAuthorityIntact(fx: Fixture, old: OldSession): void {
   ).toEqual({ kind: 'authorized', role: 'editor' });
 }
 
-/** Commits one committed outcome for the queue seam. */
 /** Fences the old session's edit pipeline with one accepted edit and two pending debounces. */
 function fenceForDrain(
   fx: Fixture,
