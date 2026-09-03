@@ -79,10 +79,15 @@ test('activation lands the rebuilt shell at a fresh generation with live session
   await expect(page.getByTestId('shell-state')).toContainText('queries=1');
   await expect(page.getByTestId('shell-state')).toContainText('reset=none');
 
-  // The three stable feature slots exist — placeholders, no vertical implemented.
-  for (const slot of ['sidebar', 'editor-dock', 'canvas']) {
+  // The stable feature slots exist. The sidebar and editor-dock slots
+  // stay placeholders (no vertical implemented yet); the canvas slot
+  // carries #242's natural-route same-origin canvas — the plain iframe
+  // on the project origin (its own battery pins the canvas's behavior;
+  // this leg pins only that the slot is filled by it).
+  for (const slot of ['sidebar', 'editor-dock']) {
     await expect(page.locator(`[data-slot="${slot}"]`)).toContainText(`slot: ${slot}`);
   }
+  await expect(page.locator('[data-slot="canvas"] [data-testid="canvas-frame"]')).toHaveCount(1);
 
   // Restore the idle state for the next leg.
   await page.getByTestId('deactivate').click();
