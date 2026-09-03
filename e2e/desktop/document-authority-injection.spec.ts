@@ -136,10 +136,17 @@ class HarnessRun {
     };
     this.child.stdout?.on('data', pump);
     this.child.stderr?.on('data', () => {});
+    // The quit write can race the child's own exit (the destroy-target
+    // leg leaves no windows, and Electron's default window-all-closed
+    // behavior is to quit): a dead-pipe write must stay a swallowed
+    // event, never an unhandled EPIPE.
+    this.child.stdin?.on('error', () => {});
   }
 
   send(command: Record<string, unknown>): void {
-    this.child.stdin?.write(`${JSON.stringify(command)}\n`);
+    if (this.child.stdin?.writable) {
+      this.child.stdin.write(`${JSON.stringify(command)}\n`);
+    }
   }
 
   waitFor(match: (event: HarnessEvent) => boolean, what: string): Promise<HarnessEvent> {
