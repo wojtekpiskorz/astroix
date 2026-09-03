@@ -139,11 +139,11 @@ afterEach(async () => {
   for (const run of runs.splice(0)) {
     if (run.child.exitCode === null && !run.child.killed) {
       run.child.kill('SIGTERM');
-      const settled = await Promise.race([
-        run.exit,
-        new Promise((resolve) => setTimeout(resolve, 5000)),
-      ]);
-      if ((settled as { code: number | null } | null)?.code === null) {
+      await Promise.race([run.exit, new Promise((resolve) => setTimeout(resolve, 5000))]);
+      // The timeout arm resolves undefined, so re-read the child's own state
+      // instead of the race's settle value: only a child still alive after
+      // SIGTERM earns the SIGKILL (a signal-exited child is already gone).
+      if (run.child.exitCode === null && !run.child.killed) {
         run.child.kill('SIGKILL');
         await run.exit.catch(() => {});
       }

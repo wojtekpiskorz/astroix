@@ -32,25 +32,40 @@ export interface GrantedProjectSummary {
   readonly availability: 'available' | 'unavailable';
 }
 
-/** Why a native directory grant was refused — the registry's closed code set plus the child's own refusal. */
-export type RegisterRefusalCode =
-  | 'root-unavailable'
-  | 'quarantined'
-  | 'control-plane-unavailable'
-  | 'invalid-request';
+/**
+ * Why a native directory grant was refused — the registry's closed code set
+ * plus the child's own refusal. Derived from the one `as const` array so the
+ * union and the runtime membership check below can never drift apart
+ * (the executor-ipc idiom).
+ */
+const REGISTER_REFUSAL_CODES = [
+  'root-unavailable',
+  'quarantined',
+  'control-plane-unavailable',
+  'invalid-request',
+] as const;
+
+export type RegisterRefusalCode = (typeof REGISTER_REFUSAL_CODES)[number];
 
 /** One register-root reply: the sanitized summary, or the sanitized refusal. */
 export type RegisterResult =
   | { readonly ok: true; readonly summary: GrantedProjectSummary }
   | { readonly ok: false; readonly code: RegisterRefusalCode };
 
-/** Why a delegated session transition was refused — sanitized vocabulary only. */
-export type TransitionRefusalCode =
-  | 'unavailable-composition'
-  | 'no-active-session'
-  | 'stale-session'
-  | 'concurrent-activation'
-  | 'control-plane-unavailable';
+/**
+ * Why a delegated session transition was refused — sanitized vocabulary
+ * only, derived from the one `as const` array (same drift-proof idiom as
+ * the register codes).
+ */
+const TRANSITION_REFUSAL_CODES = [
+  'unavailable-composition',
+  'no-active-session',
+  'stale-session',
+  'concurrent-activation',
+  'control-plane-unavailable',
+] as const;
+
+export type TransitionRefusalCode = (typeof TRANSITION_REFUSAL_CODES)[number];
 
 /** One activate/deactivate reply: the session the child reports after the attempt, or the refusal. */
 export type TransitionOutcome =
@@ -146,9 +161,7 @@ function isRegisterResult(value: unknown): value is RegisterResult {
   if (record.ok === false) {
     return (
       typeof record.code === 'string' &&
-      ['root-unavailable', 'quarantined', 'control-plane-unavailable', 'invalid-request'].includes(
-        record.code,
-      )
+      (REGISTER_REFUSAL_CODES as readonly string[]).includes(record.code)
     );
   }
   return false;
@@ -163,13 +176,7 @@ function isTransitionOutcome(value: unknown): value is TransitionOutcome {
   if (record.kind === 'refused') {
     return (
       typeof record.reason === 'string' &&
-      [
-        'unavailable-composition',
-        'no-active-session',
-        'stale-session',
-        'concurrent-activation',
-        'control-plane-unavailable',
-      ].includes(record.reason)
+      (TRANSITION_REFUSAL_CODES as readonly string[]).includes(record.reason)
     );
   }
   return false;
@@ -187,10 +194,17 @@ function isRequestId(value: unknown): value is number {
  */
 export function parseDesktopChildRequest(message: unknown): DesktopChildRequest | null {
   if (!isOwnMessage(message)) return null;
-  const kind = message.kind;
-  if (!isRequestId(message.requestId)) return null;
+  return (
+    liftRegisterRootRequest(message) ??
+    liftActivateRequest(message) ??
+    liftDeactivateRequest(message)
+  );
+}
+
+function liftRegisterRootRequest(message: Record<string, unknown>): DesktopChildRequest | null {
   if (
-    kind === 'register-root' &&
+    message.kind === 'register-root' &&
+    isRequestId(message.requestId) &&
     hasExactKeys(message, ['astroix', 'kind', 'requestId', 'root']) &&
     typeof message.root === 'string' &&
     message.root.length > 0
@@ -202,8 +216,13 @@ export function parseDesktopChildRequest(message: unknown): DesktopChildRequest 
       root: message.root,
     };
   }
+  return null;
+}
+
+function liftActivateRequest(message: Record<string, unknown>): DesktopChildRequest | null {
   if (
-    kind === 'activate' &&
+    message.kind === 'activate' &&
+    isRequestId(message.requestId) &&
     hasExactKeys(message, ['astroix', 'kind', 'requestId', 'projectKey']) &&
     typeof message.projectKey === 'string' &&
     message.projectKey.length > 0
@@ -215,8 +234,13 @@ export function parseDesktopChildRequest(message: unknown): DesktopChildRequest 
       projectKey: message.projectKey,
     };
   }
+  return null;
+}
+
+function liftDeactivateRequest(message: Record<string, unknown>): DesktopChildRequest | null {
   if (
-    kind === 'deactivate' &&
+    message.kind === 'deactivate' &&
+    isRequestId(message.requestId) &&
     hasExactKeys(message, ['astroix', 'kind', 'requestId', 'sessionRef']) &&
     isSessionRef(message.sessionRef)
   ) {

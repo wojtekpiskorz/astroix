@@ -72,7 +72,7 @@ export interface ControlPlaneClientOptions {
   readonly bootDeadlineMs?: number;
 }
 
-/** The one refused shape every lost-channel call answers with — parameterized by the caller's refusal code. */
+/** The one refused transition shape every lost-channel call answers with (the register side carries its own constant). */
 const UNAVAILABLE: TransitionOutcome = {
   kind: 'refused',
   reason: 'control-plane-unavailable',

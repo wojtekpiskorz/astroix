@@ -8,6 +8,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   activateRequest,
   bootedReport,
+  parseDesktopChildReport,
   registerRootRequest,
   type TransitionOutcome,
   transitionResultReport,
@@ -173,7 +174,12 @@ describe('the control-plane child (process lane)', () => {
         (report) => (report as { requestId?: number }).requestId === 3,
       );
       expect(reply.outcome).toEqual({ kind: 'refused', reason: 'unavailable-composition' });
-      expect(transitionResultReport(0, reply.outcome).kind).toBe('transition-result');
+      // the wire shape the child produced must be exactly what the main
+      // side's parser lifts — a builder round-trip, not a type check
+      expect(parseDesktopChildReport(transitionResultReport(3, reply.outcome))).toMatchObject({
+        kind: 'transition-result',
+        requestId: 3,
+      });
     },
     CHILD_TIMEOUT,
   );
@@ -196,7 +202,7 @@ describe('the control-plane child (process lane)', () => {
     async () => {
       const run = spawnChild(await freshConfig());
       await run.booted;
-      expect(bootedReport().kind).toBe('booted');
+      expect(parseDesktopChildReport(bootedReport())).toMatchObject({ kind: 'booted' });
       const exited = exitOf(run.child);
       run.child.disconnect();
       const outcome = await exited;
