@@ -5,11 +5,13 @@ import {
   sanitizedTextSchema,
   withinByteLimit,
 } from '@wojciechpiskorz/astroix-protocol';
+import { formatPair } from '../../astro-project-adapter/certified-pair.ts';
 import type { SupervisionCloseReport } from '../../project-plane/supervision/close-report.ts';
 import {
   type CertificationFacts,
   type ProjectRun,
   ProjectRunBootError,
+  type ProjectRunBootErrorCode,
 } from '../../project-runtime/project-runtime.ts';
 
 /**
@@ -146,6 +148,25 @@ export interface AttemptHooks {
 type AttemptPhase = 'starting' | 'staged' | 'cancelling' | 'committing' | 'ended';
 
 /**
+ * The boot-code → failure-category table — the house pattern for closed
+ * code sets (`BOOT_MESSAGES`, `FAILURE_MESSAGES`,
+ * `STAGE_REJECTION_MESSAGES`): the Record's own exhaustiveness is the
+ * mapping, so a future boot code is a compile error at this site instead
+ * of silently folding into `startup`.
+ */
+const BOOT_FAILURE_CATEGORIES: Readonly<
+  Record<ProjectRunBootErrorCode, SessionFailure['category']>
+> = {
+  cancelled: 'startup',
+  'startup-timeout': 'startup-timeout',
+  'worker-crash': 'crash',
+  'managed-astro-crash': 'crash',
+  'proxy-health': 'startup',
+  'launch-failed': 'startup',
+  'uncertified-pair': 'certification',
+};
+
+/**
  * Maps a candidate-run readiness rejection to the sanitized session
  * failure. The certification boot code is the one enriched path: it
  * reports the certification category with the detected pair, the
@@ -157,14 +178,7 @@ function readinessFailureOf(error: unknown): SessionFailure {
   // Only the facade's sanitized boot error carries decision data; anything
   // else — including free text — is 'unknown' and its text never surfaces.
   if (error instanceof ProjectRunBootError) {
-    const category: SessionFailure['category'] =
-      error.code === 'uncertified-pair'
-        ? 'certification'
-        : error.code === 'startup-timeout'
-          ? 'startup-timeout'
-          : error.code === 'worker-crash' || error.code === 'managed-astro-crash'
-            ? 'crash'
-            : 'startup';
+    const category = BOOT_FAILURE_CATEGORIES[error.code];
     return {
       category,
       message:
@@ -187,6 +201,8 @@ function readinessFailureOf(error: unknown): SessionFailure {
  * and fit the lifecycle byte budget the session snapshot rides in.
  * Anything that fails either keeps the bare template: the category is
  * the fact, the enrichment is dropped, never truncated into a guess.
+ * The pair rendering is the adapter's own `formatPair` — one template,
+ * shared with the origin's diagnostic, never re-stated here.
  */
 function certificationMessageOf(facts: CertificationFacts | undefined): string {
   const bare = FAILURE_MESSAGES.certification;
@@ -201,10 +217,8 @@ function certificationMessageOf(facts: CertificationFacts | undefined): string {
     return bare;
   }
   const certifiedList =
-    facts.certified.length === 0
-      ? 'none'
-      : facts.certified.map((pair) => `astro@${pair.astro} + vite@${pair.vite}`).join(', ');
-  const composed = `${bare} (detected astro@${facts.detected.astro} + vite@${facts.detected.vite}; certified pairs: ${certifiedList}; rejected contract: ${facts.rejectedContract})`;
+    facts.certified.length === 0 ? 'none' : facts.certified.map(formatPair).join(', ');
+  const composed = `${bare} (detected ${formatPair(facts.detected)}; certified pairs: ${certifiedList}; rejected contract: ${facts.rejectedContract})`;
   return sanitizedTextSchema.safeParse(composed).success &&
     withinByteLimit(composed, 'lifecycleJsonBytes')
     ? composed
