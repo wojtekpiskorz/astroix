@@ -82,7 +82,7 @@ export interface CandidateComparison {
   readonly inventoriesMatch: boolean;
   readonly immutableHashesMatch: boolean;
   readonly identityMatches: boolean;
-  /** Inventory rows that differ (path, size, executable bit, or class). */
+  /** Inventory rows that differ (path, size, executable bit, class, or symlink target). */
   readonly inventoryDiffs: readonly string[];
   /** Immutable rows whose SHA-256 differs. */
   readonly immutableHashDiffs: readonly string[];
