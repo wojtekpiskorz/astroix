@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
+import type { CommittedTransition } from '../../session-supervisor/commit/switch-coordinator.ts';
 import { COMPLETION_FAILURE } from '../../session-supervisor/completion/completion-result.ts';
+import {
+  FIRST_COMMIT_REVOCATION,
+  neverGrantedRoutes,
+} from '../../session-supervisor/revocation/authority-revocation.ts';
 import { neverSpawnedReport } from '../../session-supervisor/staging/activation-attempt.ts';
 import {
   CLIENT_IDENTITY,
@@ -407,5 +412,105 @@ describe('host-observed completion failure — the irreversible aftermath (§4 s
     if (result.kind !== 'failed') throw new Error('unreachable');
     expect(result.aftermath.candidateClose).toEqual(neverSpawnedReport());
     expect(fx.reported).toEqual([COMPLETION_FAILURE]);
+  });
+});
+
+describe('the first-commit variant (#349) — no old session, no fabricated accounting', () => {
+  it('a first activation completes on the same exact main-frame handshake — the same result shape', async () => {
+    const fx = completionFixture();
+    const completion = completionDriver(fx, recordingTombstones(fx.journal).tombstones);
+    const observations = manualObservations(fx.journal);
+
+    const pending = completion.completeReplacement({
+      // Type-level and value-level in one: the variant is the union's
+      // own shape — there is no `revoked` field to fabricate.
+      commit: { kind: 'first-commit', committed: NEW_REF } satisfies CommittedTransition,
+      observations,
+      client: CLIENT_IDENTITY,
+      targetRemains: true,
+    });
+    observations.settleMainFrame(true);
+    const result = await pending;
+
+    expect(result).toEqual({
+      kind: 'activation-completed',
+      session: NEW_REF,
+      target: CLIENT_IDENTITY,
+    });
+    expect(fx.journal).toEqual(['observe:main-frame-ready']);
+    expect(fx.reported).toEqual([]);
+  });
+
+  it('a failed first adoption runs the same aftermath over the granted candidate — and preserves the honest first-commit accounting, never a fabricated report', async () => {
+    const fx = completionFixture();
+    const completion = completionDriver(fx, recordingTombstones(fx.journal).tombstones);
+    const observations = manualObservations(fx.journal);
+    const candidate = fakeCandidate(fx.journal, NEW_REF, PROJECT_B, 'never-minted-capability');
+
+    const pending = completion.completeReplacement({
+      commit: { kind: 'first-commit', committed: NEW_REF } satisfies CommittedTransition,
+      observations,
+      client: CLIENT_IDENTITY,
+      candidate: candidate.target,
+      targetRemains: true,
+    });
+    observations.settleMainFrame(false);
+    await flushMicrotasks(); // the ordered candidate revocation runs; the reap seam is called
+    const reapReport = completeCloseReport('stopped');
+    candidate.settleClose(reapReport);
+    await flushMicrotasks(); // the reap resolves; the launcher show is called
+    observations.settleLauncher(true);
+    const result = await pending;
+
+    if (result.kind !== 'failed')
+      throw new Error(`expected the failed result, got: ${result.kind}`);
+    expect(result.failure).toEqual(COMPLETION_FAILURE);
+    // The honest accounting exactly: the frozen first-commit marker —
+    // never a report over the NEW pair with empty steps, never any
+    // pass shape at all.
+    expect(result.revoked).toBe(FIRST_COMMIT_REVOCATION);
+    expect(result.revoked).toEqual({ kind: 'first-commit' });
+    expect(result.aftermath.candidateRevoked).toBe(true);
+    expect(result.aftermath.candidateClose).toBe(reapReport);
+    expect(result.aftermath.launcherObserved).toBe(true);
+    // The §4 step 7 order held unchanged for the first commit: the
+    // five-surface ordered revocation over the granted candidate
+    // BEFORE its reap, then the launcher show, then the report.
+    expect(fx.journal).toEqual([
+      'observe:main-frame-ready',
+      'streams:endForBinding',
+      'streams:endForHost',
+      'streams:endForSession',
+      'candidate-routes:revoke',
+      'edit-grants:revokeSession',
+      'clients:revokeSession',
+      'http-bindings:unbind',
+      'host-capability:revoke',
+      'candidate:stop-run',
+      'observe:launcher-ready',
+      'report:failed-no-active',
+    ]);
+    expect(fx.reported).toEqual([COMPLETION_FAILURE]);
+  });
+
+  it('quit refuses a first-commit transition — quit rides a settled deactivation alone', async () => {
+    const fx = completionFixture();
+    const completion = completionDriver(fx, recordingTombstones(fx.journal).tombstones);
+    const observations = manualObservations(fx.journal);
+
+    const result = await completion.completeQuit({
+      commit: { kind: 'first-commit', committed: NEW_REF } satisfies CommittedTransition,
+      observations,
+    });
+
+    expect(result).toEqual({ kind: 'rejected', reason: 'quit-requires-a-settled-deactivation' });
+    expect(fx.journal).toEqual([]);
+  });
+
+  it('the never-granted route view answers the complete-nothing accounting — the one view the vocabulary defines, never a fabricated pass', async () => {
+    await expect(neverGrantedRoutes.revoke()).resolves.toEqual({
+      outcome: 'complete',
+      destroyedSockets: 0,
+    });
   });
 });

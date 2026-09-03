@@ -3,6 +3,7 @@ import type { SupervisionCloseReport } from '../../project-plane/supervision/clo
 import type { ClientDocument } from '../clients/session-clients.ts';
 import type {
   ProjectHostTarget,
+  RevocationAccounting,
   RevocationReport,
   RoutesTarget,
 } from '../revocation/authority-revocation.ts';
@@ -132,14 +133,16 @@ export type CompletionResult =
        * session, the old one never resumed. `failure` is F6's fixed
        * `revocation`-category template when the input was F6's failed
        * grant, or the completion's own fixed template when a host
-       * observation failed; `revoked` is the old-side ordered pass's
-       * accounting (the input's, preserved); `aftermath` is what this
+       * observation failed; `revoked` is the preserved old-side
+       * accounting — the ordered pass's report for a switch, or the
+       * first commit's honest nothing for a first activation (#349:
+       * never a fabricated report shape); `aftermath` is what this
        * completion did about the candidate.
        */
       readonly kind: 'failed';
       readonly failure: SessionFailure;
       readonly target: CompletionClientIdentity;
-      readonly revoked: RevocationReport;
+      readonly revoked: RevocationAccounting;
       readonly aftermath: FailureAftermath;
     }
   | { readonly kind: 'rejected'; readonly reason: CompletionRejection };

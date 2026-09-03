@@ -87,6 +87,19 @@ export interface LeaseRevocationView {
 }
 
 /**
+ * The never-granted lease's route view (#349): the honest target when a
+ * failure aftermath revokes a candidate whose lease was never granted
+ * (the adoption died before the route was published) — no route exists,
+ * so nothing retires and no socket dies, and the pass's routes step over
+ * this view records the complete-nothing accounting. The one view the
+ * vocabulary defines for a lease that never existed: compositions
+ * consume it instead of fabricating a pass-shaped answer of their own.
+ */
+export const neverGrantedRoutes: RoutesTarget = Object.freeze({
+  revoke: async () => ({ outcome: 'complete' as const, destroyedSockets: 0 }),
+});
+
+/**
  * The old-side revocation surfaces — every landed module consumed
  * read-only through the slice the coordinator needs.
  */
@@ -143,6 +156,33 @@ export interface RevocationReport {
    */
   readonly outcome: 'complete' | 'incomplete';
 }
+
+/**
+ * The first commit's old-side accounting (#349): no old session
+ * existed, so no revocation pass ran. A {@link RevocationReport} claims
+ * a pass ran over a receipt's bound old pair — a first commit has
+ * neither — so no report shape can tell a first activation's truth;
+ * this marker is the honest nothing. Compositions construct the
+ * first-commit transition variant instead of fabricating a report.
+ */
+export type FirstCommitRevocation = { readonly kind: 'first-commit' };
+
+/**
+ * The old-side accounting one settled transition preserves: the
+ * ordered pass's report (a switch — the receipt's bound old pair), or
+ * the first commit's honest nothing (a first activation — there was
+ * no old authority to revoke).
+ */
+export type RevocationAccounting = RevocationReport | FirstCommitRevocation;
+
+/**
+ * The one {@link FirstCommitRevocation} value — the fixed template a
+ * first activation's failure result preserves (the E6 law's idiom: one
+ * frozen value, no free construction).
+ */
+export const FIRST_COMMIT_REVOCATION: FirstCommitRevocation = Object.freeze({
+  kind: 'first-commit',
+});
 
 /** What the ordered pass needs — the receipt's bound targets plus the shared surfaces. */
 export interface RevokeOldAuthorityInput {

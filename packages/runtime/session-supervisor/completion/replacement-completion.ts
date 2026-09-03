@@ -3,6 +3,8 @@ import type { SupervisionCloseReport } from '../../project-plane/supervision/clo
 import type { CommittedTransition } from '../commit/switch-coordinator.ts';
 
 import {
+  FIRST_COMMIT_REVOCATION,
+  type RevocationAccounting,
   type RevocationReport,
   type RevocationSurfaces,
   revokeOldAuthority,
@@ -21,7 +23,13 @@ import {
   type QuitResult,
 } from './completion-result.ts';
 
-/** The settled variants — every kind that carries the preserved `revoked` accounting. */
+/**
+ * The settled variants — every kind but the pre-linearization
+ * rejection. The switch's `committed`, `deactivated`, and `failed`
+ * kinds carry the preserved `revoked` report; the first-commit variant
+ * (#349) carries none — that absence is its honesty (no old session
+ * existed, so no pass ran).
+ */
 type SettledTransition = Exclude<CommittedTransition, { readonly kind: 'rejected' }>;
 
 // The seam entry's own contract (the #305 re-export idiom): a consumer of
@@ -68,7 +76,18 @@ export { COMPLETION_FAILURE } from './completion-result.ts';
  *   target remains, then report the failed no-active state. The old
  *   session is NEVER resumed: this machine owns no resume operation at
  *   all — no fence resume, no re-mint, no re-bind — and its failure
- *   results carry the old side's revoked accounting unchanged.
+ *   results carry the old side's revocation accounting unchanged (the
+ *   ordered pass's report for a switch; the first commit's honest
+ *   nothing for a first activation).
+ * - **The first-commit variant (#349)**: a first activation's commit —
+ *   the composition's own construction over the grant, no coordinator
+ *   receipt (nothing was ever active to revoke) — arrives with NO
+ *   old-side accounting: no report shape could tell its truth, so the
+ *   union carries none. It shares the activation observation with the
+ *   switch's committed grant, and on failure the same §4 step 7
+ *   aftermath runs over the granted candidate alone; the failed result
+ *   preserves the first commit's own accounting marker — never a
+ *   fabricated report.
  * - **The receipt's client identity is consumed here** (the #239 carried
  *   input): the document + supervisor-side capability the receipt froze
  *   at issuance are this completion's target reference — every result
@@ -187,7 +206,12 @@ export function createSessionCompletion(options: SessionCompletionOptions): Sess
     let candidateRevocation: RevocationReport | null = null;
     let candidateClose: SupervisionCloseReport | null = null;
     const candidate = input.candidate ?? null;
-    if (commit.kind === 'committed' && candidate !== null) {
+    // Both committed variants granted the candidate — a switch's and a
+    // first activation's failed adoption revoke the same way (#349:
+    // the first-commit variant joins `committed` here, never a
+    // fabricated report standing in for it). F6's own `failed` grant
+    // and the deactivation never granted one.
+    if ((commit.kind === 'committed' || commit.kind === 'first-commit') && candidate !== null) {
       candidateRevocation = await revokeOldAuthority({
         session: candidate.session,
         host: candidate.host,
@@ -209,6 +233,10 @@ export function createSessionCompletion(options: SessionCompletionOptions): Sess
     };
   };
 
+  /** The preserved old-side accounting — the input's report, or the first commit's honest nothing (#349). */
+  const accountingOf = (commit: SettledTransition): RevocationAccounting =>
+    commit.kind === 'first-commit' ? FIRST_COMMIT_REVOCATION : commit.revoked;
+
   /** The failed result's shared tail — the aftermath plus the preserved revoked accounting. */
   const failedResult = async (
     input: ReplacementCompletionInput,
@@ -216,7 +244,13 @@ export function createSessionCompletion(options: SessionCompletionOptions): Sess
     commit: SettledTransition,
   ): Promise<CompletionResult> => {
     const aftermath = await runFailureAftermath(input, failure, commit);
-    return { kind: 'failed', failure, target: input.client, revoked: commit.revoked, aftermath };
+    return {
+      kind: 'failed',
+      failure,
+      target: input.client,
+      revoked: accountingOf(commit),
+      aftermath,
+    };
   };
 
   return {
@@ -233,8 +267,11 @@ export function createSessionCompletion(options: SessionCompletionOptions): Sess
         // was never granted, so no candidate authority exists to revoke.
         return await failedResult(input, commit.failure, commit);
       }
-      if (commit.kind === 'committed') {
-        // §4 step 6, activation: the exact main-frame ready handshake.
+      if (commit.kind === 'committed' || commit.kind === 'first-commit') {
+        // §4 step 6, activation: the exact main-frame ready handshake —
+        // a switch's committed grant and a first activation's plain
+        // commit (#349's variant) share the one observation and the one
+        // success shape; only their failure accounting differs.
         if (await observedOutcome(input.observations.mainFrameReady)) {
           return { kind: 'activation-completed', session: commit.committed, target: input.client };
         }
