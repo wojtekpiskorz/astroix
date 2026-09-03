@@ -16,6 +16,12 @@
     "@wojciechpiskorz/astroix-runtime": "^0.0.0"
   },
   "devDependencies": {
+    "@electron-forge/cli": "7.11.2",
+    "@electron-forge/core": "7.11.2",
+    "@electron-forge/maker-zip": "7.11.2",
+    "@electron-forge/plugin-fuses": "7.11.2",
+    "@electron-forge/shared-types": "7.11.2",
+    "@electron/fuses": "1.8.0",
     "electron": "44.1.0"
   }
 }
