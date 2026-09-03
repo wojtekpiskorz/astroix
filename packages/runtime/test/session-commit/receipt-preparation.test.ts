@@ -61,7 +61,7 @@ async function drainedFence(): Promise<SealedFence> {
 async function timedOutFence(): Promise<SealedFence & { readonly release: Release }> {
   const clock = manualClock();
   const fence = createEditFence({ clock: clock.clock });
-  const release: Release = { settled: false, resolve: () => {} };
+  const release: Release = { resolve: () => {} };
   const started = fence.fence(() => [hangingEdit('stuck-write', release)]);
   if (started.kind !== 'fenced') throw new Error('expected the fence to start');
   await flushMicrotasks(); // the queue takes the edit in flight
@@ -97,19 +97,12 @@ describe('the normal preparation — issuance over the sealed terminal drain', (
     const fx = commitFixture();
     const first = await firstRef(fx);
     const sealed = await drainedFence();
-    const editor = fx.clients.bind({ role: 'editor', document: EDITOR_DOC, sessionRef: first });
-    const http = fx.httpBindings.bind({ role: 'editor', host: 'project', sessionRef: first });
-    if (editor.kind !== 'bound' || http.kind !== 'bound') throw new Error('expected bindings');
     const candidate = await beginCandidate(fx, PROJECT_B);
 
     const prepared = await fx.coordinator.prepareNormal({
       oldSession: first,
       target: { kind: 'replacement', candidate: candidate.ref },
-      client: {
-        document: EDITOR_DOC,
-        capability: editor.capability,
-        httpCapability: http.capability,
-      },
+      client: bindEditor(fx, first),
       fence: sealed.fence,
       drain: sealed.drain,
       host: { host: 'project', projectKey: PROJECT_A },
@@ -153,7 +146,6 @@ describe('the normal preparation — issuance over the sealed terminal drain', (
     // the stuck work now settles — the fence crosses to terminal-after-timeout,
     // but the verdict was sealed: the normal receipt still refuses
     sealed.release.resolve();
-    sealed.release.settled = true;
     await sealed.drain.settled;
     expect(sealed.fence.state).toBe('terminal-after-timeout');
     const still = await fx.coordinator.prepareNormal(base);

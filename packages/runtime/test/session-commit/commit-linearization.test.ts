@@ -20,6 +20,7 @@ import {
   PROJECT_A,
   PROJECT_B,
   type Release,
+  refKey,
   type SessionSeat,
   sameRef,
   switchTo,
@@ -127,7 +128,7 @@ interface ForcedPrepared {
  */
 async function forcedPrepared(fx: ReturnType<typeof commitFixture>): Promise<ForcedPrepared> {
   const first = await activateFirst(fx, PROJECT_A);
-  const release: Release = { settled: false, resolve: () => {} };
+  const release: Release = { resolve: () => {} };
   const started = first.fence.fence(() => [hangingEdit('stuck-write', release)]);
   if (started.kind !== 'fenced') throw new Error('expected the drain to start');
   first.drain = started.drain;
@@ -159,7 +160,7 @@ describe('the commit linearization — consumption, ordering, and the grant', ()
   it('revokes every old-side surface BEFORE granting candidate authority, in the one order', async () => {
     const fx = commitFixture();
     const first = await activateFirst(fx, PROJECT_A);
-    fx.liveGrants.set(`${first.ref.runtimeEpoch}#${first.ref.generation}`, 3);
+    fx.liveGrants.set(refKey(first.ref), 3);
     fx.journal.length = 0; // observe exactly this switch's sequence
 
     const result = await switchTo(fx, PROJECT_B);
@@ -380,7 +381,6 @@ describe('the commit linearization — consumption, ordering, and the grant', ()
     // (terminal-after-timeout — still a certified state), then the
     // fence resumes — out of the forced arm's certified set entirely
     forced.release.resolve();
-    forced.release.settled = true;
     await forced.drain.settled;
     expect(forced.first.fence.state).toBe('terminal-after-timeout');
     expect(forced.drain.resume()).toEqual({ kind: 'resumed' });
@@ -408,7 +408,7 @@ describe('the deactivation variant — the same order, no grant', () => {
       },
     });
     const { first, receipt } = prepared;
-    fx.liveGrants.set(`${first.ref.runtimeEpoch}#${first.ref.generation}`, 2);
+    fx.liveGrants.set(refKey(first.ref), 2);
     fx.journal.length = 0; // observe exactly the deactivation's sequence
     const result = await fx.coordinator.deactivate(receipt);
 

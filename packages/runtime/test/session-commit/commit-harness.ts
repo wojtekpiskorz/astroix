@@ -84,7 +84,6 @@ export function sameRef(left: SessionRef, right: SessionRef): boolean {
 
 /** A stuck write's release: the test settles the hanging edit when it says. */
 export interface Release {
-  settled: boolean;
   resolve: () => void;
 }
 
