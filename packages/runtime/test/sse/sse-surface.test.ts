@@ -24,6 +24,7 @@ import {
   type SseAuthorityFixture,
   type SseConnection,
   waitFor,
+  withoutHeader,
 } from './fixtures.ts';
 
 /**
@@ -273,11 +274,32 @@ describe('coexistence with the F2 command endpoint', () => {
   });
 });
 
-describe('admission refusals at the wire (spot legs; the full matrix is the pure lane)', () => {
-  it('refuses a missing Origin, a wrong capability, and a stale pair with the closed codes', async () => {
+describe('admission at the wire (spot legs; the full matrix is the pure lane)', () => {
+  it('admits a same-origin stream WITHOUT Origin — the real-browser shape (#330)', async () => {
+    // `Origin` is a forbidden header on a same-origin GET in real
+    // browsers: Chromium's own `EventSource` presents exactly this
+    // header set, and the reads law admits it (same-origin Fetch
+    // Metadata present, `Origin` absent).
+    const { listener, fixture } = socket as SocketFixture;
+    const connection = await openSse(
+      listener.port,
+      rawSseGet(
+        `${EVENTS_PATH}${eventsQuery(SESSION)}`,
+        withoutHeader(projectStreamHeaders(fixture, 'editor'), 'Origin'),
+      ),
+    );
+    try {
+      expect(connection.status).toBe(200);
+      expect(connection.headers.toLowerCase()).toContain('content-type: text/event-stream');
+    } finally {
+      connection.end();
+    }
+  });
+
+  it('refuses an empty Origin, a wrong capability, and a stale pair with the closed codes', async () => {
     const { listener, fixture } = socket as SocketFixture;
     const legs: Array<[string, string, string[]]> = [
-      ['missing origin', EVENTS_PATH, launcherStreamHeaders(fixture, { Origin: true })],
+      ['empty origin', EVENTS_PATH, launcherStreamHeaders(fixture, { Origin: true })],
       [
         'wrong capability',
         EVENTS_PATH,

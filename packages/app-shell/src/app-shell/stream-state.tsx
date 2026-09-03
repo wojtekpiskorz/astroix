@@ -9,9 +9,10 @@ import { useShell } from './shell-context.ts';
  * arrives (#342: a quiet session delivering no frame is live, not
  * eternally connecting), `stale` when the stream is refused as stale,
  * `unavailable` on a transport refusal, and the terminal reason once
- * the subscription settles. Live SSE admission is #330-blocked (owner
- * ruling pending) — a live browser stream reports the honest refusal
- * here; the delivery semantics are unit-pinned.
+ * the subscription settles. Live SSE admission follows the reads law
+ * (#330) — the browser's no-`Origin` same-origin GET shape is
+ * admitted — so a live document's stream opens; the delivery semantics
+ * stay unit-pinned.
  */
 
 /** The events stream's display state, as the shell renders it. */

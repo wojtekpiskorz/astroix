@@ -121,7 +121,30 @@ export function eventsQuery(session: SessionRef): string {
   return `?runtimeEpoch=${encodeURIComponent(session.runtimeEpoch)}&generation=${session.generation}`;
 }
 
-/** The launcher-host header set for an events stream: exact Origin and same-origin Fetch Metadata, always. */
+/**
+ * The header pairs with every pair of `name` removed — the absent-header
+ * shape a raw socket must be able to present (the extras mechanism can
+ * only replace or add, never remove). The absent-`Origin` shape is the
+ * real-browser one (#330): `Origin` is a forbidden header on a
+ * same-origin GET, so Chromium sends none.
+ */
+export function withoutHeader(headers: readonly string[], name: string): string[] {
+  const target = name.toLowerCase();
+  const filtered: string[] = [];
+  for (let i = 0; i < headers.length; i += 2) {
+    const current = (headers[i] ?? '').toLowerCase();
+    if (current === target) continue;
+    filtered.push(headers[i] ?? '', headers[i + 1] ?? '');
+  }
+  return filtered;
+}
+
+/**
+ * The launcher-host header set for an events stream: same-origin Fetch
+ * Metadata always; the exact `Origin` is the present-and-exact shape a
+ * raw socket can carry (a real browser sends none on a same-origin GET,
+ * #330 — use {@link withoutHeader} to present that shape).
+ */
 export function launcherStreamHeaders(
   fixture: SseAuthorityFixture,
   extras: Record<string, string | true | string[]> = {},
@@ -136,7 +159,12 @@ export function launcherStreamHeaders(
   return rawPairs({ ...base, ...extras });
 }
 
-/** The project-host header set for an events stream, in the given client role. */
+/**
+ * The project-host header set for an events stream, in the given client
+ * role; the exact `Origin` is the present-and-exact shape (see
+ * {@link launcherStreamHeaders} for the absent-`Origin` real-browser
+ * shape, #330).
+ */
 export function projectStreamHeaders(
   fixture: SseAuthorityFixture,
   role: 'editor' | 'diagnostic',

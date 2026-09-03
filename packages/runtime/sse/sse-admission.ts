@@ -29,26 +29,28 @@ import {
 } from '../origin/virtual-hosts.ts';
 
 /**
- * The SSE admission core (#235, F3; ADR-0006 §7 "SSE requires exact
- * `Host`, `Origin`, host capability, client binding, and `SessionRef`"):
- * the pure decision layer that admits or refuses one
- * `GET /__astroix/events` request. It reuses F2's exact admission spine
- * — the same {@link headerEvidence} single entry point for header
- * values, the same duplicate-header law, the same strict Host
- * re-derivation and timing-safe host capability, the same client-binding
- * resolution and role-matrix shape, the same Fetch-Metadata same-origin
- * law and zero-CORS posture (`api/http/**` is imported, never edited) —
- * with the two SSE-strict deltas the ADR names: the exact `Origin` is
- * REQUIRED (a read's Origin is only checked when present), and the
- * CURRENT `SessionRef` is required of every session-bound stream (the
- * pair rides the query string because an `EventSource` carries no body;
- * a launcher document's stream — the idle-registry consumer — must not
- * invent one).
+ * The SSE admission core (#235, F3; ADR-0006 §7's SSE sentence as
+ * amended by the reads-law alignment #330): the pure decision layer
+ * that admits or refuses one `GET /__astroix/events` request. It reuses
+ * F2's exact admission spine — the same {@link headerEvidence} single
+ * entry point for header values, the same duplicate-header law, the
+ * same strict Host re-derivation and timing-safe host capability, the
+ * same client-binding resolution and role-matrix shape, the same
+ * Fetch-Metadata same-origin reads law and zero-CORS posture
+ * (`api/http/**` is imported, never edited) — with the one SSE-strict
+ * delta the ADR names: the CURRENT `SessionRef` is required of every
+ * session-bound stream (the pair rides the query string because an
+ * `EventSource` carries no body; a launcher document's stream — the
+ * idle-registry consumer — must not invent one). The transport laws
+ * are the reads law verbatim (#330): same-origin Fetch Metadata
+ * REQUIRED, `Origin` verified only when present — a real browser never
+ * sends `Origin` on a same-origin GET, so its absence is the honest
+ * same-origin shape, never a refusal.
  *
  * The admission order mirrors `api-dispatch.ts` and is load-bearing the
  * same way: everything decidable from the request line and headers —
- * route, method, duplicate security headers, Host, capability, Origin,
- * Fetch Metadata — is decided before any consult of the binding or
+ * route, method, duplicate security headers, Host, capability, Fetch
+ * Metadata, Origin — is decided before any consult of the binding or
  * session state; then the binding and role; then the SessionRef
  * freshness pair. Every refusal is a closed, sanitized public error
  * (constant messages, no-store, never a capability byte, a port, or a
@@ -279,13 +281,15 @@ function resolveHostClass(
 }
 
 /**
- * The SSE transport laws (ADR-0006 §7, the SSE-strict shape): a stream
- * request is browser read traffic — same-origin Fetch Metadata, and a
- * mutation marker is contradictory evidence, malformed — and unlike a
- * read, whose Origin is checked only when present, the stream's exact
- * `Origin` is REQUIRED: the ADR's admission list names it, and a
- * same-origin `EventSource` always sends the matching value, so an
- * absent or disagreeing one is forged or foreign evidence.
+ * The SSE transport laws (ADR-0006 §7, the reads-law alignment #330): a
+ * stream request is browser read traffic — same-origin Fetch Metadata,
+ * and a mutation marker is contradictory evidence, malformed — the
+ * reads law of `api-dispatch.ts` verbatim: the stream's `Origin`, when
+ * present, must agree (a disagreement is forged evidence), and its
+ * ABSENCE is no refusal, because a real browser never sends `Origin`
+ * on a same-origin GET (`Origin` is a forbidden header for fetch and
+ * `EventSource` alike) — the strict-demand shape 403'd every real
+ * client while raw-socket test pins masked the mismatch.
  */
 function checkTransportMarkers(
   headers: HeaderEvidence,
@@ -296,7 +300,7 @@ function checkTransportMarkers(
   }
   if (headers.values['sec-fetch-site'] !== 'same-origin') return refused({ code: 'unauthorized' });
   const origin = headers.values.origin;
-  if (origin === undefined || origin.toLowerCase() !== expectedOrigin.toLowerCase()) {
+  if (origin !== undefined && origin.toLowerCase() !== expectedOrigin.toLowerCase()) {
     return refused({ code: 'unauthorized' });
   }
   return null;
