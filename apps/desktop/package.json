@@ -1,0 +1,21 @@
+{
+  "name": "@wojciechpiskorz/astroix",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Astroix desktop — the thin Electron native host (#243, H1): windows, menus, singleton behavior, native selection, navigation policy, app lifecycle, and one-use control-plane boot. Product identity: Astroix, bundle identifier dev.astroix.app (the packaged wiring is H3's Forge lane, #245); Electron is pinned exactly (ADR-0008).",
+  "type": "module",
+  "license": "MIT",
+  "productName": "Astroix",
+  "main": "dist-main/main.js",
+  "engines": {
+    "node": ">=24"
+  },
+  "sideEffects": false,
+  "dependencies": {
+    "@wojciechpiskorz/astroix-protocol": "^0.0.0",
+    "@wojciechpiskorz/astroix-runtime": "^0.0.0"
+  },
+  "devDependencies": {
+    "electron": "44.1.0"
+  }
+}

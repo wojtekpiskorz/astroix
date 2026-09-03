@@ -28,6 +28,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
+    "test:desktop": "node apps/desktop/smoke/build-main.mjs && vitest run --config apps/desktop/smoke/vitest.config.ts",
     "certify:adapter": "vitest run --config packages/runtime/astro-project-adapter/certification/vitest.config.ts"
   },
   "devDependencies": {
