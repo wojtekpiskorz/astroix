@@ -156,9 +156,12 @@ async function activate(
     .records.find((entry) => entry.projectKey === projectKey);
   if (record === undefined) return notFoundProject();
   clearCandidates();
-  inputs.pendingDevPorts.push(await inputs.freePort());
   const begun = inputs.supervisor.begin(projectKey);
   if (begun.kind === 'refused') return concurrentActivation();
+  // The port joins the queue only for an admitted attempt — a refused
+  // begin consumes nothing, so the queue always holds exactly the port
+  // each live activation picked.
+  inputs.pendingDevPorts.push(await inputs.freePort());
   let candidate: StagedCandidate;
   try {
     candidate = await begun.attempt.ready;
