@@ -1,9 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import {
-  type WriteOutcome,
-  writeFailure,
-  writeRejection,
-} from '../../edit-authority/executor/write-outcomes.ts';
+import { writeFailure, writeRejection } from '../../edit-authority/executor/write-outcomes.ts';
 import {
   DRAIN_DEADLINE_MS,
   type DrainReport,
