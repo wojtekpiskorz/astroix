@@ -32,7 +32,8 @@ import {
 } from '@wojciechpiskorz/astroix-runtime/session-supervisor/staging';
 import type { SseHub } from '@wojciechpiskorz/astroix-runtime/sse';
 import { ssePublication } from '@wojciechpiskorz/astroix-runtime/sse';
-import { candidateRun, clearCandidates, runPort } from './run-ports.ts';
+import { type CandidateStore, pairKey } from './candidates.ts';
+import { neverSpawnedRun } from './never-spawned.ts';
 
 /**
  * The command executor of the web host (#240): the composition behind
@@ -95,6 +96,8 @@ export interface ExecutorInputs {
   readonly pendingDevPorts: number[];
   readonly freePort: () => Promise<number>;
   readonly hub: SseHub;
+  /** The composition-owned candidate bookkeeping — runs and dev-server ports by pair. */
+  readonly candidates: CandidateStore;
 }
 
 /** The executor surface — one call per admitted envelope. */
@@ -155,7 +158,7 @@ async function activate(
     .snapshot()
     .records.find((entry) => entry.projectKey === projectKey);
   if (record === undefined) return notFoundProject();
-  clearCandidates();
+  inputs.candidates.clear();
   // The port is picked BEFORE `begin` — the supervisor's `startCandidate`
   // seam consumes it synchronously inside `begin`. A refused begin
   // returns it: the queue always holds exactly the ports of admitted
@@ -365,13 +368,13 @@ async function adoptSession(
   if (httpBound.kind !== 'bound' || clientBound.kind !== 'bound') {
     throw new Error('the session editor binding could not be installed');
   }
-  const devServerPort = runPortOf(candidate);
+  const devServerPort = inputs.candidates.portOf(candidate.ref);
   const lease = inputs.listener.grantProjectLease({
     projectKey: active.projectKey,
     upstream: { host: '127.0.0.1', port: devServerPort },
   });
   inputs.grantTables.set(pairKey(candidate.ref), await createGrantTable(canonicalRoot));
-  const run = candidateRun(candidate.ref);
+  const run = inputs.candidates.runOf(candidate.ref);
   if (run !== null) {
     run.subscribe((event) => {
       const wire: SseEvent =
@@ -385,7 +388,7 @@ async function adoptSession(
   inputs.seatStore.adopt({
     ref: candidate.ref,
     projectKey: active.projectKey,
-    run: run ?? neverSpawnedRun(),
+    run: run ?? neverSpawnedRun('the session run was never registered'),
     devServerPort,
     lease,
     fence: createEditFence(),
@@ -393,39 +396,6 @@ async function adoptSession(
     document,
     clientCapability: clientBound.capability,
   });
-}
-
-/** The candidate's dev-server port, from the composition's bookkeeping — never the run's to disclose. */
-function runPortOf(candidate: StagedCandidate): number {
-  const run = candidateRun(candidate.ref);
-  return run !== null ? runPort(run) : -1;
-}
-
-/** A run that was never spawned — the seat's stand-in on a composition defect (never silently editable). */
-function neverSpawnedRun(): ProjectRun {
-  const failure = new Error('the session run was never registered');
-  const ready = Promise.reject(failure);
-  ready.catch(() => {});
-  const closed = Promise.resolve({
-    reason: 'cancelled',
-    outcome: 'complete',
-    failures: [],
-    accounting: {
-      workerReportReceived: false,
-      workerCleanupComplete: true,
-      workerReaped: false,
-      managedAstroReaped: false,
-      probesSettled: true,
-      killEscalations: [],
-    },
-  } as const);
-  return {
-    ready,
-    inspect: () => Promise.reject(failure),
-    subscribe: () => () => {},
-    stop: () => closed,
-    closed,
-  };
 }
 
 /** Runs one fence to its terminal drained verdict — `null` when it failed (§4 step 3's abort). */
@@ -492,8 +462,4 @@ function notComposed(): PublicError {
 /** Field-wise pair equality — the codebase idiom. */
 function samePair(a: SessionRef, b: SessionRef | undefined): boolean {
   return b !== undefined && a.runtimeEpoch === b.runtimeEpoch && a.generation === b.generation;
-}
-
-function pairKey(ref: SessionRef): string {
-  return `${ref.runtimeEpoch}#${ref.generation}`;
 }

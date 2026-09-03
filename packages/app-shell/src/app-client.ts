@@ -220,7 +220,13 @@ export function createAppClient(options: AppClientOptions): AppClient {
   async function request(command: Command, session?: SessionRef, signal?: AbortSignal) {
     const requestId = `req-${nextRequestId}`;
     nextRequestId += 1;
-    const mutation = command.kind === 'activate' || command.kind === 'deactivate';
+    // The mutation-marker set mirrors the server's COMMAND_ROUTES truth
+    // (`activate`, `deactivate`, `apply-edit` — F2 #234): an unmarked
+    // mutation envelope is refused at admission, so this fork must never
+    // drift behind it. The single home is a protocol-side table and is
+    // fenced to #334 — this set matches the server until that lands.
+    const mutation =
+      command.kind === 'activate' || command.kind === 'deactivate' || command.kind === 'apply-edit';
     let response: Response;
     try {
       response = await fetch(endpoint, {

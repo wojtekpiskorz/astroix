@@ -89,33 +89,36 @@ function serveDocument(
   options: DocumentSurfaceOptions,
 ): void {
   const hostname = hostnameOf(request);
+  if (hostname === LAUNCHER_HOSTNAME) {
+    void servePage(
+      'launcher.html',
+      { clientCapability: options.launcherClient },
+      options.launcherCapability,
+      response,
+      options.clientDist,
+    );
+    return;
+  }
   const current = options.sessions.current();
-  const onProjectHost = current !== null && hostname === projectHostname(current.projectKey);
-  if (hostname !== LAUNCHER_HOSTNAME && !onProjectHost) {
+  if (current === null || hostname !== projectHostname(current.projectKey)) {
     respond(response, 404, 'text/plain', 'not found');
     return;
   }
-  const page = onProjectHost ? 'project.html' : 'launcher.html';
-  const editorCapability = onProjectHost ? options.sessions.editorCapability() : null;
-  if (onProjectHost && (current === null || editorCapability === null)) {
+  const editorCapability = options.sessions.editorCapability();
+  if (editorCapability === null) {
     // The host is current but no document authority exists — a
     // composition inconsistency, never a fallback to the launcher page.
     respond(response, 404, 'text/plain', 'not found');
     return;
   }
-  const cookie = onProjectHost
-    ? (options.grants.current({
-        host: 'project',
-        projectKey: (current as NonNullable<typeof current>).projectKey,
-      }) ?? '')
-    : options.launcherCapability;
-  const bootstrap: DocumentBootstrap = onProjectHost
-    ? {
-        clientCapability: editorCapability as string,
-        session: (current as NonNullable<typeof current>).sessionRef,
-      }
-    : { clientCapability: options.launcherClient };
-  void servePage(page, bootstrap, cookie, response, options.clientDist);
+  const cookie = options.grants.current({ host: 'project', projectKey: current.projectKey }) ?? '';
+  void servePage(
+    'project.html',
+    { clientCapability: editorCapability, session: current.sessionRef },
+    cookie,
+    response,
+    options.clientDist,
+  );
 }
 
 /** Reads one built page, injects the bootstrap metas, sets the cookie, and serves it no-store. */

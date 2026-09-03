@@ -17,7 +17,6 @@ import {
 } from '@wojciechpiskorz/astroix-runtime/project-plane/supervision';
 import {
   createProjectRuntime,
-  type ProjectRun,
   type ProjectRuntime,
 } from '@wojciechpiskorz/astroix-runtime/project-runtime';
 import {
@@ -42,9 +41,10 @@ import {
   type SseHub,
   ssePublication,
 } from '@wojciechpiskorz/astroix-runtime/sse';
+import { createCandidateStore, pairKey } from './candidates.ts';
 import { bindLauncherDocument, createDocumentSurface } from './documents.ts';
 import { createExecutor, type SeatStore, type SessionSeat } from './executor.ts';
-import { rememberCandidate } from './run-ports.ts';
+import { neverSpawnedRun } from './never-spawned.ts';
 
 /** The raw-Node register this dev-checkout control plane and its worker child load. */
 const RAW_NODE_REGISTER = fileURLToPath(new URL('../raw-node-register.mjs', import.meta.url));
@@ -124,6 +124,7 @@ export async function createWebControlPlane(
   });
   const seats = new Map<string, SessionSeat>();
   const grantTables = new Map<string, GrantTable>();
+  const candidates = createCandidateStore();
   /** The dev-server port each activation picked before `begin` — consumed by its `startCandidate`. */
   const pendingDevPorts: number[] = [];
   const launcherCapability = grants.mint({ host: 'launcher' });
@@ -137,9 +138,11 @@ export async function createWebControlPlane(
       const record = registry
         .snapshot()
         .records.find((entry) => entry.projectKey === request.projectKey);
-      if (port === undefined || record === undefined) return neverSpawnedRun();
+      if (port === undefined || record === undefined) {
+        return neverSpawnedRun('the candidate could not be launched');
+      }
       const run = runtime.start({ projectRoot: record.canonicalRoot, devServerPort: port });
-      rememberCandidate(run, port, request.sessionRef);
+      candidates.remember(run, port, request.sessionRef);
       return run;
     },
   });
@@ -203,25 +206,30 @@ export async function createWebControlPlane(
     },
   });
 
+  // One executor for the composition's lifetime — its inputs are the
+  // composition-owned stores, rebuilt never: a per-envelope rebuild was
+  // three ownership stories for one state (injected inputs, module
+  // globals, and a fresh closure); this is the one.
+  const executor = createExecutor({
+    registry,
+    supervisor,
+    coordinator,
+    seatStore,
+    listener,
+    sessionClients,
+    httpBindings,
+    grantTables,
+    pendingDevPorts,
+    freePort,
+    hub,
+    candidates,
+  });
   apiSurface.setAuthority({
     expectedPort: listener.port,
     sessionState,
     verifyHostCapability: grants.verify,
     resolveClientBinding: httpBindings.resolve,
-    executeCommand: (envelope) =>
-      createExecutor({
-        registry,
-        supervisor,
-        coordinator,
-        seatStore,
-        listener,
-        sessionClients,
-        httpBindings,
-        grantTables,
-        pendingDevPorts,
-        freePort,
-        hub,
-      }).execute(envelope),
+    executeCommand: executor.execute,
   });
   eventsSurface.setAuthority({
     expectedPort: listener.port,
@@ -288,33 +296,6 @@ async function launchWebPlane(input: {
   });
 }
 
-/** A run that was never spawned — the E8 never-spawned law, for the vanished-record path. */
-function neverSpawnedRun(): ProjectRun {
-  const failure = new Error('the candidate could not be launched');
-  const ready = Promise.reject(failure);
-  ready.catch(() => {}); // anchored: the attempt surfaces it, the composition never hangs
-  const closed = Promise.resolve({
-    reason: 'cancelled',
-    outcome: 'complete',
-    failures: [],
-    accounting: {
-      workerReportReceived: false,
-      workerCleanupComplete: true,
-      workerReaped: false,
-      managedAstroReaped: false,
-      probesSettled: true,
-      killEscalations: [],
-    },
-  } as const);
-  return {
-    ready,
-    inspect: () => Promise.reject(failure),
-    subscribe: () => () => {},
-    stop: () => closed,
-    closed,
-  };
-}
-
 /** One free loopback port — the dev-server port discipline (the managed-astro lane's idiom). */
 export function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -326,8 +307,4 @@ export function freePort(): Promise<number> {
       server.close(() => resolve(port));
     });
   });
-}
-
-function pairKey(ref: SessionRef): string {
-  return `${ref.runtimeEpoch}#${ref.generation}`;
 }
