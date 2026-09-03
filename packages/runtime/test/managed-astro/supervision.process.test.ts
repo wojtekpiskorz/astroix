@@ -464,11 +464,11 @@ describe('escalation and the reap bounds', () => {
     // filed as #326). Until that rules, this
     // leg pins the scenario's deterministic half: the escalation ladder
     // itself, its observed reap inside the lane's default bound, and the
-    // (a half that overlaps the ignoreTerm leg's assertions — until #326
-    // makes the two children distinguishable, an ignoring child and a
-    // delaying one are one observable surface here)
     // KILL-only death. The honest incomplete-reap CLASSIFICATION keeps its
-    // pure coverage in close-report.test.ts.
+    // pure coverage in close-report.test.ts. (That half overlaps the
+    // ignoreTerm leg's assertions: until #326 makes the two children
+    // distinguishable, an ignoring child and a delaying one are one
+    // observable surface here.)
     const lane = await startLane({ devServer: { termDelayMs: 5000 } });
     await lane.supervisor.ready;
     const report = await lane.supervisor.stop();
