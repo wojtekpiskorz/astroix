@@ -18,6 +18,7 @@
     "./edit-authority/grants": "./edit-authority/grants/grant-table.ts",
     "./edit-authority/planning": "./edit-authority/planning/write-plans.ts",
     "./edit-authority/executor": "./edit-authority/executor/executor-spawn.ts",
+    "./internal/packaged-assets": "./src/internal/packaged-assets.ts",
     "./kernel-lease": "./kernel-lease/kernel-lease.ts",
     "./private-boot": "./private-boot/control-plane-boot.ts",
     "./project-plane/composition": "./project-plane/composition/composition-runtime.ts",

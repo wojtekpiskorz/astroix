@@ -331,6 +331,10 @@ describe('toRiskEntry', () => {
       // tombstone machine (tombstone).
       'packages/runtime/session-supervisor/completion/replacement-completion.ts',
       'packages/runtime/session-supervisor/tombstone/boot-tombstone.ts',
+      // #244 (H2): one representative per new covered prefix — the
+      // packaged-asset adapter (src/internal; tests live under
+      // apps/desktop/test/runtime-resources per the owned paths).
+      'packages/runtime/src/internal/packaged-assets.ts',
     ];
     for (const file of covered) {
       expect(toRiskEntry(file, fn, fileCov).metric).toBe('crap');
