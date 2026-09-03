@@ -9,7 +9,12 @@ import {
   type EditFence,
   type EditFenceState,
 } from '../fence/edit-fence.ts';
-import type { RevocationReport, RevocationSurfaces } from '../revocation/authority-revocation.ts';
+import type {
+  ProjectHostTarget,
+  RevocationReport,
+  RevocationSurfaces,
+  RoutesTarget,
+} from '../revocation/authority-revocation.ts';
 import { revokeOldAuthority } from '../revocation/authority-revocation.ts';
 import type { StagedCandidate } from '../staging/session-supervisor.ts';
 import {
@@ -20,6 +25,19 @@ import {
   type ReceiptLedger,
   type SwitchPreparationReceipt,
   type SwitchTarget,
+} from './switch-receipt.ts';
+
+// The seam entry's own contract (the #305 re-export idiom): a consumer
+// of `session-supervisor/commit` names the whole public vocabulary —
+// the receipt currency, its bindings, and the one-use ledger — without
+// reaching around the exports map.
+export type {
+  AuthoritativeClient,
+  ExecutorExitView,
+  PreparationResult,
+  ReceiptBindings,
+  SwitchPreparationReceipt,
+  SwitchTarget,
 } from './switch-receipt.ts';
 
 /**
@@ -117,8 +135,8 @@ export interface SwitchPreparationInput {
   readonly client: AuthoritativeClient;
   readonly fence: EditFence;
   readonly drain: EditDrain;
-  readonly host: Parameters<typeof revokeOldAuthority>[0]['host'];
-  readonly routes: Parameters<typeof revokeOldAuthority>[0]['routes'];
+  readonly host: ProjectHostTarget;
+  readonly routes: RoutesTarget;
   /** Deactivation only: stops the outgoing run after revocation. */
   readonly stopOldRun?: () => void;
 }
