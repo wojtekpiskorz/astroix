@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { stripAuthorityFromRawPairs } from '../../api/http/authority-strip.ts';
 import {
   reconstructUpgradeHandshake,
-  stripAuthorityFromRawPairs,
   validateUpgradeRequest,
 } from '../../proxy/upgrade-request.ts';
 

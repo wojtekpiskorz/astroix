@@ -40,12 +40,9 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { Duplex } from 'node:stream';
 import type { ProjectKey } from '@wojciechpiskorz/astroix-protocol';
+import { stripAuthorityFromRawPairs } from '../api/http/authority-strip.ts';
 import { proxyHttpStream, sendGeneratedResponse } from '../proxy/http-stream.ts';
-import {
-  reconstructUpgradeHandshake,
-  stripAuthorityFromRawPairs,
-  validateUpgradeRequest,
-} from '../proxy/upgrade-request.ts';
+import { reconstructUpgradeHandshake, validateUpgradeRequest } from '../proxy/upgrade-request.ts';
 import { respondRawAndClose, tunnelRawUpgrade } from '../proxy/upgrade-tunnel.ts';
 import { createHostRouter, type HostEvidence } from './host-router.ts';
 import {
