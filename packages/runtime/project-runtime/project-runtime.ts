@@ -1,3 +1,5 @@
+import { findDisclosure } from '@wojciechpiskorz/astroix-protocol';
+import type { ExactPairValue } from '../astro-project-adapter/adapter-error.ts';
 import type { SupervisionCloseReport } from '../project-plane/supervision/close-report.ts';
 import type {
   ProjectPlaneSupervisor,
@@ -46,7 +48,11 @@ export { type ProxyHealthPrerequisite, satisfiedProxyHealth } from './proxy-heal
  *   deferred seam F1 (#233) wires. Every terminal startup outcome
  *   (launch failure, supervisor boot failure, failed health check,
  *   stop-during-startup) rejects with one sanitized
- *   {@link ProjectRunBootError}.
+ *   {@link ProjectRunBootError}; an uncertified Astro/Vite pair rejects
+ *   with the certification code and its pair facts (#319, ADR-0005's
+ *   compatibility contract — the launch pre-flight fails the pair
+ *   before any child spawns, and the facade's admission is the one
+ *   origin-gated, shape-gated mapping into that code).
  * - **`inspect`** accepts ONLY the four typed request families (E6's
  *   guard re-applied at this boundary — defense in depth, never the
  *   sole gate) and settles with the revisioned typed results THE
@@ -75,8 +81,35 @@ export { type ProxyHealthPrerequisite, satisfiedProxyHealth } from './proxy-heal
  * other IO glue.
  */
 
-/** Why a run failed to become ready — sanitized codes only (ADR-0006 §7 output hygiene). */
-export type ProjectRunBootErrorCode = SupervisionBootErrorCode | 'proxy-health' | 'launch-failed';
+/**
+ * Why a run failed to become ready — sanitized codes only (ADR-0006 §7
+ * output hygiene). `uncertified-pair` is the adapter's compatibility
+ * origin (#319, ADR-0005: an uncertified pair "fails before project
+ * config executes"): the production launch's pair pre-flight rejects
+ * with the adapter's own `AdapterError('uncertified-pair')`, and the
+ * facade's boot-error admission maps exactly that origin — with its pair
+ * facts — to this code, so the session layer can report the
+ * certification category instead of a launch-shaped default.
+ */
+export type ProjectRunBootErrorCode =
+  | SupervisionBootErrorCode
+  | 'proxy-health'
+  | 'launch-failed'
+  | 'uncertified-pair';
+
+/**
+ * The certification facts an uncertified-pair boot rejection carries
+ * (ADR-0005's explicit report requirement: the detected pair, the
+ * certified pairs, and the rejected contract). These are the adapter's
+ * sanctioned `details` payload, re-validated at admission — the strings
+ * are disclosure-checked before they ride the error, so nothing a
+ * hostile project manifest carried can surface through the boot path.
+ */
+export interface CertificationFacts {
+  readonly detected: ExactPairValue;
+  readonly certified: readonly ExactPairValue[];
+  readonly rejectedContract: string;
+}
 
 /** The fixed templates behind every boot-rejection message — no free text ever enters (the E6 law). */
 const BOOT_MESSAGES: Record<ProjectRunBootErrorCode, string> = {
@@ -86,26 +119,115 @@ const BOOT_MESSAGES: Record<ProjectRunBootErrorCode, string> = {
   'managed-astro-crash': 'the managed Astro dev server terminated before the run completed',
   'proxy-health': 'the proxy health prerequisite failed during project startup',
   'launch-failed': 'the project plane could not be launched for the requested project',
+  'uncertified-pair': 'the managed project did not carry a certified Astro and Vite pair',
 };
 
-/** The sanitized terminal-startup rejection `ready` settles with — the facade's one boot-error shape. */
+/**
+ * The sanitized terminal-startup rejection `ready` settles with — the
+ * facade's one boot-error shape. The certification code is the one
+ * payload-bearing member: its {@link CertificationFacts} are required
+ * (the overload pair makes a facts-free certification unconstructible in
+ * types), because the code without its facts could never satisfy
+ * ADR-0005's report requirement.
+ */
 export class ProjectRunBootError extends Error {
-  constructor(readonly code: ProjectRunBootErrorCode) {
+  readonly certification?: CertificationFacts;
+
+  constructor(code: Exclude<ProjectRunBootErrorCode, 'uncertified-pair'>);
+  constructor(code: 'uncertified-pair', certification: CertificationFacts);
+  constructor(
+    readonly code: ProjectRunBootErrorCode,
+    certification?: CertificationFacts,
+  ) {
     super(BOOT_MESSAGES[code]);
     this.name = 'ProjectRunBootError';
+    // The key rides only when the facts do — an absent payload must not
+    // leave an observable `undefined` property behind.
+    if (certification !== undefined) this.certification = certification;
   }
 }
 
-/** Maps a plane-readiness rejection to the facade's boot error: the supervisor's code through, anything else launch-shaped. */
+/** The adapter's compatibility origin — the only certification-bearing code admitted. */
+const UNCERTIFIED_PAIR_CODE = 'uncertified-pair';
+
+/** A fact string the certification payload may carry: non-empty and disclosure-free. */
+function isFactText(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0 && findDisclosure(value) === null;
+}
+
+/** One pair value in the certification payload — both versions fact strings. */
+function isFactPair(value: unknown): value is ExactPairValue {
+  if (typeof value !== 'object' || value === null) return false;
+  const record = value as Record<string, unknown>;
+  return isFactText(record.astro) && isFactText(record.vite);
+}
+
+/**
+ * Validates a boot-path rejection into the certification facts — or null
+ * when the origin is anything else: another adapter code, no code at
+ * all, or an `uncertified-pair` whose payload drifted in shape or carries
+ * disclosure-shaped text. The admission never guesses (#319): a drifted
+ * origin reports `launch-failed`, never a partially-trusted
+ * certification.
+ */
+function certificationFactsOf(error: unknown): CertificationFacts | null {
+  if (typeof error !== 'object' || error === null) return null;
+  const record = error as Record<string, unknown>;
+  if (record.code !== UNCERTIFIED_PAIR_CODE) return null;
+  const details = record.details;
+  if (typeof details !== 'object' || details === null) return null;
+  return certificationPayloadOf(details as Record<string, unknown>);
+}
+
+/**
+ * The adapter's uncertified-pair detail payload, validated whole: the
+ * detected pair, a non-empty certified list of pairs, and the rejected
+ * contract — every string a non-empty, disclosure-free fact.
+ */
+function certificationPayloadOf(payload: Record<string, unknown>): CertificationFacts | null {
+  if (!isFactPair(payload.detected)) return null;
+  if (!Array.isArray(payload.certified) || payload.certified.length === 0) return null;
+  const certified: ExactPairValue[] = [];
+  for (const pair of payload.certified) {
+    if (!isFactPair(pair)) return null;
+    certified.push({ astro: pair.astro, vite: pair.vite });
+  }
+  if (!isFactText(payload.rejectedContract)) return null;
+  return {
+    detected: { astro: payload.detected.astro, vite: payload.detected.vite },
+    certified,
+    rejectedContract: payload.rejectedContract,
+  };
+}
+
+/**
+ * Maps a boot-path rejection (the launch pre-flight's or the plane's own
+ * readiness) to the facade's boot error: the adapter's `uncertified-pair`
+ * origin with a well-formed payload becomes the certification code;
+ * the supervisor's codes pass through by membership; everything else —
+ * including a drifted certification payload — is launch-shaped.
+ */
 function toBootError(error: unknown): ProjectRunBootError {
+  const facts = certificationFactsOf(error);
+  if (facts !== null) {
+    return new ProjectRunBootError('uncertified-pair', facts);
+  }
   const code = (error as { readonly code?: unknown } | null)?.code;
   // The supervisor's boot codes are admitted by membership in the
   // compiler-forced BOOT_MESSAGES key set — the Record's own exhaustiveness
   // is the allowlist, so a future E7 boot code template compiles here for
   // free instead of drifting silently in a hand-listed array. hasOwn, not
   // `in`: the prototype chain makes 'constructor' in obj true.
-  if (typeof code === 'string' && Object.hasOwn(BOOT_MESSAGES, code)) {
-    return new ProjectRunBootError(code as SupervisionBootErrorCode);
+  // `uncertified-pair` itself is exempt from the membership path on
+  // purpose: its admission is the shape-gated branch above, so a rejection
+  // wearing the code without a valid payload falls closed instead of
+  // riding the table into a facts-free certification.
+  if (
+    typeof code === 'string' &&
+    code !== UNCERTIFIED_PAIR_CODE &&
+    Object.hasOwn(BOOT_MESSAGES, code)
+  ) {
+    return new ProjectRunBootError(code as Exclude<ProjectRunBootErrorCode, 'uncertified-pair'>);
   }
   return new ProjectRunBootError('launch-failed');
 }
@@ -214,8 +336,13 @@ function startRun(
           throw toBootError(error);
         },
       ),
-    () => {
-      throw new ProjectRunBootError('launch-failed');
+    (error: unknown) => {
+      // The launch rejection rides the SAME admission as the plane's own
+      // boot failures: the pre-flight's `uncertified-pair` origin maps to
+      // the certification boot error with its pair facts, and everything
+      // else (an unresolvable dependency, a hostile free-text error)
+      // stays `launch-failed` — never a guess (#319).
+      throw toBootError(error);
     },
   );
   // The same anchor for the facade's own rejection paths.
