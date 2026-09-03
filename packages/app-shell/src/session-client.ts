@@ -55,6 +55,13 @@ export type SseCloseReason = 'ended' | 'aborted' | 'stale' | 'failed';
 export interface SseHandlers {
   /** Every parsed event envelope, in delivery order. */
   onEvent: SessionEventCallback;
+  /**
+   * The transport established an admitted stream — fires on each
+   * (re)connection, before any frame is delivered; symmetric with the
+   * other ungated stream-level callbacks (`onStale`, `onTransportError`):
+   * it describes the STREAM, not a pair.
+   */
+  onOpen?: () => void;
   /** The stream was refused or ended as stale — it will not reconnect. */
   onStale?: () => void;
   /** A sanitized transport-level failure (fetch/network shape); the subscription's policy decides the tail. */
