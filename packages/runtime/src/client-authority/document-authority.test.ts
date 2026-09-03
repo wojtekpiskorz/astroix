@@ -677,8 +677,8 @@ describe('the upstream strip — the injected authority never forwards (HTTP and
    * node:http's parsed lowercased record for the stream proxy, and the
    * raw-cased pair view the HMR handshake reconstruction preserves.
    * F2's one strip definition (`stripControlAuthority`) must clean BOTH;
-   * the live wiring of the strip into the proxy paths is the open
-   * prerequisite this lane reports (its owned paths are F1's).
+   * the live wiring into the proxy paths landed with #343 (1c47a11),
+   * which owns F1's paths — these pins hold the definition itself.
    */
   function rawPairRecord(rawHeaders: readonly string[]): Record<string, string> {
     const record: Record<string, string> = {};
