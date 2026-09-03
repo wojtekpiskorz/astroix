@@ -303,7 +303,11 @@ describe('crash is terminal — the sibling is cleaned, never restarted', () => 
       },
       devServerPort: port,
       startupTimeoutMs: 3000,
-      stopTimeoutMs: 600,
+      // The widened boot bound, same family as the sibling startup legs:
+      // this stop races the worker's loaded boot (the spawn error fires
+      // at t≈0 while the worker is mid-boot); a 600 ms bound TERMs it
+      // mid-boot under suite-scale load and voids the close report.
+      stopTimeoutMs: 10_000,
       termGraceMs: 200,
       killReapMs: 200,
       probeIntervalMs: 15,
@@ -332,7 +336,15 @@ describe('crash is terminal — the sibling is cleaned, never restarted', () => 
 
 describe('startup cancellation and the startup deadline', () => {
   it('a stop during startup cancels: both children terminated, probes aborted, complete report', async () => {
-    const lane = await startLane({ devServer: { mode: 'hang' } });
+    // stopTimeoutMs widened for #322's boot-race family: the stop control
+    // is IPC-buffered until the worker is up, but the graceful close that
+    // awaits it is bounded — a bound tighter than a loaded boot would TERM
+    // the worker mid-boot (default disposition, no exit handler) and void
+    // its voluntary-exit marker below.
+    const lane = await startLane({
+      devServer: { mode: 'hang' },
+      bounds: { stopTimeoutMs: 10_000 },
+    });
     const rejection = rejectedReady(lane.supervisor);
     const report = await lane.supervisor.stop();
     expect(report).toMatchObject({ reason: 'cancelled', outcome: 'complete', failures: [] });
@@ -347,9 +359,23 @@ describe('startup cancellation and the startup deadline', () => {
   }, 15_000);
 
   it('a never-ready dev server hits the startup deadline: terminal close, children terminated', async () => {
+    // The deadline's SIGTERM races the dev server's node boot: under
+    // suite-scale load the child can still be mid-boot when the terminal
+    // close reaches it, and a SIGTERM delivered before the child has
+    // registered its handlers is a default-disposition kill — no exit
+    // handler runs, so no astro-exit stamp EVER lands while the reap is
+    // honestly complete (#322: 20/90 probe runs under a concurrent suite
+    // died pre-boot, boot stamp absent too). The awaitAstroListening
+    // rendezvous closes the race by construction: the worker holds its
+    // close report until the sibling stamped astro-listening (written
+    // strictly after its SIGTERM/exit handlers are registered), and the
+    // supervisor TERMs the dev server only after that report — the exit
+    // stamp becomes a causal consequence of the signal. The widened stop
+    // bound gives both children's loaded boots room inside the rendezvous.
     const lane = await startLane({
+      workerBehaviors: { awaitAstroListening: true },
       devServer: { mode: 'hang' },
-      bounds: { startupTimeoutMs: 350 },
+      bounds: { startupTimeoutMs: 350, stopTimeoutMs: 10_000 },
     });
     const rejection = await rejectedReady(lane.supervisor);
     expect(rejection.code).toBe('startup-timeout');
@@ -367,7 +393,10 @@ describe('startup cancellation and the startup deadline', () => {
   it('a worker whose project inspection FAILS is never admitted — the startup deadline terminates the plane', async () => {
     const lane = await startLane({
       workerBehaviors: { probeFail: true },
-      bounds: { startupTimeoutMs: 350 },
+      // stopTimeoutMs widened for #322's boot-race family: the deadline
+      // still fires at 350 ms, but the worker's stop-received stamp stays
+      // causal (IPC-buffered, then honored) however slow its loaded boot.
+      bounds: { startupTimeoutMs: 350, stopTimeoutMs: 10_000 },
     });
     const rejection = await rejectedReady(lane.supervisor);
     expect(rejection.code).toBe('startup-timeout');
@@ -421,18 +450,39 @@ describe('escalation and the reap bounds', () => {
     expect(await markerStamps(lane.markerDir, 'worker-exit')).toHaveLength(0);
   }, 15_000);
 
-  it('an unobserved exit after SIGKILL reports the honest incomplete reap — no PID, no false complete', async () => {
-    const lane = await startLane({
-      devServer: { termDelayMs: 5000 },
-      bounds: { killReapMs: 0 },
-    });
+  it('a TERM-delaying dev server dies by the SIGKILL ladder — observed reap, honest complete report, no PID', async () => {
+    // #322: this leg was the "unobserved exit after SIGKILL" zero-bound
+    // gamble (killReapMs: 0 → 'incomplete'), but a zero reap bound is a
+    // scheduling coin, not a construction: the SIGKILLed child dies in
+    // microseconds and nothing test-side can delay its death or the
+    // supervisor's exit-event observation, so the clamped 1 ms bound timer
+    // races the SIGCHLD-driven exit event on parent preemption — calm
+    // loops stamped 'incomplete', concurrent-suite load stamped 'complete'
+    // (4/90 probe runs; the CI signature). Both reports were honest; the
+    // unobserved-exit scenario is not constructible against real children
+    // without a product seam (a killReapMs ≤ 0 already-observed-only pin —
+    // filed as #326). Until that rules, this
+    // leg pins the scenario's deterministic half: the escalation ladder
+    // itself, its observed reap inside the lane's default bound, and the
+    // KILL-only death. The honest incomplete-reap CLASSIFICATION keeps its
+    // pure coverage in close-report.test.ts. (That half overlaps the
+    // ignoreTerm leg's assertions: until #326 makes the two children
+    // distinguishable, an ignoring child and a delaying one are one
+    // observable surface here.)
+    const lane = await startLane({ devServer: { termDelayMs: 5000 } });
     await lane.supervisor.ready;
     const report = await lane.supervisor.stop();
 
-    expect(report.outcome).toBe('incomplete');
-    expect(report.failures).toContain('managed-astro-reap');
-    expect(report.accounting.managedAstroReaped).toBe(false);
+    expect(report.outcome).toBe('complete');
+    expect(report.failures).toEqual([]);
+    expect(report.accounting.killEscalations).toEqual(['managed-astro']);
+    expect(report.accounting.managedAstroReaped).toBe(true);
     expect(report.accounting.workerReaped).toBe(true);
+    // The TERM really reached the delaying child, and only the KILL ended
+    // it — a SIGKILLed process runs no exit handler, and its own delayed
+    // exit was still ~4.8 s away when the ladder escalated.
+    expect(await markerStamps(lane.markerDir, 'astro-term-received')).toHaveLength(1);
+    expect(await markerStamps(lane.markerDir, 'astro-exit')).toHaveLength(0);
     expect(JSON.stringify(report)).not.toContain('pid');
   }, 15_000);
 });

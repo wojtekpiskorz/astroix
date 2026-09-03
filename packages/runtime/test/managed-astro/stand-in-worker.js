@@ -7,8 +7,9 @@ import { join } from 'node:path';
  * the supervisor's readiness probe, honors the stop control with the
  * close report, and exits 0. The knobs exist to prove SUPERVISION
  * contracts (boot failure, crash-on-control, stop-hang with ignored
- * TERM, an incomplete own-report), never worker behavior — the real
- * boot-and-serve contract is E6's process lane (#230).
+ * TERM, an incomplete own-report, and the awaitAstroListening close
+ * rendezvous), never worker behavior — the real boot-and-serve contract
+ * is E6's process lane (#230).
  *
  * The #308 wire-facet knobs: inspections answer with the request's own
  * wire id as the revision (correlation provable end-to-end — the probe
@@ -138,10 +139,33 @@ process.on('message', (message) => {
   if (message?.type === 'stop') {
     marker('worker-stop-received');
     if (config.behaviors?.hangStop) return;
-    process.send({
-      type: 'closed',
-      report: config.behaviors?.incompleteReport ? INCOMPLETE_REPORT : COMPLETE_REPORT,
-    });
-    process.exit(0);
+    const finish = () => {
+      process.send({
+        type: 'closed',
+        report: config.behaviors?.incompleteReport ? INCOMPLETE_REPORT : COMPLETE_REPORT,
+      });
+      process.exit(0);
+    };
+    // awaitAstroListening: the startup-deadline leg's boot-race rendezvous
+    // (#322). The supervisor TERMs the dev server only after this close
+    // report, and the sibling stamps astro-listening strictly AFTER it
+    // registered its SIGTERM/exit handlers — so holding the report until
+    // that marker appears makes the dev server's clean exit (and its
+    // astro-exit stamp) a causal consequence of the supervisor's signal,
+    // never a race between the startup deadline's SIGTERM and the
+    // sibling's node boot under load.
+    if (!config.behaviors?.awaitAstroListening) {
+      finish();
+      return;
+    }
+    const astroListening = join(config.markerDir, 'astro-listening.marker');
+    const poll = () => {
+      if (existsSync(astroListening)) {
+        finish();
+        return;
+      }
+      setTimeout(poll, 10);
+    };
+    poll();
   }
 });
