@@ -233,24 +233,44 @@ export function parseDesktopChildRequest(message: unknown): DesktopChildRequest 
 /**
  * Lifts one unknown channel message into a child→main report. The same
  * closed-vocabulary discipline as the request parse: `null` for anything
- * the child never said.
+ * the child never said — each kind has its own lifter so the envelope
+ * fence stays per-shape (one closed key set per branch, never a merge).
  */
 export function parseDesktopChildReport(message: unknown): DesktopChildReport | null {
   if (!isOwnMessage(message)) return null;
-  const kind = message.kind;
-  if (kind === 'booted' && hasExactKeys(message, ['astroix', 'kind'])) {
+  return (
+    liftBootedReport(message) ??
+    liftSessionStateReport(message) ??
+    liftRegisterResultReport(message) ??
+    liftTransitionResultReport(message)
+  );
+}
+
+function liftBootedReport(message: Record<string, unknown>): DesktopChildReport | null {
+  if (message.kind === 'booted' && hasExactKeys(message, ['astroix', 'kind'])) {
     return { astroix: CHANNEL_TAG, kind: 'booted' };
   }
-  if (kind === 'session-state' && hasExactKeys(message, ['astroix', 'kind', 'sessionRef'])) {
-    const ref = message.sessionRef;
-    if (ref === null || isSessionRef(ref)) {
-      return { astroix: CHANNEL_TAG, kind: 'session-state', sessionRef: ref };
-    }
+  return null;
+}
+
+function liftSessionStateReport(message: Record<string, unknown>): DesktopChildReport | null {
+  if (
+    message.kind !== 'session-state' ||
+    !hasExactKeys(message, ['astroix', 'kind', 'sessionRef'])
+  ) {
     return null;
   }
-  if (!isRequestId(message.requestId)) return null;
+  const ref = message.sessionRef;
+  if (ref === null || isSessionRef(ref)) {
+    return { astroix: CHANNEL_TAG, kind: 'session-state', sessionRef: ref };
+  }
+  return null;
+}
+
+function liftRegisterResultReport(message: Record<string, unknown>): DesktopChildReport | null {
   if (
-    kind === 'register-result' &&
+    message.kind === 'register-result' &&
+    isRequestId(message.requestId) &&
     hasExactKeys(message, ['astroix', 'kind', 'requestId', 'result']) &&
     isRegisterResult(message.result)
   ) {
@@ -261,8 +281,13 @@ export function parseDesktopChildReport(message: unknown): DesktopChildReport | 
       result: message.result,
     };
   }
+  return null;
+}
+
+function liftTransitionResultReport(message: Record<string, unknown>): DesktopChildReport | null {
   if (
-    kind === 'transition-result' &&
+    message.kind === 'transition-result' &&
+    isRequestId(message.requestId) &&
     hasExactKeys(message, ['astroix', 'kind', 'requestId', 'outcome']) &&
     isTransitionOutcome(message.outcome)
   ) {
