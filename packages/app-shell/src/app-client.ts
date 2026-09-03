@@ -352,6 +352,11 @@ export function createAppClient(options: AppClientOptions): AppClient {
         handlers.onTransportError?.();
         return settle('failed');
       }
+      // The transport-open signal (#342): an admitted stream is live the
+      // moment it is established — a quiet session that delivers no frame
+      // must not read as eternally connecting. Fires on every
+      // (re)connection, before any frame is delivered.
+      handlers.onOpen?.();
       const ended = await deliverFrames(response, handlers, controller);
       if (ended === 'aborted') return settle('aborted');
       // The server ended the stream (a revocation ends it server-side):

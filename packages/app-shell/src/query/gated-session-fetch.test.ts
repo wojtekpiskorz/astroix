@@ -86,12 +86,28 @@ describe('gatedSseHandlers', () => {
 
   it('passes the stream-level callbacks through un-gated', () => {
     const gate = createSessionGate(FIRST);
+    const onOpen = vi.fn();
     const onStale = vi.fn();
     const onTransportError = vi.fn();
-    const handlers = gatedSseHandlers(gate, { onEvent: () => {}, onStale, onTransportError });
+    const handlers = gatedSseHandlers(gate, {
+      onEvent: () => {},
+      onOpen,
+      onStale,
+      onTransportError,
+    });
+    handlers.onOpen?.();
     handlers.onStale?.();
     handlers.onTransportError?.();
+    expect(onOpen).toHaveBeenCalledTimes(1);
     expect(onStale).toHaveBeenCalledTimes(1);
     expect(onTransportError).toHaveBeenCalledTimes(1);
+  });
+
+  it('passes onOpen through even on a closed gate — it describes the stream, not a pair', () => {
+    const gate = createSessionGate(FIRST);
+    gate.move(null);
+    const onOpen = vi.fn();
+    gatedSseHandlers(gate, { onEvent: () => {}, onOpen }).onOpen?.();
+    expect(onOpen).toHaveBeenCalledTimes(1);
   });
 });

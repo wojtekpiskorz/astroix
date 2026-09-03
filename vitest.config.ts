@@ -80,6 +80,16 @@ export default defineConfig({
       // deterministic fakes, same tier as the main-process units above
       // (the real-Electron leg is e2e/desktop behind the smoke config).
       'apps/desktop/src/document-authority/**/*.test.{ts,tsx}',
+      // apps/desktop (#244, H2): the packaged-runtime resource tests —
+      // the internal packaged-asset adapter over real temp fixture
+      // layouts (fake executables with recorded hashes), the desktop
+      // resolver's packaged/dev/no-fallback matrix, manifest
+      // determinism, and the public-output no-leak legs. Deterministic
+      // and network-free: the real 100 MB Node binary never runs here —
+      // the packaged-layout spawn test self-skips unless the real
+      // assembly exists locally (`npm run assemble:runtime`, captured
+      // for the PR), the certify:adapter precedent.
+      'apps/desktop/test/runtime-resources/**/*.test.{ts,tsx}',
       // Behavior-contract schema validators (#217, directive from B1's
       // review): the schemas are pure zod over frozen fixtures — the unit
       // doctrine's home, no browser needed. The corpus bytes stay owned by
@@ -268,6 +278,16 @@ export default defineConfig({
         // deterministic colocated unit tests, same covered-tier decision
         // as the client registry it composes.
         'packages/runtime/src/client-authority/**',
+        // The internal packaged-asset adapter (#244, H2, additive): the
+        // layout vocabulary, pin table, manifest schema/builder/
+        // serializer, and the resource verifier are deterministic
+        // real-filesystem units over temp fixture layouts (fake
+        // executables with recorded hashes) — same covered-tier decision
+        // as the registry seam (#221). Its tests live under
+        // apps/desktop/test/runtime-resources per #244's owned paths;
+        // metric honesty lives in the tier decision (crap.ts), not the
+        // test location.
+        'packages/runtime/src/internal/**',
       ],
       reporter: ['json'],
       reportsDirectory: 'coverage',

@@ -136,7 +136,12 @@ export interface PlaneSupervisorOptions {
   readonly stopTimeoutMs?: number;
   /** SIGTERM→SIGKILL grace per child (ms); defaults to {@link DEFAULT_TERM_GRACE_MS}. */
   readonly termGraceMs?: number;
-  /** Bound on the post-SIGKILL exit (ms); defaults to {@link DEFAULT_KILL_REAP_MS}. */
+  /**
+   * Bound on the post-SIGKILL exit (ms); defaults to
+   * {@link DEFAULT_KILL_REAP_MS}. A bound ≤ 0 is already-observed-only
+   * (#326): the post-SIGKILL reap decides from the child's synchronous
+   * exit observation, never a timer race.
+   */
   readonly killReapMs?: number;
   /** Dev-server readiness retry interval (ms). */
   readonly probeIntervalMs?: number;
@@ -480,6 +485,21 @@ function childWireChannel(child: ChildProcess): WorkerChannel {
  * Terminates and reaps one exact child: TERM, then KILL when ignored,
  * bounded at every rung. An already-gone child needs no branch — `kill()`
  * on a dead child is a no-op and a resolved `gone` always beats the bound.
+ *
+ * The zero reap bound is **already-observed-only** (#326): when
+ * `killReapMs <= 0`, `reaped` reads the child's exit observation
+ * synchronously (`exitCode !== null || signalCode !== null`) instead of
+ * racing the bound timer — Node clamps a 0 ms `setTimeout` to ~1 ms, and
+ * that macrotask raced the SIGCHLD-driven exit event on the supervisor's
+ * own preemption, so the same run reported `incomplete` on a calm loop
+ * and `complete` under load (the #318/#325 flip signatures). The
+ * synchronous read is deterministic by construction: reaching the KILL
+ * rung means the TERM grace expired unresolved, and the exit event that
+ * sets those two fields is the very event `gone` still awaits — it cannot
+ * have been processed between the expired bound and this check (microtask
+ * ordering bars a macrotask from interleaving), so a child alive at
+ * escalation always reads `false`: the honest unobserved-reap report, on
+ * any machine load. Positive bounds keep the timer race unchanged.
  */
 async function terminateAndReap(input: {
   readonly child: ChildProcess;
@@ -490,7 +510,10 @@ async function terminateAndReap(input: {
   input.child.kill('SIGTERM');
   if (await raceBound(input.gone, input.termGraceMs)) return { reaped: true, escalated: false };
   input.child.kill('SIGKILL');
-  const reaped = await raceBound(input.gone, input.killReapMs);
+  const reaped =
+    input.killReapMs > 0
+      ? await raceBound(input.gone, input.killReapMs)
+      : input.child.exitCode !== null || input.child.signalCode !== null;
   return { reaped, escalated: true };
 }
 

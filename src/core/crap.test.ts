@@ -335,6 +335,10 @@ describe('toRiskEntry', () => {
       // HTTP table and F4's supervisor registry (src/ per the ticket's
       // owned paths — colocated-test idiom).
       'packages/runtime/src/client-authority/document-authority.ts',
+      // #244 (H2): one representative per new covered prefix — the
+      // packaged-asset adapter (src/internal; tests live under
+      // apps/desktop/test/runtime-resources per the owned paths).
+      'packages/runtime/src/internal/packaged-assets.ts',
     ];
     for (const file of covered) {
       expect(toRiskEntry(file, fn, fileCov).metric).toBe('crap');

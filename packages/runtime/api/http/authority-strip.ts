@@ -9,9 +9,11 @@ import { CAPABILITY_COOKIE_NAME } from './host-capability.ts';
  * capability cookie and the injected client-capability header never
  * reach the managed dev server — not over the HTTP stream proxy, not
  * over a raw HMR upgrade tunnel. Pure header-set surgery; the live
- * wiring into the proxy path belongs to the Electron host lane (#246,
- * its upstream HTTP and HMR header-stripping legs), which calls this
- * one function so the strip has exactly one definition.
+ * wiring is the two proxy legs (#338): the stream proxy forwards
+ * `stripControlAuthority`'s answer directly, and the upgrade path feeds
+ * `reconstructUpgradeHandshake` from `stripAuthorityFromRawPairs` —
+ * both defined here, so every drop and cookie decision has exactly one
+ * home.
  *
  * Everything else passes through untouched — other cookies, the Host,
  * the HMR token, Vite's subprotocol: the strip is surgical, never a
@@ -48,7 +50,7 @@ export type ForwardedHeaders = ParsedHeaders;
  * parsed view lowercases every name, while the raw HMR handshake view
  * F1 reconstructs from `rawHeaders` preserves the client's original
  * casing (`Origin-listener` → `reconstructUpgradeHandshake`, wired by
- * #246) — a capitalized `X-Astroix-Client` or `Cookie` must be stripped
+ * #338) — a capitalized `X-Astroix-Client` or `Cookie` must be stripped
  * just the same, and every header that stays must keep its own bytes
  * exactly: the strip is surgical, never a rewrite, not even a recasing.
  */
@@ -85,4 +87,44 @@ export function stripControlAuthority(
     }
   }
   return out;
+}
+
+/**
+ * The pair-level primitive of the strip (#338 review round 1): ONE raw
+ * handshake pair's forwarded answer. The raw-pair leg routes through
+ * this, never through the record shape — a header named `__proto__` (a
+ * legal RFC 7230 token a hand-crafted client can send on an upgrade)
+ * must keep its bytes like any other non-authority pair, not vanish
+ * into object semantics. Name matching is case-insensitive; every kept
+ * value is the pair's own bytes, except the cookie rewrite.
+ */
+export function stripAuthorityFromPair(name: string, value: string): string | undefined {
+  const lower = name.toLowerCase();
+  if (lower === CLIENT_CAPABILITY_HEADER) return undefined;
+  if (lower === 'cookie') return stripCapabilityCookie(value);
+  return value;
+}
+
+/**
+ * The handshake view's header pairs with the control-plane authority
+ * removed (#338; ADR-0006 §3 "strips it before forwarding either
+ * request to the managed Astro/Vite server"): the pair list
+ * `reconstructUpgradeHandshake` reassembles never carries the
+ * client-capability header or the host capability cookie up to the
+ * managed dev server. Each pair through {@link stripAuthorityFromPair}
+ * — no part of the strip is decided anywhere else — and every kept pair
+ * keeps its exact name bytes, value bytes, and position: URL token,
+ * Host, Origin, subprotocol, key, duplicate spellings, original casing,
+ * and order all ride as they arrived.
+ */
+export function stripAuthorityFromRawPairs(rawHeaders: readonly string[]): string[] {
+  const kept: string[] = [];
+  for (let i = 0; i < rawHeaders.length; i += 2) {
+    const name = rawHeaders[i] ?? '';
+    const value = rawHeaders[i + 1] ?? '';
+    const forwarded = stripAuthorityFromPair(name, value);
+    if (forwarded === undefined) continue;
+    kept.push(name, forwarded);
+  }
+  return kept;
 }

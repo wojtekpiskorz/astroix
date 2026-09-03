@@ -3,7 +3,13 @@ import { connect, createServer as createNetServer } from 'node:net';
 import type { Duplex } from 'node:stream';
 import { describe, expect, it } from 'vitest';
 import { proxyHttpStream } from '../../proxy/http-stream.ts';
-import { waitFor } from './stand-ins.ts';
+import {
+  type RecordedRequest,
+  rawExchange,
+  type StandInUpstream,
+  startStandInUpstream,
+  waitFor,
+} from './stand-ins.ts';
 
 /**
  * The synchronous-registration regression leg (#314 review round,
@@ -15,6 +21,11 @@ import { waitFor } from './stand-ins.ts';
  * function over a real captured (request, response) pair from a real
  * node:http server, against a real (never-answering) upstream socket —
  * and asserts the tracked set synchronously, before any event can fire.
+ *
+ * The control-authority strip leg (#338, ADR-0006 §3): a real captured
+ * exchange carrying the client-capability header and the host
+ * capability cookie proxies to a stand-in managed dev server — neither
+ * authority may arrive, everything else must.
  */
 
 describe('proxyHttpStream (synchronous socket registration)', () => {
@@ -80,3 +91,67 @@ function portOf(server: { address(): { port: number } | string | null }): number
   if (address === null || typeof address === 'string') throw new Error('server did not bind');
   return address.port;
 }
+
+describe('proxyHttpStream (the control-authority strip, #338)', () => {
+  it('forwards the exchange with the host cookie and the client capability stripped — everything else arrives', async () => {
+    let captured: { request: IncomingMessage; response: ServerResponse } | undefined;
+    const harness = createServer((request, response) => {
+      captured = { request, response };
+    });
+    const upstream: StandInUpstream = await startStandInUpstream();
+    await new Promise<void>((resolve, reject) => {
+      harness.once('error', reject);
+      harness.listen(0, '127.0.0.1', () => resolve());
+    });
+    try {
+      // A raw client sending the authority in mixed casing — node's
+      // parsed view lowercases the names, and the strip must catch the
+      // header regardless of how the client spelled it.
+      const exchangePromise = rawExchange(
+        portOf(harness),
+        [
+          'GET /?token=vite-tok HTTP/1.1',
+          'Host: harness',
+          'X-Astroix-Client: cap-338-http',
+          'Cookie: __astroix_host=host-cap-338; theme=dark',
+          'X-Custom-Kept: verbatim-value',
+          'Connection: close',
+          '',
+          '',
+        ].join('\r\n'),
+      );
+      await waitFor(() => captured !== undefined);
+      const exchange = captured as { request: IncomingMessage; response: ServerResponse };
+      proxyHttpStream({
+        request: exchange.request,
+        response: exchange.response,
+        upstream: { host: '127.0.0.1', port: upstream.port },
+        track: () => {},
+      });
+      const proxied = await exchangePromise;
+      expect(proxied.status).toBe(200); // the exchange itself completed untouched
+      expect(upstream.requests).toHaveLength(1);
+      const seen = upstream.requests[0] as RecordedRequest;
+      // Neither authority arrives, in any casing.
+      expect(seen.headers['x-astroix-client']).toBeUndefined();
+      expect(JSON.stringify(seen.headers).toLowerCase()).not.toContain('astroix-client');
+      // The cookie line survives with its OTHER cookies — surgical, never a rewrite.
+      expect(seen.headers.cookie).toBe('theme=dark');
+      // Everything else rides: method, target, Host, the custom header.
+      expect(seen.method).toBe('GET');
+      expect(seen.url).toBe('/?token=vite-tok');
+      expect(seen.host).toBe('harness');
+      expect(seen.headers['x-custom-kept']).toBe('verbatim-value');
+      // The raw bytes the upstream received carry no capability byte at all.
+      const raw = Buffer.concat(upstream.receivedChunks).toString('latin1').toLowerCase();
+      expect(raw).not.toContain('astroix-client');
+      expect(raw).not.toContain('__astroix_host');
+      expect(raw).not.toContain('cap-338-http');
+      expect(raw).not.toContain('host-cap-338');
+    } finally {
+      harness.closeAllConnections();
+      await new Promise<void>((resolve) => harness.close(() => resolve()));
+      await upstream.close();
+    }
+  });
+});
