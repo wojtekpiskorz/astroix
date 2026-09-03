@@ -440,7 +440,9 @@ describe('the stranded-adoption convergence (#333, direction (a))', () => {
       const switchReport = failedResults[0];
       if (switchReport === undefined) throw new Error('expected the failed completion result');
       if (!('session' in switchReport.revoked)) {
-        throw new Error('the switch preserves the ordered pass report');
+        throw new Error(
+          'expected the ordered pass report over the old pair, got the first-commit marker',
+        );
       }
       expect(switchReport.revoked.session).toEqual(first.target.session);
       expect(switchReport.revoked.outcome).toBe('complete');
