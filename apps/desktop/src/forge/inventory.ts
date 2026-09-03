@@ -191,6 +191,23 @@ export function compareCandidateManifests(
   a: CandidateManifest,
   b: CandidateManifest,
 ): CandidateComparison {
+  const { inventoryDiffs, immutableHashDiffs } = comparePayloadRows(a, b);
+  const identityDiffs = compareIdentityFields(a, b);
+  return {
+    inventoriesMatch: inventoryDiffs.length === 0,
+    immutableHashesMatch: immutableHashDiffs.length === 0,
+    identityMatches: identityDiffs.length === 0,
+    inventoryDiffs,
+    immutableHashDiffs,
+    identityDiffs,
+  };
+}
+
+/** The per-row payload law: inventory facts for every row, hash claims for immutable files only. */
+function comparePayloadRows(
+  a: CandidateManifest,
+  b: CandidateManifest,
+): { inventoryDiffs: string[]; immutableHashDiffs: string[] } {
   const inventoryDiffs: string[] = [];
   const immutableHashDiffs: string[] = [];
   const rowsA = new Map(a.payload.map((entry) => [entry.path, entry]));
@@ -203,26 +220,50 @@ export function compareCandidateManifests(
       continue;
     }
     if ('symlinkTarget' in rowA || 'symlinkTarget' in rowB) {
-      // a symlink's law is its target — and a path flipping between
-      // symlink and file is drift either way; there are no bytes to hash
-      const linkA = 'symlinkTarget' in rowA ? rowA.symlinkTarget : null;
-      const linkB = 'symlinkTarget' in rowB ? rowB.symlinkTarget : null;
-      if (linkA === null || linkB === null || linkA !== linkB) {
-        inventoryDiffs.push(`${path}: symlink ${String(linkA)} vs ${String(linkB)}`);
-      }
+      appendSymlinkDiff(path, rowA, rowB, inventoryDiffs);
       continue;
     }
-    const fileA = rowA as PayloadFileEntry;
-    const fileB = rowB as PayloadFileEntry;
-    if (fileA.bytes !== fileB.bytes || fileA.executable !== fileB.executable) {
-      inventoryDiffs.push(
-        `${path}: ${fileA.bytes}/${fileA.executable} vs ${fileB.bytes}/${fileB.executable}`,
-      );
-    }
-    if (fileA.class === 'immutable' && fileA.sha256 !== fileB.sha256) {
-      immutableHashDiffs.push(path);
-    }
+    appendFileDiffs(path, rowA as PayloadFileEntry, rowB as PayloadFileEntry, {
+      inventoryDiffs,
+      immutableHashDiffs,
+    });
   }
+  return { inventoryDiffs, immutableHashDiffs };
+}
+
+/** A symlink's law is its target — and a path flipping between symlink and file is drift either way. */
+function appendSymlinkDiff(
+  path: string,
+  rowA: PayloadEntry,
+  rowB: PayloadEntry,
+  inventoryDiffs: string[],
+): void {
+  const linkA = 'symlinkTarget' in rowA ? rowA.symlinkTarget : null;
+  const linkB = 'symlinkTarget' in rowB ? rowB.symlinkTarget : null;
+  if (linkA === null || linkB === null || linkA !== linkB) {
+    inventoryDiffs.push(`${path}: symlink ${String(linkA)} vs ${String(linkB)}`);
+  }
+}
+
+/** A file's law: inventory facts (size, executable bit) always; the hash claim for immutable files only. */
+function appendFileDiffs(
+  path: string,
+  fileA: PayloadFileEntry,
+  fileB: PayloadFileEntry,
+  diffs: { inventoryDiffs: string[]; immutableHashDiffs: string[] },
+): void {
+  if (fileA.bytes !== fileB.bytes || fileA.executable !== fileB.executable) {
+    diffs.inventoryDiffs.push(
+      `${path}: ${fileA.bytes}/${fileA.executable} vs ${fileB.bytes}/${fileB.executable}`,
+    );
+  }
+  if (fileA.class === 'immutable' && fileA.sha256 !== fileB.sha256) {
+    diffs.immutableHashDiffs.push(path);
+  }
+}
+
+/** The identity fields two clean builds must never drift on (ZIP bytes are deliberately absent). */
+function compareIdentityFields(a: CandidateManifest, b: CandidateManifest): string[] {
   const identityDiffs: string[] = [];
   const identities: ReadonlyArray<readonly [string, string, string]> = [
     ['sourceCommit', a.sourceCommit, b.sourceCommit],
@@ -235,14 +276,7 @@ export function compareCandidateManifests(
   for (const [field, valueA, valueB] of identities) {
     if (valueA !== valueB) identityDiffs.push(`${field}: ${valueA} vs ${valueB}`);
   }
-  return {
-    inventoriesMatch: inventoryDiffs.length === 0,
-    immutableHashesMatch: immutableHashDiffs.length === 0,
-    identityMatches: identityDiffs.length === 0,
-    inventoryDiffs,
-    immutableHashDiffs,
-    identityDiffs,
-  };
+  return identityDiffs;
 }
 
 /** The streamed SHA-256 of one file — payload files are large, never buffered whole. */
