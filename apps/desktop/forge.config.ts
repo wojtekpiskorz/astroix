@@ -3,7 +3,6 @@ import { fileURLToPath } from 'node:url';
 import FusesPlugin from '@electron-forge/plugin-fuses';
 import type { ForgeConfig } from '@electron-forge/shared-types';
 import {
-  PRODUCT_ARCH,
   PRODUCT_BUNDLE_ID,
   PRODUCT_MINIMUM_MACOS,
   PRODUCT_NAME,
@@ -45,12 +44,6 @@ export const PACKAGED_RESOURCE_SUBTREES: readonly string[] = Object.freeze([
   join(APP_ROOT, 'resources', 'astroix-runtime'),
   join(APP_ROOT, 'resources', 'node'),
 ]);
-
-/** The packaged platform/arch pair the pipeline always passes to Forge (`--platform darwin --arch arm64`). */
-export const PACKAGED_TARGET: Readonly<{ platform: string; arch: string }> = Object.freeze({
-  platform: PRODUCT_PLATFORM,
-  arch: PRODUCT_ARCH,
-});
 
 /**
  * The asar payload allowlist, as Packager's ignore function sees it

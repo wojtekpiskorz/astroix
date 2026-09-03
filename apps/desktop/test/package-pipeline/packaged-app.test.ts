@@ -1,10 +1,9 @@
-import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { readdir, readFile } from 'node:fs/promises';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import type { CandidateManifest } from '../../src/forge/inventory.ts';
+import { type CandidateManifest, sha256File } from '../../src/forge/inventory.ts';
 import { verifyPackagedApp } from '../../src/forge/package-verification.ts';
 import { expectedReleaseFuseStates, readFuseStates } from '../../src/forge/release-fuses.ts';
 
@@ -126,13 +125,4 @@ async function expectNoForbiddenArtifacts(dir: string): Promise<void> {
   };
   await walk(dir);
   expect(forbidden, 'ADR-0008 non-goal artifacts produced').toEqual([]);
-}
-
-async function sha256File(path: string): Promise<string> {
-  const { createReadStream } = await import('node:fs');
-  const hash = createHash('sha256');
-  for await (const chunk of createReadStream(path)) {
-    hash.update(chunk as Buffer);
-  }
-  return hash.digest('hex');
 }

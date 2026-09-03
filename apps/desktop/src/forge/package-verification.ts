@@ -78,26 +78,42 @@ export interface PackageVerificationReport {
 }
 
 /**
- * Runs every facet against the packaged app at `appPath`. Facets are
- * independent — one failing does not mask another; the report carries
- * all verdicts and `ok` is false when any facet failed.
+ * The non-signature facets — the facts pass the PRE-SIGN stage runs
+ * (fuses and resources final before anything is signed) and the full
+ * pass COMPOSES: one facet list, never two to keep in step.
  */
-export async function verifyPackagedApp(appPath: string): Promise<PackageVerificationReport> {
-  const codesign = await strictVerifyApp(appPath);
+export async function verifyPackagedAppFacts(
+  appPath: string,
+): Promise<Pick<PackageVerificationReport, 'assets' | 'fuses' | 'plist' | 'arch'>> {
   const [assets, fuses, plist, arch] = await Promise.all([
     verifyAssets(appPath),
     verifyFuses(appPath),
     verifyIdentity(appPath),
     verifyArchitectures(appPath),
   ]);
+  return { assets, fuses, plist, arch };
+}
+
+/**
+ * Runs every facet against the packaged app at `appPath`, the facts
+ * pass COMPOSED with the signature pass — "both passes are the same
+ * law" is the call graph, not a comment. Facets are independent — one
+ * failing does not mask another; the report carries all verdicts and
+ * `ok` is false when any facet failed.
+ */
+export async function verifyPackagedApp(appPath: string): Promise<PackageVerificationReport> {
+  const [codesign, facts] = await Promise.all([
+    strictVerifyApp(appPath),
+    verifyPackagedAppFacts(appPath),
+  ]);
   return {
     appPath,
-    ok: codesign.ok && assets.ok && fuses.ok && plist.ok && arch.ok,
+    ok: codesign.ok && facts.assets.ok && facts.fuses.ok && facts.plist.ok && facts.arch.ok,
     codesign,
-    assets,
-    fuses,
-    plist,
-    arch,
+    assets: facts.assets,
+    fuses: facts.fuses,
+    plist: facts.plist,
+    arch: facts.arch,
   };
 }
 
@@ -131,19 +147,6 @@ export function describePackageVerification(report: PackageVerificationReport): 
     `  arch: ${report.arch.ok ? `single-arch ${PRODUCT_ARCH} executables` : `FINDINGS ${JSON.stringify(report.arch.detail.findings)}`}`,
   );
   return lines;
-}
-
-/** The non-signature facets, exported for the pipeline's PRE-SIGN check (fuses and resources final before signing). */
-export async function verifyPackagedAppFacts(
-  appPath: string,
-): Promise<Pick<PackageVerificationReport, 'assets' | 'fuses' | 'plist' | 'arch'>> {
-  const [assets, fuses, plist, arch] = await Promise.all([
-    verifyAssets(appPath),
-    verifyFuses(appPath),
-    verifyIdentity(appPath),
-    verifyArchitectures(appPath),
-  ]);
-  return { assets, fuses, plist, arch };
 }
 
 async function verifyAssets(appPath: string): Promise<FacetVerdict<unknown>> {

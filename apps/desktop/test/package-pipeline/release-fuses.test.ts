@@ -112,9 +112,9 @@ describe('the fuse-wire reader over synthetic binaries (#245)', () => {
     expect(read).toEqual({ code: 'binary-unreadable' });
   });
 
-  it('reports a wire shorter than the V1 law as a rejection, never as silent states', async () => {
+  it('reports a wire shorter than the V1 law by its honest diagnosis: too short', async () => {
     const read = await readFuseStates(await syntheticBinary([ENABLE, ENABLE, ENABLE], 0x01, 3));
-    expect('code' in read && read.code).toBe('wire-unknown-state');
+    expect(read).toEqual({ code: 'wire-too-short', found: 3, expected: 9 });
   });
 
   it('reports a non-V1 wire version as a version mismatch', async () => {

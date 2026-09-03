@@ -1,10 +1,10 @@
-import { spawn } from 'node:child_process';
-import { createHash } from 'node:crypto';
-import { createReadStream, existsSync } from 'node:fs';
+import { execFile, spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 import {
   PACKAGED_ELECTRON_PIN,
   PACKAGED_FORGE_PIN,
@@ -15,6 +15,7 @@ import {
   buildCandidateManifest,
   buildPayloadInventory,
   serializeCandidateManifest,
+  sha256File,
 } from '../src/forge/inventory.ts';
 import {
   describePackageVerification,
@@ -28,11 +29,6 @@ import {
   PRODUCT_NAME,
   PRODUCT_PLATFORM,
 } from '../src/forge/product.ts';
-import {
-  expectedReleaseFuseStates,
-  fuseStateViolations,
-  readFuseStates,
-} from '../src/forge/release-fuses.ts';
 
 /**
  * The packaging pipeline orchestrator (#245, H3; ADR-0008): the ONE
@@ -86,6 +82,7 @@ const RAW_NODE_FLAGS = [
   './apps/desktop/raw-node-register.mjs',
 ];
 const LABEL = cliValue('--label') ?? 'candidate';
+const execFileAsync = promisify(execFile);
 
 // ——— the v1 product shape (ADR-0008): exactly one macOS arm64 app ———
 
@@ -131,20 +128,9 @@ if (!existsSync(APP_PATH)) {
 
 // ——— 4. PRE-SIGN: resources and fuses final BEFORE any signature ———
 
-const fuseWire = await readFuseStates(APP_PATH);
-if ('code' in fuseWire) {
-  console.error(
-    `package: PRE-SIGN fuse read rejected ${JSON.stringify(fuseWire)} — nothing is signed`,
-  );
-  process.exit(1);
-}
-const fuseViolations = fuseStateViolations(fuseWire, expectedReleaseFuseStates());
-if (fuseViolations.length > 0) {
-  console.error(
-    `package: PRE-SIGN fuse state violates the release law: ${JSON.stringify(fuseViolations)}`,
-  );
-  process.exit(1);
-}
+// the facts pass is the ONE fuse judge (its fuses facet reads the wire
+// and compares against the release law); the manifest below carries the
+// states it already read
 const preSign = await verifyPackagedAppFacts(APP_PATH);
 if (!preSign.assets.ok || !preSign.fuses.ok || !preSign.plist.ok || !preSign.arch.ok) {
   console.error(
@@ -209,7 +195,7 @@ const manifest = buildCandidateManifest({
   forge: PACKAGED_FORGE_PIN,
   node: PACKAGED_NODE_PIN,
   minimumSystemVersion: PRODUCT_MINIMUM_MACOS,
-  fuseStates: fuseWire,
+  fuseStates: preSign.fuses.detail.states,
   zip: {
     file: zipPath.split('/').pop() ?? zipPath,
     bytes: (await stat(zipPath)).size,
@@ -335,17 +321,6 @@ async function readVersion() {
 }
 
 async function gitCommit() {
-  const { execFile } = await import('node:child_process');
-  const { promisify } = await import('node:util');
-  const execFileAsync = promisify(execFile);
   const { stdout } = await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: ROOT });
   return stdout.trim();
-}
-
-async function sha256File(path) {
-  const hash = createHash('sha256');
-  for await (const chunk of createReadStream(path)) {
-    hash.update(chunk);
-  }
-  return hash.digest('hex');
 }

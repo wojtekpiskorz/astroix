@@ -158,6 +158,18 @@ export async function readFuseStates(
   if (wire.version !== '1') {
     return { code: 'wire-version-mismatch', found: wire.version };
   }
+  // the ride-along belt FIRST, both directions, so each arm is live and
+  // the diagnosis is honest: a SHORTER wire cannot carry the law's nine,
+  // a LONGER one means an Electron fuse this table does not rule on —
+  // neither may pass verification silently
+  const wireLength = Object.keys(wire).filter((key) => Number.isInteger(Number(key))).length;
+  if (wireLength !== V1_WIRE.length) {
+    return {
+      code: wireLength < V1_WIRE.length ? 'wire-too-short' : 'wire-too-long',
+      found: wireLength,
+      expected: V1_WIRE.length,
+    };
+  }
   const states: Record<string, VerifiedFuseState> = {};
   for (const fuse of V1_WIRE) {
     const raw = wire[fuse.index as FuseV1Options] as number | undefined;
@@ -166,16 +178,6 @@ export async function readFuseStates(
       return { code: 'wire-unknown-state', fuse: fuse.name };
     }
     states[fuse.name] = state;
-  }
-  const wireLength = Object.keys(wire).filter((key) => Number.isInteger(Number(key))).length;
-  // the ride-along belt, both directions: a SHORTER wire cannot carry the
-  // law's nine, and a LONGER one means an Electron fuse this table does
-  // not rule on — neither may pass verification silently
-  if (wireLength < V1_WIRE.length) {
-    return { code: 'wire-too-short', found: wireLength, expected: V1_WIRE.length };
-  }
-  if (wireLength > V1_WIRE.length) {
-    return { code: 'wire-too-long', found: wireLength, expected: V1_WIRE.length };
   }
   return states;
 }

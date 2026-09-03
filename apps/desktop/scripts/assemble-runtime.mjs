@@ -1,6 +1,4 @@
 import { spawnSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
-import { createReadStream } from 'node:fs';
 import { chmod, cp, mkdir, mkdtemp, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
@@ -18,6 +16,7 @@ import {
   serializeManifest,
   verifyPackagedAssets,
 } from '../../../packages/runtime/src/internal/packaged-assets.ts';
+import { sha256File } from '../src/forge/inventory.ts';
 
 /**
  * The packaged-runtime assembly step (#244, H2; ADR-0008 resource layout):
@@ -259,12 +258,4 @@ async function collectResources(dir, subtree, inventory) {
       executable: (entryStat.mode & 0o111) !== 0,
     });
   }
-}
-
-async function sha256File(path) {
-  const hash = createHash('sha256');
-  for await (const chunk of createReadStream(path)) {
-    hash.update(chunk);
-  }
-  return hash.digest('hex');
 }
