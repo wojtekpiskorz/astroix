@@ -347,8 +347,19 @@ async function readManifest(
   let bytes: Buffer;
   try {
     bytes = await readFile(manifestPath);
-  } catch {
-    return { failure: { code: 'manifest-missing', resource: BUILD_MANIFEST_RESOURCE_PATH } };
+  } catch (error) {
+    // The same missing/inaccessible split the leaf lstat above already
+    // made for this file: a mode-0o000 manifest leaf stats fine (nothing
+    // above reads the mode bits) and then fails to open — an operator
+    // told "missing" hunts a lost file instead of permissions.
+    const code = (error as NodeJS.ErrnoException).code;
+    return {
+      failure: {
+        code:
+          code === 'ENOENT' || code === 'ENOTDIR' ? 'manifest-missing' : 'resource-inaccessible',
+        resource: BUILD_MANIFEST_RESOURCE_PATH,
+      },
+    };
   }
   if (bytes.byteLength > MAX_MANIFEST_BYTES) {
     return { failure: { code: 'manifest-invalid', resource: BUILD_MANIFEST_RESOURCE_PATH } };
@@ -515,8 +526,9 @@ async function verifyAncestry(
  * dropped in, swapped in, or left behind — is drift a verifier must own,
  * not a silent extra the spawn might later load; symlinks among the
  * unlisted die here as well (an inventoried symlink already died in
- * {@link verifyResource}). Unreadable/missing subtrees are not this
- * walk's failure — the required facts above already rejected those.
+ * {@link verifyResource}). A subtree the walk cannot even list rejects
+ * as inaccessible — only a MISSING subtree is left to the required-fact
+ * checks above (every inventoried file under it already died there).
  */
 async function verifyInventoryCompleteness(
   resourcesRoot: string,
@@ -543,8 +555,17 @@ async function walkForUnlisted(
   let entries: ReadonlyArray<Dirent>;
   try {
     entries = await readdir(directory, { withFileTypes: true });
-  } catch {
-    return null; // the required-fact checks own missing/unreadable subtrees
+  } catch (error) {
+    // A MISSING subtree is owned elsewhere: every inventoried file under
+    // it already died in the per-resource loop, and a subtree holding no
+    // inventoried resource names nothing the required facts check. An
+    // UNREADABLE subtree is owned by nobody else — a directory this walk
+    // cannot list is exactly where unlisted files would ride along
+    // silently, so it rejects here. The lstatSafe split, one function
+    // up: ENOENT/ENOTDIR is absence, anything else is inaccessibility.
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT' || code === 'ENOTDIR') return null;
+    return { code: 'resource-inaccessible', resource: directoryPath };
   }
   for (const entry of entries) {
     const entryPath = `${directoryPath}/${entry.name}`;

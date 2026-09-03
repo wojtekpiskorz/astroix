@@ -47,6 +47,7 @@ afterEach(async () => {
   // removal, or the recursive delete itself fails on macOS
   for (const root of scratchRoots.splice(0)) {
     await chmod(join(root, 'node', 'bin'), 0o755).catch(() => {});
+    await chmod(join(root, 'astroix-runtime', 'evil'), 0o755).catch(() => {});
     await rm(root, { recursive: true, force: true });
   }
 });

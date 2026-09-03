@@ -293,6 +293,20 @@ describe('the packaged-asset adapter (#244)', () => {
       });
     });
 
+    it('rejects an unreadable manifest read as inaccessible — never a hunt for a lost file (resource-inaccessible)', async () => {
+      const root = await newScratchRoot('astroix-assets-');
+      await writePackagedFixture(root);
+      // mode 0o000 on the manifest leaf: the lstat above passes (nothing
+      // reads the mode bits), the open fails EACCES — the diagnostic must
+      // say inaccessible, not missing
+      await chmod(join(root, BUILD_MANIFEST_RESOURCE_PATH), 0o000);
+
+      await expectRejected(root, {
+        code: 'resource-inaccessible',
+        resource: BUILD_MANIFEST_RESOURCE_PATH,
+      });
+    });
+
     it('rejects a wrong Node pin — a wrong-version resource never spawns (pin-mismatch)', async () => {
       const root = await newScratchRoot('astroix-assets-');
       await writePackagedFixture(root);
@@ -429,6 +443,23 @@ describe('the packaged-asset adapter (#244)', () => {
       await expectRejected(root, {
         code: 'layout-unlisted',
         resource: 'astroix-runtime/control-plane/evil.js',
+      });
+    });
+
+    it('rejects a directory the walk cannot even list — hidden contents never ride along silently (resource-inaccessible)', async () => {
+      const root = await newScratchRoot('astroix-assets-');
+      await writePackagedFixture(root);
+      // a dropped directory holding no inventoried resource: the
+      // required facts never stat it, the per-resource loop never walks
+      // it — only this walk can, and it cannot list it. Fail closed on
+      // the directory itself, never pass because the contents are dark
+      await mkdir(join(root, 'astroix-runtime', 'evil'));
+      await writeFile(join(root, 'astroix-runtime', 'evil', 'payload.js'), 'hidden drift\n');
+      await chmod(join(root, 'astroix-runtime', 'evil'), 0o000);
+
+      await expectRejected(root, {
+        code: 'resource-inaccessible',
+        resource: 'astroix-runtime/evil',
       });
     });
 
