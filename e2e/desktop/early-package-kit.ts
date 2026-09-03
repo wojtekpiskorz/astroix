@@ -1,11 +1,12 @@
-import { type ChildProcess, execFile, spawn } from 'node:child_process';
-import { createHash } from 'node:crypto';
-import { existsSync, readdirSync, readFileSync, readlinkSync } from 'node:fs';
+import { execFile, spawn } from 'node:child_process';
+import { existsSync, readdirSync } from 'node:fs';
 import { mkdtemp, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
+import { findDisclosure } from '../../packages/protocol/src/sanitization.ts';
+import { type HarnessEvent, HarnessRun } from './harness-kit.ts';
 
 /**
  * The exact-packaged-app kit of the early packaged smoke (#248, H6): the
@@ -24,12 +25,14 @@ import { promisify } from 'node:util';
  * - **Extraction** — `ditto -x -k` (the packaging pipeline's own
  *   extraction stage idiom) into a fresh staging root, asserting the
  *   ZIP's root is exactly one `Astroix.app`.
- * - **The real launch** — the app executable with an ISOLATED temp HOME
- *   and the product's `ASTROIX_DESKTOP_USER_DATA` override (the H1
- *   isolation law), with every dev-only env declaration REMOVED so the
- *   packaged laws are the only ones that can fire; stdout/stderr are
- *   captured line-buffered (the harness-kit discipline: a report line
- *   split across chunk boundaries is never dropped).
+ * - **The real launch** — `PackagedAppRun`, a thin subclass of the
+ *   shared `harness-kit.ts` run (the third consumer of its one
+ *   line-buffered pump, waiter registry, stderr bound, and TERM→KILL
+ *   escalation): the app executable with an ISOLATED temp HOME and the
+ *   product's `ASTROIX_DESKTOP_USER_DATA` override (the H1 isolation
+ *   law), every dev-only env declaration REMOVED so the packaged laws
+ *   are the only ones that can fire, plus the browser-level
+ *   `--user-data-dir` switch (see the constructor).
  * - **The real product driving surface** — the native application menu
  *   and the native directory picker through System Events AppleScript
  *   (the real registration flow: `File > Add Existing Project…` →
@@ -37,10 +40,12 @@ import { promisify } from 'node:util';
  *   normal quit through the Apple event (the same event Cmd+Q sends).
  * - **The audits** — process-tree observation and stray-process sweep
  *   over the staging roots, listening-socket evidence, temp-root
- *   diffs, the managed-project byte/metadata snapshot (the G3
- *   zero-injection methodology), and the public-log sanitization scan
- *   (AC-6: no paths, PIDs, ports, or internal digests in the product's
- *   own log vocabulary).
+ *   diffs, the managed-project byte/metadata snapshot (the shared
+ *   `e2e/managed-project-snapshot.ts` — the zero-injection law, one
+ *   home with the web lane), and the public-log sanitization scan
+ *   (AC-6: the protocol's own `findDisclosure` shapes — paths, PIDs,
+ *   ports, environment values — plus the 64-hex digest check local to
+ *   this lane).
  *
  * Lane gate machinery, never release evidence on its own — the recorded
  * run under `apps/desktop/test-results/early-package-smoke/` is the
@@ -108,49 +113,13 @@ export async function extractPackagedApp(zip: string, into: string): Promise<str
   return appPath;
 }
 
-/** The managed project's permitted Astro/Vite side effects (the G3 exclusion set). */
-const MANAGED_EXCLUDED_ENTRIES = new Set(['node_modules', '.astro', 'dist']);
-
-/**
- * One managed-project snapshot: every file's bytes (SHA-256) and
- * metadata (kind, mode, symlink target) keyed by project-relative path —
- * the zero-injection methodology (`e2e/web/zero-injection.spec.ts`),
- * applied to the copy the packaged app actually held.
- */
-export function snapshotManagedProject(root: string): Map<string, string> {
-  const entries = new Map<string, string>();
-  const walk = (directory: string, prefix: string): void => {
-    for (const entry of readdirSync(directory, { withFileTypes: true })) {
-      if (MANAGED_EXCLUDED_ENTRIES.has(entry.name)) continue;
-      const relative = prefix === '' ? entry.name : `${prefix}/${entry.name}`;
-      const full = join(directory, entry.name);
-      if (entry.isSymbolicLink()) {
-        entries.set(relative, `symlink:${readlinkSync(full)}`);
-        continue;
-      }
-      if (entry.isDirectory()) {
-        entries.set(relative, 'directory');
-        walk(full, relative);
-        continue;
-      }
-      const bytes = readFileSync(full);
-      entries.set(
-        relative,
-        `file:${bytes.length}:${createHash('sha256').update(bytes).digest('hex')}`,
-      );
-    }
-  };
-  walk(root, '');
-  return entries;
-}
+/** The managed-project snapshot's single home: `e2e/managed-project-snapshot.ts` (shared with the web lane). */
+export { snapshotManagedProject } from '../managed-project-snapshot.ts';
 
 // ——— the real launch ———
 
-/** One product log event parsed off the app's stdout (`astroix-desktop: ` lines). */
-export interface DesktopEvent {
-  readonly kind: string;
-  readonly [field: string]: unknown;
-}
+/** One product log event parsed off the app's stdout (`astroix-desktop: ` lines) — the harness-kit event shape. */
+export type DesktopEvent = HarnessEvent;
 
 /** The closed event vocabulary the product log may carry (the sanitization law's shape half). */
 export const DESKTOP_EVENT_KINDS: ReadonlySet<string> = new Set([
@@ -175,27 +144,17 @@ export interface IsolationRoots {
   readonly userData: string;
 }
 
-/** One launched packaged app: captured output, product events, exit tracking. */
-export class PackagedAppRun {
-  readonly child: ChildProcess;
+/**
+ * One launched packaged app: the shared `harness-kit.ts` run (its one
+ * line-buffered pump, waiter registry, bounded stderr tail, and
+ * TERM→KILL escalation) over the REAL app executable — thin, carrying
+ * only the packaged lane's own laws.
+ */
+export class PackagedAppRun extends HarnessRun {
   readonly roots: IsolationRoots;
   readonly appPath: string;
-  /** Every captured stdout line, trimmed (raw evidence). */
-  readonly stdoutLines: string[] = [];
-  /** Every captured stderr line, trimmed, `stderr: `-prefixed (raw evidence). */
-  readonly stderrLines: string[] = [];
-  private readonly waiters: {
-    match: (line: string) => boolean;
-    resolve: (line: string) => void;
-    timer: ReturnType<typeof setTimeout>;
-  }[] = [];
-  private stdoutRemainder = '';
-  private stderrRemainder = '';
-  private exitSettled?: Promise<{ code: number | null; signal: string | null }>;
 
   constructor(appPath: string, roots: IsolationRoots) {
-    this.appPath = appPath;
-    this.roots = roots;
     // The packaged laws only: every dev-only env declaration is REMOVED,
     // so nothing but the product's packaged resolution can decide the boot.
     const env: NodeJS.ProcessEnv = { ...process.env };
@@ -205,87 +164,25 @@ export class PackagedAppRun {
     env.HOME = roots.home;
     env.ASTROIX_DESKTOP_USER_DATA = roots.userData;
     env.ELECTRON_ENABLE_LOGGING = '0';
-    // The browser-level `--user-data-dir` switch — the isolation law's
-    // harness half. Chromium resolves the browser's user-data-dir at
-    // process start and hands it to EVERY helper; the product's env
-    // override (`app.setPath` in main) lands only after the pre-boot
-    // resource verification, so without the switch the early GPU and
-    // network helpers run against the REAL account home's Application
-    // Support (observed in the first recorded run; the product half —
-    // setPath's late landing — belongs to its owning lane). The switch
-    // names the SAME temp root as the env override, so the app's own
-    // paths are unchanged — every process of the tree, first to last,
-    // is isolated.
-    this.child = spawn(
-      join(appPath, 'Contents', 'MacOS', 'Astroix'),
-      [`--user-data-dir=${roots.userData}`],
-      {
-        cwd: roots.staging,
-        env,
-        stdio: ['ignore', 'pipe', 'pipe'],
-      },
-    );
-    this.child.stdout?.on('data', (chunk: Buffer) => {
-      this.pump(
-        chunk,
-        this.stdoutLines,
-        (remainder) => {
-          this.stdoutRemainder = remainder;
-        },
-        this.stdoutRemainder,
-      );
+    super({
+      executable: join(appPath, 'Contents', 'MacOS', 'Astroix'),
+      // The browser-level `--user-data-dir` switch — the isolation law's
+      // harness half. Chromium resolves the browser's user-data-dir at
+      // process start and hands it to EVERY helper; the product's env
+      // override (`app.setPath` in main) lands only after the pre-boot
+      // resource verification, so without the switch the early GPU and
+      // network helpers run against the REAL account home's Application
+      // Support (observed in the first recorded run; the product half —
+      // setPath's late landing — is #363). The switch names the SAME
+      // temp root as the env override, so the app's own paths are
+      // unchanged — every process of the tree, first to last, is isolated.
+      argv: [`--user-data-dir=${roots.userData}`],
+      env,
+      cwd: roots.staging,
+      reportPrefix: DESKTOP_LOG_PREFIX,
     });
-    this.child.stderr?.on('data', (chunk: Buffer) => {
-      this.pump(
-        chunk,
-        this.stderrLines,
-        (remainder) => {
-          this.stderrRemainder = remainder;
-        },
-        this.stderrRemainder,
-        'stderr: ',
-      );
-    });
-  }
-
-  private pump(
-    chunk: Buffer,
-    sink: string[],
-    setRemainder: (value: string) => void,
-    priorRemainder: string,
-    prefix = '',
-  ): void {
-    const text = priorRemainder + chunk.toString('utf8');
-    const lines = text.split('\n');
-    setRemainder(lines.pop() ?? '');
-    for (const raw of lines) {
-      const line = raw.trim();
-      if (line.length === 0) continue;
-      sink.push(prefix === '' ? line : `${prefix}${line}`);
-      for (let index = 0; index < this.waiters.length; index += 1) {
-        const waiter = this.waiters[index];
-        if (waiter?.match(line)) {
-          clearTimeout(waiter.timer);
-          this.waiters.splice(index, 1);
-          waiter.resolve(line);
-          index -= 1;
-        }
-      }
-    }
-  }
-
-  /** The parsed product events, in order (the `astroix-desktop: ` vocabulary only). */
-  get events(): DesktopEvent[] {
-    const parsed: DesktopEvent[] = [];
-    for (const line of this.stdoutLines) {
-      if (!line.startsWith(DESKTOP_LOG_PREFIX)) continue;
-      try {
-        parsed.push(JSON.parse(line.slice(DESKTOP_LOG_PREFIX.length)) as DesktopEvent);
-      } catch {
-        // a non-JSON product line is itself evidence — surfaced by the raw capture
-      }
-    }
-    return parsed;
+    this.appPath = appPath;
+    this.roots = roots;
   }
 
   /** The product's own log lines (the AC-6 audit surface). */
@@ -293,61 +190,14 @@ export class PackagedAppRun {
     return this.stdoutLines.filter((line) => line.startsWith(DESKTOP_LOG_PREFIX));
   }
 
-  /** Resolves as soon as one matching stdout line lands; scans already-seen lines first. */
-  waitForLine(match: (line: string) => boolean, what: string, timeoutMs = 90_000): Promise<string> {
-    const already = this.stdoutLines.find(match);
-    if (already !== undefined) return Promise.resolve(already);
-    return new Promise<string>((resolve, reject) => {
-      const waiter = {
-        match,
-        resolve,
-        timer: setTimeout(() => {
-          const at = this.waiters.indexOf(waiter);
-          if (at !== -1) this.waiters.splice(at, 1);
-          reject(
-            new Error(
-              `early-package: timed out waiting for ${what}; stdout so far:\n${this.stdoutLines.join('\n')}` +
-                `\nstderr tail:\n${this.stderrLines.slice(-20).join('\n') || '(empty)'}`,
-            ),
-          );
-        }, timeoutMs),
-      };
-      this.waiters.push(waiter);
-    });
+  /** Waits for one product event kind (already-seen included; the real-GUI bound default). */
+  waitForEvent(kind: string, what: string, timeoutMs = 90_000): Promise<DesktopEvent> {
+    return this.waitFor((event) => event.kind === kind, what, timeoutMs);
   }
 
-  /** Waits for one product event kind (already-seen included). */
-  async waitForEvent(kind: string, what: string, timeoutMs = 90_000): Promise<DesktopEvent> {
-    const line = await this.waitForLine(
-      (candidate) =>
-        candidate.startsWith(DESKTOP_LOG_PREFIX) && candidate.includes(`"kind":"${kind}"`),
-      what,
-      timeoutMs,
-    );
-    return JSON.parse(line.slice(DESKTOP_LOG_PREFIX.length)) as DesktopEvent;
-  }
-
-  /** The exit settlement (idempotent). */
-  get exit(): Promise<{ code: number | null; signal: string | null }> {
-    this.exitSettled ??= new Promise((resolve) => {
-      if (this.child.exitCode !== null || this.child.signalCode !== null) {
-        resolve({ code: this.child.exitCode, signal: this.child.signalCode });
-        return;
-      }
-      this.child.once('exit', (code, signal) => resolve({ code, signal }));
-    });
-    return this.exitSettled;
-  }
-
-  /** Cleanup-only kill (a leg that failed before its own quit path). */
+  /** Cleanup-only stop (a leg that failed before its own quit path) — the shared escalation. */
   async killForCleanup(): Promise<void> {
-    if (this.child.exitCode !== null) return;
-    this.child.kill('SIGTERM');
-    await Promise.race([this.exit, new Promise((resolve) => setTimeout(resolve, 5000))]);
-    if (this.child.exitCode === null) {
-      this.child.kill('SIGKILL');
-      await this.exit.catch(() => {});
-    }
+    if (this.child.exitCode === null) await this.stop();
   }
 }
 
@@ -590,26 +440,28 @@ export async function tmpTopLevel(): Promise<Set<string>> {
   return new Set(await readdir(tmpdir()));
 }
 
+/** One 64-hex digest shape — the one disclosure class the protocol guard does not carry (internal hashes, not wire text). */
+const HEX64 = /(^|[^0-9a-f])[0-9a-f]{64}([^0-9a-f]|$)/;
+
 /**
- * The AC-6 sanitization scan over the product's own log lines: no
- * absolute path under any sensitive root, no 64-hex digest, no PID or
- * port shapes — the printed vocabulary stays codes and summaries.
+ * The AC-6 sanitization scan over the product's own log lines: the
+ * PROTOCOL's own disclosure guard (`findDisclosure` — the same shapes
+ * every public free-text field passes: any POSIX absolute path wherever
+ * it points, home-relative, Windows-drive, UNC, stack frames, PID,
+ * port, environment values), plus the one digest check local to this
+ * lane (internal 64-hex hashes are not wire text, so the protocol
+ * guard does not carry them). Root-membership is deliberately NOT the
+ * law here — a leaked absolute path is a disclosure regardless of
+ * where it points.
  */
-export function sanitizationFindings(
-  productLogLines: readonly string[],
-  sensitiveRoots: readonly string[],
-): string[] {
+export function sanitizationFindings(productLogLines: readonly string[]): string[] {
   const findings: string[] = [];
   for (const line of productLogLines) {
-    for (const root of sensitiveRoots) {
-      if (line.includes(root))
-        findings.push(`an absolute path under a sensitive root leaked: ${root}`);
+    const disclosure = findDisclosure(line);
+    if (disclosure !== null) {
+      findings.push(`a ${disclosure.what} disclosure shape (${disclosure.id})`);
     }
-    if (/(^|[^0-9a-f])[0-9a-f]{64}([^0-9a-f]|$)/.test(line)) {
-      findings.push('a 64-hex digest leaked');
-    }
-    if (/\bpid\b[^a-z]*\d+/i.test(line)) findings.push('a PID leaked');
-    if (/\bport\b[^a-z]*\d+/i.test(line)) findings.push('a port leaked');
+    if (HEX64.test(line)) findings.push('a 64-hex digest leaked');
   }
   return findings;
 }

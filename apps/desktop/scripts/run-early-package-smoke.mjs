@@ -212,13 +212,15 @@ function listZipNames() {
 /** The battery: vitest over the desktop smoke config, the early-package family only. */
 async function runBattery(zip) {
   const vitestBin = join(ROOT, 'node_modules', 'vitest', 'vitest.mjs');
+  // One positional FAMILY filter, never a per-file list: the smoke
+  // config's include glob owns discovery (e2e/desktop/early-package*.spec.ts),
+  // and a future family spec joins the recorded battery by matching the
+  // prefix — silently staying out is exactly how a literal list fails.
   const args = [
     'run',
     '--config',
     'apps/desktop/smoke/vitest.config.ts',
-    'e2e/desktop/early-package-smoke.spec.ts',
-    'e2e/desktop/early-package-tamper.spec.ts',
-    'e2e/desktop/early-package-repeated-run.spec.ts',
+    'e2e/desktop/early-package',
   ];
   const chunks = [];
   const exitCode = await new Promise((resolve) => {

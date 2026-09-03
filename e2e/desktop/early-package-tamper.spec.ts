@@ -11,6 +11,7 @@ import {
   PackagedAppRun,
   processesReferencing,
   removeStaging,
+  sanitizationFindings,
 } from './early-package-kit.ts';
 
 /**
@@ -156,12 +157,15 @@ function expectRefused(outcome: RefusedRun, code: string, resource: string | und
       'the diagnostic names the relative resource id',
     ).toBe(true);
   }
-  // Sanitized: the diagnostic carries no absolute path and no digest.
-  expect(diagnostic?.includes('/tmp/'), 'no absolute path in the diagnostic').toBe(false);
+  // Sanitized: the diagnostic passes the SAME disclosure guard the
+  // product's public log does (findDisclosure — any absolute-path shape
+  // wherever it points, home-relative, drive/UNC, PID, port, env
+  // values) plus the lane's 64-hex digest law. No root-membership
+  // shortcut: a leaked path leaks regardless of where it points.
   expect(
-    /(^|[^0-9a-f])[0-9a-f]{64}([^0-9a-f]|$)/.test(diagnostic ?? ''),
-    'no digest in the diagnostic',
-  ).toBe(false);
+    sanitizationFindings(diagnostic === undefined ? [] : [diagnostic]),
+    'the diagnostic carries no disclosure shape and no digest',
+  ).toEqual([]);
   // Refused BEFORE activation: no boot completed, no child ever spawned.
   expect(outcome.run.events, 'no product event ever fired').toEqual([]);
   expect(outcome.run.stdoutLines.join('\n')).not.toContain('control-plane-booted');

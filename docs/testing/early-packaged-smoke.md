@@ -50,7 +50,7 @@ override + the browser-level `--user-data-dir` switch so Chromium's
 early GPU/network helpers inherit the temp root too — asserted: no
 process of the tree references the real account home; the product half
 of that observation, the env override landing after the pre-boot
-verification, belongs to its owning lane), the System Events driving
+verification, is #363), the System Events driving
 surface, and the post-run audits.
 
 1. **Prelaunch verification** (`early-package-smoke.spec.ts`) —

@@ -1,10 +1,10 @@
 import { execSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
-import { readdirSync, readFileSync, readlinkSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expect, test } from '@playwright/test';
 import { stagedCopyRoot } from '../../apps/web/src/stage-e2e.ts';
+import { snapshotManagedProject as snapshotProject } from '../managed-project-snapshot.ts';
 import { activateButton, PROJECT_APP_URL, restoreIdle } from './spec-helpers.ts';
 
 /**
@@ -29,41 +29,6 @@ import { activateButton, PROJECT_APP_URL, restoreIdle } from './spec-helpers.ts'
 
 const WORKSPACE_ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const PROJECT_A = stagedCopyRoot('project-a');
-/** The permitted side effects (CONTEXT.md): ordinary Astro/Vite caches and build output. */
-const EXCLUDED_ENTRIES = new Set(['node_modules', '.astro', 'dist']);
-
-/**
- * One managed-project snapshot: every file's bytes (SHA-256) and
- * metadata (kind, mode, symlink target), keyed by project-relative
- * path — everything a hidden control file, bridge, config edit, or
- * manifest mutation would move.
- */
-function snapshotProject(root: string): Map<string, string> {
-  const entries = new Map<string, string>();
-  const walk = (directory: string, prefix: string): void => {
-    for (const entry of readdirSync(directory, { withFileTypes: true })) {
-      if (EXCLUDED_ENTRIES.has(entry.name)) continue;
-      const relative = prefix === '' ? entry.name : `${prefix}/${entry.name}`;
-      const full = join(directory, entry.name);
-      if (entry.isSymbolicLink()) {
-        entries.set(relative, `symlink:${readlinkSync(full)}`);
-        continue;
-      }
-      if (entry.isDirectory()) {
-        entries.set(relative, 'directory');
-        walk(full, relative);
-        continue;
-      }
-      const bytes = readFileSync(full);
-      entries.set(
-        relative,
-        `file:${bytes.length}:${createHash('sha256').update(bytes).digest('hex')}`,
-      );
-    }
-  };
-  walk(root, '');
-  return entries;
-}
 
 /** Every file below one directory — the build-output scan's walker. */
 function collectFiles(directory: string): string[] {

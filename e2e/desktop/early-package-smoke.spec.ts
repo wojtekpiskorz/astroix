@@ -193,8 +193,8 @@ describe.skipIf(!PACKAGE_ZIP)('the exact packaged host — the early packaged sm
     // finding — early GPU/network helpers ran against the real home's
     // Application Support; the launch now carries the browser-level
     // --user-data-dir switch so every helper, first to last, holds the
-    // temp root. The product half of that observation belongs to its
-    // owning lane).
+    // temp root. The product half of that observation — the env
+    // override landing after the pre-boot verification — is #363).
     const homeFindings = realHomeIsolationFindings(tree, homedir());
     expect(homeFindings, `isolation leak: ${JSON.stringify(homeFindings)}`).toEqual([]);
     console.log(
@@ -357,7 +357,7 @@ describe.skipIf(!PACKAGE_ZIP)('the exact packaged host — the early packaged sm
     // 6. AC-6: the product's public log vocabulary is sanitized — no
     //    absolute paths, no digests, no PIDs, no ports — and every event
     //    stayed inside the closed H1 vocabulary.
-    expect(sanitizationFindings(run.productLogLines, [staging])).toEqual([]);
+    expect(sanitizationFindings(run.productLogLines)).toEqual([]);
     for (const event of run.events) {
       expect(DESKTOP_EVENT_KINDS.has(event.kind), `unknown product event kind ${event.kind}`).toBe(
         true,
