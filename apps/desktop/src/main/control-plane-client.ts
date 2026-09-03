@@ -1,21 +1,29 @@
 import type { SessionRef } from '@wojciechpiskorz/astroix-protocol';
 import { BootCapability } from '@wojciechpiskorz/astroix-runtime/private-boot';
 import {
+  type AuthorityObservation,
   activateRequest,
+  authorityObservationRequest,
+  type DesktopChildReport,
   type DesktopChildRequest,
   deactivateRequest,
+  hostObservationResultRequest,
   parseDesktopChildReport,
   type RegisterResult,
   registerRootRequest,
   type TransitionOutcome,
 } from './child-protocol.ts';
 
+/** The requestId-correlated report kinds — every other kind is a broadcast the host handles directly. */
+type CorrelatedReport = Extract<DesktopChildReport, { readonly requestId: number }>;
+
 /**
- * The main-side control-plane client (#243, H1): owns the private channel
- * to the ONE control-plane child for the whole main lifetime — confers
- * the one-use boot capability as the channel's first message (D3 #222:
- * mint fresh per boot, send exactly once, never reuse across children),
- * correlates requests to reports by id, and holds the two hard policies:
+ * The main-side control-plane client (#243, H1; #362, H7's composition
+ * extension): owns the private channel to the ONE control-plane child
+ * for the whole main lifetime — confers the one-use boot capability as
+ * the channel's first message (D3 #222: mint fresh per boot, send
+ * exactly once, never reuse across children), correlates requests to
+ * reports by id, and holds the two hard policies:
  *
  * - **No restart, ever**: the child is spawned once by the host; channel
  *   disconnect, child exit, or boot timeout mark the client LOST —
@@ -27,6 +35,13 @@ import {
  *   own fence-and-exit contract — D3), awaits its exit within the
  *   graceful bound (ADR-0006 §8's 5 s), then force-kills and awaits
  *   again. The outcome is sanitized: no exit codes, signals, or PIDs.
+ *
+ * Since H7 the channel is BIDIRECTIONAL: the child's composition asks
+ * main to observe the authoritative window (the adoption handshake) and
+ * reports the live document capability (the H4 injection's feed); main
+ * answers through {@link ControlPlaneClient.hostObservation} and
+ * forwards its authority observations through
+ * {@link ControlPlaneClient.authorityObserve}.
  */
 
 /** The sanitized outcome of the ordered stop. */
@@ -45,22 +60,45 @@ export interface SpawnedChildHandle {
   onExit(handler: (code: number | null, signal: string | null) => void): void;
 }
 
+/** One host-observation ask, as the child's composition phrases it. */
+export type HostObservationAsk =
+  | { readonly kind: 'current-document'; readonly requestId: number }
+  | {
+      readonly kind: 'replace-top-level';
+      readonly requestId: number;
+      readonly sessionRef: SessionRef;
+      readonly projectKey: string;
+      readonly origin: string;
+    };
+
 /** The client's host callbacks — all sanitized. */
 export interface ControlPlaneClientHost {
-  onBooted(): void;
+  onBooted(port: number): void;
   onLost(reason: ControlPlaneLossReason): void;
   onSessionState(sessionRef: SessionRef | null): void;
+  /** The child's composition asks main to observe the authoritative window — main answers through the client. */
+  onHostObservationAsk(ask: HostObservationAsk): void;
+  /** The live document capability (the H4 injection's feed); null clears. */
+  onDocumentCapability(webContentsId: number, capability: string | null): void;
 }
 
 /** The client surface the native host owns. */
 export interface ControlPlaneClient {
-  /** Resolves true once the child reported its boot complete; false on loss or boot timeout. */
-  readonly booted: Promise<boolean>;
+  /** Resolves the composition's origin port once the child reported its boot complete; false on loss or boot timeout. */
+  readonly booted: Promise<number | false>;
   /** False once the channel or child is gone. */
   readonly connected: boolean;
   registerRoot(root: string): Promise<RegisterResult>;
   activate(projectKey: string): Promise<TransitionOutcome>;
   deactivate(sessionRef: SessionRef): Promise<TransitionOutcome>;
+  /** Answers one host-observation ask with the observed document identity (or the honest unobserved). */
+  hostObservation(
+    requestId: number,
+    observed: boolean,
+    document: { readonly webContentsId: number; readonly navigationId: number } | null,
+  ): void;
+  /** Forwards one mirror-side authority observation into the composition's document authority. */
+  authorityObserve(observation: AuthorityObservation): Promise<void>;
   /** The ordered stop: disconnect → bounded graceful exit → forced kill. Idempotent. */
   stop(gracefulMs: number): Promise<ChildStopOutcome>;
 }
@@ -91,17 +129,18 @@ export function connectControlPlaneChild(options: ControlPlaneClientOptions): Co
     {
       readonly register?: (result: RegisterResult) => void;
       readonly transition?: (outcome: TransitionOutcome) => void;
+      readonly authority?: () => void;
     }
   >();
   let nextRequestId = 0;
   let lost = false;
-  let bootedFlag = false;
+  let bootedPort: number | false = false;
   let stopRun: Promise<ChildStopOutcome> | null = null;
   const exitWaiters: Array<() => void> = [];
   let exited = false;
 
-  let settleBoot: (booted: boolean) => void = () => {};
-  const booted = new Promise<boolean>((resolve) => {
+  let settleBoot: (booted: number | false) => void = () => {};
+  const booted = new Promise<number | false>((resolve) => {
     settleBoot = resolve;
   });
 
@@ -111,9 +150,10 @@ export function connectControlPlaneChild(options: ControlPlaneClientOptions): Co
     for (const settle of pending.values()) {
       settle.register?.(REGISTER_UNAVAILABLE);
       settle.transition?.(UNAVAILABLE);
+      settle.authority?.();
     }
     pending.clear();
-    if (!bootedFlag) settleBoot(false);
+    if (bootedPort === false) settleBoot(false);
     host.onLost(reason);
   };
 
@@ -122,20 +162,45 @@ export function connectControlPlaneChild(options: ControlPlaneClientOptions): Co
     const report = parseDesktopChildReport(message);
     if (report === null) return; // a drifted or hostile message is dropped, never parsed
     if (report.kind === 'booted') {
-      bootedFlag = true;
-      settleBoot(true);
-      host.onBooted();
+      bootedPort = report.port;
+      settleBoot(report.port);
+      host.onBooted(report.port);
       return;
     }
     if (report.kind === 'session-state') {
       host.onSessionState(report.sessionRef);
       return;
     }
+    if (report.kind === 'document-capability') {
+      host.onDocumentCapability(report.webContentsId, report.capability);
+      return;
+    }
+    if (report.kind === 'observe-document') {
+      host.onHostObservationAsk({ kind: 'current-document', requestId: report.requestId });
+      return;
+    }
+    if (report.kind === 'replace-top-level') {
+      host.onHostObservationAsk({
+        kind: 'replace-top-level',
+        requestId: report.requestId,
+        sessionRef: report.sessionRef,
+        projectKey: report.projectKey,
+        origin: report.origin,
+      });
+      return;
+    }
+    settleCorrelated(report);
+  });
+
+  /**
+   * One requestId-correlated reply onto its pending call. A correlated
+   * report of the wrong kind for its request is a drifted message:
+   * dropped, never half-processed — the entry survives so the real reply
+   * (or the loss policy) settles the pending call.
+   */
+  function settleCorrelated(report: CorrelatedReport): void {
     const settle = pending.get(report.requestId);
     if (settle === undefined) return;
-    // A correlated report of the wrong kind for its request is a drifted
-    // message: dropped, never half-processed — the entry survives so the
-    // real reply (or the loss policy) settles the pending call.
     if (report.kind === 'register-result' && settle.register !== undefined) {
       pending.delete(report.requestId);
       settle.register(report.result);
@@ -144,8 +209,13 @@ export function connectControlPlaneChild(options: ControlPlaneClientOptions): Co
     if (report.kind === 'transition-result' && settle.transition !== undefined) {
       pending.delete(report.requestId);
       settle.transition(report.outcome);
+      return;
     }
-  });
+    if (report.kind === 'authority-observation-result' && settle.authority !== undefined) {
+      pending.delete(report.requestId);
+      settle.authority();
+    }
+  }
 
   handle.onDisconnect(() => markLost('channel-closed'));
   handle.onExit(() => {
@@ -165,7 +235,7 @@ export function connectControlPlaneChild(options: ControlPlaneClientOptions): Co
 
   const deadline = options.bootDeadlineMs ?? 30_000;
   const timer = setTimeout(() => {
-    if (!bootedFlag) markLost('boot-timeout');
+    if (bootedPort === false) markLost('boot-timeout');
   }, deadline);
   unrefTimer(timer);
 
@@ -179,11 +249,13 @@ export function connectControlPlaneChild(options: ControlPlaneClientOptions): Co
     settle: {
       register?: (result: RegisterResult) => void;
       transition?: (o: TransitionOutcome) => void;
+      authority?: () => void;
     },
   ): void {
     if (lost) {
       settle.register?.(REGISTER_UNAVAILABLE);
       settle.transition?.(UNAVAILABLE);
+      settle.authority?.();
       return;
     }
     const requestId = nextId();
@@ -193,6 +265,7 @@ export function connectControlPlaneChild(options: ControlPlaneClientOptions): Co
       pending.delete(requestId);
       settle.register?.(REGISTER_UNAVAILABLE);
       settle.transition?.(UNAVAILABLE);
+      settle.authority?.();
     }
   }
 
@@ -234,6 +307,18 @@ export function connectControlPlaneChild(options: ControlPlaneClientOptions): Co
         new Promise<TransitionOutcome>((resolve) => {
           request((requestId) => deactivateRequest(requestId, sessionRef), {
             transition: resolve,
+          });
+        }),
+      hostObservation: (requestId, observed, document) => {
+        // The ask's own reply: a lost channel drops it (the child's
+        // handshake waiter dies with the child), never a fabricated answer.
+        if (lost) return;
+        handle.send(hostObservationResultRequest(requestId, observed, document));
+      },
+      authorityObserve: (observation) =>
+        new Promise<void>((resolve) => {
+          request((requestId) => authorityObservationRequest(requestId, observation), {
+            authority: resolve,
           });
         }),
       stop: (gracefulMs) => {

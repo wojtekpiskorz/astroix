@@ -16,6 +16,10 @@ import {
   createHostCapabilityGrants,
   type HostCapabilityGrants,
 } from '@wojciechpiskorz/astroix-runtime/api/http';
+import {
+  createDocumentAuthority,
+  type DocumentAuthority,
+} from '@wojciechpiskorz/astroix-runtime/client-authority';
 import type { GrantTable } from '@wojciechpiskorz/astroix-runtime/edit-authority/grants';
 import type { OriginLease, OriginListener } from '@wojciechpiskorz/astroix-runtime/origin';
 import type { ProjectRun } from '@wojciechpiskorz/astroix-runtime/project-runtime';
@@ -242,6 +246,13 @@ async function bootHarness(options: { readonly refuseGrant?: boolean } = {}): Pr
   const reportedFailures: SessionFailure[] = [];
   const httpBindings = createClientBindings();
   const sessionClients = createSessionClients();
+  // The composition's document authority (#246, H4): the adoption's
+  // one-mint both-truths discipline — the same surface the shared
+  // composition composes over these very tables.
+  const authority: DocumentAuthority = createDocumentAuthority({
+    httpBindings,
+    clients: sessionClients,
+  });
   const grants = createHostCapabilityGrants();
   const hub = createSseHub();
   const grantTables = new Map<string, GrantTable>();
@@ -327,6 +338,7 @@ async function bootHarness(options: { readonly refuseGrant?: boolean } = {}): Pr
     supervisor,
     coordinator,
     completion,
+    authority,
     seatStore,
     listener: fakeListener(journal),
     sessionClients,

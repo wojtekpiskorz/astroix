@@ -1,5 +1,15 @@
 import { spawnSync } from 'node:child_process';
-import { chmod, cp, mkdir, mkdtemp, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import {
+  chmod,
+  cp,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  rm,
+  stat,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -71,6 +81,7 @@ import { sha256File } from '../src/forge/inventory.ts';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DESKTOP = join(HERE, '..');
+const ROOT = join(DESKTOP, '..', '..');
 const DEFAULT_OUT = join(DESKTOP, 'resources');
 const DEFAULT_CACHE = join(DESKTOP, '.assemble-cache');
 
@@ -127,6 +138,128 @@ await build({
       output: {
         entryFileNames: 'control-plane/child.js',
         chunkFileNames: 'chunk-[name].js',
+      },
+    },
+  },
+});
+
+// ——— 2a. the plane worker's rebased sibling entry (#362) ———
+//
+// The plane supervisor's worker-plan seam resolves the worker entry as a
+// sibling FILE path relative to its own module (`new URL('../worker/
+// worker-child.ts', import.meta.url)`) — the dev checkout's workspace
+// source. The bundler's asset pipeline INLINES that referenced .ts as a
+// base64 data URL inside the controller (a spawnable path that is not a
+// file: the packaged plane's first activation found exactly that), so
+// the assembly rebases the expression onto the sibling entry it emits
+// below (ADR-0008's "the packaged runtime rebases it to the bundled
+// entry"). The rebase is a POST-PASS over the built controller: the
+// payload is verified to BE the worker tail's source (decoded, matched
+// by its own boot function) before the expression is replaced, and any
+// drift of the seam's shape fails the assembly loudly.
+const CONTROLLER_ENTRY = join(outDir, RUNTIME_RESOURCE_DIR, 'control-plane', 'child.js');
+const WORKER_TAIL_SIGNATURE = 'bootProjectPlaneWorker';
+const inlinedWorkerTail =
+  /new URL\("data:video\/mp2t;base64,([A-Za-z0-9+/=]+)", "" \+ import\.meta\.url\)/;
+{
+  const controller = await readFile(CONTROLLER_ENTRY, 'utf8');
+  const match = inlinedWorkerTail.exec(controller);
+  if (match === null) {
+    throw new Error(
+      'assemble-runtime: the controller no longer inlines the worker tail as a data URL — the rebase drifted; update the assembly',
+    );
+  }
+  const payload = Buffer.from(match[1], 'base64').toString('utf8');
+  if (!payload.includes(WORKER_TAIL_SIGNATURE)) {
+    throw new Error(
+      'assemble-runtime: the inlined asset is not the plane worker tail — refusing to rebase the wrong expression',
+    );
+  }
+  const rebased = controller.replace(
+    match[0],
+    "new URL('../worker/worker-child.js', import.meta.url)",
+  );
+  await writeFile(CONTROLLER_ENTRY, rebased);
+  console.log('assemble-runtime: rebased the controller worker-entry seam onto the sibling bundle');
+}
+
+// The forked worker tail the plane supervisor spawns: the SAME runtime
+// code (the composition server and its internals), bundled as its own
+// plain-ECMAScript entry at the exact sibling path the rebased
+// controller references — `<resources>/astroix-runtime/worker/
+// worker-child.js`, beside `control-plane/child.js`.
+await mkdir(join(outDir, RUNTIME_RESOURCE_DIR, 'worker'), { recursive: true });
+await build({
+  root: DESKTOP,
+  configFile: false,
+  logLevel: 'silent',
+  build: {
+    target: 'node24',
+    outDir: join(outDir, RUNTIME_RESOURCE_DIR, 'worker'),
+    emptyOutDir: true,
+    minify: false,
+    lib: {
+      entry: join(ROOT, 'packages', 'runtime', 'project-plane', 'worker', 'worker-child.ts'),
+      formats: ['es'],
+      fileName: () => 'worker-child.js',
+    },
+    rollupOptions: {
+      external: (id) => id.startsWith('node:'),
+      output: {
+        entryFileNames: 'worker-child.js',
+        chunkFileNames: 'chunk-[name].js',
+      },
+    },
+  },
+});
+
+// ——— 2b. the native compiler binding's binary beside the worker entry (#362) ———
+//
+// The worker's graph inlines Astro's native compiler binding loader
+// (NAPI-RS generated): its FIRST darwin attempt is a relative
+// `require('./astro.darwin-arm64.node')` against its own module — which
+// inside the bundle is the worker entry's directory. A bundle can never
+// inline native bytes, so the exact platform binary the workspace
+// resolved ships as a real file at that relative path — no scoped
+// node_modules tree (the manifest's resource-path vocabulary carries no
+// `@`), and every platform this product ships does the same.
+const NATIVE_BINDINGS = [
+  {
+    from: join(
+      ROOT,
+      'node_modules',
+      '@astrojs',
+      'compiler-binding-darwin-arm64',
+      'astro.darwin-arm64.node',
+    ),
+    to: join(outDir, RUNTIME_RESOURCE_DIR, 'worker', 'astro.darwin-arm64.node'),
+  },
+];
+for (const binding of NATIVE_BINDINGS) {
+  await cp(binding.from, binding.to);
+}
+
+// ——— 2b. the client documents the child's origin listener serves (#362, H7) ——
+
+// The launcher and project app documents every renderer host serves
+// (the SAME web client build the web host boots from): the desktop
+// child composes the shared control-plane composition, whose document
+// surface serves them from an explicitly named directory — the packaged
+// resources' client subtree, built here beside the rebased entry and
+// inventoried like every other immutable resource.
+const WEB_CLIENT_ROOT = join(ROOT, 'apps', 'web', 'client');
+await build({
+  root: WEB_CLIENT_ROOT,
+  configFile: false,
+  logLevel: 'silent',
+  base: '/__astroix/app/',
+  build: {
+    outDir: join(outDir, RUNTIME_RESOURCE_DIR, 'client'),
+    emptyOutDir: true,
+    rollupOptions: {
+      input: {
+        launcher: join(WEB_CLIENT_ROOT, 'launcher.html'),
+        project: join(WEB_CLIENT_ROOT, 'project.html'),
       },
     },
   },

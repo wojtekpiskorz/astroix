@@ -1,7 +1,17 @@
 import type { SessionRef } from '@wojciechpiskorz/astroix-protocol';
 import { describe, expect, it } from 'vitest';
-import { registerResultReport } from './child-protocol.ts';
+import {
+  bootedReport,
+  documentCapabilityReport,
+  observeDocumentRequest,
+  registerResultReport,
+  replaceTopLevelRequest,
+  sessionStateReport,
+  transitionResultReport,
+} from './child-protocol.ts';
 import type { SpawnedChildHandle } from './control-plane-client.ts';
+import type { AuthoritativeTargetHost } from './desktop-composition-target.ts';
+import type { NativeMenuDeclarations } from './menus.ts';
 import {
   APP_BUNDLE_IDENTIFIER,
   type AppLifecycleSeam,
@@ -29,7 +39,7 @@ import { WINDOW_SECURITY_PREFERENCES } from './security-policy.ts';
 
 const SESSION_A: SessionRef = { runtimeEpoch: 'epoch-1', generation: 1 };
 const SESSION_B: SessionRef = { runtimeEpoch: 'epoch-1', generation: 2 };
-type MenuActionId = 'add-existing-project' | 'deactivate' | 'quit';
+type MenuActionId = 'add-existing-project' | 'activate' | 'deactivate' | 'quit';
 type ExitListener = (code: number | null, signal: string | null) => void;
 
 class FakeApp implements AppLifecycleSeam {
@@ -159,8 +169,44 @@ class FakeChildHandle implements SpawnedChildHandle {
   }
 }
 
+import type { HostDocumentIdentityReport } from './child-protocol.ts';
+import type { ControlPlaneClient } from './control-plane-client.ts';
+import type { NavigationApprovals } from './navigation-policy.ts';
+
 interface InstalledMenu {
-  onAction(actionId: MenuActionId): void;
+  onAction(actionId: MenuActionId, projectKey?: string): void;
+  declarations: NativeMenuDeclarations;
+}
+
+/** The fake authoritative-target host — records the native host's drives, answers programmable identities. */
+class FakeTargetHost implements AuthoritativeTargetHost {
+  prepared = 0;
+  tornDown = 0;
+  replaced: string[] = [];
+  capabilities: Array<{ readonly webContentsId: number; readonly capability: string | null }> = [];
+  prepareResult = true;
+  currentDocument: HostDocumentIdentityReport | null = null;
+  replaceResult: HostDocumentIdentityReport | null = { webContentsId: 7, navigationId: 2 };
+  async prepare(): Promise<boolean> {
+    this.prepared += 1;
+    return this.prepareResult;
+  }
+  observeCurrentDocument(): HostDocumentIdentityReport | null {
+    return this.currentDocument;
+  }
+  async replaceTopLevel(origin: string): Promise<HostDocumentIdentityReport | null> {
+    this.replaced.push(origin);
+    return this.replaceResult;
+  }
+  documentCapability(webContentsId: number, capability: string | null): void {
+    this.capabilities.push({ webContentsId, capability });
+  }
+  async teardown(): Promise<void> {
+    this.tornDown += 1;
+  }
+  exists(): boolean {
+    return this.tornDown === 0 && this.prepared > 0;
+  }
 }
 
 class FakeHostSeam implements NativeHostSeam {
@@ -187,8 +233,8 @@ class FakeHostSeam implements NativeHostSeam {
     },
   };
   readonly menu: ApplicationMenuSeam = {
-    setApplicationMenu: (_declarations, onAction) => {
-      this.installedMenus.push({ onAction });
+    setApplicationMenu: (declarations, onAction) => {
+      this.installedMenus.push({ onAction, declarations });
     },
   };
   readonly session: SessionSecuritySeam = {
@@ -208,9 +254,17 @@ class FakeHostSeam implements NativeHostSeam {
   readonly picker: DirectoryPickerSeam = {
     showOpenDirectory: async () => this.pickerChoice,
   };
+  readonly target = new FakeTargetHost();
   spawnControlPlaneChild(): SpawnedChildHandle {
     this.child.spawnCount += 1;
     return this.child;
+  }
+  createAuthoritativeTarget(
+    _launcherOrigin: string,
+    _navigation: NavigationApprovals,
+    _controlPlane: ControlPlaneClient,
+  ): AuthoritativeTargetHost {
+    return this.target;
   }
   /** The last installed menu's action dispatch. */
   menuDispatch(): InstalledMenu {
@@ -288,11 +342,23 @@ describe('startNativeHost — the control-plane boot and its loss', () => {
   it('confers the one-use capability as the first channel message and surfaces the boot', async () => {
     const seam = new FakeHostSeam();
     const events = eventsLog();
-    await startNativeHost(seam, { observer: (event) => events.push(event) });
+    const host = await startNativeHost(seam, { observer: (event) => events.push(event) });
+    if (host === null) throw new Error('the host did not start');
     const first = seam.child.sent[0] as Record<string, unknown>;
     expect(first?.astroix).toBe('astroix.private-boot-capability');
-    seam.child.reply({ astroix: 'astroix.desktop-private-channel', kind: 'booted' });
+    // The booted report carries the composition's origin port (#362):
+    // the boot surfaces, the launcher origin joins the approved set, and
+    // the main window loads the launcher document off the neutral one.
+    seam.child.reply(bootedReport(4426));
     expect(events).toContainEqual({ kind: 'control-plane-booted' });
+    await Promise.resolve();
+    expect(seam.windows[0]?.loadedURLs).toContain('http://launcher.localhost:4426/__astroix/app/');
+    expect(host.navigation.decideNavigation('http://launcher.localhost:4426/__astroix/app/')).toBe(
+      'allow',
+    );
+    expect(host.navigation.decideNavigation('http://launcher.localhost:9999/__astroix/app/')).toBe(
+      'deny',
+    );
   });
 
   it('fails closed and never respawns when the boot channel is lost', async () => {
@@ -472,5 +538,141 @@ describe('startNativeHost — lifecycle delegation', () => {
     expect(seam.child.killed).toBe(true);
     await stopped;
     expect(events).toContainEqual({ kind: 'quit-settled', childStop: 'forced' });
+  });
+});
+
+describe('startNativeHost — the activation surface (#362)', () => {
+  /** Boots the host, completes the child's boot, and registers one project through the REAL selection flow. */
+  async function bootedWithProject() {
+    const seam = new FakeHostSeam();
+    const events = eventsLog();
+    const host = await startNativeHost(seam, { observer: (event) => events.push(event) });
+    seam.child.reply(bootedReport(4426));
+    seam.pickerChoice = { canceled: false, directory: '/granted/managed-project' };
+    const pending = host?.addExistingProject();
+    await new Promise((resolve) => setTimeout(resolve, 0)); // the async picker resolves first
+    const registerMessage = seam.child.lastOf('register-root');
+    seam.child.reply(
+      registerResultReport(registerMessage?.requestId as number, {
+        ok: true,
+        summary: {
+          projectKey: 'aaaaaaaaaaaaaaaaaaaaaaaaaa',
+          displayName: 'managed-project',
+          availability: 'available',
+        },
+      }),
+    );
+    await pending;
+    return { seam, events, host };
+  }
+
+  it('shows the launcher origin once booted, and the activation entry appears with the registered project', async () => {
+    const { seam } = await bootedWithProject();
+    expect(seam.windows[0]?.loadedURLs).toContain('http://launcher.localhost:4426/__astroix/app/');
+    const sessionItems =
+      seam.installedMenus
+        .at(-1)
+        ?.declarations.sections.find((section) => section.label === 'Session')?.items ?? [];
+    const activate = sessionItems.find((item) => item.actionId === 'activate');
+    expect(activate?.label).toBe('Activate managed-project');
+    expect(activate?.enabled).toBe(true);
+  });
+
+  it('activates through the menu: the target prepares first, then the delegated transition', async () => {
+    const { seam, events } = await bootedWithProject();
+    seam.target.currentDocument = { webContentsId: 7, navigationId: 1 };
+    seam.menuDispatch().onAction('activate', 'aaaaaaaaaaaaaaaaaaaaaaaaaa');
+    await new Promise((resolve) => setTimeout(resolve, 0)); // the async preparation completes
+    // The target prepared BEFORE the activate request left.
+    expect(seam.target.prepared).toBe(1);
+    expect(seam.child.lastOf('activate')?.projectKey).toBe('aaaaaaaaaaaaaaaaaaaaaaaaaa');
+    // The child answers: the transition completes and the session flows back.
+    seam.child.reply(transitionResultReport(2, { kind: 'completed', sessionRef: SESSION_A }));
+    seam.child.reply(sessionStateReport(SESSION_A));
+    expect(events).toContainEqual({ kind: 'session-active', sessionRef: SESSION_A });
+  });
+
+  it('refuses locally when the authoritative target cannot be prepared — no activate request leaves', async () => {
+    const { seam, events } = await bootedWithProject();
+    seam.target.prepareResult = false;
+    seam.menuDispatch().onAction('activate', 'aaaaaaaaaaaaaaaaaaaaaaaaaa');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(seam.child.lastOf('activate')).toBeUndefined();
+    expect(events).toContainEqual({ kind: 'activation-refused', reason: 'transition-failed' });
+  });
+
+  it('answers the adoption handshake asks through the target and the client channel', async () => {
+    const { seam } = await bootedWithProject();
+    seam.target.currentDocument = { webContentsId: 7, navigationId: 1 };
+    seam.target.replaceResult = { webContentsId: 7, navigationId: 2 };
+    // Phase 1: the current document ask.
+    seam.child.reply(observeDocumentRequest(1));
+    expect(
+      seam.child.sent.find(
+        (message) =>
+          (message as Record<string, unknown>).kind === 'host-observation-result' &&
+          (message as Record<string, unknown>).requestId === 1,
+      ),
+    ).toMatchObject({ observed: true, document: { webContentsId: 7, navigationId: 1 } });
+    // Phase 2: the top-level replacement — the origin joins the approved set first.
+    seam.child.reply(
+      replaceTopLevelRequest({
+        requestId: 2,
+        sessionRef: SESSION_A,
+        projectKey: 'aaaaaaaaaaaaaaaaaaaaaaaaaa',
+        origin: 'http://aaaaaaaaaaaaaaaaaaaaaaaaaa.localhost:4426',
+      }),
+    );
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(seam.target.replaced).toEqual(['http://aaaaaaaaaaaaaaaaaaaaaaaaaa.localhost:4426']);
+    expect(
+      seam.child.sent.find(
+        (message) =>
+          (message as Record<string, unknown>).kind === 'host-observation-result' &&
+          (message as Record<string, unknown>).requestId === 2,
+      ),
+    ).toMatchObject({ observed: true, document: { webContentsId: 7, navigationId: 2 } });
+  });
+
+  it('feeds the reported document capability to the target host', async () => {
+    const { seam } = await bootedWithProject();
+    seam.child.reply(documentCapabilityReport(7, 'cap-live'));
+    expect(seam.target.capabilities).toEqual([{ webContentsId: 7, capability: 'cap-live' }]);
+    seam.child.reply(documentCapabilityReport(7, null));
+    expect(seam.target.capabilities).toEqual([
+      { webContentsId: 7, capability: 'cap-live' },
+      { webContentsId: 7, capability: null },
+    ]);
+  });
+
+  it('deactivates: the delegated transition, the target teardown, and the launcher returns', async () => {
+    const { seam, events } = await bootedWithProject();
+    seam.child.reply(sessionStateReport(SESSION_A));
+    const dispatch = seam.menuDispatch();
+    dispatch.onAction('deactivate');
+    expect(seam.child.lastOf('deactivate')?.sessionRef).toEqual(SESSION_A);
+    const deactivateId = seam.child.lastOf('deactivate')?.requestId as number;
+    seam.child.reply(transitionResultReport(deactivateId, { kind: 'completed', sessionRef: null }));
+    seam.child.reply(sessionStateReport(null));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(seam.target.tornDown).toBe(1);
+    expect(events).toContainEqual({ kind: 'session-idle' });
+    expect(seam.windows[0]?.loadedURLs.at(-1)).toBe(
+      'http://launcher.localhost:4426/__astroix/app/',
+    );
+  });
+
+  it('the quit transition tears the target down before the child stop', async () => {
+    const { seam, host } = await bootedWithProject();
+    seam.target.prepared = 1; // a live target exists
+    const settled = host?.quitTransition();
+    seam.child.exit(0, null); // the ordered stop's graceful exit
+    await settled;
+    expect(seam.target.tornDown).toBe(1);
+    expect(seam.child.disconnected).toBe(true);
   });
 });

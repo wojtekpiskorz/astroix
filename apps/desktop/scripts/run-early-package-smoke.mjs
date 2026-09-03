@@ -73,10 +73,6 @@ const LABEL = cliValue('--label') ?? 'early-smoke';
 const ZIP_ARGUMENT = cliValue('--zip');
 const FORCE = process.argv.includes('--force');
 
-if (IS_MAIN) {
-  await orchestrate();
-}
-
 /** The recording flow — the command's whole body, import-inert. */
 async function orchestrate() {
   if (process.platform !== 'darwin' || process.arch !== 'arm64') {
@@ -162,25 +158,26 @@ async function orchestrate() {
       exitCode: battery.exitCode,
       ok: battery.ok,
     },
-    blockedLegs: [
+    legs: [
       {
-        leg: 'activation with same-origin direct canvas DOM access and zero-injection hosting loop',
-        reason:
-          'the desktop control-plane composition (origin listener, launcher, project runtime, canvas) is not packaged — the child answers the settled unavailable-composition refusal',
-        owningSurface:
-          'apps/desktop/src/main/control-plane-child.ts + the missing composition seam',
-      },
-      {
-        leg: 'hostile Service Worker bypass and document authority observed in the packaged app',
-        reason:
-          'the H4/H5 surfaces are pure seams with real-Electron harness lanes; no packaged editing target exists to observe them on',
-        owningSurface:
-          'apps/desktop/src/document-authority/** + apps/desktop/src/service-worker/**',
+        leg: 'activation with the zero-injection hosting loop through the packaged composition',
+        status:
+          'flipped (#362, H7 — the desktop child composes the production control plane over its kernel-leased registry; the native menu drives the settled transition; the launcher and project origins serve; the natural route streams through the proxy byte-identical)',
       },
       {
         leg: 'Vite HMR connecting through the packaged proxy',
-        reason: 'no project origin or proxy is composed into the packaged host',
-        owningSurface: 'packages/runtime origin/proxy composition into the desktop child',
+        status:
+          'flipped (#362 — the canvas route lives on the project origin; the established upgrade-tunnel connection is the packaged evidence)',
+      },
+      {
+        leg: 'document authority observed in the packaged app',
+        status:
+          'flipped-half (#362 — the reserved API admission is enforced server-side in the packaged child: an unauthenticated mutation is unauthorized; the H4 injection and the H5 bypass are the composed load-bearing path, their full enforcement truth stays in e2e/desktop/document-authority-injection.spec.ts and service-worker-bypass.spec.ts)',
+      },
+      {
+        leg: 'hostile Service Worker interception observed in the packaged app',
+        status:
+          "remains the real-Electron lane's truth (e2e/desktop/service-worker-bypass.spec.ts — the hostile-SW proof needs the hostile fixture the plain canonical copy never carries; the packaged app's editing target is bypass-guarded by construction)",
       },
     ],
   };
@@ -363,4 +360,13 @@ async function capture(command, args) {
   } catch {
     return 'unknown';
   }
+}
+
+// The main invocation runs LAST, after every module-scope declaration has
+// initialized: a top-level `await orchestrate()` beside the flag check
+// left everything below it in the temporal dead zone for the whole run
+// (the verdict regex included), crashing every main-path recording — the
+// #361 refactor's latent break, surfaced by the first re-record (#362).
+if (IS_MAIN) {
+  await orchestrate();
 }

@@ -1,0 +1,44 @@
+{
+  "lane": "H6 early packaged smoke (#248)",
+  "startedAt": "2026-09-03T23:24:08.613Z",
+  "finishedAt": "2026-09-03T23:25:16.563Z",
+  "artifact": {
+    "zip": "apps/desktop/out/make/zip/darwin/arm64/Astroix-darwin-arm64-0.1.0.zip",
+    "sha256": "3ff00e68879e62cd1c7156e8641aefd27ef4e2f2e7c61c26b09cfd51bb818e27",
+    "bytes": 168671476,
+    "packagingLabel": "desktop-composition-362",
+    "reusedExistingZip": false
+  },
+  "sourceCommit": "5deeaae7ba3a6b4d401029f1933ccac60ad34759",
+  "host": {
+    "productVersion": "26.3.1",
+    "arch": "arm64",
+    "harnessNode": "v24.12.0"
+  },
+  "battery": {
+    "command": "vitest run --config apps/desktop/smoke/vitest.config.ts e2e/desktop/early-package (the spawned battery; ASTROIX_EARLY_PACKAGE_ZIP bound to the exact ZIP)",
+    "passed": 13,
+    "failed": 0,
+    "skipped": 0,
+    "exitCode": 0,
+    "ok": true
+  },
+  "legs": [
+    {
+      "leg": "activation with the zero-injection hosting loop through the packaged composition",
+      "status": "flipped (#362, H7 — the desktop child composes the production control plane over its kernel-leased registry; the native menu drives the settled transition; the launcher and project origins serve; the natural route streams through the proxy byte-identical)"
+    },
+    {
+      "leg": "Vite HMR connecting through the packaged proxy",
+      "status": "flipped (#362 — the canvas route lives on the project origin; the established upgrade-tunnel connection is the packaged evidence)"
+    },
+    {
+      "leg": "document authority observed in the packaged app",
+      "status": "flipped-half (#362 — the reserved API admission is enforced server-side in the packaged child: an unauthenticated mutation is unauthorized; the H4 injection and the H5 bypass are the composed load-bearing path, their full enforcement truth stays in e2e/desktop/document-authority-injection.spec.ts and service-worker-bypass.spec.ts)"
+    },
+    {
+      "leg": "hostile Service Worker interception observed in the packaged app",
+      "status": "remains the real-Electron lane's truth (e2e/desktop/service-worker-bypass.spec.ts — the hostile-SW proof needs the hostile fixture the plain canonical copy never carries; the packaged app's editing target is bypass-guarded by construction)"
+    }
+  ]
+}

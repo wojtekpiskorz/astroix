@@ -1,16 +1,20 @@
-import type { SessionRef } from '@wojciechpiskorz/astroix-protocol';
+import type { ProjectKey, SessionRef } from '@wojciechpiskorz/astroix-protocol';
+import { APP_PATH } from '../../../web/src/documents.ts';
 import type {
   GrantedProjectSummary,
   RegisterRefusalCode,
   TransitionOutcome,
+  TransitionRefusalCode,
 } from './child-protocol.ts';
 import {
   type ChildStopOutcome,
   type ControlPlaneClient,
   type ControlPlaneLossReason,
   connectControlPlaneChild,
+  type HostObservationAsk,
   type SpawnedChildHandle,
 } from './control-plane-client.ts';
+import type { AuthoritativeTargetHost } from './desktop-composition-target.ts';
 import {
   buildApplicationMenu,
   dispatchMenuAction,
@@ -90,7 +94,7 @@ export interface BrowserWindowSeam {
 export interface ApplicationMenuSeam {
   setApplicationMenu(
     declarations: NativeMenuDeclarations,
-    onAction: (actionId: NativeMenuActionId) => void,
+    onAction: (actionId: NativeMenuActionId, projectKey?: ProjectKey) => void,
   ): void;
 }
 
@@ -101,6 +105,20 @@ export interface NativeHostSeam {
   readonly menu: ApplicationMenuSeam;
   readonly session: SessionSecuritySeam;
   readonly picker: DirectoryPickerSeam;
+  /**
+   * Builds the main-side authoritative-target host once the control
+   * plane's origin port is known (#362, H7): the H5-guarded, H4-injected
+   * editing target over the launcher origin the composition published.
+   * The navigation approvals and the connected control-plane client ride
+   * along — the target's window hardens under the same origin-grant
+   * policy as the main window's, and its authority observations forward
+   * through the private channel.
+   */
+  createAuthoritativeTarget(
+    launcherOrigin: string,
+    navigation: NavigationApprovals,
+    controlPlane: ControlPlaneClient,
+  ): AuthoritativeTargetHost;
   /**
    * Spawns the control-plane child — the wiring's dev adapter supplies
    * the explicit executable (never PATH discovery, a shell, system Node,
@@ -123,6 +141,9 @@ export type NativeHostEvent =
       readonly kind: 'menu-action-rejected';
       readonly reason: 'no-active-session' | 'stale-session';
     }
+  | { readonly kind: 'session-active'; readonly sessionRef: SessionRef }
+  | { readonly kind: 'session-idle' }
+  | { readonly kind: 'activation-refused'; readonly reason: TransitionRefusalCode }
   | { readonly kind: 'quit-settled'; readonly childStop: ChildStopOutcome };
 
 export interface NativeHostOptions {
@@ -140,7 +161,8 @@ export interface NativeHostOptions {
 /** The running host surface — what menus, the picker, and the lifecycle drive. */
 export interface NativeHost {
   readonly navigation: NavigationApprovals;
-  readonly booted: Promise<boolean>;
+  /** The composition's origin port once the child reported its boot complete; false on loss or boot timeout. */
+  readonly booted: Promise<number | false>;
   addExistingProject(): Promise<void>;
   activate(projectKey: string): Promise<TransitionOutcome>;
   deactivate(): Promise<TransitionOutcome>;
@@ -173,6 +195,12 @@ export async function startNativeHost(
   let window: HostWindowSeam | null = null;
   let quitRun: Promise<void> | null = null;
   let quitSettled = false;
+  /** The registered projects (the sanitized summaries) — the activation menu's data. */
+  const registeredProjects: GrantedProjectSummary[] = [];
+  /** The main-side authoritative-target host — born when the composition's port arrives. */
+  let target: AuthoritativeTargetHost | null = null;
+  /** The launcher origin the composition published — the main window's idle document. */
+  let launcherOrigin: string | null = null;
 
   // — the window: hardened preferences, popup denial, navigation policy —
   window = seam.browserWindow.create(WINDOW_SECURITY_PREFERENCES);
@@ -183,36 +211,108 @@ export async function startNativeHost(
   // — the session-wide denial surface —
   applySessionSecurityPolicy(seam.session, options.securityEvidence);
 
+  /** Loads the launcher document on the main window — the idle surface (ADR-0005's neutral trusted page). */
+  const showLauncher = (): void => {
+    if (launcherOrigin !== null && window !== null && !window.isDestroyed()) {
+      window.loadURL(`${launcherOrigin}${APP_PATH}`);
+    }
+  };
+
+  /** Answers one adoption-handshake ask by driving the authoritative target. */
+  const answerHostObservation = (ask: HostObservationAsk): void => {
+    if (ask.kind === 'current-document') {
+      const identity = target?.observeCurrentDocument() ?? null;
+      controlPlane.hostObservation(ask.requestId, identity !== null, identity);
+      return;
+    }
+    // The granted origin joins the approved navigation set before the
+    // top level replaces onto it (the policy's own grant, #362).
+    navigation.approveOrigin(ask.origin);
+    void (target?.replaceTopLevel(ask.origin) ?? Promise.resolve(null)).then((identity) => {
+      controlPlane.hostObservation(ask.requestId, identity !== null, identity);
+    });
+  };
+
   // — the ONE control-plane child through the private boot —
   const controlPlane: ControlPlaneClient = connectControlPlaneChild({
     handle: seam.spawnControlPlaneChild(),
     bootDeadlineMs: options.bootDeadlineMs,
     host: {
-      onBooted: () => observer({ kind: 'control-plane-booted' }),
+      onBooted: (port) => {
+        observer({ kind: 'control-plane-booted' });
+        launcherOrigin = `http://launcher.localhost:${port}`;
+        navigation.approveOrigin(launcherOrigin);
+        target = seam.createAuthoritativeTarget(launcherOrigin, navigation, controlPlane);
+        showLauncher();
+      },
       onLost: (reason) => observer({ kind: 'control-plane-lost', reason }),
       onSessionState: (sessionRef) => {
         currentSessionRef = sessionRef;
+        if (sessionRef !== null) {
+          observer({ kind: 'session-active', sessionRef });
+        } else {
+          observer({ kind: 'session-idle' });
+        }
         installMenu();
+      },
+      onHostObservationAsk: answerHostObservation,
+      onDocumentCapability: (webContentsId, capability) => {
+        target?.documentCapability(webContentsId, capability);
       },
     },
   });
 
   const selectionObserver: NativeSelectionObserver = {
-    onRegistered: (summary) => observer({ kind: 'registered', summary }),
+    onRegistered: (summary) => {
+      registeredProjects.push(summary);
+      observer({ kind: 'registered', summary });
+      installMenu();
+    },
     onRegistrationRefused: (code) => observer({ kind: 'registration-refused', code }),
     onSelectionCanceled: () => observer({ kind: 'selection-canceled' }),
+  };
+
+  /**
+   * One activation through the native surface: the authoritative target
+   * PREPARES first (fresh partition, bypass active — H5's ordering law
+   * holds before the control plane moves), then the delegated
+   * transition drives the composition. A refused outcome surfaces the
+   * sanitized reason; a completed one leaves the target loaded (the
+   * adoption handshake replaced its top level mid-transition).
+   */
+  const activateProject = async (projectKey: ProjectKey): Promise<TransitionOutcome> => {
+    if (target === null || !(await target.prepare())) {
+      const refused: TransitionOutcome = { kind: 'refused', reason: 'transition-failed' };
+      observer({ kind: 'activation-refused', reason: refused.reason });
+      return refused;
+    }
+    const outcome = await controlPlane.activate(projectKey);
+    if (outcome.kind === 'refused') {
+      observer({ kind: 'activation-refused', reason: outcome.reason });
+    }
+    return outcome;
+  };
+
+  /** One deactivation: the delegated transition, then the target teardown and the launcher. */
+  const deactivateProject = async (sessionRef: SessionRef): Promise<TransitionOutcome> => {
+    const outcome = await controlPlane.deactivate(sessionRef);
+    if (outcome.kind === 'completed') {
+      await target?.teardown().catch(() => {});
+      showLauncher();
+    }
+    return outcome;
   };
 
   const host: NativeHost = {
     navigation,
     booted: controlPlane.booted,
     addExistingProject: () => addExistingProject(seam.picker, controlPlane, selectionObserver),
-    activate: (projectKey) => controlPlane.activate(projectKey),
+    activate: (projectKey) => activateProject(projectKey),
     deactivate: () => {
       if (currentSessionRef === null) {
         return Promise.resolve<TransitionOutcome>({ kind: 'refused', reason: 'no-active-session' });
       }
-      return controlPlane.deactivate(currentSessionRef);
+      return deactivateProject(currentSessionRef);
     },
     quitTransition: () => {
       // The body is DEFERRED one microtask so `quitRun` is assigned
@@ -234,8 +334,11 @@ export async function startNativeHost(
     addExistingProject: () => {
       void host.addExistingProject();
     },
+    activate: (projectKey) => {
+      void activateProject(projectKey);
+    },
     deactivate: (sessionRef) => {
-      void controlPlane.deactivate(sessionRef);
+      void deactivateProject(sessionRef);
     },
     quit: () => {
       void host.quitTransition().then(() => seam.app.quit());
@@ -243,9 +346,9 @@ export async function startNativeHost(
     menuActionRejected: (reason) => observer({ kind: 'menu-action-rejected', reason }),
   };
   const installMenu = (): void => {
-    const built = buildApplicationMenu(currentSessionRef);
-    seam.menu.setApplicationMenu(built, (actionId) => {
-      dispatchMenuAction(built, actionId, currentSessionRef, menuActions);
+    const built = buildApplicationMenu(currentSessionRef, registeredProjects);
+    seam.menu.setApplicationMenu(built, (actionId, projectKey) => {
+      dispatchMenuAction(built, actionId, currentSessionRef, menuActions, projectKey);
     });
   };
 
@@ -265,7 +368,13 @@ export async function startNativeHost(
 
   async function runQuitTransition(): Promise<void> {
     // §4 step 6's quit law: close the target WITHOUT navigation — the
-    // close observation alone, no ready seam, no renderer consent.
+    // close observation alone, no ready seam, no renderer consent. The
+    // authoritative target's close is its OWN ordered teardown (guard,
+    // authority, hygiene) before the child's ordered stop reaps the
+    // active run's plane.
+    if (target?.exists()) {
+      await target.teardown().catch(() => {});
+    }
     if (window !== null && !window.isDestroyed()) {
       const closed = new Promise<void>((resolve) => {
         window?.onClosed(resolve);

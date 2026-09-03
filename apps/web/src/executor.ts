@@ -8,6 +8,7 @@ import type {
 } from '@wojciechpiskorz/astroix-protocol';
 import type { ClientBindings } from '@wojciechpiskorz/astroix-runtime/api/http';
 import { pagedProjectList } from '@wojciechpiskorz/astroix-runtime/api/pagination';
+import type { DocumentAuthority } from '@wojciechpiskorz/astroix-runtime/client-authority';
 import {
   createGrantTable,
   type GrantTable,
@@ -23,7 +24,6 @@ import type {
 import type {
   CompletionClientIdentity,
   GrantedCandidateTarget,
-  HostCompletionObservations,
   SessionCompletion,
 } from '@wojciechpiskorz/astroix-runtime/session-supervisor/completion';
 import {
@@ -121,6 +121,13 @@ export interface ExecutorInputs {
   readonly coordinator: SwitchCoordinator;
   /** F7's completion (#239): the transition's observed last step and its irreversible failure aftermath. */
   readonly completion: SessionCompletion;
+  /**
+   * The document authority (#246, H4): the server-side both-truths bind
+   * discipline the adoption mints through — the composition declares the
+   * authoritative target and observes its navigations; one bind, one
+   * grant, two tables in lockstep.
+   */
+  readonly authority: DocumentAuthority;
   readonly seatStore: SeatStore;
   readonly listener: OriginListener;
   readonly sessionClients: SessionClients;
@@ -131,6 +138,37 @@ export interface ExecutorInputs {
   readonly hub: SseHub;
   /** The composition-owned candidate bookkeeping — runs and dev-server ports by pair. */
   readonly candidates: CandidateStore;
+  /**
+   * The Electron host's adoption seam (#362, H7): when present, the
+   * transition's host observations are the HOST's (the authoritative
+   * window's real main-frame handshake over the private channel); absent,
+   * the web host's stand-in holds — the adoption itself is the
+   * observation. One seam, two hosts; never a second transition driver.
+   */
+  readonly host?: HostAdoptionSeam;
+}
+
+/**
+ * The host's half of one committed transition: the observations F7's
+ * completion awaits. The Electron host loads the granted project origin
+ * on the authoritative target and reports the observed document; the
+ * web host's default implementation (below) adopts the stand-in
+ * document synchronously. Each member returns a REJECTED promise when
+ * unobserved — F7 treats rejection as `false`, never a failure.
+ */
+export interface HostAdoptionSeam {
+  /**
+   * The activation observation (§4 step 6): grant nothing here — the
+   * adoption tail (`adoptSessionAtDocument`) is the caller's; this
+   * member resolves once the HOST has replaced the top level and
+   * observed the new document, and everything it needs to reach that
+   * point (the origin lease included) is the composition's.
+   */
+  mainFrameReady(candidate: StagedCandidate, trail: AdoptionTrail): Promise<void>;
+  /** The deactivation observation — the launcher is the host's to show. */
+  launcherReady(): Promise<void>;
+  /** The quit observation — the close without navigation. */
+  targetClosed(): Promise<void>;
 }
 
 /** The executor surface — one call per admitted envelope. */
@@ -266,9 +304,14 @@ async function commitTransition(
           },
         }
       : { document: oldSeat.document, capability: oldSeat.clientCapability };
+  const host: HostAdoptionSeam = inputs.host ?? webHostAdoption(inputs, candidate, trail);
   await inputs.completion.completeReplacement({
     commit: transition,
-    observations: adoptionObservations(() => adoptSession(candidate, trail, inputs)),
+    observations: {
+      mainFrameReady: () => host.mainFrameReady(candidate, trail),
+      launcherReady: () => host.launcherReady(),
+      targetClosed: () => host.targetClosed(),
+    },
     client,
     candidate: grantedCandidateTarget(candidate, projectKey, trail, inputs),
     targetRemains: true,
@@ -359,12 +402,29 @@ async function commitSwitch(
  * launcher as `false` instead of hanging on a navigation that cannot
  * come from the wire.
  */
-function adoptionObservations(adoption: () => Promise<void>): HostCompletionObservations {
+function webHostAdoption(
+  inputs: ExecutorInputs,
+  candidate: StagedCandidate,
+  trail: AdoptionTrail,
+): HostAdoptionSeam {
   const unobserved = (): Promise<void> =>
     Promise.reject(
       new Error('the web host observes no host-side navigation (the Electron host lanes own it)'),
     );
-  return { mainFrameReady: adoption, launcherReady: unobserved, targetClosed: unobserved };
+  return {
+    mainFrameReady: async () => {
+      // The stand-in's declaration and navigation observation (H4's
+      // monotonic law): the web host "navigates" its one virtual
+      // document to the candidate's generation, then adopts at exactly
+      // that document.
+      const document = intendedDocument(candidate);
+      inputs.authority.declareAuthoritativeTarget(document.webContentsId);
+      inputs.authority.documentNavigated(document.webContentsId, document.navigationId);
+      await adoptSession(candidate, trail, inputs, document, null);
+    },
+    launcherReady: unobserved,
+    targetClosed: unobserved,
+  };
 }
 
 /**
@@ -492,18 +552,22 @@ async function inspect(
 }
 
 /**
- * Adopts one committed session: the editor document binding (both
- * truths — the HTTP table and the supervisor's registry), the grant
- * table, the origin lease (granted strictly after the coordinator
- * revoked the old one), the seat, and the worker event lift onto the
- * hub under the exact pair. Each grant records onto the {@link
- * AdoptionTrail} as it lands, so a throw later in the sequence leaves
- * the aftermath the exact partial-grant inventory to revoke.
+ * Adopts one committed session — the shared adoption tail (one
+ * discipline, two hosts): the editor document binding (ONE mint through
+ * H4's document authority — both truths in lockstep), the grant table,
+ * the origin lease (the caller's when the Electron host pre-granted it
+ * so the origin serves before the host loads it; granted here
+ * otherwise), the seat, and the worker event lift onto the hub under
+ * the exact pair. Each grant records onto the {@link AdoptionTrail} as
+ * it lands, so a throw later in the sequence leaves the aftermath the
+ * exact partial-grant inventory to revoke.
  */
-async function adoptSession(
+export async function adoptSession(
   candidate: StagedCandidate,
   trail: AdoptionTrail,
   inputs: ExecutorInputs,
+  document: SessionSeat['document'],
+  preGrantedLease: OriginLease | null,
 ): Promise<void> {
   const active = inputs.supervisor.snapshot().active;
   if (active === undefined || !samePair(active.ref, candidate.ref)) {
@@ -516,27 +580,23 @@ async function adoptSession(
     .records.find((entry) => entry.projectKey === active.projectKey);
   if (record === undefined) throw new Error('the committed session has no registry record');
   const canonicalRoot = record.canonicalRoot;
-  const document = intendedDocument(candidate);
-  const httpBound = inputs.httpBindings.bind({
-    role: 'editor',
-    host: 'project',
-    sessionRef: candidate.ref,
-  });
-  if (httpBound.kind === 'bound') trail.httpCapability = httpBound.capability;
-  const clientBound = inputs.sessionClients.bind({
-    role: 'editor',
+  const bound = inputs.authority.bindEditor({
     document,
     sessionRef: candidate.ref,
-  });
-  if (clientBound.kind === 'bound') trail.supervisorCapability = clientBound.capability;
-  if (httpBound.kind !== 'bound' || clientBound.kind !== 'bound') {
-    throw new Error('the session editor binding could not be installed');
-  }
-  const devServerPort = inputs.candidates.portOf(candidate.ref);
-  const lease = inputs.listener.grantProjectLease({
     projectKey: active.projectKey,
-    upstream: { host: '127.0.0.1', port: devServerPort },
   });
+  if (bound.kind === 'refused') {
+    throw new Error(`the session editor binding could not be installed (${bound.reason})`);
+  }
+  trail.httpCapability = bound.grant.capability;
+  trail.supervisorCapability = bound.grant.clientCapability;
+  const devServerPort = inputs.candidates.portOf(candidate.ref);
+  const lease =
+    preGrantedLease ??
+    inputs.listener.grantProjectLease({
+      projectKey: active.projectKey,
+      upstream: { host: '127.0.0.1', port: devServerPort },
+    });
   trail.lease = lease;
   inputs.grantTables.set(pairKey(candidate.ref), await createGrantTable(canonicalRoot));
   const run = inputs.candidates.runOf(candidate.ref);
@@ -557,9 +617,9 @@ async function adoptSession(
     devServerPort,
     lease,
     fence: createEditFence(),
-    editorCapability: httpBound.capability,
+    editorCapability: bound.grant.capability,
     document,
-    clientCapability: clientBound.capability,
+    clientCapability: bound.grant.clientCapability,
   });
 }
 
