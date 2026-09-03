@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   reconstructUpgradeHandshake,
+  stripAuthorityFromRawPairs,
   validateUpgradeRequest,
 } from '../../proxy/upgrade-request.ts';
 
@@ -8,7 +9,10 @@ import {
  * The upgrade admission and handshake-reconstruction focused tests
  * (#233): the RFC 6455 opening shape, the `vite-hmr` subprotocol gate,
  * the exact same-origin Origin, and the byte-true reassembly of the
- * client's handshake (original casing, order, duplicates visible).
+ * client's handshake (original casing, order, duplicates visible) —
+ * plus the raw-pair control-authority strip that feeds the
+ * reconstruction (#338, ADR-0006 §3): F2's one definition decides the
+ * drops, and every kept pair keeps its exact bytes and position.
  */
 
 const ORIGIN = 'http://abcdefghijklmnopqrstuvwxyz.localhost:4405';
@@ -135,5 +139,85 @@ describe('reconstructUpgradeHandshake', () => {
         '',
       ].join('\r\n'),
     );
+  });
+});
+
+describe('stripAuthorityFromRawPairs (the raw-pair leg of the control-authority strip)', () => {
+  it('drops the client-capability pair in any casing and keeps every other pair byte-identical', () => {
+    const kept = stripAuthorityFromRawPairs([
+      'Host',
+      'abcdefghijklmnopqrstuvwxyz.localhost:4405',
+      'X-Astroix-Client',
+      'cap-7f3a',
+      'Sec-WebSocket-Key',
+      'dGhlIHNhbXBsZSBub25jZQ==',
+      'x-astroix-client',
+      'cap-deadbeef',
+      'Origin',
+      ORIGIN,
+    ]);
+    expect(kept).toEqual([
+      'Host',
+      'abcdefghijklmnopqrstuvwxyz.localhost:4405',
+      'Sec-WebSocket-Key',
+      'dGhlIHNhbXBsZSBub25jZQ==',
+      'Origin',
+      ORIGIN,
+    ]);
+  });
+
+  it('filters the capability cookie out of a Cookie line and drops the pair when nothing else rode it', () => {
+    expect(stripAuthorityFromRawPairs(['Cookie', '__astroix_host=host-cap; theme=dark'])).toEqual([
+      'Cookie',
+      'theme=dark',
+    ]);
+    expect(stripAuthorityFromRawPairs(['Cookie', '__astroix_host=host-cap'])).toEqual([]);
+  });
+
+  it('cleans every cookie-cased spelling — distinct-case duplicates cannot smuggle one through', () => {
+    expect(
+      stripAuthorityFromRawPairs([
+        'Cookie',
+        '__astroix_host=host-cap; theme=dark',
+        'COOKIE',
+        '__astroix_host=host-cap',
+      ]),
+    ).toEqual(['Cookie', 'theme=dark']);
+  });
+
+  it('feeds the reconstruction: the handshake carries the authority in no casing and everything else exactly', () => {
+    const forwarded = reconstructUpgradeHandshake({
+      method: 'GET',
+      url: '/?token=T0K3N-vite',
+      httpVersion: '1.1',
+      rawHeaders: stripAuthorityFromRawPairs([
+        'Host',
+        'abcdefghijklmnopqrstuvwxyz.localhost:4405',
+        'Origin',
+        ORIGIN,
+        'X-Astroix-Client',
+        'cap-7f3a',
+        'Cookie',
+        '__astroix_host=host-cap; theme=dark',
+        'Sec-WebSocket-Key',
+        'dGhlIHNhbXBsZSBub25jZQ==',
+      ]),
+    });
+    expect(forwarded).toBe(
+      [
+        'GET /?token=T0K3N-vite HTTP/1.1',
+        'Host: abcdefghijklmnopqrstuvwxyz.localhost:4405',
+        `Origin: ${ORIGIN}`,
+        'Cookie: theme=dark',
+        'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==',
+        '',
+        '',
+      ].join('\r\n'),
+    );
+    // The authority never appears in the forwarded bytes, in any casing.
+    expect(forwarded.toLowerCase()).not.toContain('astroix-client');
+    expect(forwarded.toLowerCase()).not.toContain('__astroix_host');
+    expect(forwarded).not.toContain('cap-7f3a');
+    expect(forwarded).not.toContain('host-cap');
   });
 });

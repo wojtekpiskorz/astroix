@@ -9,9 +9,10 @@ import { CAPABILITY_COOKIE_NAME } from './host-capability.ts';
  * capability cookie and the injected client-capability header never
  * reach the managed dev server — not over the HTTP stream proxy, not
  * over a raw HMR upgrade tunnel. Pure header-set surgery; the live
- * wiring into the proxy path belongs to the Electron host lane (#246,
- * its upstream HTTP and HMR header-stripping legs), which calls this
- * one function so the strip has exactly one definition.
+ * wiring is the two proxy legs (#338): the stream proxy forwards this
+ * function's answer directly, and the upgrade path consults it one raw
+ * pair at a time (`stripAuthorityFromRawPairs`) — so the strip has
+ * exactly one definition.
  *
  * Everything else passes through untouched — other cookies, the Host,
  * the HMR token, Vite's subprotocol: the strip is surgical, never a
@@ -48,7 +49,7 @@ export type ForwardedHeaders = ParsedHeaders;
  * parsed view lowercases every name, while the raw HMR handshake view
  * F1 reconstructs from `rawHeaders` preserves the client's original
  * casing (`Origin-listener` → `reconstructUpgradeHandshake`, wired by
- * #246) — a capitalized `X-Astroix-Client` or `Cookie` must be stripped
+ * #338) — a capitalized `X-Astroix-Client` or `Cookie` must be stripped
  * just the same, and every header that stays must keep its own bytes
  * exactly: the strip is surgical, never a rewrite, not even a recasing.
  */

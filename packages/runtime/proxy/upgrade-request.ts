@@ -11,8 +11,13 @@
  * leg is the session lanes' (F2/F3), and the token is Vite's own — this
  * seam PRESERVES both, byte for byte, and validates everything that
  * exists today: the WebSocket upgrade shape, the `vite-hmr`
- * subprotocol, and the exact same-origin Origin.
+ * subprotocol, and the exact same-origin Origin. Before reconstruction,
+ * the control-plane authority leaves the pair view (ADR-0006 §3, #338):
+ * `stripAuthorityFromRawPairs` hands `reconstructUpgradeHandshake` a
+ * pair list already cleaned by F2's ONE strip definition.
  */
+
+import { stripControlAuthority } from '../api/http/authority-strip.ts';
 
 /** Why an upgrade was refused admission — sanitized vocabulary only. */
 export type UpgradeRejectionReason =
@@ -114,4 +119,34 @@ export function reconstructUpgradeHandshake(request: HandshakeSource): string {
     out += `${request.rawHeaders[i]}: ${request.rawHeaders[i + 1]}\r\n`;
   }
   return `${out}\r\n`;
+}
+
+/**
+ * The handshake view's header pairs with the control-plane authority
+ * removed (#338; ADR-0006 §3 "strips it before forwarding either
+ * request to the managed Astro/Vite server"): the pair list
+ * `reconstructUpgradeHandshake` reassembles never carries the
+ * client-capability header or the host capability cookie up to the
+ * managed dev server. F2's ONE strip definition decides every drop and
+ * every cookie rewrite — consulted one pair at a time, so no part of
+ * the strip is re-implemented here — and every kept pair keeps its
+ * exact name bytes, value bytes, and position: URL token, Host, Origin,
+ * subprotocol, key, duplicate spellings, original casing, and order all
+ * ride as they arrived.
+ */
+export function stripAuthorityFromRawPairs(rawHeaders: readonly string[]): string[] {
+  const kept: string[] = [];
+  for (let i = 0; i < rawHeaders.length; i += 2) {
+    const name = rawHeaders[i] ?? '';
+    const value = rawHeaders[i + 1] ?? '';
+    // One pair through the one definition: the answer drops the name
+    // when the pair was pure authority (the client-capability header, a
+    // Cookie line holding nothing else), and rewrites the value when the
+    // cookie line keeps its other cookies. A one-pair record's kept
+    // answer is always a string — any other shape never occurs.
+    const stripped = stripControlAuthority({ [name]: value })[name];
+    if (typeof stripped !== 'string') continue;
+    kept.push(name, stripped);
+  }
+  return kept;
 }
