@@ -331,6 +331,14 @@ describe('toRiskEntry', () => {
       // tombstone machine (tombstone).
       'packages/runtime/session-supervisor/completion/replacement-completion.ts',
       'packages/runtime/session-supervisor/tombstone/boot-tombstone.ts',
+      // #246 (H4): the document-bound client authority join over F2's
+      // HTTP table and F4's supervisor registry (src/ per the ticket's
+      // owned paths — colocated-test idiom).
+      'packages/runtime/src/client-authority/document-authority.ts',
+      // #244 (H2): one representative per new covered prefix — the
+      // packaged-asset adapter (src/internal; tests live under
+      // apps/desktop/test/runtime-resources per the owned paths).
+      'packages/runtime/src/internal/packaged-assets.ts',
     ];
     for (const file of covered) {
       expect(toRiskEntry(file, fn, fileCov).metric).toBe('crap');

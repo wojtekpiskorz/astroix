@@ -296,6 +296,26 @@ const COVERED_PREFIXES: readonly string[] = [
   // over injected seams and manual observations; no real timers.
   'packages/runtime/session-supervisor/completion/',
   'packages/runtime/session-supervisor/tombstone/',
+  // `packages/runtime/src/client-authority` since #246 (H4): the
+  // document-bound client authority — the both-truths mint and lockstep
+  // invalidation join over F2's HTTP binding table and F4's supervisor
+  // client registry (one editor + three diagnostics, the four-identity
+  // binding, the A→B→A stale-document guard, the invalidation matrix) —
+  // a pure module with deterministic colocated unit tests driving the
+  // REAL settled tables, same covered-tier decision as the registry it
+  // composes. The seam sits under src/ per the ticket's owned paths
+  // (colocated-test idiom), the one runtime seam outside the flat
+  // seam-root layout.
+  'packages/runtime/src/client-authority/',
+  // `packages/runtime/src/internal` since #244 (H2): the packaged-asset
+  // adapter — the ratified resource layout vocabulary, the pin table,
+  // the build manifest schema/builder/serializer, and the immutable-
+  // resource verifier. Deterministic real-filesystem units over temp
+  // fixture layouts (fake executables with recorded hashes), same
+  // covered-tier decision as the registry seam (#221); the tests live
+  // under apps/desktop/test/runtime-resources per #244's owned paths —
+  // metric honesty lives in this tier decision, not the test location.
+  'packages/runtime/src/internal/',
 ];
 
 /**

@@ -7,6 +7,12 @@ dist/
 apps/web/dist-client/
 # the desktop host's bundled Electron main (built by the smoke lane, #243)
 apps/desktop/dist-main/
+# the desktop host's assembled packaged runtime (#244): real artifacts
+# built by `npm run assemble:runtime` (the stock Node distribution and the
+# bundled runtime) never enter git — only the .gitkeep placeholder does
+apps/desktop/resources/*
+!apps/desktop/resources/.gitkeep
+apps/desktop/.assemble-cache/
 *.tsbuildinfo
 
 # env & secrets
