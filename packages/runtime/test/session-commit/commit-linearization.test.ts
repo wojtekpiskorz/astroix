@@ -464,6 +464,38 @@ describe('the deactivation variant — the same order, no grant', () => {
     expect(fx.journal).toEqual([]);
   });
 
+  it('a throwing deactivation stop is the same irreversible failed result — and it documents the optional-guard pair', async () => {
+    const fx = commitFixture();
+    const prepared = await preparedSwitch(fx, {
+      kind: 'deactivation',
+      // the throwing tail this leg drives is what the `?.`-and-catch
+      // pair around `bindings.stopOldRun` guards: authority is already
+      // revoked when it fires, so the result is the irreversible
+      // `failed`, never a silent deactivate-without-stop
+      stopOldRun: () => {
+        throw new Error('stop seam defect');
+      },
+    });
+    const { first, receipt } = prepared;
+
+    const failed = await fx.coordinator.deactivate(receipt);
+    expect(failed.kind).toBe('failed');
+    if (failed.kind !== 'failed') throw new Error('unreachable');
+    expect(failed.failure).toEqual({
+      category: 'revocation',
+      message: 'the session commit failed after the outgoing authority was revoked',
+    });
+    expect(failed.revoked.outcome).toBe('complete');
+    // irreversibility: the old authority is dead, never resumed
+    expect(
+      fx.capabilityGrants.verify(first.cookie, { host: 'project', projectKey: PROJECT_A }),
+    ).toBe(false);
+    expect(first.lease.revocations).toBe(1);
+    // and the spent receipt never replays
+    const replay = await fx.coordinator.deactivate(receipt);
+    expect(replay).toEqual({ kind: 'rejected', reason: 'already-consumed' });
+  });
+
   it('a deactivated receipt never replays either', async () => {
     const fx = commitFixture();
     const prepared = await preparedSwitch(fx, { kind: 'deactivation', stopOldRun: () => {} });
