@@ -3,6 +3,8 @@ node_modules/
 
 # build (the canonical fixture's astro build output lives under e2e/fixture/dist)
 dist/
+# the web host's bundled client documents (built at host boot, #240)
+apps/web/dist-client/
 *.tsbuildinfo
 
 # env & secrets

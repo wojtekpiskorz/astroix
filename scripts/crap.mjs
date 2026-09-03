@@ -67,13 +67,19 @@ const SRC_ROOT = join(ROOT, 'src');
 // kernel-lease/private-boot boot-authority seams are covered-tier per
 // their decisions in crap.ts; later runtime seams decide in their lanes).
 // Future workspace packages join this list in the PR that lands them,
-// together with their coverage-tier decision in crap.ts.
+// together with their coverage-tier decision in crap.ts. apps/web
+// (#240) joins as a CC-only watchlist package: the web host is real
+// process/socket/child composition end to end (listener, supervisor,
+// managed dev-server children), so honest per-function unit coverage
+// does not exist for it — its truth is the Playwright web lane, the
+// same tier reasoning as packages/app-shell (#218).
 const RISK_ROOTS = [
   SRC_ROOT,
   join(ROOT, 'packages/core'),
   join(ROOT, 'packages/protocol'),
   join(ROOT, 'packages/app-shell'),
   join(ROOT, 'packages/runtime'),
+  join(ROOT, 'apps/web'),
 ];
 // the same roots as repo-relative path prefixes — isRiskScope derives from
 // these so the scope is stated once (advisory round 2 on #270: a second
