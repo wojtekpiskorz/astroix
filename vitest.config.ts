@@ -199,7 +199,7 @@ export default defineConfig({
         // currency envelope) are deterministic units over run fakes —
         // same covered-tier decision as the facade seams. The fence (F5
         // #237) and commit/revocation (F6 #238) subtrees land their own
-        // globs.
+        // globs below.
         'packages/runtime/session-supervisor/staging/**',
         'packages/runtime/session-supervisor/clients/**',
         // The session-supervisor fence seams (#237, F5, additive): the
@@ -209,9 +209,22 @@ export default defineConfig({
         // verdicts, the no-silent-work tracking, resume legality) are
         // deterministic units over injected clock and queue seams — the
         // deadline never waits on a real timer (manual or fake clocks,
-        // both sides of the boundary pinned). The commit/revocation
-        // (F6 #238) subtree lands its own glob.
+        // both sides of the boundary pinned).
         'packages/runtime/session-supervisor/fence/**',
+        // The session-supervisor commit + revocation seams (#238, F6,
+        // additive): the one-use switch-preparation receipt and its
+        // ledger, the normal/forced preparations (the sealed terminal
+        // drain verdict; the observed exact write-executor exit raced
+        // against the protocol's forced-reap bound on an injected
+        // clock), the receipt-consuming commit linearization, and the
+        // ordered old-authority revocation (streams, awaited lease,
+        // edit grants, both client-binding truths, host capability —
+        // before the candidate grant) are deterministic units over
+        // injected seams and journaling wrappers around the REAL landed
+        // surfaces; the real-socket 421 legs ride the REAL origin
+        // listener on OS-assigned loopback ports.
+        'packages/runtime/session-supervisor/commit/**',
+        'packages/runtime/session-supervisor/revocation/**',
       ],
       reporter: ['json'],
       reportsDirectory: 'coverage',
