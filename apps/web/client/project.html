@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Astroix — project</title>
+    <!--ASTROIX_BOOTSTRAP-->
+  </head>
+  <body>
+    <main class="project">
+      <h1>Project</h1>
+      <p data-testid="session-generation"></p>
+      <p data-testid="inspect-revision"></p>
+      <p data-testid="stream-state">connecting</p>
+      <p data-testid="command-error" hidden></p>
+      <button type="button" data-testid="reinspect">Inspect again</button>
+      <button type="button" data-testid="deactivate">Deactivate</button>
+    </main>
+    <script type="module" src="./project-main.ts"></script>
+  </body>
+</html>

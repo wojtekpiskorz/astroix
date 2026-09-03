@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Astroix — launcher</title>
+    <!--ASTROIX_BOOTSTRAP-->
+  </head>
+  <body>
+    <main class="launcher">
+      <h1>Astroix</h1>
+      <p data-testid="session-label">idle</p>
+      <p data-testid="stream-state">connecting</p>
+      <p data-testid="command-error" hidden></p>
+      <p data-testid="last-failure" hidden></p>
+      <ul data-testid="project-list"></ul>
+    </main>
+    <script type="module" src="./launcher-main.ts"></script>
+  </body>
+</html>

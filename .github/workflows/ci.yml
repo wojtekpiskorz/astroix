@@ -37,20 +37,25 @@ jobs:
       # retained-UI coupling scan + mounts, fixture plainness + zero-byte
       # build, counts, inventory)
       - run: npm run test
-      # ── no-product-E2E interval — the named state (ADR-0010) ──
-      # There is NO product E2E lane until the web-host slices land (#240),
-      # and this step is never presented as one. Exactly one serverless
-      # Playwright spec survives the retirement gate (#215): the
-      # plain-fixture build smoke. Playwright itself fails a config whose
-      # testMatch matches zero specs, so the interval cannot silently pass
-      # empty — deleting the last spec reds this step instead of vacuously
-      # greening it. No browser is launched; no chromium install is needed.
-      - name: no-product-E2E interval — plain-fixture build smoke (not product E2E, ADR-0010)
+      # ── product E2E is restored (#240, G1): the no-E2E interval of
+      # ADR-0010 ends here ──
+      # The web-host lane is a real Chromium against the real control
+      # plane — the real origin listener, HTTP admission, SSE hub,
+      # staged-activation supervisor, switch coordinator, and managed
+      # `astro dev` children — over the isolated test registry the lane's
+      # staging owns. The plain-fixture build smoke stays as its own
+      # project. The playwright config fails at load when the web
+      # project's spec discovery is vacuous (missing or emptied specs),
+      # so this lane cannot pass with zero tests. The frozen
+      # behavior-contract validators above remain the behavioral judge;
+      # this lane is the live host.
+      - run: npx playwright install --with-deps chromium
+      - name: product E2E — web host (real browser, real control plane) + plain-fixture build smoke
         run: npm run test:e2e
 
   # Retirement gate context (#215, lane A6): the integration runtime,
   # injected chrome, delivery lanes, npm artifact checks, Changesets, and
   # publish workflows are deleted; the root package is private. What CI
   # gates on is the retained tree: lint + types + the vitest lanes above,
-  # and the one serverless fixture smoke as the explicit stand-in for E2E
-  # until product E2E returns with the web host (#240).
+  # plus the restored product-E2E web-host lane and the plain-fixture
+  # build smoke (#240).
