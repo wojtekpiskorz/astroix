@@ -17,14 +17,26 @@ picker through System Events. It is never part of `npm test` or CI.
 ```sh
 npm run smoke:package                       # package --label early-smoke → smoke → record
 npm run smoke:package -- --zip <path.zip>   # smoke an EXISTING build's ZIP (records which)
-npm run smoke:package -- --force            # discard an unclaimed recorded run and re-record
+npm run smoke:package -- --force            # discard an UNCOMMITTED run and re-record
 ```
 
 The recorded evidence lands in
 `apps/desktop/test-results/early-package-smoke/` (`evidence.json` +
 `run.log`) and is **write-once**: the no-rebuild-after-recording law
 (#248's migration policy) — no upload, tag, publish, or rebuild after a
-claimed exact run.
+claimed exact run. A claim is a **committed** evidence record (git
+history is the mechanism): `--force` refuses to discard one, so
+superseding a claimed run requires an explicit `git rm` of the evidence
+in its own commit before re-recording.
+
+**Provenance of the committed record**: `evidence.json` names the source
+commit the smoked ZIP was built at. The first recorded run (PR #361,
+pre-review) was built at `21754f1`, before the #358 integration landed
+on the branch — #358 was additive (`e2e/web` + `playwright.config.ts`),
+touched nothing this battery runs, and the post-merge gates re-ran
+green; the post-review re-record (the isolation-law harness fix) names
+its own head. Either way, the composition flip (#360) re-records before
+any final claim.
 
 ## The battery
 
@@ -34,8 +46,12 @@ local package build or its exact ZIP (the #339 pattern — `npm test`
 stays deterministic and network-free). The shared machinery is
 `e2e/desktop/early-package-kit.ts`: extraction (`ditto`), the isolated
 launch (temp `HOME` + the product's `ASTROIX_DESKTOP_USER_DATA`
-override, every dev-only env declaration removed), the System Events
-driving surface, and the post-run audits.
+override + the browser-level `--user-data-dir` switch so Chromium's
+early GPU/network helpers inherit the temp root too — asserted: no
+process of the tree references the real account home; the product half
+of that observation, the env override landing after the pre-boot
+verification, belongs to its owning lane), the System Events driving
+surface, and the post-run audits.
 
 1. **Prelaunch verification** (`early-package-smoke.spec.ts`) —
    `verifyPackagedApp` over the smoke's own extraction: strict nested +

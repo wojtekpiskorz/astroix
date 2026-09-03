@@ -23,18 +23,19 @@ the specs themselves.
 ## The recording law
 
 `npm run smoke:package` writes this directory **write-once**: a second
-recording is refused unless `--force` is passed explicitly (the ticket's
-"no upload, tag, publish, or rebuild after recording a claimed exact
-run"). The evidence names the exact ZIP bytes it smoked — `--zip` adopts
-an existing build instead of packaging a fresh one, and the record says
-which happened.
+recording is refused unless `--force` is passed, and `--force` itself
+refuses when the existing record is **committed** — git history is the
+claim mechanism, so a claimed exact run is retracted only by an explicit
+`git rm` of the evidence in its own commit, never silently. The evidence
+names the exact ZIP bytes it smoked — `--zip` adopts an existing build
+instead of packaging a fresh one, and the record says which happened.
 
 ## Reproducing
 
 ```sh
 npm run smoke:package                       # package a labeled build + smoke + record
 npm run smoke:package -- --zip <path.zip>   # smoke an EXISTING build's ZIP
-npm run smoke:package -- --force            # discard an unclaimed run and re-record
+npm run smoke:package -- --force            # discard an UNCOMMITTED run and re-record
 ```
 
 The battery behind it is the `e2e/desktop/early-package*.spec.ts` family

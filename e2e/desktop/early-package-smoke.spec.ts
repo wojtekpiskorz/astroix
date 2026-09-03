@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { readFile, stat } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
@@ -27,6 +28,7 @@ import {
   PackagedAppRun,
   processesReferencing,
   quitNormally,
+  realHomeIsolationFindings,
   registerThroughNativePicker,
   removeStaging,
   sanitizationFindings,
@@ -95,6 +97,14 @@ let run: PackagedAppRun;
 let managedBefore: Map<string, string>;
 let tmpBefore: Set<string>;
 let menuRows: string[] = [];
+/**
+ * The registration leg's outcome — the skip-cascade truth the boundary
+ * leg consumes: `'pending'` before the leg ran, `'completed'` when the
+ * native flow drove, `'ui-scripting-unavailable'` when the host cannot
+ * drive System Events (the legs that depend on the drive skip with the
+ * REASON, never fail on inferred emptiness).
+ */
+let registrationOutcome: 'pending' | 'completed' | 'ui-scripting-unavailable' = 'pending';
 
 beforeAll(async () => {
   staging = await makeStagingRoot('astroix-early-package-');
@@ -178,6 +188,18 @@ describe.skipIf(!PACKAGE_ZIP)('the exact packaged host — the early packaged sm
     expect(childRow?.command.includes('Electron'), 'the child is never Electron-as-Node').toBe(
       false,
     );
+    // The isolation law over the WHOLE captured tree: no process of the
+    // app references the real account home (the first recorded run's
+    // finding — early GPU/network helpers ran against the real home's
+    // Application Support; the launch now carries the browser-level
+    // --user-data-dir switch so every helper, first to last, holds the
+    // temp root. The product half of that observation belongs to its
+    // owning lane).
+    const homeFindings = realHomeIsolationFindings(tree, homedir());
+    expect(homeFindings, `isolation leak: ${JSON.stringify(homeFindings)}`).toEqual([]);
+    console.log(
+      `early-package-evidence: isolation — ${tree.length} processes, none reference the real account home`,
+    );
     // No window-state or session report preceded the boot — the product
     // log stays the closed H1 vocabulary (the sanitization half).
     expect(run.events.map((event) => event.kind)).toEqual(['control-plane-booted']);
@@ -186,12 +208,14 @@ describe.skipIf(!PACKAGE_ZIP)('the exact packaged host — the early packaged sm
   it('registers a plain project through the native picker — the real registry flow, sanitized summary', async (context) => {
     const canDriveUi = await uiScriptingAvailable();
     if (!canDriveUi) {
+      registrationOutcome = 'ui-scripting-unavailable';
       console.log(
-        'early-package-evidence: System Events UI scripting unavailable on this host — the native-picker leg SKIPPED (grant Automation for the lane host to run it)',
+        'early-package-evidence: System Events UI scripting unavailable on this host — the native-picker leg SKIPPED (grant Automation for the lane host to run it); the boundary leg and the injection audit skip with it',
       );
       context.skip();
       return;
     }
+    registrationOutcome = 'completed';
     managedBefore = snapshotManagedProject(managedRoot);
     expect(managedBefore.size).toBeGreaterThan(5);
     const registered: DesktopEvent = await registerThroughNativePicker(run, managedRoot);
@@ -224,7 +248,7 @@ describe.skipIf(!PACKAGE_ZIP)('the exact packaged host — the early packaged sm
     for (const row of menuRows) console.log(`early-package-evidence: menu :: ${row}`);
   }, 180_000);
 
-  it('records the honest boundary: no activation surface exists — the composition seam is the blocked leg', async () => {
+  it('records the honest boundary: no activation surface exists — the composition seam is the blocked leg', async (context) => {
     // #248's activation/canvas/HMR/SW legs are BLOCKED on the missing
     // desktop composition (the child answers the settled
     // `unavailable-composition`; no origin, launcher, canvas, or editing
@@ -232,10 +256,19 @@ describe.skipIf(!PACKAGE_ZIP)('the exact packaged host — the early packaged sm
     // composition lane flips it exactly here: the application menu is
     // H1's closed set — a registration entry, no activation entry — and
     // no session ever existed in this run.
-    expect(
-      menuRows.filter((row) => row.length > 0).length,
-      'the menu was enumerated in the registration leg',
-    ).toBeGreaterThan(0);
+    //
+    // The menu enumeration comes from the registration leg's UI drive:
+    // when System Events scripting is unavailable THAT leg skipped (with
+    // its reason recorded in `registrationOutcome`) and this leg skips
+    // with it — never a false failure inferred from empty rows.
+    if (registrationOutcome === 'ui-scripting-unavailable') {
+      console.log(
+        'early-package-evidence: boundary leg SKIPPED — the menu surface cannot be enumerated without System Events UI scripting (the registration leg already skipped for the same reason)',
+      );
+      context.skip();
+      return;
+    }
+    expect(registrationOutcome, 'the registration leg completed').toBe('completed');
     // Parse the enumerated rows into sections: `menu:` headers and their
     // `item:` rows. The PRODUCT menus are exactly H1's closed set — a
     // registration entry, NO activation entry — and the only other menu
@@ -292,11 +325,21 @@ describe.skipIf(!PACKAGE_ZIP)('the exact packaged host — the early packaged sm
     // 2. No listener sockets remain (nothing holds the pids at all).
     expect(await listeningSockets(strays.map((row) => row.pid))).toEqual([]);
     // 3. The managed project is byte- and metadata-identical: zero
-    //    injection across register + quit (the G3 methodology).
-    const managedAfter = snapshotManagedProject(managedRoot);
-    expect([...managedAfter.keys()]).toEqual([...managedBefore.keys()]);
-    for (const [path, recorded] of managedBefore) {
-      expect(managedAfter.get(path), `managed-project drift at ${path}`).toBe(recorded);
+    //    injection across register + quit (the G3 methodology). With the
+    //    registration drive skipped (System Events unavailable) there is
+    //    no register step to audit — the leg records that honestly
+    //    instead of comparing an empty snapshot against itself.
+    if (registrationOutcome === 'completed') {
+      const managedAfter = snapshotManagedProject(managedRoot);
+      expect(managedBefore.size, 'the pre-registration snapshot is non-vacuous').toBeGreaterThan(5);
+      expect([...managedAfter.keys()]).toEqual([...managedBefore.keys()]);
+      for (const [path, recorded] of managedBefore) {
+        expect(managedAfter.get(path), `managed-project drift at ${path}`).toBe(recorded);
+      }
+    } else {
+      console.log(
+        'early-package-evidence: the injection audit is vacuous on this host — no registration ran (System Events UI scripting unavailable)',
+      );
     }
     // 4. The temporary root is clean: nothing new at the top level of
     //    the system temp directory beyond what existed before launch

@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { readFile, realpath } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
@@ -13,6 +14,7 @@ import {
   PackagedAppRun,
   processesReferencing,
   quitNormally,
+  realHomeIsolationFindings,
   registerThroughNativePicker,
   removeStaging,
   snapshotManagedProject,
@@ -24,12 +26,15 @@ import {
  * packaged smokes over FRESH extractions of the same ZIP — each with
  * its own isolated temp HOME and user-data root — proving no retained
  * state and deterministic cleanup: every cycle boots the same way,
- * registers the SAME managed project to the SAME canonical projectKey
- * through a fresh empty registry (identity is content-derived, never
- * machine state), quits with the same graceful child stop, and leaves
- * the same zero-residue audits. A first-run-only artifact (a lock file
- * outside userData, a cache keyed to the app path, a leftover process)
- * would break the second cycle's equality or its audits.
+ * registers the same managed project through a FRESH empty registry
+ * (the canonical root — the deterministic identity — is identical
+ * across cycles, while each registration mints a fresh CSPRNG
+ * ProjectKey: ADR-0006 §1 makes the key routing entropy, never
+ * root-derived, so key equality across registrations is NOT the law),
+ * quits with the same graceful child stop, and leaves the same
+ * zero-residue audits. A first-run-only artifact (a lock file outside
+ * userData, a cache keyed to the app path, a leftover process) would
+ * break the second cycle's equality or its audits.
  */
 
 const execFileAsync = promisify(execFile);
@@ -70,6 +75,15 @@ async function runCycle(cycle: number): Promise<{
   });
   liveRuns.push(run);
   await run.waitForEvent('control-plane-booted', `cycle ${cycle} boot`);
+  // The isolation law holds per cycle: no process of THIS launch's tree
+  // references the real account home (the kit's launch carries the
+  // browser-level --user-data-dir switch; this is the audit that holds
+  // it — the same law the smoke spec's boot leg asserts).
+  const bootTree = await processesReferencing(extraction);
+  const homeFindings = realHomeIsolationFindings(bootTree, homedir());
+  expect(homeFindings, `cycle ${cycle} isolation leak: ${JSON.stringify(homeFindings)}`).toEqual(
+    [],
+  );
   let projectKey: string | null = null;
   if (canDriveUi) {
     const registered: DesktopEvent = await registerThroughNativePicker(run, managedRoot);

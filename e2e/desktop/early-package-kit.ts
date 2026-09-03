@@ -205,11 +205,26 @@ export class PackagedAppRun {
     env.HOME = roots.home;
     env.ASTROIX_DESKTOP_USER_DATA = roots.userData;
     env.ELECTRON_ENABLE_LOGGING = '0';
-    this.child = spawn(join(appPath, 'Contents', 'MacOS', 'Astroix'), [], {
-      cwd: roots.staging,
-      env,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
+    // The browser-level `--user-data-dir` switch — the isolation law's
+    // harness half. Chromium resolves the browser's user-data-dir at
+    // process start and hands it to EVERY helper; the product's env
+    // override (`app.setPath` in main) lands only after the pre-boot
+    // resource verification, so without the switch the early GPU and
+    // network helpers run against the REAL account home's Application
+    // Support (observed in the first recorded run; the product half —
+    // setPath's late landing — belongs to its owning lane). The switch
+    // names the SAME temp root as the env override, so the app's own
+    // paths are unchanged — every process of the tree, first to last,
+    // is isolated.
+    this.child = spawn(
+      join(appPath, 'Contents', 'MacOS', 'Astroix'),
+      [`--user-data-dir=${roots.userData}`],
+      {
+        cwd: roots.staging,
+        env,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      },
+    );
     this.child.stdout?.on('data', (chunk: Buffer) => {
       this.pump(
         chunk,
@@ -487,6 +502,30 @@ export async function quitNormally(run: PackagedAppRun): Promise<void> {
 }
 
 // ——— the audits ———
+
+/**
+ * The isolation audit over one captured process tree: NO process of the
+ * launched app's tree may reference the REAL account home — the
+ * isolation law (a temp HOME + temp user data only). Born from the
+ * first recorded run's finding: without the browser-level
+ * `--user-data-dir` switch, Chromium's early GPU and network helpers
+ * ran against the real home's Application Support even under a temp
+ * `$HOME` (the browser resolves its user-data-dir before the product's
+ * env override lands); the switch is now part of the launch, and this
+ * audit holds the law in every recorded run.
+ */
+export function realHomeIsolationFindings(
+  tree: ReadonlyArray<{ readonly pid: string; readonly command: string }>,
+  realHome: string,
+): string[] {
+  const findings: string[] = [];
+  for (const row of tree) {
+    if (row.command.includes(realHome)) {
+      findings.push(`process ${row.pid} references the real account home (${realHome})`);
+    }
+  }
+  return findings;
+}
 
 /**
  * The live process tree referencing `root` (the app executable, the

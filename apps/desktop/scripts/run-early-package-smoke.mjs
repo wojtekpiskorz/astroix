@@ -19,8 +19,11 @@ import { promisify } from 'node:util';
  *                                 packaging (records which artifact was
  *                                 smoked — the no-rebuild law's input side)
  *     --force                     overwrite a previously recorded run's
- *                                 evidence (refused otherwise: never
- *                                 re-record over a claimed exact run)
+ *                                 evidence — refused when the existing
+ *                                 record is COMMITTED (git history is the
+ *                                 claim mechanism; a claimed exact run is
+ *                                 retracted only by an explicit git rm in
+ *                                 its own commit, never silently)
  *
  * The staged flow:
  *
@@ -41,9 +44,9 @@ import { promisify } from 'node:util';
  *      the owning issue carries the finding)
  *
  * Migration policy (the ticket's law): no upload, tag, publish, or
- * rebuild after recording a claimed exact run — `--force` exists for
- * discarding an unclaimed run, and the evidence names the exact ZIP
- * bytes it smoked.
+ * rebuild after recording a claimed exact run — a claim is a COMMITTED
+ * evidence record (git history is the mechanism; `--force` refuses to
+ * discard one), and the evidence names the exact ZIP bytes it smoked.
  */
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -64,12 +67,30 @@ if (process.platform !== 'darwin' || process.arch !== 'arm64') {
 
 // ——— 0. the evidence record is write-once ———
 
-if (existsSync(join(EVIDENCE_DIR, 'evidence.json')) && !FORCE) {
+const EVIDENCE_FILE = join(EVIDENCE_DIR, 'evidence.json');
+if (existsSync(EVIDENCE_FILE) && !FORCE) {
   console.error(
     `run-early-package-smoke: a recorded run already exists at ${relative(ROOT, EVIDENCE_DIR)} — ` +
       'the no-rebuild-after-recording law (pass --force only to discard an unclaimed run)',
   );
   process.exit(1);
+}
+if (existsSync(EVIDENCE_FILE) && FORCE) {
+  // The claim mechanism is git history: a COMMITTED evidence record is
+  // a claimed exact run, and --force cannot silently discard it — the
+  // claim is retracted explicitly (a visible `git rm` of the record in
+  // its own commit) before re-recording.
+  if (await evidenceIsClaimed()) {
+    console.error(
+      `run-early-package-smoke: refusing --force — the recorded run at ${relative(ROOT, EVIDENCE_FILE)} is ` +
+        'committed (a CLAIMED exact run; the no-rebuild law). To supersede it, retract the claim ' +
+        'explicitly: git rm the evidence in its own commit, then re-record.',
+    );
+    process.exit(1);
+  }
+  console.log(
+    'run-early-package-smoke: --force discards the UNCLAIMED (uncommitted) recorded run — re-recording',
+  );
 }
 await rm(EVIDENCE_DIR, { recursive: true, force: true });
 await mkdir(EVIDENCE_DIR, { recursive: true });
@@ -153,6 +174,19 @@ if (battery.failed > 0) process.exit(1);
 function cliValue(flag) {
   const index = process.argv.indexOf(flag);
   return index === -1 ? undefined : process.argv.at(index + 1);
+}
+
+/** True when the recorded evidence is git-TRACKED — a committed (claimed) exact run. */
+async function evidenceIsClaimed() {
+  try {
+    await execFileAsync('git', ['ls-files', '--error-unmatch', relative(ROOT, EVIDENCE_FILE)], {
+      cwd: ROOT,
+      timeout: 30_000,
+    });
+    return true;
+  } catch {
+    return false; // untracked (or no git) — unclaimed, --force may discard
+  }
 }
 
 /** One labeled hardened build through H3's pipeline; returns its ZIP. */
