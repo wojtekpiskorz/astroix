@@ -1,6 +1,7 @@
+import { randomUUID } from 'node:crypto';
 import { cp, mkdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { basename, join } from 'node:path';
+import { basename, dirname, isAbsolute, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 /**
@@ -15,28 +16,96 @@ import { fileURLToPath } from 'node:url';
  * the env file the web host boots from. Nothing here registers through
  * the browser: registration is a control-plane-side boot input, the
  * native directory grant's stand-in.
+ *
+ * #350 (concurrent lanes): the scratch root is PER-INVOCATION by
+ * default — `stageWebLane()` mints a fresh nonce root and publishes it
+ * through `ASTROIX_WEB_E2E_SCRATCH` — so two `npm run test:e2e`
+ * invocations can never stage (or `rm -rf`) into each other's root
+ * mid-battery. Both knobs also take an explicit env override (the
+ * steering convention: one exclusive port + scratch per lane, like the
+ * legacy fixture trio); the port default stays the fixed 4426, so CI
+ * (one runner, no envs) is untouched.
  */
 
-const WORKSPACE_ROOT = fileURLToPath(new URL('../../../', import.meta.url));
+// dirname(fileURLToPath(...)), never `new URL('../../..', import.meta.url)`:
+// under vitest's vite transform the URL form is statically rewritten to a
+// dev-server asset URL when the target stays inside the vite root (this
+// module is exactly three levels deep) — the path form is identical under
+// playwright's config loader and vitest alike.
+const WORKSPACE_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 const FIXTURE = join(WORKSPACE_ROOT, 'e2e', 'fixture');
 // The scratch root lives in the OS temp dir, NOT under test-results —
 // Playwright clears its own output directory at startup, which would
 // delete the staged env file between config load and the webServer
-// spawn. Disposed by the lane's teardown.
-const SCRATCH_ROOT = join(tmpdir(), 'astroix-web-240');
-const ENV_FILE = join(SCRATCH_ROOT, 'web-host.env');
+// spawn. Disposed by the lane's teardown. The per-invocation default is
+// minted inside stageWebLane() (PID + random nonce); an explicit
+// ASTROIX_WEB_E2E_SCRATCH wins over the minted root.
 
-/** The web lane's fixed port (≥4426, per the lane-port doctrine; never 4314/4313 outside CI). */
-export const WEB_LANE_PORT = 4426;
+export const WEB_E2E_PORT_ENV = 'ASTROIX_WEB_E2E_PORT';
+export const WEB_E2E_SCRATCH_ENV = 'ASTROIX_WEB_E2E_SCRATCH';
+
+const DEFAULT_WEB_LANE_PORT = 4426;
+
+/** Resolves the lane's port from the environment; fails loudly on garbage instead of half-binding. */
+function resolveWebLanePort(): number {
+  const raw = process.env[WEB_E2E_PORT_ENV];
+  if (raw === undefined || raw === '') {
+    return DEFAULT_WEB_LANE_PORT;
+  }
+  const port = Number.parseInt(raw, 10);
+  if (!/^\d+$/.test(raw) || port < 1 || port > 65535) {
+    throw new Error(
+      `stage-e2e: ${WEB_E2E_PORT_ENV} must be an integer TCP port 1-65535, got "${raw}"`,
+    );
+  }
+  return port;
+}
+
+/** The web lane's port (default 4426, ≥4426 per the lane-port doctrine; never 4314/4313 outside CI). */
+export const WEB_LANE_PORT = resolveWebLanePort();
+
+/** The root this module instance last minted — so its own publication is never mistaken for an override. */
+let mintedRoot: string | undefined;
+
+/**
+ * Resolves this staging's scratch root: an explicit env override is
+ * honored as given (reused verbatim — deterministic, user-directed);
+ * otherwise a fresh nonce root is minted per staging, so no invocation
+ * ever stages into — or `rm -rf`s — another's root.
+ */
+function resolveScratchRoot(): string {
+  const fromEnv = process.env[WEB_E2E_SCRATCH_ENV];
+  if (fromEnv !== undefined && fromEnv !== '' && fromEnv !== mintedRoot) {
+    if (!isAbsolute(fromEnv)) {
+      throw new Error(
+        `stage-e2e: ${WEB_E2E_SCRATCH_ENV} must be an absolute path, got "${fromEnv}"`,
+      );
+    }
+    return fromEnv;
+  }
+  mintedRoot = join(tmpdir(), `astroix-web-e2e-${process.pid}-${randomUUID().slice(0, 8)}`);
+  return mintedRoot;
+}
 
 /**
  * The staged copies' root (exported for the specs that assert against
  * the managed copies themselves — #242's zero-injection snapshots and
  * its disposable-copy HMR mutations; the staging layout is this
- * module's own contract, so the constant is too).
+ * module's own contract, so the seam is too). Answers from the root
+ * `stageWebLane()` published to the environment — the only channel that
+ * crosses the process boundary between the config-load staging and the
+ * spec workers — and fails closed when no staging has run.
  */
 export function stagedCopyRoot(name: string): string {
-  return join(SCRATCH_ROOT, name);
+  const root = process.env[WEB_E2E_SCRATCH_ENV];
+  if (root === undefined || root === '') {
+    throw new Error(
+      `stage-e2e: the scratch root is unknown — ${WEB_E2E_SCRATCH_ENV} is unset. ` +
+        'It is minted and published by stageWebLane() at playwright config load; ' +
+        'stagedCopyRoot only answers inside a run whose staging has run (#350).',
+    );
+  }
+  return join(root, name);
 }
 
 export interface WebLaneStage {
@@ -47,11 +116,17 @@ export interface WebLaneStage {
 
 /** Stages the lane: two fixture copies, one broken root, the isolated registry, the env file. */
 export async function stageWebLane(): Promise<WebLaneStage> {
-  await rm(SCRATCH_ROOT, { recursive: true, force: true });
-  const registry = join(SCRATCH_ROOT, 'registry');
-  const projectA = await stagedFixtureCopy('project-a');
-  const projectB = await stagedFixtureCopy('project-b');
-  const broken = join(SCRATCH_ROOT, 'broken');
+  const scratchRoot = resolveScratchRoot();
+  // Publish the invocation's root to the descendants that import this
+  // module independently (spec workers, the global teardown) — they must
+  // resolve THIS invocation's root, and the environment is inherited by
+  // every process the runner spawns after config load.
+  process.env[WEB_E2E_SCRATCH_ENV] = scratchRoot;
+  await rm(scratchRoot, { recursive: true, force: true });
+  const registry = join(scratchRoot, 'registry');
+  const projectA = await stagedFixtureCopy(scratchRoot, 'project-a');
+  const projectB = await stagedFixtureCopy(scratchRoot, 'project-b');
+  const broken = join(scratchRoot, 'broken');
   await mkdir(registry, { recursive: true });
   await mkdir(broken, { recursive: true });
   const launcherUrl = `http://launcher.localhost:${WEB_LANE_PORT}/__astroix/app/`;
@@ -60,20 +135,21 @@ export async function stageWebLane(): Promise<WebLaneStage> {
     `ASTROIX_WEB_REGISTRY_DIR=${registry}`,
     `ASTROIX_WEB_REGISTER=${projectA}:${projectB}:${broken}`,
   ].join('\n');
-  await mkdir(SCRATCH_ROOT, { recursive: true });
-  await writeFile(ENV_FILE, `${env}\n`, 'utf8');
+  const envFile = join(scratchRoot, 'web-host.env');
+  await mkdir(scratchRoot, { recursive: true });
+  await writeFile(envFile, `${env}\n`, 'utf8');
   return {
-    envFile: ENV_FILE,
+    envFile,
     launcherUrl,
     teardown: async () => {
-      await rm(SCRATCH_ROOT, { recursive: true, force: true });
+      await rm(scratchRoot, { recursive: true, force: true });
     },
   };
 }
 
 /** Copies the tracked fixture's sources minus installation, output, and caches; links the installation back in. */
-async function stagedFixtureCopy(name: string): Promise<string> {
-  const copy = join(SCRATCH_ROOT, name);
+async function stagedFixtureCopy(scratchRoot: string, name: string): Promise<string> {
+  const copy = join(scratchRoot, name);
   await mkdir(copy, { recursive: true });
   await cp(FIXTURE, copy, {
     recursive: true,

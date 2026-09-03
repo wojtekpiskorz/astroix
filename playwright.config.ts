@@ -54,7 +54,12 @@ if (specFiles.length === 0 || missing.length > 0 || emptied.length > 0) {
 // The lane's test-owned staging runs at CONFIG LOAD (ahead of the
 // webServer spawn, order guaranteed): two staged fixture copies, one
 // broken root, the isolated registry, and the env file the host boots
-// from. Teardown removes the whole scratch root.
+// from. Teardown removes the whole scratch root. The root is
+// per-invocation by default (a fresh nonce #350 — a second concurrent
+// lane can never stage into, or delete, a live lane's root) and both it
+// and the port take an explicit env override for exclusive lane
+// steering (`ASTROIX_WEB_E2E_SCRATCH` / `ASTROIX_WEB_E2E_PORT`); the
+// defaults keep CI untouched.
 const stage = await stageWebLane();
 
 export default defineConfig({
@@ -72,7 +77,11 @@ export default defineConfig({
   webServer: {
     command: `node --experimental-transform-types --import ./apps/web/raw-node-register.mjs --env-file=${stage.envFile} apps/web/src/main.ts`,
     url: `http://launcher.localhost:${WEB_LANE_PORT}/__astroix/app/`,
-    reuseExistingServer: !process.env.CI,
+    // NEVER reuse (#350, CI included): a second concurrent lane hitting
+    // a busy port must fail loudly on its own spawn instead of silently
+    // driving the first lane's control plane (observed: a fresh epoch
+    // answering generation 3 — the other suite's burned attempts).
+    reuseExistingServer: false,
     timeout: 120_000,
   },
   projects: [
