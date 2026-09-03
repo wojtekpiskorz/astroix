@@ -31,7 +31,10 @@ import {
   type EditDrain,
   type EditFence,
 } from '@wojciechpiskorz/astroix-runtime/session-supervisor/fence';
-import type { RoutesTarget } from '@wojciechpiskorz/astroix-runtime/session-supervisor/revocation';
+import {
+  neverGrantedRoutes,
+  type RoutesTarget,
+} from '@wojciechpiskorz/astroix-runtime/session-supervisor/revocation';
 import {
   ActivationFailedError,
   type SessionSupervisor,
@@ -222,8 +225,10 @@ async function activate(
 
 /**
  * The transition's commit half, then its completion half (§4 steps 5–6):
- * the plain first commit or the receipt-gated switch, then the adoption
- * observed as the activation completion. A failed adoption after a
+ * the plain first commit (the first-commit variant, #349 — no old
+ * session existed, so no old-side accounting) or the receipt-gated
+ * switch, then the adoption observed as the activation completion. A
+ * failed adoption after a
  * committed transition is the irreversible post-revocation failure (§4
  * step 7): it converges through the landed F7 aftermath — the granted
  * candidate's authority revoked by F6's ordered pass, its run reaped,
@@ -270,20 +275,22 @@ async function commitTransition(
   });
 }
 
-/** The first activation's plain commit — no old session exists, so there is nothing to drain or revoke. */
+/**
+ * The first activation's plain commit — no old session exists, so
+ * there is nothing to drain or revoke: the honest first-commit variant
+ * (#349), constructed here because the coordinator owns switches alone
+ * (there is no receipt to spend when nothing was ever active).
+ */
 async function commitFirstActivation(
   candidate: StagedCandidate,
 ): Promise<CommittedTransition | null> {
   try {
     const granted = await candidate.commit();
-    return {
-      kind: 'committed',
-      committed: granted.committed,
-      // No old session existed, so the old-side pass revoked nothing —
-      // the empty step list is the honest accounting, never a fabricated
-      // pass over steps that could not have run.
-      revoked: { session: granted.committed, steps: [], outcome: 'complete' },
-    };
+    // No old session existed, so no revocation pass ran — the variant
+    // carries no `revoked` accounting at all, and F7's failure result
+    // preserves the first commit's honest marker, never a fabricated
+    // report over a pass that could not have run.
+    return { kind: 'first-commit', committed: granted.committed };
   } catch {
     // Nothing was revoked (no old session existed), so this refusal is
     // NOT §4 step 7's aftermath shape: F4's attempt machine already
@@ -376,7 +383,11 @@ function grantedCandidateTarget(
     session: candidate.ref,
     host: { host: 'project', projectKey },
     get routes(): RoutesTarget {
-      return trail.lease ?? NEVER_GRANTED_ROUTE;
+      // The adoption died before the lease was granted: the
+      // vocabulary's never-granted view (#349) — no route was
+      // published, so nothing retires and no socket dies — never a
+      // fabricated pass-shaped answer of this composition's own.
+      return trail.lease ?? neverGrantedRoutes;
     },
     get clientCapability(): string {
       // The empty capability is the never-minted truth: unbinding and
@@ -386,15 +397,6 @@ function grantedCandidateTarget(
     stopRun: () => reapGrantedRun(candidate, inputs),
   };
 }
-
-/**
- * The honest route target when the failed adoption never granted a
- * lease: no route was published, so nothing retires and no socket dies —
- * the complete-nothing accounting, never a fabricated pass.
- */
-const NEVER_GRANTED_ROUTE: RoutesTarget = Object.freeze({
-  revoke: async () => ({ outcome: 'complete' as const, destroyedSockets: 0 }),
-});
 
 /**
  * Reaps the granted run and settles the supervisor's crash observation

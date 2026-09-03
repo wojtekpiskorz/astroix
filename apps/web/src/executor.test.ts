@@ -28,7 +28,12 @@ import {
   createSwitchCoordinator,
   type SwitchCoordinator,
 } from '@wojciechpiskorz/astroix-runtime/session-supervisor/commit';
-import { createSessionCompletion } from '@wojciechpiskorz/astroix-runtime/session-supervisor/completion';
+import {
+  type CompletionResult,
+  createSessionCompletion,
+  type SessionCompletion,
+} from '@wojciechpiskorz/astroix-runtime/session-supervisor/completion';
+import { FIRST_COMMIT_REVOCATION } from '@wojciechpiskorz/astroix-runtime/session-supervisor/revocation';
 import {
   createSessionSupervisor,
   type SessionSupervisor,
@@ -210,6 +215,8 @@ interface Harness {
   readonly grantTables: Map<string, GrantTable>;
   readonly journal: Journal;
   readonly reportedFailures: readonly SessionFailure[];
+  /** The completion results the executor drops — recorded by the journaling wrapper (#349). */
+  readonly completionResults: readonly CompletionResult[];
   /** The manual runs, in activation order. */
   readonly runs: readonly ManualRun[];
   execute(envelope: RequestEnvelope): Promise<ResponseEnvelope | PublicError>;
@@ -283,7 +290,7 @@ async function bootHarness(options: { readonly refuseGrant?: boolean } = {}): Pr
   const realCoordinator = createSwitchCoordinator(surfaces);
   const coordinator =
     options.refuseGrant === true ? refusingGrantCoordinator(realCoordinator) : realCoordinator;
-  const completion = createSessionCompletion({
+  const realCompletion = createSessionCompletion({
     ...surfaces,
     reportFailedNoActive: (failure) => {
       journal.push('report:failed-no-active');
@@ -295,6 +302,22 @@ async function bootHarness(options: { readonly refuseGrant?: boolean } = {}): Pr
       },
     },
   });
+  // The journaling wrapper (the #236–#239 idiom over the REAL
+  // completion): journals the transition variant the executor hands F7
+  // and records the results the executor drops — the #349 assertions
+  // read here (the honest variant consumed, never a fabricated report
+  // shape).
+  const completionResults: CompletionResult[] = [];
+  const completion: SessionCompletion = {
+    completeReplacement: async (input) => {
+      journal.push(`completion:${input.commit.kind}`);
+      const result = await realCompletion.completeReplacement(input);
+      completionResults.push(result);
+      return result;
+    },
+    completeQuit: realCompletion.completeQuit,
+    handleIncompleteReap: realCompletion.handleIncompleteReap,
+  };
 
   const executor = createExecutor({
     registry: fakeRegistry([
@@ -327,6 +350,7 @@ async function bootHarness(options: { readonly refuseGrant?: boolean } = {}): Pr
     grantTables,
     journal,
     reportedFailures,
+    completionResults,
     runs,
     execute: executor.execute,
     close: async () => {
@@ -401,6 +425,28 @@ describe('the stranded-adoption convergence (#333, direction (a))', () => {
       // The incomplete-reap tail never ran — this was a normal
       // preparation, and the tombstone stays out of it.
       expect(h.journal).not.toContain('tombstone:record');
+
+      // #349's honesty pin, both sides in one leg: generation 1's clean
+      // adoption consumed the FIRST-COMMIT variant (no old session —
+      // and it completed), generation 2's stranded switch consumed the
+      // SWITCH transition, whose failed result preserves the ordered
+      // pass's report over the receipt's bound OLD pair (generation 1)
+      // — never the new session, never a fabricated shape.
+      expect(h.journal).toContain('completion:first-commit');
+      expect(h.journal).toContain('completion:committed');
+      expect(h.completionResults[0]?.kind).toBe('activation-completed');
+      const failedResults = h.completionResults.filter((entry) => entry.kind === 'failed');
+      expect(failedResults).toHaveLength(1);
+      const switchReport = failedResults[0];
+      if (switchReport === undefined) throw new Error('expected the failed completion result');
+      if (!('session' in switchReport.revoked)) {
+        throw new Error(
+          'expected the ordered pass report over the old pair, got the first-commit marker',
+        );
+      }
+      expect(switchReport.revoked.session).toEqual(first.target.session);
+      expect(switchReport.revoked.outcome).toBe('complete');
+      expect(switchReport.revoked.steps).toHaveLength(5);
     } finally {
       await h.close();
     }
@@ -458,6 +504,18 @@ describe('the stranded-adoption convergence (#333, direction (a))', () => {
       expect(h.reportedFailures[0]?.category).toBe('revocation');
       expect(h.runs[0]?.stopCalls()).toBe(1);
 
+      // #349's honesty pin, first-commit side: the executor handed F7
+      // the FIRST-COMMIT variant — no old session existed, so no
+      // revocation pass ran — and the failed result preserves the
+      // frozen first-commit accounting, never a fabricated report over
+      // the new pair with empty steps.
+      expect(h.journal).toContain('completion:first-commit');
+      expect(h.completionResults).toHaveLength(1);
+      const firstReport = h.completionResults[0];
+      if (firstReport?.kind !== 'failed') throw new Error('expected the failed completion result');
+      expect(firstReport.revoked).toBe(FIRST_COMMIT_REVOCATION);
+      expect(firstReport.revoked).toEqual({ kind: 'first-commit' });
+
       // And the next activation still converges onto a real session.
       const second = activationOf(await h.execute(activate(PROJECT_A, 'req-2')));
       expect(second.target.session.generation).toBe(2);
@@ -482,6 +540,9 @@ describe('the stranded-adoption convergence (#333, direction (a))', () => {
       // correctly skipped (the candidate was never granted).
       const second = activationOf(await h.execute(activate(PROJECT_B, 'req-2')));
       expect(second.target.session.generation).toBe(2);
+      // The completion consumed F6's `failed` variant — the route the
+      // wrapper journals proves it reached the real machine.
+      expect(h.journal).toContain('completion:failed');
 
       // The failed-no-active report ran exactly once, strictly after
       // the old-side revocation pass, with F6's post-revocation

@@ -181,8 +181,9 @@ export type ReceiptRejection =
   | 'fence-resumed';
 
 /**
- * The committed transition result: the grant or the deactivation with
- * its revocation report, the irreversible post-revocation failure, or
+ * The committed transition result: the switch's grant or the
+ * deactivation with its revocation report, the first activation's
+ * no-old-authority commit, the irreversible post-revocation failure, or
  * the pre-linearization rejection.
  */
 export type CommittedTransition =
@@ -190,6 +191,20 @@ export type CommittedTransition =
       readonly kind: 'committed';
       readonly committed: SessionRef;
       readonly revoked: RevocationReport;
+    }
+  | {
+      /**
+       * The first activation's commit (#349): no old session existed,
+       * so no revocation pass ran and there is NO old-side accounting
+       * to report — the absent `revoked` is the honesty. The
+       * composition constructs this variant directly over the grant:
+       * the coordinator owns switches alone (there is no receipt to
+       * spend when nothing was ever active), and F7's failure result
+       * preserves the first commit's own accounting marker — never a
+       * fabricated report shape.
+       */
+      readonly kind: 'first-commit';
+      readonly committed: SessionRef;
     }
   | {
       readonly kind: 'deactivated';
