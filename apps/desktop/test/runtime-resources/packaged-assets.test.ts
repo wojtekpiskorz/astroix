@@ -251,6 +251,48 @@ describe('the packaged-asset adapter (#244)', () => {
       });
     });
 
+    it('rejects a directly symlinked manifest leaf — the trust anchor sits under the same symlink policy (resource-symlink)', async () => {
+      const root = await newScratchRoot('astroix-assets-');
+      await writePackagedFixture(root);
+      // real intermediate directories, byte-identical content — the leaf
+      // hop alone is the attack; readFile would follow it silently
+      const manifestPath = join(root, BUILD_MANIFEST_RESOURCE_PATH);
+      const outside = join(root, 'evil-manifest-copy');
+      await cp(manifestPath, outside);
+      await rm(manifestPath);
+      await symlink(outside, manifestPath);
+
+      await expectRejected(root, {
+        code: 'resource-symlink',
+        resource: BUILD_MANIFEST_RESOURCE_PATH,
+      });
+    });
+
+    it('rejects a hard-linked manifest — nlink must be 1 even for the anchor (resource-type)', async () => {
+      const root = await newScratchRoot('astroix-assets-');
+      await writePackagedFixture(root);
+      // the second link lives outside the two ratified subtrees, so the
+      // unlisted-file walk stays silent — the leaf policy alone must fire
+      await link(join(root, BUILD_MANIFEST_RESOURCE_PATH), join(root, 'manifest-copy'));
+
+      await expectRejected(root, {
+        code: 'resource-type',
+        resource: BUILD_MANIFEST_RESOURCE_PATH,
+      });
+    });
+
+    it('rejects a non-regular manifest (resource-type)', async () => {
+      const root = await newScratchRoot('astroix-assets-');
+      await writePackagedFixture(root);
+      await rm(join(root, BUILD_MANIFEST_RESOURCE_PATH));
+      await mkdir(join(root, BUILD_MANIFEST_RESOURCE_PATH));
+
+      await expectRejected(root, {
+        code: 'resource-type',
+        resource: BUILD_MANIFEST_RESOURCE_PATH,
+      });
+    });
+
     it('rejects a wrong Node pin — a wrong-version resource never spawns (pin-mismatch)', async () => {
       const root = await newScratchRoot('astroix-assets-');
       await writePackagedFixture(root);
@@ -340,6 +382,56 @@ describe('the packaged-asset adapter (#244)', () => {
       });
     });
 
+    it('rejects a manifest that omits the module-type marker — the ESM identity is a required layout fact, not an assembly nicety (layout-missing)', async () => {
+      const root = await newScratchRoot('astroix-assets-');
+      await writePackagedFixture(root);
+      await rewriteManifest(root, (parsed) => {
+        (parsed as { resources: Array<{ path: string }> }).resources = (
+          parsed as { resources: Array<{ path: string }> }
+        ).resources.filter((resource) => resource.path !== 'astroix-runtime/package.json');
+      });
+
+      await expectRejected(root, {
+        code: 'layout-missing',
+        resource: 'astroix-runtime/package.json',
+      });
+    });
+
+    it('rejects unlisted files under the ratified subtrees — the inventory is complete in both directions (layout-unlisted)', async () => {
+      const root = await newScratchRoot('astroix-assets-');
+      await writePackagedFixture(root);
+      await writeFile(join(root, 'node', 'bin', 'node2'), 'a dropped sibling\n');
+      await expectRejected(root, { code: 'layout-unlisted', resource: 'node/bin/node2' });
+
+      const second = await newScratchRoot('astroix-assets-');
+      await writePackagedFixture(second);
+      await writeFile(
+        join(second, 'astroix-runtime', 'control-plane', 'evil.js'),
+        'export const evil = true;\n',
+      );
+      await expectRejected(second, {
+        code: 'layout-unlisted',
+        resource: 'astroix-runtime/control-plane/evil.js',
+      });
+
+      const third = await newScratchRoot('astroix-assets-');
+      await writePackagedFixture(third);
+      await mkdir(join(third, 'node', 'lib'));
+      await writeFile(join(third, 'node', 'lib', 'extra.txt'), 'nested drift\n');
+      await expectRejected(third, { code: 'layout-unlisted', resource: 'node/lib/extra.txt' });
+    });
+
+    it('rejects an unlisted symlink under a ratified subtree — the walk never follows what no manifest names (layout-unlisted)', async () => {
+      const root = await newScratchRoot('astroix-assets-');
+      await writePackagedFixture(root);
+      await symlink('/bin/sh', join(root, 'astroix-runtime', 'control-plane', 'evil.js'));
+
+      await expectRejected(root, {
+        code: 'layout-unlisted',
+        resource: 'astroix-runtime/control-plane/evil.js',
+      });
+    });
+
     it('rejects a Node executable recorded without its exec bit claim (executable-not-executable)', async () => {
       const root = await newScratchRoot('astroix-assets-');
       await writePackagedFixture(root);
@@ -394,6 +486,21 @@ describe('the packaged-asset adapter (#244)', () => {
       await expectRejected(root, {
         code: 'resource-inaccessible',
         resource: NODE_EXECUTABLE_RESOURCE_PATH,
+      });
+    });
+
+    it('rejects a leaf that stats fine but cannot be opened for hashing — the EACCES repro, sanitized (resource-inaccessible)', async () => {
+      const root = await newScratchRoot('astroix-assets-');
+      await writePackagedFixture(root);
+      // mode 0o000 on a NON-executable leaf under a searchable directory:
+      // lstat passes, the exec-bit check is skipped (not marked
+      // executable), the size matches — the failure lands on the hash
+      // read, which must reject as a coded failure, never a thrown path
+      await chmod(join(root, CONTROL_PLANE_ENTRY_RESOURCE_PATH), 0o000);
+
+      await expectRejected(root, {
+        code: 'resource-inaccessible',
+        resource: CONTROL_PLANE_ENTRY_RESOURCE_PATH,
       });
     });
 

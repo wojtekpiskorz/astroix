@@ -4,15 +4,18 @@ import { chmod, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'n
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
+  BUILD_MANIFEST_RESOURCE_PATH,
   type BuildManifest,
   buildManifest,
   CONTROL_PLANE_ENTRY_RESOURCE_PATH,
+  MODULE_TYPE_MARKER_RESOURCE_PATH,
   NODE_EXECUTABLE_RESOURCE_PATH,
   PACKAGED_ELECTRON_PIN,
   serializeManifest,
   verifyPackagedAssets,
 } from '@wojciechpiskorz/astroix-runtime/internal/packaged-assets';
 import { afterEach } from 'vitest';
+import type { RuntimeAssetHostFacts } from '../../src/runtime-assets/resolve-runtime-assets.ts';
 
 /**
  * The focused runtime-resource fixtures (#244, H2): deterministic temp
@@ -66,7 +69,7 @@ export async function writePackagedFixture(root: string): Promise<BuildManifest>
     join(root, CONTROL_PLANE_ENTRY_RESOURCE_PATH),
     'export const booted = true; // the rebased control-plane child\n',
   );
-  await writeFile(join(root, 'astroix-runtime', 'package.json'), '{"type":"module"}\n');
+  await writeFile(join(root, MODULE_TYPE_MARKER_RESOURCE_PATH), '{"type":"module"}\n');
 
   const manifest = buildManifest({
     sourceCommit: FIXTURE_SOURCE_COMMIT,
@@ -74,7 +77,7 @@ export async function writePackagedFixture(root: string): Promise<BuildManifest>
     resources: [
       await manifestFacts(root, NODE_EXECUTABLE_RESOURCE_PATH, true),
       await manifestFacts(root, CONTROL_PLANE_ENTRY_RESOURCE_PATH, false),
-      await manifestFacts(root, 'astroix-runtime/package.json', false),
+      await manifestFacts(root, MODULE_TYPE_MARKER_RESOURCE_PATH, false),
     ],
   });
   await writeManifest(root, manifest);
@@ -83,10 +86,7 @@ export async function writePackagedFixture(root: string): Promise<BuildManifest>
 
 /** (Re)writes the manifest from a built object. */
 export async function writeManifest(root: string, manifest: BuildManifest): Promise<void> {
-  await writeFile(
-    join(root, 'astroix-runtime', 'build-manifest.json'),
-    serializeManifest(manifest),
-  );
+  await writeFile(join(root, BUILD_MANIFEST_RESOURCE_PATH), serializeManifest(manifest));
 }
 
 /** The manifest's own JSON, mutated — for legs that must record a wrong pin. */
@@ -94,13 +94,10 @@ export async function rewriteManifest(
   root: string,
   mutate: (parsed: Record<string, unknown>) => void,
 ): Promise<void> {
-  const bytes = await readFile(join(root, 'astroix-runtime', 'build-manifest.json'), 'utf8');
+  const bytes = await readFile(join(root, BUILD_MANIFEST_RESOURCE_PATH), 'utf8');
   const parsed = JSON.parse(bytes) as Record<string, unknown>;
   mutate(parsed);
-  await writeFile(
-    join(root, 'astroix-runtime', 'build-manifest.json'),
-    `${JSON.stringify(parsed, null, 2)}\n`,
-  );
+  await writeFile(join(root, BUILD_MANIFEST_RESOURCE_PATH), `${JSON.stringify(parsed, null, 2)}\n`);
 }
 
 /** Verifies a fixture root with the fixture host's identity. */
@@ -110,6 +107,17 @@ export function verifyFixture(root: string) {
     architecture: FIXTURE_ARCHITECTURE,
     electronVersion: PACKAGED_ELECTRON_PIN,
   });
+}
+
+/** Packaged-mode host facts for the resolver, with the fixture host's identity. */
+export function packagedHostFacts(resourcesPath: string): RuntimeAssetHostFacts {
+  return {
+    isPackaged: true,
+    resourcesPath,
+    electronVersion: PACKAGED_ELECTRON_PIN,
+    architecture: FIXTURE_ARCHITECTURE,
+    env: {},
+  };
 }
 
 /** Replaces one path with a symlink pointing outside the root — the symlink-policy attack shape. */

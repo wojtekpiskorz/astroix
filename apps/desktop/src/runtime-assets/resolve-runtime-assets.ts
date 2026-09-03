@@ -150,6 +150,23 @@ function resolveDev(
 }
 
 /**
+ * A detail value may print only when it is version-shaped: lowercase
+ * version-string charset (digits, lowercase letters, `.`, `+`, `_`,
+ * `-`), at most 32 bytes. The manifest schema accepts arbitrary
+ * non-empty strings for its pin fields, so a tampered manifest can put
+ * ANY bytes — a path shape, a hostile line — into a pin-mismatch detail;
+ * those elide rather than print. The printed vocabulary stays exactly
+ * what this module claims: codes, relative resource ids, and
+ * version-level detail, never attacker-chosen bytes.
+ */
+const PRINTABLE_DETAIL_VALUE = /^[0-9a-z.+_-]{1,32}$/;
+
+/** One detail entry as it may print — version-shaped values verbatim, anything else elided. */
+function printableDetailEntry(key: string, value: string): string {
+  return `${key}=${PRINTABLE_DETAIL_VALUE.test(value) ? value : '<elided>'}`;
+}
+
+/**
  * The sanitized fail-closed boot diagnostic — the one line main may
  * print (its console is a public surface): codes, relative resource ids,
  * and pin-level detail only, never an absolute packaged path or a hash.
@@ -167,7 +184,7 @@ export function runtimeAssetsBootDiagnostic(rejection: RuntimeAssetsRejection): 
     failure.detail === undefined
       ? ''
       : ` ${Object.entries(failure.detail)
-          .map(([key, value]) => `${key}=${value}`)
+          .map(([key, value]) => printableDetailEntry(key, value))
           .join(' ')}`;
   return `packaged runtime resources rejected (code=${failure.code}${resource}${detail}); there is no fallback — reinstall the app`;
 }

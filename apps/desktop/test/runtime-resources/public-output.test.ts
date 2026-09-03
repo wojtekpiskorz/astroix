@@ -4,7 +4,6 @@ import { join } from 'node:path';
 import {
   NODE_EXECUTABLE_RESOURCE_PATH,
   type PackagedAssetFailure,
-  verifyPackagedAssets,
 } from '@wojciechpiskorz/astroix-runtime/internal/packaged-assets';
 import { describe, expect, it } from 'vitest';
 import {
@@ -14,8 +13,10 @@ import {
 } from '../../src/runtime-assets/resolve-runtime-assets.ts';
 import {
   newScratchRoot,
+  packagedHostFacts,
   replaceWithOutsideSymlink,
   rewriteManifest,
+  verifyFixture,
   writePackagedFixture,
 } from './fixtures.ts';
 
@@ -42,7 +43,9 @@ describe('packaged paths and hashes never leak (#244)', () => {
     await writePackagedFixture(root);
     await rm(join(root, NODE_EXECUTABLE_RESOURCE_PATH));
 
-    const rejection = (await resolveRuntimeAssets(packagedFacts(root))) as RuntimeAssetsRejection;
+    const rejection = (await resolveRuntimeAssets(
+      packagedHostFacts(root),
+    )) as RuntimeAssetsRejection;
     assertSanitized(JSON.stringify(rejection));
   });
 
@@ -51,13 +54,47 @@ describe('packaged paths and hashes never leak (#244)', () => {
     await writePackagedFixture(root);
     await rm(join(root, NODE_EXECUTABLE_RESOURCE_PATH));
 
-    const rejection = (await resolveRuntimeAssets(packagedFacts(root))) as RuntimeAssetsRejection;
+    const rejection = (await resolveRuntimeAssets(
+      packagedHostFacts(root),
+    )) as RuntimeAssetsRejection;
     const diagnostic = runtimeAssetsBootDiagnostic(rejection);
     assertSanitized(diagnostic);
     // the vocabulary is the sanitized one: a code and a relative resource id
     expect(diagnostic).toContain('code=resource-missing');
     expect(diagnostic).toContain(`resource=${NODE_EXECUTABLE_RESOURCE_PATH}`);
     expect(diagnostic).toContain('there is no fallback');
+  });
+
+  it('elides detail values that are not version-shaped — a tampered manifest cannot put its bytes on the console', async () => {
+    const root = await newScratchRoot('astroix-leak-elide-');
+    await writePackagedFixture(root);
+    await rewriteManifest(root, (parsed) => {
+      parsed.node = '/Applications/Astroix.app/Contents/Resources/evil';
+    });
+
+    const rejection = (await resolveRuntimeAssets(
+      packagedHostFacts(root),
+    )) as RuntimeAssetsRejection;
+    const diagnostic = runtimeAssetsBootDiagnostic(rejection);
+    expect(diagnostic.includes('/Applications')).toBe(false);
+    expect(diagnostic.includes('Resources/evil')).toBe(false);
+    expect(diagnostic).toContain('field=node');
+    expect(diagnostic).toContain('declared=<elided>');
+    // the expected side is this module's own pin — version-shaped, printable
+    expect(diagnostic).toContain('expected=v24.20.0');
+
+    // an over-long or space-bearing value elides too: the cap is structural, not shape-luck
+    const longRoot = await newScratchRoot('astroix-leak-elide-');
+    await writePackagedFixture(longRoot);
+    await rewriteManifest(longRoot, (parsed) => {
+      parsed.node = `${'x'.repeat(64)}`;
+    });
+    const longRejection = (await resolveRuntimeAssets(
+      packagedHostFacts(longRoot),
+    )) as RuntimeAssetsRejection;
+    const longDiagnostic = runtimeAssetsBootDiagnostic(longRejection);
+    expect(longDiagnostic.includes('x'.repeat(64))).toBe(false);
+    expect(longDiagnostic).toContain('declared=<elided>');
   });
 
   it('the wrong-pin diagnostic carries version strings only — never a path', () => {
@@ -141,23 +178,9 @@ async function collectFailureVocabulary(): Promise<Set<PackagedAssetFailure>> {
 }
 
 async function verifyRoot(root: string): Promise<PackagedAssetFailure> {
-  const outcome = await verifyPackagedAssets({
-    resourcesRoot: root,
-    architecture: 'arm64',
-    electronVersion: '44.1.0',
-  });
+  const outcome = await verifyFixture(root);
   if (!('code' in outcome)) {
     throw new Error('the broken fixture battery must reject, never resolve');
   }
   return outcome;
-}
-
-function packagedFacts(root: string) {
-  return {
-    isPackaged: true,
-    resourcesPath: root,
-    electronVersion: '44.1.0',
-    architecture: 'arm64',
-    env: {},
-  };
 }

@@ -1,4 +1,5 @@
 import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   PACKAGED_ELECTRON_PIN,
   PACKAGED_NODE_PIN,
@@ -21,8 +22,8 @@ import {
  * rejection — there is no fallback layout to try.
  */
 
-const DEFAULT_ROOT = new URL('../resources/', import.meta.url);
-const root = resolve(process.argv[2] ?? DEFAULT_ROOT.pathname);
+const DEFAULT_ROOT = fileURLToPath(new URL('../resources/', import.meta.url));
+const root = resolve(process.argv[2] ?? DEFAULT_ROOT);
 
 const verified = await verifyPackagedAssets({
   resourcesRoot: root,

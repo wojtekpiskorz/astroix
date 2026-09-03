@@ -9,6 +9,7 @@ import { build } from 'vite';
 import {
   BUILD_MANIFEST_RESOURCE_PATH,
   buildManifest,
+  MODULE_TYPE_MARKER_RESOURCE_PATH,
   NODE_EXECUTABLE_RESOURCE_PATH,
   NODE_RESOURCE_DIR,
   PACKAGED_ELECTRON_PIN,
@@ -185,7 +186,7 @@ try {
 // Contents/Resources tree has none, so without this marker the bundled
 // child.js would load as CommonJS and die on its first import statement.
 // One immutable marker file, inventoried like every other resource.
-await writeFile(join(outDir, RUNTIME_RESOURCE_DIR, 'package.json'), '{"type":"module"}\n');
+await writeFile(join(outDir, MODULE_TYPE_MARKER_RESOURCE_PATH), '{"type":"module"}\n');
 
 const inventory = [];
 for (const subtree of [RUNTIME_RESOURCE_DIR, NODE_RESOURCE_DIR]) {

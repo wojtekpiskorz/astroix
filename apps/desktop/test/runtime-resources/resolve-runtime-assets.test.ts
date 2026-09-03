@@ -3,6 +3,7 @@ import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  BUILD_MANIFEST_RESOURCE_PATH,
   CONTROL_PLANE_ENTRY_RESOURCE_PATH,
   NODE_EXECUTABLE_RESOURCE_PATH,
   PACKAGED_ELECTRON_PIN,
@@ -15,7 +16,12 @@ import {
   type RuntimeAssets,
   resolveRuntimeAssets,
 } from '../../src/runtime-assets/resolve-runtime-assets.ts';
-import { FIXTURE_ARCHITECTURE, newScratchRoot, writePackagedFixture } from './fixtures.ts';
+import {
+  FIXTURE_ARCHITECTURE,
+  newScratchRoot,
+  packagedHostFacts,
+  writePackagedFixture,
+} from './fixtures.ts';
 
 /**
  * The desktop host's runtime-asset resolution (#244, H2): the one seam
@@ -129,9 +135,7 @@ describe('the desktop runtime-asset resolver (#244)', () => {
       const root = await newScratchRoot('astroix-resolver-packaged-');
       await writePackagedFixture(root);
 
-      const assets = (await resolveRuntimeAssets(
-        packagedFacts({ resourcesPath: root }),
-      )) as RuntimeAssets;
+      const assets = (await resolveRuntimeAssets(packagedHostFacts(root))) as RuntimeAssets;
       expect(assets).toEqual({
         mode: 'packaged',
         nodeExecutable: join(root, NODE_EXECUTABLE_RESOURCE_PATH),
@@ -147,7 +151,7 @@ describe('the desktop runtime-asset resolver (#244)', () => {
       await writePackagedFixture(root);
       await rm(join(root, NODE_EXECUTABLE_RESOURCE_PATH));
 
-      expect(await resolveRuntimeAssets(packagedFacts({ resourcesPath: root }))).toEqual({
+      expect(await resolveRuntimeAssets(packagedHostFacts(root))).toEqual({
         code: 'packaged-resources-rejected',
         failure: { code: 'resource-missing', resource: NODE_EXECUTABLE_RESOURCE_PATH },
       });
@@ -158,7 +162,7 @@ describe('the desktop runtime-asset resolver (#244)', () => {
       await writePackagedFixture(root);
 
       expect(
-        await resolveRuntimeAssets(packagedFacts({ resourcesPath: root, architecture: 'x64' })),
+        await resolveRuntimeAssets({ ...packagedHostFacts(root), architecture: 'x64' }),
       ).toEqual({
         code: 'packaged-resources-rejected',
         failure: {
@@ -183,7 +187,7 @@ describe('the desktop runtime-asset resolver (#244)', () => {
         }),
       ).toEqual({
         code: 'packaged-resources-rejected',
-        failure: { code: 'manifest-missing', resource: 'astroix-runtime/build-manifest.json' },
+        failure: { code: 'manifest-missing', resource: BUILD_MANIFEST_RESOURCE_PATH },
       });
     });
   });
@@ -197,17 +201,5 @@ function devFacts(env: Record<string, string | undefined>): RuntimeAssetHostFact
     electronVersion: PACKAGED_ELECTRON_PIN,
     architecture: FIXTURE_ARCHITECTURE,
     env,
-  };
-}
-
-/** Packaged-mode host facts with the fixture identity (any overrides supplied). */
-function packagedFacts(overrides: Partial<RuntimeAssetHostFacts>): RuntimeAssetHostFacts {
-  return {
-    isPackaged: true,
-    resourcesPath: '/dev/null/unreachable-until-overridden',
-    electronVersion: PACKAGED_ELECTRON_PIN,
-    architecture: FIXTURE_ARCHITECTURE,
-    env: {},
-    ...overrides,
   };
 }

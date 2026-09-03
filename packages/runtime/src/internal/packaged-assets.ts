@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
-import { createReadStream } from 'node:fs';
-import { lstat, readFile } from 'node:fs/promises';
+import { createReadStream, type Dirent } from 'node:fs';
+import { lstat, readdir, readFile } from 'node:fs/promises';
 import { join, resolve, sep } from 'node:path';
 import { z } from 'zod';
 import {
@@ -33,11 +33,17 @@ import { QUALIFIED_NODE_VERSION } from '../../kernel-lease/kernel-lease.ts';
  *   order + sorted inventory make same-input manifests byte-identical.
  * - **Verification** — before private boot or project activation the app
  *   verifies every immutable resource: existence, regular-file type, the
- *   symlink policy (leaves AND intermediate directories, plus the
- *   kernel-lease hard-link discipline `nlink = 1`), containment inside
- *   the resources root, executable identity (the exec bit on the Node
- *   executable, plus the byte hash that pins its exact identity), the
- *   size, and the SHA-256 of every inventoried file against the manifest.
+ *   symlink policy (leaves AND intermediate directories — the build
+ *   manifest leaf included, so the trust anchor sits under the same law
+ *   it enforces — plus the kernel-lease hard-link discipline `nlink =
+ *   1`), containment inside the resources root, executable identity (the
+ *   exec bit on the Node executable, plus the byte hash that pins its
+ *   exact identity), the size, and the SHA-256 of every inventoried file
+ *   against the manifest. The layout laws run both ways: the manifest
+ *   must inventory the required facts (the Node executable, the entry,
+ *   the ESM module-type marker the packaged child cannot load without),
+ *   and the two ratified subtrees may hold NOTHING the manifest does not
+ *   name — unlisted files reject, they never ride along silently.
  *
  * Fail-closed law (ADR-0008): there is no fallback. Missing, altered,
  * symlinked, wrong-version, wrong-architecture, or wrong-Electron
@@ -64,6 +70,13 @@ export const NODE_RESOURCE_DIR = 'node';
 export const NODE_EXECUTABLE_RESOURCE_PATH = 'node/bin/node';
 /** The rebased control-plane child entry (plain ECMAScript — no dev loaders needed). */
 export const CONTROL_PLANE_ENTRY_RESOURCE_PATH = 'astroix-runtime/control-plane/child.js';
+/**
+ * The module-type marker: the rebased entry is ESM by import syntax, and
+ * the packaged `Contents/Resources` tree has no ancestor package.json —
+ * the child cannot load without this marker, so the verifier requires it
+ * as a layout fact, not an assembly nicety.
+ */
+export const MODULE_TYPE_MARKER_RESOURCE_PATH = 'astroix-runtime/package.json';
 /** The build manifest — the inventory the app verifies before any spawn. */
 export const BUILD_MANIFEST_RESOURCE_PATH = 'astroix-runtime/build-manifest.json';
 
@@ -221,6 +234,7 @@ export type PackagedAssetFailureCode =
   | 'manifest-invalid'
   | 'pin-mismatch'
   | 'layout-missing'
+  | 'layout-unlisted'
   | 'resource-escape'
   | 'resource-missing'
   | 'resource-inaccessible'
@@ -284,6 +298,9 @@ export async function verifyPackagedAssets(
     if (failure !== null) return failure;
   }
 
+  const unlistedFailure = await verifyInventoryCompleteness(input.resourcesRoot, manifest);
+  if (unlistedFailure !== null) return unlistedFailure;
+
   const nodeExecutable = resourceAbsolutePath(input.resourcesRoot, NODE_EXECUTABLE_RESOURCE_PATH);
   const controlPlaneEntry = resourceAbsolutePath(
     input.resourcesRoot,
@@ -297,13 +314,35 @@ export async function verifyPackagedAssets(
   return { nodeExecutable, controlPlaneEntry, execArgv: [] };
 }
 
-/** Reads and parses the build manifest; IO/JSON/schema failures stay distinct and sanitized. */
+/**
+ * Reads and parses the build manifest; IO/JSON/schema failures stay distinct and sanitized.
+ * The manifest leaf itself sits under the same symlink/type/nlink policy as
+ * every inventoried resource — the trust anchor of the whole verification
+ * is never the one file exempt from it: a symlinked, non-regular, or
+ * hard-linked manifest rejects before a byte of it is parsed (a hostile
+ * or drifted manifest never gets to speak).
+ */
 async function readManifest(
   resourcesRoot: string,
 ): Promise<{ manifest: BuildManifest } | { failure: PackagedAssetFailure }> {
   const manifestPath = resourceAbsolutePath(resourcesRoot, BUILD_MANIFEST_RESOURCE_PATH);
   if (manifestPath === null) {
     return { failure: { code: 'resource-escape', resource: BUILD_MANIFEST_RESOURCE_PATH } };
+  }
+  const leaf = await lstatSafe(manifestPath);
+  if (typeof leaf === 'string') {
+    return {
+      failure: {
+        code: leaf === 'resource-missing' ? 'manifest-missing' : 'resource-inaccessible',
+        resource: BUILD_MANIFEST_RESOURCE_PATH,
+      },
+    };
+  }
+  if (leaf.isSymbolicLink()) {
+    return { failure: { code: 'resource-symlink', resource: BUILD_MANIFEST_RESOURCE_PATH } };
+  }
+  if (!leaf.isFile() || leaf.nlink !== 1) {
+    return { failure: { code: 'resource-type', resource: BUILD_MANIFEST_RESOURCE_PATH } };
   }
   let bytes: Buffer;
   try {
@@ -359,7 +398,13 @@ function pinFailure(field: string, declaredValue: string, expected: string): Pac
   };
 }
 
-/** The manifest must inventory the two spawn ingredients, with the Node executable marked executable. */
+/**
+ * The manifest must inventory the three required layout facts — the Node
+ * executable (marked executable), the rebased entry, and the module-type
+ * marker the packaged child cannot load without (a manifest omitting the
+ * marker would verify green and die later at ESM load; the verifier owns
+ * that failure, not the boot).
+ */
 function checkRequiredLayout(manifest: BuildManifest): PackagedAssetFailure | null {
   const inventoried = new Map(manifest.resources.map((resource) => [resource.path, resource]));
   const nodeExecutable = inventoried.get(NODE_EXECUTABLE_RESOURCE_PATH);
@@ -372,18 +417,36 @@ function checkRequiredLayout(manifest: BuildManifest): PackagedAssetFailure | nu
   if (!inventoried.has(CONTROL_PLANE_ENTRY_RESOURCE_PATH)) {
     return { code: 'layout-missing', resource: CONTROL_PLANE_ENTRY_RESOURCE_PATH };
   }
+  if (!inventoried.has(MODULE_TYPE_MARKER_RESOURCE_PATH)) {
+    return { code: 'layout-missing', resource: MODULE_TYPE_MARKER_RESOURCE_PATH };
+  }
   return null;
 }
 
 /** One inventoried resource as the manifest carries it. */
 type ManifestResource = BuildManifest['resources'][number];
 
-/** Verifies one inventoried resource: ancestry, leaf type, symlink and hard-link policy, exec bit, size, hash. */
+/**
+ * Verifies one inventoried resource: ancestry, leaf type, symlink and
+ * hard-link policy, exec bit, size, hash. Every IO failure stays inside
+ * the sanitized vocabulary — including the hash read itself: a leaf that
+ * `lstat`s fine but cannot be opened (mode 0o000 under a searchable
+ * directory) or that vanishes between the stat and the open rejects as a
+ * coded failure, never as a thrown error whose message would carry the
+ * absolute path into a public surface.
+ */
 async function verifyResource(
   resourcesRoot: string,
   resource: ManifestResource,
 ): Promise<PackagedAssetFailure | null> {
   const absolute = resourceAbsolutePath(resourcesRoot, resource.path);
+  // The resource-escape arm here is dead by construction and stays that
+  // way on purpose: the manifest schema's path pattern and this
+  // containment check share one escape definition (the same regex
+  // validates the id before the join), so a manifest row cannot name an
+  // escaping path. The branch is the belt to the schema's braces — if
+  // the two patterns ever diverge, this closes the gap instead of
+  // trusting the parser (the E6 weighed-not-raised precedent).
   if (absolute === null) return { code: 'resource-escape', resource: resource.path };
 
   const ancestry = await verifyAncestry(resourcesRoot, resource.path);
@@ -398,9 +461,29 @@ async function verifyResource(
     return { code: 'executable-not-executable', resource: resource.path };
   }
   if (leaf.size !== resource.bytes) return { code: 'resource-tampered', resource: resource.path };
-  const sha256 = await sha256File(absolute);
-  if (sha256 !== resource.sha256) return { code: 'resource-tampered', resource: resource.path };
+  const hashed = await sha256FileSanitized(absolute);
+  if (typeof hashed === 'string') return { code: hashed, resource: resource.path };
+  if (hashed.value !== resource.sha256) {
+    return { code: 'resource-tampered', resource: resource.path };
+  }
   return null;
+}
+
+/**
+ * The hash read with the failure vocabulary: an open/read error at hash
+ * time — EACCES on a mode-0o000 leaf `lstat` could still stat, a file
+ * gone between the stat and the open — is a sanitized coded failure,
+ * never a thrown message carrying the absolute path.
+ */
+async function sha256FileSanitized(
+  absolute: string,
+): Promise<{ value: string } | 'resource-missing' | 'resource-inaccessible'> {
+  try {
+    return { value: await sha256File(absolute) };
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    return code === 'ENOENT' || code === 'ENOTDIR' ? 'resource-missing' : 'resource-inaccessible';
+  }
 }
 
 /**
@@ -421,6 +504,58 @@ async function verifyAncestry(
     if (typeof stat === 'string') return { code: stat, resource: resourcePath };
     if (stat.isSymbolicLink()) return { code: 'resource-symlink', resource: resourcePath };
     if (!stat.isDirectory()) return { code: 'resource-type', resource: resourcePath };
+  }
+  return null;
+}
+
+/**
+ * The inventory is complete in the other direction too: the two ratified
+ * subtrees hold EXACTLY the inventoried files (plus the manifest, which
+ * never inventories itself). A file on disk that no manifest names —
+ * dropped in, swapped in, or left behind — is drift a verifier must own,
+ * not a silent extra the spawn might later load; symlinks among the
+ * unlisted die here as well (an inventoried symlink already died in
+ * {@link verifyResource}). Unreadable/missing subtrees are not this
+ * walk's failure — the required facts above already rejected those.
+ */
+async function verifyInventoryCompleteness(
+  resourcesRoot: string,
+  manifest: BuildManifest,
+): Promise<PackagedAssetFailure | null> {
+  const inventoried = new Set(manifest.resources.map((resource) => resource.path));
+  for (const subtree of [RUNTIME_RESOURCE_DIR, NODE_RESOURCE_DIR]) {
+    const failure = await walkForUnlisted(resourcesRoot, subtree, inventoried);
+    if (failure !== null) return failure;
+  }
+  return null;
+}
+
+/** One subtree walk: recurses real directories, rejects any non-inventoried entry (the manifest excepted). */
+async function walkForUnlisted(
+  resourcesRoot: string,
+  directoryPath: string,
+  inventoried: ReadonlySet<string>,
+): Promise<PackagedAssetFailure | null> {
+  const directory = resourceAbsolutePath(resourcesRoot, directoryPath);
+  // directoryPath is this module's own constant or built from readdir names
+  // under a constant — this cannot trip; failing closed regardless
+  if (directory === null) return { code: 'layout-missing', resource: directoryPath };
+  let entries: ReadonlyArray<Dirent>;
+  try {
+    entries = await readdir(directory, { withFileTypes: true });
+  } catch {
+    return null; // the required-fact checks own missing/unreadable subtrees
+  }
+  for (const entry of entries) {
+    const entryPath = `${directoryPath}/${entry.name}`;
+    if (entry.isDirectory()) {
+      const nested = await walkForUnlisted(resourcesRoot, entryPath, inventoried);
+      if (nested !== null) return nested;
+      continue;
+    }
+    if (entryPath !== BUILD_MANIFEST_RESOURCE_PATH && !inventoried.has(entryPath)) {
+      return { code: 'layout-unlisted', resource: entryPath };
+    }
   }
   return null;
 }
