@@ -60,6 +60,15 @@ export default defineConfig({
       // minutes-scale) behind `npm run certify:adapter` with their own
       // config — the root run must stay deterministic and network-free.
       'packages/runtime/test/**/*.test.{ts,tsx}',
+      // apps/desktop (#243, H1): the thin Electron host's main-process
+      // units — deterministic fakes at the injected Electron seams, plus
+      // the real-forked control-plane child process lane (the #222 idiom:
+      // temp dirs, real lease files, no network). The real-Electron smoke
+      // (security prefs, denials, second launch) is NOT here by design: it
+      // launches the Electron binary behind `npm run test:desktop` with
+      // its own config, like certify:adapter — the root run stays
+      // deterministic and network-free.
+      'apps/desktop/src/main/**/*.test.{ts,tsx}',
       // Behavior-contract schema validators (#217, directive from B1's
       // review): the schemas are pure zod over frozen fixtures — the unit
       // doctrine's home, no browser needed. The corpus bytes stay owned by
