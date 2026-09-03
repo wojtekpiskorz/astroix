@@ -103,6 +103,7 @@ Static and deterministic, upstream of the advisory AI review (wayfinder #55). En
 Lanes run concurrently — the owner steers several agent sessions at once — so checkout territory is explicit:
 
 - A session that branches works from its own worktree (`git worktree add ../astroix-<issue-or-pr> <branch>`), never by switching the shared main checkout: two sessions ping-ponging one checkout is how commits land on the wrong branch (the `b1d1ee6` incident, PR #88 thread).
+- Concurrent e2e lanes each take an exclusive web port + scratch root — `ASTROIX_WEB_E2E_PORT` (next free ≥ 4438, per the port table) and `ASTROIX_WEB_E2E_SCRATCH`, like the legacy `ASTROIX_E2E_PORT` trio — never the shared default 4426 across worktrees (#350).
 - At lane close, the worktree is always removed and the branch deleted. Canonical sequence: exit the worktree first (`git worktree remove` refuses the one you are standing in), remove it, then `gh pr merge <n> --delete-branch` — merge, local + remote delete, and prune in one step.
 - macOS fallback (`File name too long`, #125): on any lane that installed the fixtures, `git worktree remove` can fail — git's recursive delete chokes on the deep `node_modules` nesting. Recover with `rm -rf ../astroix-<lane>` + `git worktree prune`; the worktree must be gone before `gh pr merge --delete-branch` (its local branch delete also fails while the worktree exists — git never deletes a checked-out branch; that refusal is universal, not the macOS long-path failure), so if the merge already ran, finish with `git branch -D <branch>`.
 

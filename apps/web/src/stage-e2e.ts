@@ -52,8 +52,13 @@ function resolveWebLanePort(): number {
   if (raw === undefined || raw === '') {
     return DEFAULT_WEB_LANE_PORT;
   }
+  if (!/^\d+$/.test(raw)) {
+    throw new Error(
+      `stage-e2e: ${WEB_E2E_PORT_ENV} must be an integer TCP port 1-65535, got "${raw}"`,
+    );
+  }
   const port = Number.parseInt(raw, 10);
-  if (!/^\d+$/.test(raw) || port < 1 || port > 65535) {
+  if (port < 1 || port > 65535) {
     throw new Error(
       `stage-e2e: ${WEB_E2E_PORT_ENV} must be an integer TCP port 1-65535, got "${raw}"`,
     );
