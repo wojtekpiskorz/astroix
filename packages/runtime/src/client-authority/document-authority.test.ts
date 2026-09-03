@@ -160,7 +160,11 @@ describe('the document authority — role caps, server-enforced across both trut
       sessionRef: SESSION,
       projectKey: KEY_A,
     });
-    expect(second).toEqual({ kind: 'refused', reason: 'editor-already-bound' });
+    // The same-document second grant dies on the more precise law —
+    // one document is one client — before either table mints; the
+    // one-editor CAP itself stays pinned by the lockstep-coherence leg
+    // (a foreign editor the join does not hold).
+    expect(second).toEqual({ kind: 'refused', reason: 'document-already-bound' });
     expect(world.authority.grants()).toHaveLength(1);
     expect(world.httpBindings.counts()).toEqual({ editor: 1, diagnostic: 0, launcher: 0 });
   });

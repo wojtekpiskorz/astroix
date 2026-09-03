@@ -56,11 +56,11 @@ import type {
  *
  * One document holds at most ONE binding: an exact `webContents` at an
  * exact top-level navigation is one client with one role — `bind`
- * refuses a second grant at a live document (`document-already-bound`,
- * both partial mints rolled back synchronously, never observable).
- * Without the guard the injection port would be ambiguous at a shared
- * document; with it, the value `injectableCapability` returns is total
- * by construction.
+ * refuses a second grant at a live document (`document-already-bound`)
+ * BEFORE either table mints anything (the guard reads only this
+ * module's own join plus the input). Without the guard the injection
+ * port would be ambiguous at a shared document; with it, the value
+ * `injectableCapability` returns is total by construction.
  */
 
 /** What `bindEditor`/`bindDiagnostic` refused — sanitized vocabulary only. */
@@ -175,6 +175,21 @@ export function createDocumentAuthority(options: DocumentAuthorityOptions): Docu
     if (role === 'editor' && input.document.webContentsId !== authoritativeTarget) {
       return { kind: 'refused', reason: 'not-authoritative-target' };
     }
+    // One document is one client — checked BEFORE either table mints:
+    // the guard reads only this module's own join plus the input, so a
+    // second grant at a live exact document refuses with nothing to
+    // roll back. Without it the injection port would be ambiguous at a
+    // shared document (the caps alone permit a diagnostic beside an
+    // editor); with it, the value `injectableCapability` returns is
+    // total by construction.
+    for (const grant of live.values()) {
+      if (
+        grant.document.webContentsId === input.document.webContentsId &&
+        grant.document.navigationId === input.document.navigationId
+      ) {
+        return { kind: 'refused', reason: 'document-already-bound' };
+      }
+    }
     const httpBound = httpBindings.bind({ role, host: 'project', sessionRef: input.sessionRef });
     if (httpBound.kind === 'refused') {
       return {
@@ -190,7 +205,9 @@ export function createDocumentAuthority(options: DocumentAuthorityOptions): Docu
     if (clientBound.kind === 'refused') {
       // Lockstep coherence: a refusal F4's table owes but F2's did not
       // record rolls the HTTP binding back — the two truths never
-      // disagree, and the caps stay server-enforced on both sides.
+      // disagree, and the caps stay server-enforced on both sides. The
+      // injected table's state cannot be pre-checked here, so the
+      // rollback is this branch's alone.
       httpBindings.unbind(httpBound.capability);
       return {
         kind: 'refused',
@@ -199,20 +216,6 @@ export function createDocumentAuthority(options: DocumentAuthorityOptions): Docu
             ? 'editor-already-bound'
             : 'diagnostics-full',
       };
-    }
-    // One document is one client: the caps above permit a diagnostic
-    // beside a live editor, but a second grant at the SAME exact
-    // document would make the injection port ambiguous — roll both
-    // mints back and refuse (never observable: the sweep is synchronous).
-    for (const grant of live.values()) {
-      if (
-        grant.document.webContentsId === input.document.webContentsId &&
-        grant.document.navigationId === input.document.navigationId
-      ) {
-        httpBindings.unbind(httpBound.capability);
-        clients.revoke(clientBound.capability);
-        return { kind: 'refused', reason: 'document-already-bound' };
-      }
     }
     const grant: DocumentAuthorityGrant = {
       capability: httpBound.capability,
