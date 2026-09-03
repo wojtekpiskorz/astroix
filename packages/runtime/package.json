@@ -32,7 +32,9 @@
     "./sse": "./sse/sse-surface.ts",
     "./session-supervisor/staging": "./session-supervisor/staging/session-supervisor.ts",
     "./session-supervisor/clients": "./session-supervisor/clients/session-clients.ts",
-    "./session-supervisor/fence": "./session-supervisor/fence/edit-fence.ts"
+    "./session-supervisor/fence": "./session-supervisor/fence/edit-fence.ts",
+    "./session-supervisor/commit": "./session-supervisor/commit/switch-coordinator.ts",
+    "./session-supervisor/revocation": "./session-supervisor/revocation/authority-revocation.ts"
   },
   "sideEffects": false,
   "dependencies": {

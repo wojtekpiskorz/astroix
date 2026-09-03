@@ -67,8 +67,12 @@ import type { FunctionComplexity } from './complexity';
  * crash observation) and the document-bound client registry (one
  * editor, three diagnostics, navigation/renderer/session revocation,
  * the menu-action currency envelope) — are covered (deterministic
- * units over run fakes); the fence (F5) and commit/revocation (F6)
- * subtrees rule their own tiers when their lanes land. A
+ * units over run fakes); the commit + revocation seams since #238 (F6)
+ * — the one-use switch-preparation receipt, the normal/forced
+ * preparations, the receipt-consuming commit linearization, and the
+ * ordered old-authority revocation — join them (deterministic units
+ * over injected seams; the real-socket 421 legs are the focused lane's
+ * evidence, not shipped composition IO). A
  * watchlist row has `coverage === null` and `crap === null`, and its gate
  * metric is CC. (The `src/node` + `src/client` watchlist tiers were
  * deleted with their functions at the retirement gate, #215.)
@@ -259,9 +263,24 @@ const COVERED_PREFIXES: readonly string[] = [
   // the no-silent-work tracking after a timeout, and resume legality —
   // deterministic units over injected clock and queue seams (no real
   // timers; both sides of the deadline pinned through manual and fake
-  // clocks). The commit/revocation (F6 #238) subtree under
-  // session-supervisor/ stays watchlist until its lane rules.
+  // clocks).
   'packages/runtime/session-supervisor/fence/',
+  // `packages/runtime/session-supervisor/{commit,revocation}` since
+  // #238 (F6): the one-use switch-preparation receipt and its ledger
+  // (mint/bind/one-use/replay), the normal and forced preparations
+  // (the sealed terminal drain verdict with resume-before-receipt
+  // refused; the observed exact write-executor exit raced against the
+  // protocol's forced-reap bound on an injected clock — an incomplete
+  // reap mints nothing), the receipt-consuming commit linearization
+  // (binding checks before the one-use flip, the irreversible
+  // post-revocation failure), and the ordered old-authority revocation
+  // (streams, the awaited origin lease, edit grants, both
+  // client-binding truths, the host capability — each before the
+  // candidate grant) — deterministic units over injected seams and
+  // journaling wrappers around the real landed surfaces; the 421 legs
+  // ride the real origin listener in the focused lane.
+  'packages/runtime/session-supervisor/commit/',
+  'packages/runtime/session-supervisor/revocation/',
 ];
 
 /**

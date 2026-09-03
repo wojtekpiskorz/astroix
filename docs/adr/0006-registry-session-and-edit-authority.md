@@ -113,7 +113,7 @@ interface ActivationAttempt {
 }
 
 interface StagedCandidate {
-  commit(receipt: SwitchPreparationReceipt): Promise<CommitResult>;
+  commit(): Promise<CommitResult>;
   rollback(reason: RollbackReason): Promise<CloseReport>;
 }
 
@@ -148,7 +148,7 @@ interface EditFence {
 }
 ```
 
-`RegistryCommand` is a closed union (register, rename, remove, explicit last-known-good restore) with no root-rebind command. `DiscoveredResource` is control-plane-only; the wire representation of `ResourceGrant` is opaque. `PreparedReplacement` contains the one-use opaque receipt issued only after a terminal bounded drain or a forced preparation proving the exact write executor exited — it cannot be manufactured from request fields. A native switch coordinator calls `prepareReplacement()`, consumes the receipt through candidate commit or deactivation, then `completeReplacement()` (asynchronous, host-observed; failures feed the supervisor's irreversible post-revocation path, never a renderer-side rejected promise with stale authority behind it). `cancelReplacement()` is legal only before old-authority revocation and resumes the fence only after a terminal drain. `EditFence.outcome` settles within the 5-second drain deadline with a drained/failed/timed-out report; `resume()` rejects unless every accepted operation is terminal and revocation has not begun; `revoke()` is idempotent and closes admission synchronously before awaiting cleanup. `AppClient` is the authoritative-target interface; a separate diagnostic adapter exposes `events`, `projects()`, and read-only `inspect()` only.
+`StagedCandidate.commit()` is deliberately paramless — staging cannot validate a proof it never minted: the one-use receipt is minted and consumed by the switch coordinator's receipt-consuming composition (`session-supervisor/commit/`, #238), whose consumption linearizes the commit and then drives the candidate's state-side commit (the two-seam settlement of #238). `RegistryCommand` is a closed union (register, rename, remove, explicit last-known-good restore) with no root-rebind command. `DiscoveredResource` is control-plane-only; the wire representation of `ResourceGrant` is opaque. `PreparedReplacement` contains the one-use opaque receipt issued only after a terminal bounded drain or a forced preparation proving the exact write executor exited — it cannot be manufactured from request fields. A native switch coordinator calls `prepareReplacement()`, consumes the receipt through candidate commit or deactivation, then `completeReplacement()` (asynchronous, host-observed; failures feed the supervisor's irreversible post-revocation path, never a renderer-side rejected promise with stale authority behind it). `cancelReplacement()` is legal only before old-authority revocation and resumes the fence only after a terminal drain. `EditFence.outcome` settles within the 5-second drain deadline with a drained/failed/timed-out report; `resume()` rejects unless every accepted operation is terminal and revocation has not begun; `revoke()` is idempotent and closes admission synchronously before awaiting cleanup. `AppClient` is the authoritative-target interface; a separate diagnostic adapter exposes `events`, `projects()`, and read-only `inspect()` only.
 
 ## Consequences
 
