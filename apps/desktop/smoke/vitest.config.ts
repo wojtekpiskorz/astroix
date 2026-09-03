@@ -8,7 +8,11 @@ import { defineConfig } from 'vitest/config';
  * observe processes; no DOM. The document-authority spec (#246, H4)
  * and the service-worker bypass spec (#247, H5) join the same lane:
  * they too drive the real Electron binary (their own harness mains,
- * built per run) — additive includes, same gate.
+ * built per run) — additive includes, same gate. The early packaged
+ * smoke family (#248, H6) joins the same way: it launches the REAL
+ * extracted package (`npm run package`'s ZIP) and self-skips without a
+ * local build — like H2's packaged-spawn lane, the run stays out of
+ * `npm test` (real GUI binary, real codesign, ADR-0008 local-only).
  */
 export default defineConfig({
   test: {
@@ -17,6 +21,7 @@ export default defineConfig({
       'apps/desktop/smoke/desktop-smoke.test.ts',
       'e2e/desktop/document-authority*.spec.ts',
       'e2e/desktop/service-worker-bypass*.spec.ts',
+      'e2e/desktop/early-package*.spec.ts',
     ],
     testTimeout: 180_000,
     hookTimeout: 180_000,

@@ -35,3 +35,15 @@ test-results/
 # os / editor
 .DS_Store
 *.log
+
+# the early packaged-smoke evidence root (#248, H6): committed by
+# exception AFTER the blanket test-results/ and *.log rules — the README
+# and one recorded run's evidence files, never raw run scratch (the
+# no-rebuild-after-recording law)
+!apps/desktop/test-results/
+apps/desktop/test-results/*
+!apps/desktop/test-results/README.md
+!apps/desktop/test-results/early-package-smoke/
+apps/desktop/test-results/early-package-smoke/*
+!apps/desktop/test-results/early-package-smoke/evidence.json
+!apps/desktop/test-results/early-package-smoke/run.log

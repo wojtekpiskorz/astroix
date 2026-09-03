@@ -1,0 +1,80 @@
+
+ RUN  v4.1.11 /Users/woji/Dev/playground/astroix-248-packaged-smoke
+
+stdout | e2e/desktop/early-package-repeated-run.spec.ts > the exact packaged host — the repeated-run leg (#248) > two consecutive fresh-extraction cycles behave identically: no retained state, deterministic cleanup
+early-package-evidence: repeated run first — projectKey=ukxv6f4gbmoxmxz6cjnroxll5e childStop=graceful exit=0
+early-package-evidence: repeated run second — projectKey=tol4vkkhb4g4dxxufmeozqt3b4 childStop=graceful exit=0
+
+ ✓ e2e/desktop/early-package-repeated-run.spec.ts (1 test) 31987ms
+     ✓ two consecutive fresh-extraction cycles behave identically: no retained state, deterministic cleanup  26488ms
+(node:95098) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+stdout | e2e/desktop/early-package-smoke.spec.ts > the exact packaged host — the early packaged smoke (#248) > the extracted artifact proves its facts before launch: pins, hashes, fuses, identity, strict adhoc signature
+early-package-evidence: package-verification: PASSED — /var/folders/zk/tkmdgsd97nd6d4t1yd82hslr0000gn/T/astroix-early-package-5e3wFT/Astroix.app
+early-package-evidence:   codesign: strict verification + adhoc signature on all targets
+early-package-evidence:   assets: verified through the packaged-asset adapter
+early-package-evidence:   fuses: wire matches the release law
+early-package-evidence:   identity: bundle id + min-OS 13.5 + asar integrity hash
+early-package-evidence:   arch: single-arch arm64 executables
+
+stdout | e2e/desktop/early-package-smoke.spec.ts > the exact packaged host — the early packaged smoke (#248) > the extracted artifact proves its facts before launch: pins, hashes, fuses, identity, strict adhoc signature
+early-package-evidence: artifact pins — node=v24.20.0 electron=44.1.0 forge=7.11.2 arch=arm64
+
+stdout | e2e/desktop/early-package-smoke.spec.ts > the exact packaged host — the early packaged smoke (#248) > boots: in-app verification green, the private boot spawns the bundled stock Node child
+early-package-evidence: process 95454 ppid 95098 :: /var/folders/zk/tkmdgsd97nd6d4t1yd82hslr0000gn/T/astroix-early-package-5e3wFT/Astroix.app/Contents/MacOS/Astroix
+early-package-evidence: process 95455 ppid 95454 :: /private/var/folders/zk/tkmdgsd97nd6d4t1yd82hslr0000gn/T/astroix-early-package-5e3wFT/Astroix.app/Contents/Frameworks/Astroix Helper.app/Contents/MacOS/Astroix Helper --type=gpu-process --user-data-dir=/Users/woji/Library/Application Support/Astroix --gpu-preferences=WAAAAAAAAAAgAQAEAAAAAAAAAAAAAGAAQAAAAAAAAAADAAAAAAAAADgAAAAAAAAAAAAAAAAAAAACAAAAAAAAAAAAAAAAAAAAKAAAAAAAAAAoAAAAAAAAAAgAAAAAAAAADAAAAAEAAAAAAAAAAAAAAAgAAAAAAAAACAAAAAAAAAA= --shared-files --field-trial-handle=1718379636,r,14331874923446389886,14586845391473060873,262144 --enable-features=PdfUseShowSaveFilePicker,ScreenCaptureKitPickerScreen,ScreenCaptureKitStreamPickerSonoma --disable-features=DropInputEventsWhilePaintHolding,LocalNetworkAccessChecks,ScreenAIOCREnabled,SpareRendererForSitePerProcess,TimeoutHangingVideoCaptureStarts,TraceSiteInstanceGetProcessCreation --variations-seed-version --pseudonymization-salt-handle=1935764596,r,4041503499483018387,13858761522969964914,4 --trace-process-track-uuid=3190708988185955192 --seatbelt-client=28
+early-package-evidence: process 95456 ppid 95454 :: /private/var/folders/zk/tkmdgsd97nd6d4t1yd82hslr0000gn/T/astroix-early-package-5e3wFT/Astroix.app/Contents/Frameworks/Astroix Helper.app/Contents/MacOS/Astroix Helper --type=utility --utility-sub-type=network.mojom.NetworkService --lang=en-US --service-sandbox-type=network --user-data-dir=/Users/woji/Library/Application Support/Astroix --shared-files --field-trial-handle=1718379636,r,14331874923446389886,14586845391473060873,262144 --enable-features=PdfUseShowSaveFilePicker,ScreenCaptureKitPickerScreen,ScreenCaptureKitStreamPickerSonoma --disable-features=DropInputEventsWhilePaintHolding,LocalNetworkAccessChecks,ScreenAIOCREnabled,SpareRendererForSitePerProcess,TimeoutHangingVideoCaptureStarts,TraceSiteInstanceGetProcessCreation --variations-seed-version --pseudonymization-salt-handle=1935764596,r,4041503499483018387,13858761522969964914,4 --trace-process-track-uuid=3190708989122997041 --seatbelt-client=29
+early-package-evidence: process 95457 ppid 95454 :: /private/var/folders/zk/tkmdgsd97nd6d4t1yd82hslr0000gn/T/astroix-early-package-5e3wFT/Astroix.app/Contents/Frameworks/Astroix Helper (Renderer).app/Contents/MacOS/Astroix Helper (Renderer) --type=renderer --user-data-dir=/var/folders/zk/tkmdgsd97nd6d4t1yd82hslr0000gn/T/astroix-early-package-5e3wFT/user-data --app-path=/private/var/folders/zk/tkmdgsd97nd6d4t1yd82hslr0000gn/T/astroix-early-package-5e3wFT/Astroix.app/Contents/Resources/app.asar --enable-sandbox --lang=en-US --num-raster-threads=4 --enable-zero-copy --enable-gpu-memory-buffer-compositor-resources --enable-main-frame-before-activation --renderer-client-id=4 --launch-time-ticks=635717061692 --shared-files --field-trial-handle=1718379636,r,14331874923446389886,14586845391473060873,262144 --enable-features=PdfUseShowSaveFilePicker,ScreenCaptureKitPickerScreen,ScreenCaptureKitStreamPickerSonoma --disable-features=DropInputEventsWhilePaintHolding,LocalNetworkAccessChecks,ScreenAIOCREnabled,SpareRendererForSitePerProcess,TimeoutHangingVideoCaptureStarts,TraceSiteInstanceGetProcessCreation --variations-seed-version --pseudonymization-salt-handle=1935764596,r,4041503499483018387,13858761522969964914,4 --trace-process-track-uuid=3190708990060038890 --seatbelt-client=37
+early-package-evidence: process 95458 ppid 95454 :: /private/var/folders/zk/tkmdgsd97nd6d4t1yd82hslr0000gn/T/astroix-early-package-5e3wFT/Astroix.app/Contents/Resources/node/bin/node /private/var/folders/zk/tkmdgsd97nd6d4t1yd82hslr0000gn/T/astroix-early-package-5e3wFT/Astroix.app/Contents/Resources/astroix-runtime/control-plane/child.js {"privateStateDirectory":"/var/folders/zk/tkmdgsd97nd6d4t1yd82hslr0000gn/T/astroix-early-package-5e3wFT/user-data/private-state","registryDirectory":"/var/folders/zk/tkmdgsd97nd6d4t1yd82hslr0000gn/T/astroix-early-package-5e3wFT/user-data/registry","declareCurrentRuntimePin":false}
+
+stdout | e2e/desktop/early-package-smoke.spec.ts > the exact packaged host — the early packaged smoke (#248) > registers a plain project through the native picker — the real registry flow, sanitized summary
+early-package-evidence: registered through the native picker — projectKey=d4h2nzmo5xc56rnr6svztyiw2e availability=available
+
+stdout | e2e/desktop/early-package-smoke.spec.ts > the exact packaged host — the early packaged smoke (#248) > registers a plain project through the native picker — the real registry flow, sanitized summary
+early-package-evidence: menu :: menu: Apple
+early-package-evidence: menu :: item: About This Mac
+early-package-evidence: menu :: item: System Information
+early-package-evidence: menu :: item: System Settings…, 1 update
+early-package-evidence: menu :: item: App Store…, 6 updates
+early-package-evidence: menu :: item: Recent Items
+early-package-evidence: menu :: item: Force Quit…
+early-package-evidence: menu :: item: Force Quit Astroix
+early-package-evidence: menu :: item: Sleep
+early-package-evidence: menu :: item: Restart…
+early-package-evidence: menu :: item: Restart
+early-package-evidence: menu :: item: Shut Down…
+early-package-evidence: menu :: item: Shut Down
+early-package-evidence: menu :: item: Lock Screen
+early-package-evidence: menu :: item: Log Out Wojciech Piskorz…
+early-package-evidence: menu :: item: Log Out Wojciech Piskorz
+early-package-evidence: menu :: menu: Astroix
+early-package-evidence: menu :: item: About Astroix
+early-package-evidence: menu :: item: Quit Astroix
+early-package-evidence: menu :: menu: File
+early-package-evidence: menu :: item: Add Existing Project…
+early-package-evidence: menu :: menu: Session
+early-package-evidence: menu :: item: Deactivate Project
+
+stdout | e2e/desktop/early-package-smoke.spec.ts > the exact packaged host — the early packaged smoke (#248) > records the honest boundary: no activation surface exists — the composition seam is the blocked leg
+early-package-evidence: BLOCKED LEG RECORDED — activation, canvas, HMR-through-proxy, and Service-Worker-bypass observations require the desktop control-plane composition (not packaged at #248); see the owning issue
+
+stdout | e2e/desktop/early-package-smoke.spec.ts > the exact packaged host — the early packaged smoke (#248) > quits normally: the transition settles, the exact children reap, nothing remains, zero injection
+early-package-evidence: quit settled (childStop=graceful), zero strays, zero sockets, zero temp leftovers, managed project identical, product log sanitized (4 lines)
+
+ ✓ e2e/desktop/early-package-smoke.spec.ts (5 tests) 17633ms
+     ✓ the extracted artifact proves its facts before launch: pins, hashes, fuses, identity, strict adhoc signature  774ms
+     ✓ boots: in-app verification green, the private boot spawns the bundled stock Node child  3457ms
+     ✓ registers a plain project through the native picker — the real registry flow, sanitized summary  6282ms
+     ✓ quits normally: the transition settles, the exact children reap, nothing remains, zero injection  1432ms
+(node:95660) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ e2e/desktop/early-package-tamper.spec.ts (3 tests) 12850ms
+     ✓ rejects a tampered runtime resource byte before activation, sanitized, childless  3437ms
+     ✓ rejects a swapped bundled Node before activation — a working different Node is never a fallback  4450ms
+     ✓ rejects a tampered manifest pin before activation, with pin-level detail only  4826ms
+
+ Test Files  3 passed (3)
+      Tests  9 passed (9)
+   Start at  19:34:33
+   Duration  63.34s (transform 136ms, setup 0ms, import 315ms, tests 62.47s, environment 0ms)
+
