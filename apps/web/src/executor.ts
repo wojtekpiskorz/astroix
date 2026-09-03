@@ -229,6 +229,9 @@ async function activate(
  * candidate's authority revoked by F6's ordered pass, its run reaped,
  * the failed no-active state reported — never a stranded session
  * (#333's ruling: direction (a), no supervisor-side reconciliation).
+ * F6's own `failed` grant result rides the same completion unchanged
+ * (its failed branch runs the report with the revoked accounting and
+ * skips the candidate revocation — the candidate was never granted).
  */
 async function commitTransition(
   candidate: StagedCandidate,
@@ -240,6 +243,10 @@ async function commitTransition(
     oldSeat === null
       ? await commitFirstActivation(candidate)
       : await commitSwitch(oldSeat, candidate, inputs);
+  // `null` is the pre-linearization abort alone: the drain conflict
+  // (rollback + resume — §4 step 3, the old session untouched) or the
+  // refused preparation — nothing was revoked, so there is no
+  // completion and no aftermath to drive.
   if (transition === null) return;
   const trail: AdoptionTrail = { httpCapability: null, supervisorCapability: null, lease: null };
   const client: CompletionClientIdentity =
@@ -278,6 +285,13 @@ async function commitFirstActivation(
       revoked: { session: granted.committed, steps: [], outcome: 'complete' },
     };
   } catch {
+    // Nothing was revoked (no old session existed), so this refusal is
+    // NOT §4 step 7's aftermath shape: F4's attempt machine already
+    // ended the attempt, recorded the sanitized failure on the snapshot
+    // (`attemptEnded` → `lastFailure` — the answer the envelope
+    // carries), and stopped the orphaned candidate run itself. Route it
+    // through F7 anyway and the completion would report a post-
+    // revocation failure that never happened.
     return null;
   }
 }
@@ -316,7 +330,16 @@ async function commitSwitch(
   }
   const result: CommittedTransition = await inputs.coordinator.commit(prepared.receipt, candidate);
   inputs.seatStore.drop(oldSeat.ref);
-  return result.kind === 'committed' ? result : null;
+  // Only the pre-linearization rejection returns with nothing driven
+  // (§4 step 5: nothing spent, nothing revoked — the old session was
+  // resumed). F6's own `failed` grant result — authority already
+  // revoked, the grant then refused — is the irreversible §4 step 7
+  // input F7's completion owns the aftermath for (the coordinator's own
+  // contract says so): it rides `completeReplacement` unchanged, which
+  // reports the failed no-active state over the preserved revoked
+  // accounting and correctly skips the candidate revocation (the
+  // candidate was never granted).
+  return result.kind === 'rejected' ? null : result;
 }
 
 /**

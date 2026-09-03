@@ -24,7 +24,10 @@ import {
   createSessionClients,
   type SessionClients,
 } from '@wojciechpiskorz/astroix-runtime/session-supervisor/clients';
-import { createSwitchCoordinator } from '@wojciechpiskorz/astroix-runtime/session-supervisor/commit';
+import {
+  createSwitchCoordinator,
+  type SwitchCoordinator,
+} from '@wojciechpiskorz/astroix-runtime/session-supervisor/commit';
 import { createSessionCompletion } from '@wojciechpiskorz/astroix-runtime/session-supervisor/completion';
 import {
   createSessionSupervisor,
@@ -171,6 +174,32 @@ function fakeListener(journal: Journal): OriginListener {
   return listener;
 }
 
+/**
+ * The refused-grant coordinator stand-in (the #333 review's T1 leg): one
+ * activation's grant refuses AFTER the real revocation pass — the exact
+ * shape F6's `failed` result documents. The real staged candidate is
+ * settled FIRST, the way every real refused grant arrives (F4's machine
+ * had already ended the attempt — a cancelled rollback stops the
+ * orphaned run and frees the generation reservation), then the REAL
+ * coordinator consumes the real receipt over a candidate whose `commit`
+ * refuses: the old-side ordered revocation is real, and the `failed`
+ * result is the real machinery's.
+ */
+function refusingGrantCoordinator(real: SwitchCoordinator): SwitchCoordinator {
+  return {
+    ...real,
+    commit: async (receipt, candidate) => {
+      await candidate.rollback('cancelled').catch(() => {});
+      const refusing = {
+        ref: candidate.ref,
+        commit: () => Promise.reject(new Error('the grant refused after the revocation')),
+        rollback: candidate.rollback.bind(candidate),
+      };
+      return await real.commit(receipt, refusing);
+    },
+  };
+}
+
 /** The composition under test, wired exactly as the control plane wires it. */
 interface Harness {
   readonly supervisor: SessionSupervisor;
@@ -192,9 +221,11 @@ interface Harness {
  * real tables, manual runs, journaled leases. Project A's root exists on
  * disk (adoptions of A succeed); project B's root is a vanished path —
  * `createGrantTable` refuses it, which is the real `adoptSession` throw
- * these legs induce AFTER the bindings and the lease were granted.
+ * these legs induce AFTER the bindings and the lease were granted. The
+ * `refuseGrant` option swaps in the refused-grant coordinator stand-in
+ * (F6's `failed` result after the real revocation pass).
  */
-async function bootHarness(): Promise<Harness> {
+async function bootHarness(options: { readonly refuseGrant?: boolean } = {}): Promise<Harness> {
   const scratch = await mkdtemp(join(tmpdir(), 'astroix-stranded-adoption-'));
   const rootA = join(scratch, 'project-a');
   await mkdir(rootA);
@@ -249,7 +280,9 @@ async function bootHarness(): Promise<Harness> {
     grants: { revokeSession: grantEviction },
     httpBindings,
   };
-  const coordinator = createSwitchCoordinator(surfaces);
+  const realCoordinator = createSwitchCoordinator(surfaces);
+  const coordinator =
+    options.refuseGrant === true ? refusingGrantCoordinator(realCoordinator) : realCoordinator;
   const completion = createSessionCompletion({
     ...surfaces,
     reportFailedNoActive: (failure) => {
@@ -422,6 +455,48 @@ describe('the stranded-adoption convergence (#333, direction (a))', () => {
       expect(second.target.session.generation).toBe(2);
       expect(h.supervisor.snapshot().active?.ref.generation).toBe(2);
       expect(h.seatStore.active()?.ref.generation).toBe(2);
+    } finally {
+      await h.close();
+    }
+  });
+
+  it('routes the F6 failed-grant result through the completion — the report runs over the revoked accounting (the review T1 leg)', async () => {
+    const h = await bootHarness({ refuseGrant: true });
+    try {
+      // Generation 1 — the live session to switch away from.
+      const first = activationOf(await h.execute(activate(PROJECT_A, 'req-1')));
+      expect(first.target.session.generation).toBe(1);
+
+      // Generation 2 — the switch whose GRANT refuses after the
+      // coordinator's real revocation pass: F6's own irreversible
+      // `failed` result. It rides `completeReplacement` unchanged —
+      // the same §4 step 7 machinery, with the candidate revocation
+      // correctly skipped (the candidate was never granted).
+      const second = activationOf(await h.execute(activate(PROJECT_B, 'req-2')));
+      expect(second.target.session.generation).toBe(2);
+
+      // The failed-no-active report ran exactly once, strictly after
+      // the old-side revocation pass, with F6's post-revocation
+      // failure category.
+      expect(h.reportedFailures).toHaveLength(1);
+      expect(h.reportedFailures[0]?.category).toBe('revocation');
+      expect(h.journal.indexOf('lease:revoke:a')).toBeGreaterThanOrEqual(0);
+      expect(h.journal.indexOf('report:failed-no-active')).toBeGreaterThan(
+        h.journal.indexOf('lease:revoke:a'),
+      );
+
+      // The old side genuinely revoked — the old lease retired and both
+      // editor-binding truths are empty (no adoption ever ran, so
+      // nothing new was bound) — and nothing was granted on the
+      // candidate side for the aftermath to revoke.
+      expect(h.journal).not.toContain('lease:grant:b');
+      expect(h.httpBindings.counts().editor).toBe(0);
+
+      // The orphaned candidate run converged exactly once — F4's own
+      // attempt machine (the settled attempt), never a second reap —
+      // and the generation reservation is freed.
+      expect(h.runs[1]?.stopCalls()).toBe(1);
+      expect(h.supervisor.snapshot().attempt).toBeUndefined();
     } finally {
       await h.close();
     }
