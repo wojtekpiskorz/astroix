@@ -367,11 +367,19 @@ export function createEditFence(options: EditFenceOptions = {}): EditFence {
     },
     fence: (pending) => {
       if (state !== 'open') return { kind: 'refused', reason: 'not-open' };
-      // The flush runs first and may throw: the fence has not moved, so a
-      // misbehaving client seam leaves admission open and the transition
-      // un-begun — never a half-fenced machine.
-      const flushed = [...(pending?.() ?? [])];
+      // Admission closes FIRST: a re-entrant `fence()` from inside the
+      // pending seam must hit `not-open`, and a `submit()` racing the
+      // flush must not slip past the closure instant. The flush may then
+      // throw: the state reverts to open and the transition is un-begun —
+      // never a half-fenced machine.
       state = 'draining';
+      let flushed: QueuedEdit[] = [];
+      try {
+        flushed = [...(pending?.() ?? [])];
+      } catch (error) {
+        state = 'open';
+        throw error;
+      }
       const outcome = new Promise<DrainReport>((resolve) => {
         resolveOutcome = resolve;
       });

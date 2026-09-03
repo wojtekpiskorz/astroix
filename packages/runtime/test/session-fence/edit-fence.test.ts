@@ -93,6 +93,19 @@ describe('admission and the one serialized queue', () => {
     expect(fence.submit(controlledEdit('after').edit).kind).toBe('accepted');
   });
 
+  it('a re-entrant fence() from inside the pending seam hits the closed admission — no hung inner drain', () => {
+    const fence = createEditFence({ clock: manualClock().clock });
+    let inner: ReturnType<typeof fence.fence> | undefined;
+    const drain = fence.fence(() => {
+      inner = fence.fence(() => []);
+      return [controlledEdit('flushed').edit];
+    });
+    // admission closed before the flush materialized: the inner call is
+    // refused, never a second drain whose outcome nobody settles
+    expect(inner).toEqual({ kind: 'refused', reason: 'not-open' });
+    expect(drain.kind).toBe('fenced');
+  });
+
   it('fence() refuses while a drain is live — one drain, not a second behind it', () => {
     const fence = createEditFence({ clock: manualClock().clock });
     expect(fence.fence().kind).toBe('fenced');
