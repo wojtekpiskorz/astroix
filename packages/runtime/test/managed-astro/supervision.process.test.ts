@@ -303,7 +303,11 @@ describe('crash is terminal — the sibling is cleaned, never restarted', () => 
       },
       devServerPort: port,
       startupTimeoutMs: 3000,
-      stopTimeoutMs: 600,
+      // The widened boot bound, same family as the sibling startup legs:
+      // this stop races the worker's loaded boot (the spawn error fires
+      // at t≈0 while the worker is mid-boot); a 600 ms bound TERMs it
+      // mid-boot under suite-scale load and voids the close report.
+      stopTimeoutMs: 10_000,
       termGraceMs: 200,
       killReapMs: 200,
       probeIntervalMs: 15,
@@ -460,6 +464,9 @@ describe('escalation and the reap bounds', () => {
     // filed as #326). Until that rules, this
     // leg pins the scenario's deterministic half: the escalation ladder
     // itself, its observed reap inside the lane's default bound, and the
+    // (a half that overlaps the ignoreTerm leg's assertions — until #326
+    // makes the two children distinguishable, an ignoring child and a
+    // delaying one are one observable surface here)
     // KILL-only death. The honest incomplete-reap CLASSIFICATION keeps its
     // pure coverage in close-report.test.ts.
     const lane = await startLane({ devServer: { termDelayMs: 5000 } });
