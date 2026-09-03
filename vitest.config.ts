@@ -202,6 +202,16 @@ export default defineConfig({
         // globs.
         'packages/runtime/session-supervisor/staging/**',
         'packages/runtime/session-supervisor/clients/**',
+        // The session-supervisor fence seams (#237, F5, additive): the
+        // edit fence and bounded transition drain (synchronous admission
+        // closure, the pending-debounce flush into the one serialized
+        // queue, the five-second deadline, the drained/failed/timed-out
+        // verdicts, the no-silent-work tracking, resume legality) are
+        // deterministic units over injected clock and queue seams — the
+        // deadline never waits on a real timer (manual or fake clocks,
+        // both sides of the boundary pinned). The commit/revocation
+        // (F6 #238) subtree lands its own glob.
+        'packages/runtime/session-supervisor/fence/**',
       ],
       reporter: ['json'],
       reportsDirectory: 'coverage',
