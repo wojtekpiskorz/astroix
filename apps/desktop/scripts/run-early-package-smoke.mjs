@@ -154,7 +154,8 @@ async function orchestrate() {
     host: { productVersion: swVers, arch: unameM, harnessNode: process.version },
     battery: {
       command:
-        'npm run test:desktop (the early-package family; ASTROIX_EARLY_PACKAGE_ZIP bound to the exact ZIP)',
+        'vitest run --config apps/desktop/smoke/vitest.config.ts e2e/desktop/early-package ' +
+        '(the spawned battery; ASTROIX_EARLY_PACKAGE_ZIP bound to the exact ZIP)',
       passed: battery.passed,
       failed: battery.failed,
       skipped: battery.skipped,

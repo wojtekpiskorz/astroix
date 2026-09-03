@@ -195,9 +195,16 @@ export class PackagedAppRun extends HarnessRun {
     return this.waitFor((event) => event.kind === kind, what, timeoutMs);
   }
 
-  /** Cleanup-only stop (a leg that failed before its own quit path) — the shared escalation. */
+  /**
+   * Cleanup-only stop (a leg that failed before its own quit path) —
+   * the shared ordered stop, nothing else: the ONE settled predicate
+   * (code OR signal) lives there, so a signal-killed app settles
+   * immediately instead of hanging the afterAll to the hook timeout
+   * (the hole review round 4 closed, with a leg proving it in
+   * `early-package-harness-lifecycle.spec.ts`).
+   */
   async killForCleanup(): Promise<void> {
-    if (this.child.exitCode === null) await this.stop();
+    await this.stop();
   }
 }
 

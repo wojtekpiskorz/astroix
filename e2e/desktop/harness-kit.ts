@@ -152,10 +152,22 @@ export class HarnessRun {
     }
   }
 
+  /**
+   * True when the child has SETTLED — exited by code or killed by
+   * signal. The ONE settled predicate (`exitCode === null` alone is the
+   * signal-death hole: a signal-killed child keeps `exitCode` null and
+   * carries the signal in `signalCode`, and cleanup that gates on
+   * `exitCode` then awaits a fresh `once('exit')` listener can never
+   * resolve — the hook-timeout hang). Shared by `exit` and `stop`.
+   */
+  private get settled(): boolean {
+    return this.child.exitCode !== null || this.child.signalCode !== null;
+  }
+
   /** The exit settlement (idempotent; safe to await from many legs). */
   get exit(): Promise<{ code: number | null; signal: string | null }> {
     this.exitSettled ??= new Promise((resolve) => {
-      if (this.child.exitCode !== null || this.child.signalCode !== null) {
+      if (this.settled) {
         resolve({ code: this.child.exitCode, signal: this.child.signalCode });
         return;
       }
@@ -216,18 +228,30 @@ export class HarnessRun {
     });
   }
 
+  /**
+   * The ordered stop: quit op (a lane whose main ignores stdin just
+   * never reads it), bounded graceful wait, SIGKILL, and a BOUNDED
+   * post-kill wait — cleanup can never hang. Already-settled children
+   * (code OR signal) return immediately: the settlement promise, never
+   * a fresh `once('exit')` listener that an already-exited child can
+   * never fire.
+   */
   async stop(): Promise<void> {
-    if (this.child.exitCode !== null) return;
+    if (this.settled) return;
     this.send({ op: 'quit' });
-    await Promise.race([
-      new Promise((resolve) => this.child.once('exit', resolve)),
-      new Promise((resolve) => setTimeout(resolve, 5000)),
-    ]);
-    if (this.child.exitCode === null) {
+    await Promise.race([this.exit, sleep(5000)]);
+    if (!this.settled) {
       this.child.kill('SIGKILL');
-      await new Promise((resolve) => this.child.once('exit', resolve));
+      // Bounded even against an unkillable child — the 180 s
+      // hook-timeout hang class dies here.
+      await Promise.race([this.exit, sleep(2000)]);
     }
   }
+}
+
+/** One bounded sleep. */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /**
