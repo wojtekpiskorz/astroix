@@ -37,7 +37,8 @@
     "./session-supervisor/commit": "./session-supervisor/commit/switch-coordinator.ts",
     "./session-supervisor/revocation": "./session-supervisor/revocation/authority-revocation.ts",
     "./session-supervisor/completion": "./session-supervisor/completion/replacement-completion.ts",
-    "./session-supervisor/tombstone": "./session-supervisor/tombstone/boot-tombstone.ts"
+    "./session-supervisor/tombstone": "./session-supervisor/tombstone/boot-tombstone.ts",
+    "./client-authority": "./src/client-authority/document-authority.ts"
   },
   "sideEffects": false,
   "dependencies": {

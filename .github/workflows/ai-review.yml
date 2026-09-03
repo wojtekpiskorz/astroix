@@ -56,6 +56,12 @@ jobs:
       # recompute the CRAP table from scratch. CI is the source of truth,
       # local runs are advisory (wayfinder #55)
       - run: npm ci
+      # the fixture install must precede crap:ci: the coverage run executes
+      # the root vitest config, whose real-dev-server legs build the canonical
+      # fixture (e2e/fixture has its own committed lockfile) — without it the
+      # coverage run fails and the risk table degrades to CC-only (#346)
+      - run: npm ci
+        working-directory: e2e/fixture
       - run: npm run crap:ci
         env:
           GITHUB_BASE_SHA: ${{ github.event.pull_request.base.sha }}

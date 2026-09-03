@@ -1,6 +1,12 @@
 import { findDisclosure } from '@wojciechpiskorz/astroix-protocol';
-import { describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it } from 'vitest';
+import { AdapterError } from '../../astro-project-adapter/adapter-error.ts';
+import {
+  CERTIFIED_PAIRS,
+  uncertifiedPairError,
+} from '../../astro-project-adapter/certified-pair.ts';
 import type { SupervisionCloseReport } from '../../project-plane/supervision/close-report.ts';
+import type { SupervisionBootErrorCode } from '../../project-plane/supervision/plane-supervisor.ts';
 import type { WorkerEvent } from '../../project-plane/worker/worker-events.ts';
 import {
   malformedRequestFailure,
@@ -9,6 +15,7 @@ import {
 } from '../../project-plane/worker/worker-failure.ts';
 import type { WorkerInspectionResult } from '../../project-plane/worker/worker-request.ts';
 import {
+  type CertificationFacts,
   createProjectRuntime,
   type LaunchPlane,
   type ProjectRun,
@@ -16,6 +23,7 @@ import {
   type ProjectRunBootErrorCode,
 } from '../../project-runtime/project-runtime.ts';
 import type { ProxyHealthPrerequisite } from '../../project-runtime/proxy-health.ts';
+import { removeStubInstalls, stageStubInstall } from '../adapter-certification/stub-install.ts';
 import { completeReport, type FakePlane, fakePlane } from './plane-fakes.ts';
 
 /**
@@ -71,6 +79,8 @@ interface LaunchControl {
   arrive(): FakePlane;
   /** Rejects the launch with an error whose text would leak if surfaced. */
   fail(): void;
+  /** Rejects the launch with exactly this error object — the admission's input. */
+  failWith(error: unknown): void;
 }
 
 function controllableLaunch(): LaunchControl {
@@ -94,6 +104,7 @@ function controllableLaunch(): LaunchControl {
       return plane;
     },
     fail: () => reject(new Error(`cannot resolve astro at ${HOSTILE_ROOT} (pid 4242, port 9999)`)),
+    failWith: (error) => reject(error as Error),
   };
 }
 
@@ -349,6 +360,154 @@ describe('terminal startup outcomes — one sanitized boot error and one report'
   });
 });
 
+describe('the certification boot code — the ADR-0005 origin admitted shape-gated (#319)', () => {
+  /** Stub roots staged by the real-launch legs; removed once after the file. */
+  const stubRoots: string[] = [];
+
+  afterAll(async () => {
+    await removeStubInstalls(stubRoots);
+  });
+
+  /** One drift pair no release ever certified — the stub install's manifests. */
+  const DRIFT = { astro: '7.3.0', vite: '8.3.0' } as const;
+
+  /** The facts the adapter's own origin carries, as the deep-equal pin. */
+  function expectedFacts(detected: { astro: string; vite: string }): CertificationFacts {
+    return {
+      detected: { astro: detected.astro, vite: detected.vite },
+      certified: CERTIFIED_PAIRS.map((pair) => ({ astro: pair.astro, vite: pair.vite })),
+      rejectedContract:
+        'exact Astro/Vite pair certification must pass before project config executes',
+    };
+  }
+
+  it('an uncertified pair driven through the REAL launch reports the certification boot code with the pair facts', async () => {
+    const stubRoot = await stageStubInstall(DRIFT);
+    stubRoots.push(stubRoot);
+
+    // No injected launcher: the production composition (the pair
+    // pre-flight in plane-launch.ts) runs — and rejects before any child
+    // is ever spawned.
+    const runtime = createProjectRuntime();
+    const run = runtime.start({ projectRoot: stubRoot, devServerPort: HOSTILE_PORT });
+
+    const error = await bootErrorOf(run.ready);
+    // The category-bearing code, not the launch-shaped default and not a
+    // crash: the certification path is the one admitted origin.
+    expect(error.code).toBe('uncertified-pair');
+    expect(error.code).not.toBe('launch-failed');
+    expect(error.message).toBe('the managed project did not carry a certified Astro and Vite pair');
+    // ADR-0005's report requirement rides the payload, sanitized.
+    expect(error.certification).toEqual(expectedFacts(DRIFT));
+    expect(findDisclosure(JSON.stringify(error.certification) ?? '')).toBeNull();
+    expect(error.message).not.toContain(HOSTILE_ROOT);
+
+    // No plane ever existed: the launch-failure law's never-spawned report.
+    const report = await run.closed;
+    expect(report).toMatchObject({ reason: 'cancelled', outcome: 'complete', failures: [] });
+    expect(await run.stop()).toBe(report);
+  });
+
+  it('the adapter origin maps through the launch rejection at the same admission site', async () => {
+    const control = controllableLaunch();
+    const runtime = createProjectRuntime({ launchPlane: control.launchPlane });
+    const run = runtime.start({ projectRoot: HOSTILE_ROOT, devServerPort: HOSTILE_PORT });
+
+    control.failWith(uncertifiedPairError(DRIFT));
+    const error = await bootErrorOf(run.ready);
+    expect(error.code).toBe('uncertified-pair');
+    expect(error.certification).toEqual(expectedFacts(DRIFT));
+  });
+
+  it('fail-closed: a drifted or unknown origin never becomes a certification — it stays launch-failed', async () => {
+    // Every hostile origin the admission must refuse, in one table: an
+    // unknown adapter code, two adapter codes the boot vocabulary does not
+    // admit, an uncertified-pair code with a malformed payload, an empty
+    // certified list, and a payload whose version text is disclosure-shaped.
+    const hostileOrigins: ReadonlyArray<{ what: string; error: unknown }> = [
+      {
+        what: 'a seam rejection (a known adapter code, never a boot code)',
+        error: new AdapterError('seam-rejected', 'AstroProjectAdapter seam rejection at a seam', {
+          seam: 'a-seam',
+          seamClass: 'certified exact-pair',
+          expected: 'expected shape',
+          observed: 'observed shape',
+        }),
+      },
+      {
+        what: 'an unresolvable dependency (adapter code, not the certification origin)',
+        error: new AdapterError(
+          'dependency-unresolved',
+          'AstroProjectAdapter compatibility rejection: the managed project dependency astro does not resolve from the managed project installation',
+          { dependency: 'astro', reason: 'not-resolvable' },
+        ),
+      },
+      {
+        what: 'an uncertified-pair code without the details payload',
+        error: Object.assign(new Error('drifted origin'), { code: 'uncertified-pair' }),
+      },
+      {
+        what: 'an uncertified-pair code with an empty certified list',
+        error: Object.assign(new Error('drifted origin'), {
+          code: 'uncertified-pair',
+          details: {
+            detected: { astro: '7.3.0', vite: '8.3.0' },
+            certified: [],
+            rejectedContract: 'contract',
+          },
+        }),
+      },
+      {
+        what: 'an uncertified-pair payload whose detected version is disclosure-shaped',
+        error: Object.assign(new Error('drifted origin'), {
+          code: 'uncertified-pair',
+          details: {
+            detected: { astro: `${HOSTILE_ROOT}/astro`, vite: '8.3.0' },
+            certified: [{ astro: '7.2.10', vite: '8.2.2' }],
+            rejectedContract: 'contract',
+          },
+        }),
+      },
+    ];
+
+    for (const origin of hostileOrigins) {
+      const control = controllableLaunch();
+      const runtime = createProjectRuntime({ launchPlane: control.launchPlane });
+      const run = runtime.start({ projectRoot: HOSTILE_ROOT, devServerPort: HOSTILE_PORT });
+
+      control.failWith(origin.error);
+      const error = await bootErrorOf(run.ready);
+      expect(error.code, origin.what).toBe('launch-failed');
+      expect(
+        error.certification,
+        `${origin.what} must not carry certification facts`,
+      ).toBeUndefined();
+      expect(error.message).toBe(
+        'the project plane could not be launched for the requested project',
+      );
+    }
+  });
+
+  it("the supervisor's own boot codes still map through unchanged", async () => {
+    for (const code of [
+      'cancelled',
+      'startup-timeout',
+      'worker-crash',
+      'managed-astro-crash',
+    ] as const satisfies readonly SupervisionBootErrorCode[]) {
+      const control = controllableLaunch();
+      const runtime = createProjectRuntime({ launchPlane: control.launchPlane });
+      const run = runtime.start({ projectRoot: HOSTILE_ROOT, devServerPort: HOSTILE_PORT });
+      const plane = control.arrive();
+
+      plane.failReady(code);
+      const error = await bootErrorOf(run.ready);
+      expect(error.code).toBe(code);
+      expect(error.certification).toBeUndefined();
+    }
+  });
+});
+
 describe('typed inspection across the four families', () => {
   it('dispatches each exact typed request and settles the revisioned typed result', async () => {
     const { run, plane } = await readyRun();
@@ -596,7 +755,7 @@ describe('public-shape redaction (ADR-0006 §7 output hygiene, the AC)', () => {
   });
 
   it('every boot-error and structured-failure message is fixed-template, disclosure-free', () => {
-    const codes: ProjectRunBootErrorCode[] = [
+    const codes: Exclude<ProjectRunBootErrorCode, 'uncertified-pair'>[] = [
       'cancelled',
       'startup-timeout',
       'worker-crash',
@@ -607,9 +766,21 @@ describe('public-shape redaction (ADR-0006 §7 output hygiene, the AC)', () => {
     for (const code of codes) {
       const error = new ProjectRunBootError(code);
       expect(error.code).toBe(code);
+      expect(error.certification).toBeUndefined();
       expect(findDisclosure(error.message)).toBeNull();
       expect(error.message).not.toContain(HOSTILE_ROOT);
     }
+    // The one payload-bearing code: the template stays fixed and the
+    // facts ride the sanitized payload, never the message (#319).
+    const certified = new ProjectRunBootError('uncertified-pair', {
+      detected: { astro: '7.3.0', vite: '8.3.0' },
+      certified: [{ astro: '7.2.10', vite: '8.2.2' }],
+      rejectedContract:
+        'exact Astro/Vite pair certification must pass before project config executes',
+    });
+    expect(certified.code).toBe('uncertified-pair');
+    expect(findDisclosure(certified.message)).toBeNull();
+    expect(findDisclosure(JSON.stringify(certified.certification) ?? '')).toBeNull();
     for (const failure of [shutdownFailure(), malformedRequestFailure()]) {
       expect(findDisclosure(failure.message)).toBeNull();
     }

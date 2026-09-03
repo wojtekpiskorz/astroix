@@ -20,6 +20,7 @@
     "apps",
     "e2e/*.spec.ts",
     "e2e/web",
+    "e2e/desktop",
     "e2e/behavior-contracts/schema/*.test.ts",
     "e2e/retirement-readiness",
     "playwright.config.ts",
