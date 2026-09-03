@@ -133,9 +133,18 @@ export function connectControlPlaneChild(options: ControlPlaneClientOptions): Co
     }
     const settle = pending.get(report.requestId);
     if (settle === undefined) return;
-    pending.delete(report.requestId);
-    if (report.kind === 'register-result') settle.register?.(report.result);
-    if (report.kind === 'transition-result') settle.transition?.(report.outcome);
+    // A correlated report of the wrong kind for its request is a drifted
+    // message: dropped, never half-processed — the entry survives so the
+    // real reply (or the loss policy) settles the pending call.
+    if (report.kind === 'register-result' && settle.register !== undefined) {
+      pending.delete(report.requestId);
+      settle.register(report.result);
+      return;
+    }
+    if (report.kind === 'transition-result' && settle.transition !== undefined) {
+      pending.delete(report.requestId);
+      settle.transition(report.outcome);
+    }
   });
 
   handle.onDisconnect(() => markLost('channel-closed'));

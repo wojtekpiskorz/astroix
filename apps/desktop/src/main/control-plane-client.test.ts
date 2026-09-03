@@ -131,6 +131,33 @@ describe('connectControlPlaneChild — correlation', () => {
     await expect(pending).resolves.toEqual({ ok: false, code: 'root-unavailable' });
   });
 
+  it('drops a kind-mismatched reply whole — the pending entry survives for the real reply', async () => {
+    const { client, child } = connect(new FakeChild());
+    const pending = client.registerRoot('/a/root');
+    // a transition-result answering a register request: drifted correlation.
+    // The entry must NOT be consumed — the real reply (or the loss policy)
+    // settles the call, never silence.
+    child.reply(transitionResultReport(1, { kind: 'refused', reason: 'stale-session' }));
+    const settledEarly = await Promise.race([
+      pending.then(
+        () => true,
+        () => true,
+      ),
+      Promise.resolve(false),
+    ]);
+    expect(settledEarly).toBe(false);
+    child.reply(
+      registerResultReport(1, {
+        ok: true,
+        summary: { projectKey: 'x', displayName: 'x', availability: 'available' },
+      }),
+    );
+    await expect(pending).resolves.toEqual({
+      ok: true,
+      summary: { projectKey: 'x', displayName: 'x', availability: 'available' },
+    });
+  });
+
   it('drops drifted channel messages without settling anything', async () => {
     const { client, child } = connect(new FakeChild());
     const pending = client.activate('key123');

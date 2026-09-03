@@ -107,6 +107,16 @@ function isOwnMessage(message: unknown): message is Record<string, unknown> {
   );
 }
 
+/**
+ * The top-level key fence: a message carrying any field the closed shape
+ * does not name is drifted — dropped, never parsed (the fail-closed law
+ * applies to the whole envelope, not just the nested result shapes).
+ */
+function hasExactKeys(message: Record<string, unknown>, keys: readonly string[]): boolean {
+  const present = Object.keys(message);
+  return present.length === keys.length && keys.every((key) => key in message);
+}
+
 function isSessionRef(value: unknown): value is SessionRef {
   if (typeof value !== 'object' || value === null) return false;
   const record = value as Record<string, unknown>;
@@ -179,7 +189,12 @@ export function parseDesktopChildRequest(message: unknown): DesktopChildRequest 
   if (!isOwnMessage(message)) return null;
   const kind = message.kind;
   if (!isRequestId(message.requestId)) return null;
-  if (kind === 'register-root' && typeof message.root === 'string' && message.root.length > 0) {
+  if (
+    kind === 'register-root' &&
+    hasExactKeys(message, ['astroix', 'kind', 'requestId', 'root']) &&
+    typeof message.root === 'string' &&
+    message.root.length > 0
+  ) {
     return {
       astroix: CHANNEL_TAG,
       kind: 'register-root',
@@ -189,6 +204,7 @@ export function parseDesktopChildRequest(message: unknown): DesktopChildRequest 
   }
   if (
     kind === 'activate' &&
+    hasExactKeys(message, ['astroix', 'kind', 'requestId', 'projectKey']) &&
     typeof message.projectKey === 'string' &&
     message.projectKey.length > 0
   ) {
@@ -199,7 +215,11 @@ export function parseDesktopChildRequest(message: unknown): DesktopChildRequest 
       projectKey: message.projectKey,
     };
   }
-  if (kind === 'deactivate' && isSessionRef(message.sessionRef)) {
+  if (
+    kind === 'deactivate' &&
+    hasExactKeys(message, ['astroix', 'kind', 'requestId', 'sessionRef']) &&
+    isSessionRef(message.sessionRef)
+  ) {
     return {
       astroix: CHANNEL_TAG,
       kind: 'deactivate',
@@ -218,8 +238,10 @@ export function parseDesktopChildRequest(message: unknown): DesktopChildRequest 
 export function parseDesktopChildReport(message: unknown): DesktopChildReport | null {
   if (!isOwnMessage(message)) return null;
   const kind = message.kind;
-  if (kind === 'booted') return { astroix: CHANNEL_TAG, kind: 'booted' };
-  if (kind === 'session-state') {
+  if (kind === 'booted' && hasExactKeys(message, ['astroix', 'kind'])) {
+    return { astroix: CHANNEL_TAG, kind: 'booted' };
+  }
+  if (kind === 'session-state' && hasExactKeys(message, ['astroix', 'kind', 'sessionRef'])) {
     const ref = message.sessionRef;
     if (ref === null || isSessionRef(ref)) {
       return { astroix: CHANNEL_TAG, kind: 'session-state', sessionRef: ref };
@@ -227,7 +249,11 @@ export function parseDesktopChildReport(message: unknown): DesktopChildReport | 
     return null;
   }
   if (!isRequestId(message.requestId)) return null;
-  if (kind === 'register-result' && isRegisterResult(message.result)) {
+  if (
+    kind === 'register-result' &&
+    hasExactKeys(message, ['astroix', 'kind', 'requestId', 'result']) &&
+    isRegisterResult(message.result)
+  ) {
     return {
       astroix: CHANNEL_TAG,
       kind: 'register-result',
@@ -235,7 +261,11 @@ export function parseDesktopChildReport(message: unknown): DesktopChildReport | 
       result: message.result,
     };
   }
-  if (kind === 'transition-result' && isTransitionOutcome(message.outcome)) {
+  if (
+    kind === 'transition-result' &&
+    hasExactKeys(message, ['astroix', 'kind', 'requestId', 'outcome']) &&
+    isTransitionOutcome(message.outcome)
+  ) {
     return {
       astroix: CHANNEL_TAG,
       kind: 'transition-result',

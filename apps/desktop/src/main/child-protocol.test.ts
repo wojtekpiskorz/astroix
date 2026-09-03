@@ -56,6 +56,14 @@ describe('parseDesktopChildRequest', () => {
         root: '/a/root',
       }),
     ).toBeNull();
+    // an extra top-level field is a drifted envelope — the closed shape
+    // fences the whole message, not just the nested result shapes
+    expect(
+      parseDesktopChildRequest({
+        ...registerRootRequest(1, '/a/root'),
+        evil: true,
+      } as never),
+    ).toBeNull();
   });
 
   it('drops a register-root without a root and a deactivate without a valid reference', () => {
@@ -150,5 +158,19 @@ describe('parseDesktopChildReport', () => {
       }),
     ).toBeNull();
     expect(parseDesktopChildReport({ kind: 'booted' })).toBeNull();
+    // extra top-level fields on otherwise-valid envelopes drop too
+    expect(
+      parseDesktopChildReport({
+        astroix: 'astroix.desktop-private-channel',
+        kind: 'booted',
+        extra: true,
+      }),
+    ).toBeNull();
+    expect(
+      parseDesktopChildReport({
+        ...registerResultReport(1, { ok: false, code: 'root-unavailable' }),
+        surplus: 'field',
+      } as never),
+    ).toBeNull();
   });
 });
