@@ -237,15 +237,17 @@ test('stock Vite HMR rides the proxied native websocket, updates the canvas with
   expect(hmrSocket).toMatch(/token=/);
   expect(websockets.some((url) => url.includes('__astroix'))).toBe(false);
 
-  // The fresh dev server's one post-connect self-reload (its initial
-  // content-scan invalidation lands right after the first client
-  // connect — the project's own behavior, nothing to do with the
-  // mutation below): wait for IT, event-ordered, and only then start
+  // The canvas document's TWO baseline navigations — the initial load,
+  // then the fresh dev server's one post-connect self-reload (its
+  // initial content-scan invalidation lands right after the first
+  // client connect — the project's own behavior, nothing to do with the
+  // mutation below): wait for BOTH, event-ordered, and only then start
   // the no-navigation clock. Under load the connect poll itself can
   // take tens of seconds; a time-ordered clear could straddle the
-  // reload and redden the zero-navigation assertion on machine load
-  // alone.
-  await expect.poll(() => frameNavigations.length, { timeout: 30_000 }).toBeGreaterThanOrEqual(1);
+  // self-reload and redden the zero-navigation assertion on machine
+  // load alone (a ≥1 wait would clear on the initial load alone and
+  // still straddle the reload).
+  await expect.poll(() => frameNavigations.length, { timeout: 30_000 }).toBeGreaterThanOrEqual(2);
   frameNavigations.length = 0;
 
   // Select before the mutation.
