@@ -359,9 +359,15 @@ describe('the stranded-adoption convergence (#333, direction (a))', () => {
       // host with no seated editor.
       const snapshot = h.supervisor.snapshot();
       expect(snapshot.active).toBeUndefined();
-      expect(snapshot.lastFailure).toBeDefined();
+      // 'crash', not 'revocation': the harness run's close report is
+      // reason 'cancelled', the commit-time observer maps anything but
+      // 'startup-timeout' to 'crash', and that observer is the surface
+      // that clears the active entry in these legs — the
+      // revocation-category completion failure reaches only the
+      // declared no-op hook in this composition.
+      expect(snapshot.lastFailure?.category).toBe('crash');
       expect(second.snapshot.active).toBeUndefined();
-      expect(second.snapshot.lastFailure).toBeDefined();
+      expect(second.snapshot.lastFailure?.category).toBe('crash');
       expect(h.seatStore.active()).toBeNull();
 
       // The aftermath revoked exactly what the failed adoption granted:
@@ -440,7 +446,9 @@ describe('the stranded-adoption convergence (#333, direction (a))', () => {
       const first = activationOf(await h.execute(activate(PROJECT_B, 'req-1')));
       expect(first.target.session.generation).toBe(1);
       expect(h.supervisor.snapshot().active).toBeUndefined();
-      expect(h.supervisor.snapshot().lastFailure).toBeDefined();
+      // The same crash-law pin as the switch leg above: the observer's
+      // category, not the completion failure's.
+      expect(h.supervisor.snapshot().lastFailure?.category).toBe('crash');
       expect(h.seatStore.active()).toBeNull();
       expect(h.journal.indexOf('lease:revoke:b')).toBeGreaterThan(
         h.journal.indexOf('lease:grant:b'),
