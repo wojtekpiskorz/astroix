@@ -1,5 +1,8 @@
 import type { ProjectKey, SessionRef } from '@wojciechpiskorz/astroix-protocol';
-import type { DocumentAuthority } from '@wojciechpiskorz/astroix-runtime/client-authority';
+import type {
+  DocumentAuthority,
+  DocumentAuthorityRefusal,
+} from '@wojciechpiskorz/astroix-runtime/client-authority';
 import {
   type BypassFailure,
   createDebuggerGuard,
@@ -104,10 +107,13 @@ export type NavigationOutcome =
   | { readonly kind: 'refused'; readonly reason: 'bypass-not-active' }
   | { readonly kind: 'failed'; readonly detail: string };
 
+/** What a bind refusal names — the bypass gate's own reason beside the authority's refusal vocabulary. */
+export type EditorBindRefusalReason = 'bypass-not-active' | DocumentAuthorityRefusal;
+
 /** What `bindEditor` did — the authority's own refusals pass through beside the bypass gate. */
 export type EditorBindOutcome =
   | { readonly kind: 'bound'; readonly capability: string }
-  | { readonly kind: 'refused'; readonly reason: 'bypass-not-active' | string };
+  | { readonly kind: 'refused'; readonly reason: EditorBindRefusalReason };
 
 /** The readiness snapshot the host reports (the focused lanes' evidence). */
 export interface TargetReadiness {

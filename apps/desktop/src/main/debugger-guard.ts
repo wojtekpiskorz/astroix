@@ -13,7 +13,14 @@
  * goes false and the `onCompromised` hook fires, which the composition
  * answers by revoking document authority (editing disabled before
  * another control request). Recovery is re-activation on a fresh or
- * reloaded target — the guard re-runs the same three-step sequence.
+ * reloaded target — the guard re-runs the same three-step sequence,
+ * and every compromise path that leaves a live session of ours behind
+ * releases it first: pinned empirically on Electron 44.1.0, a rejected
+ * CDP command does NOT detach the session, and `attach()` into our own
+ * live session throws "Debugger is already attached to the target" —
+ * so a command-failure compromise (`compromiseAndReleaseSlot`) and the
+ * DevTools compromise both `detach()` before reporting, keeping
+ * recovery re-attach clean and its failure kinds honest.
  *
  * The two retention failures, both event-truth, not a poll:
  * - **The debugger detached** (another debugger took the target, the
@@ -172,11 +179,35 @@ export function createDebuggerGuard(options: DebuggerGuardOptions): DebuggerGuar
     return { ok: false, failure: recorded };
   }
 
+  /**
+   * Records a command-failure compromise AND releases the still-live
+   * slot: pinned empirically on Electron 44.1.0, a rejected CDP
+   * command does NOT detach the session, and `attach()` into our own
+   * live session throws "Debugger is already attached to the target" —
+   * so without this clean, every recovery re-activation would fail as
+   * a misattributed `attach-failed` and the target could never recover.
+   * Compromised FIRST (the devtools path's own discipline): the detach
+   * event our own `detach()` triggers must not overwrite the failure
+   * kind or double-report.
+   */
+  function compromiseAndReleaseSlot(
+    kind: BypassFailure['kind'],
+    error: unknown,
+  ): { ok: false; failure: BypassFailure } {
+    const recorded: BypassFailure = { kind, detail: messageOf(error) };
+    state = 'compromised';
+    failure = recorded;
+    options.debugger.detach();
+    options.onCompromised?.(recorded);
+    return { ok: false, failure: recorded };
+  }
+
   async function runActivation(): Promise<{ ok: true } | { ok: false; failure: BypassFailure }> {
     state = 'activating';
     try {
       options.debugger.attach(CDP_PROTOCOL_VERSION);
     } catch (error) {
+      // No slot of ours exists when attach itself refused — nothing to clean.
       return compromise('attach-failed', error);
     }
     options.onStep?.('attached');
@@ -187,7 +218,7 @@ export function createDebuggerGuard(options: DebuggerGuardOptions): DebuggerGuar
       await options.debugger.sendCommand(NETWORK_ENABLE_COMMAND);
     } catch (error) {
       if (wasCompromised()) return { ok: false, failure: recordedFailure() };
-      return compromise('network-enable-failed', error);
+      return compromiseAndReleaseSlot('network-enable-failed', error);
     }
     if (wasCompromised()) return { ok: false, failure: recordedFailure() };
     options.onStep?.('network-enabled');
@@ -195,7 +226,7 @@ export function createDebuggerGuard(options: DebuggerGuardOptions): DebuggerGuar
       await options.debugger.sendCommand(BYPASS_SERVICE_WORKER_COMMAND, { bypass: true });
     } catch (error) {
       if (wasCompromised()) return { ok: false, failure: recordedFailure() };
-      return compromise('bypass-set-failed', error);
+      return compromiseAndReleaseSlot('bypass-set-failed', error);
     }
     if (wasCompromised()) return { ok: false, failure: recordedFailure() };
     state = 'bypassed';

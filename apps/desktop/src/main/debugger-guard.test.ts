@@ -25,16 +25,18 @@ interface RecordedCall {
   readonly protocolVersion?: string;
 }
 
-/** The scriptable fake: attach/commands may be set to fail; the detach and DevTools events are hand-fired. */
+/** The scriptable fake: attach/commands may be set to fail; the detach and DevTools events are hand-fired. Models the pinned 44.1.0 attachment contract: `attach` into our own live session throws, and neither a rejected command nor anything else detaches except `detach()` or the detach event. */
 function fakeDebugger(): {
   seam: DebuggerSeam;
   calls(): readonly RecordedCall[];
   failAttach(error: Error): void;
   failCommand(method: string, error: Error): void;
+  healCommand(method: string): void;
   fireDetach(reason: string): void;
   fireDevtoolsOpened(): void;
   detachListeners(): number;
   devtoolsClosed(): boolean;
+  attached(): boolean;
 } {
   const calls: RecordedCall[] = [];
   const attachFailures: Error[] = [];
@@ -42,10 +44,15 @@ function fakeDebugger(): {
   const detachHandlers: ((reason: string) => void)[] = [];
   const devtoolsHandlers: (() => void)[] = [];
   let devtoolsClosed = false;
+  let attached = false;
   const seam: DebuggerSeam = {
     attach: (protocolVersion) => {
       const failure = attachFailures.shift();
       if (failure !== undefined) throw failure;
+      // The pinned real-binary law: attach into our own live session
+      // throws "Debugger is already attached to the target".
+      if (attached) throw new Error('Debugger is already attached to the target');
+      attached = true;
       calls.push({ kind: 'attach', protocolVersion });
     },
     sendCommand: (method, params) => {
@@ -54,9 +61,11 @@ function fakeDebugger(): {
       calls.push({ kind: 'command', method, params });
       return Promise.resolve({});
     },
-    // The self-detach echoes the real event the way Electron does.
+    // The self-detach releases the slot and echoes the real event the
+    // way Electron does — synchronously, during the call.
     detach: () => {
       calls.push({ kind: 'command', method: '(self-detach)' });
+      attached = false;
       for (const handler of [...detachHandlers]) handler('The debugger is detached');
     },
     onDetach: (handler) => {
@@ -86,7 +95,12 @@ function fakeDebugger(): {
     failCommand: (method, error) => {
       commandFailures.set(method, error);
     },
+    healCommand: (method) => {
+      commandFailures.delete(method);
+    },
     fireDetach: (reason) => {
+      // A real detach event means the session ended, whatever took it.
+      attached = false;
       for (const handler of [...detachHandlers]) handler(reason);
     },
     fireDevtoolsOpened: () => {
@@ -94,6 +108,7 @@ function fakeDebugger(): {
     },
     detachListeners: () => detachHandlers.length,
     devtoolsClosed: () => devtoolsClosed,
+    attached: () => attached,
   };
 }
 
@@ -172,8 +187,13 @@ describe('createDebuggerGuard — the fail-closed CDP bypass sequence', () => {
     expect(bypassResult.ok).toBe(false);
     if (!bypassResult.ok) expect(bypassResult.failure.kind).toBe('bypass-set-failed');
     expect(bypassGuard.state()).toBe('compromised');
-    // The enable ran; the bypass never set — the sequence stopped at its failure.
-    expect(bypassFake.calls()).toHaveLength(2);
+    // The enable ran; the bypass never set; the still-live slot was
+    // released — the sequence stopped at its failure, cleanly.
+    expect(bypassFake.calls()).toEqual([
+      { kind: 'attach', protocolVersion: CDP_PROTOCOL_VERSION },
+      { kind: 'command', method: NETWORK_ENABLE_COMMAND },
+      { kind: 'command', method: '(self-detach)' },
+    ]);
   });
 
   it('treats a detach after activation as a retention failure (the DevTools law)', async () => {
@@ -245,6 +265,44 @@ describe('createDebuggerGuard — the fail-closed CDP bypass sequence', () => {
     if (!result.ok) expect(result.failure.kind).toBe('debugger-detached');
     expect(failures).toEqual(['debugger-detached']);
     expect(guard.state()).toBe('compromised');
+  });
+
+  it('releases the still-live slot on a command-failure compromise, so recovery re-attach cannot collide with our own session', async () => {
+    // The pinned 44.1.0 laws this leg rides: a rejected command does
+    // NOT detach (the fake models that), and attach into our own live
+    // session throws "Debugger is already attached to the target".
+    const enableFake = fakeDebugger();
+    enableFake.failCommand(NETWORK_ENABLE_COMMAND, new Error('enable rejected by the target'));
+    const enableFailures: string[] = [];
+    const enableGuard = createDebuggerGuard({
+      debugger: enableFake.seam,
+      onCompromised: (failure) => {
+        enableFailures.push(failure.kind);
+      },
+    });
+    const enableResult = await enableGuard.activate();
+    expect(enableResult.ok).toBe(false);
+    if (!enableResult.ok) expect(enableResult.failure.kind).toBe('network-enable-failed');
+    // The slot was released with the compromise — without it, the
+    // retry's attach would throw and misreport as attach-failed.
+    expect(enableFake.attached()).toBe(false);
+    expect(enableFailures).toEqual(['network-enable-failed']);
+    enableFake.healCommand(NETWORK_ENABLE_COMMAND);
+    const enableRecovery = await enableGuard.activate();
+    expect(enableRecovery).toEqual({ ok: true });
+    expect(enableGuard.isBypassActive()).toBe(true);
+    expect(enableFailures).toEqual(['network-enable-failed']);
+
+    // Same law for the bypass command's failure.
+    const bypassFake = fakeDebugger();
+    bypassFake.failCommand(BYPASS_SERVICE_WORKER_COMMAND, new Error('bypass rejected'));
+    const bypassGuard = createDebuggerGuard({ debugger: bypassFake.seam });
+    const bypassResult = await bypassGuard.activate();
+    expect(bypassResult.ok).toBe(false);
+    if (!bypassResult.ok) expect(bypassResult.failure.kind).toBe('bypass-set-failed');
+    expect(bypassFake.attached()).toBe(false);
+    bypassFake.healCommand(BYPASS_SERVICE_WORKER_COMMAND);
+    expect(await bypassGuard.activate()).toEqual({ ok: true });
   });
 
   it('shares the in-flight activation across retries — a mid-flight compromise never runs two sequences in parallel', async () => {
