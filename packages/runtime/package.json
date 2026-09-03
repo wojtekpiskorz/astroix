@@ -34,7 +34,9 @@
     "./session-supervisor/clients": "./session-supervisor/clients/session-clients.ts",
     "./session-supervisor/fence": "./session-supervisor/fence/edit-fence.ts",
     "./session-supervisor/commit": "./session-supervisor/commit/switch-coordinator.ts",
-    "./session-supervisor/revocation": "./session-supervisor/revocation/authority-revocation.ts"
+    "./session-supervisor/revocation": "./session-supervisor/revocation/authority-revocation.ts",
+    "./session-supervisor/completion": "./session-supervisor/completion/replacement-completion.ts",
+    "./session-supervisor/tombstone": "./session-supervisor/tombstone/boot-tombstone.ts"
   },
   "sideEffects": false,
   "dependencies": {

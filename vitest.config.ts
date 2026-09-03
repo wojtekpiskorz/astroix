@@ -225,6 +225,23 @@ export default defineConfig({
         // listener on OS-assigned loopback ports.
         'packages/runtime/session-supervisor/commit/**',
         'packages/runtime/session-supervisor/revocation/**',
+        // The session-supervisor completion + tombstone seams (#239, F7,
+        // additive): the host-observed replacement completion (the exact
+        // main-frame ready handshake, launcher readiness, and the quit
+        // close without navigation — observed-promise seams the Electron
+        // host lanes satisfy), the irreversible post-revocation failure
+        // aftermath (revoke and reap the granted candidate, show the
+        // launcher when a target remains, report the failed no-active
+        // state, never resume the old session), the incomplete-reap tail
+        // (tombstone persisted first, candidate rolled back, blocked
+        // no-active state), and the boot-scoped tombstone (the
+        // versioned-JSON atomic store, same-boot activation denial, the
+        // exclusive edit-writer-lease recovery over an injected D3 proof
+        // seam, later-boot stale-by-construction clearing) are
+        // deterministic units over injected seams and real temp
+        // directories (the registry-store discipline).
+        'packages/runtime/session-supervisor/completion/**',
+        'packages/runtime/session-supervisor/tombstone/**',
       ],
       reporter: ['json'],
       reportsDirectory: 'coverage',
