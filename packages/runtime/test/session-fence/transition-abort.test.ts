@@ -6,7 +6,6 @@ import {
 import { describe, expect, it } from 'vitest';
 import { createHostCapabilityGrants } from '../../api/http/host-capability.ts';
 import { writeFailure, writeRejection } from '../../edit-authority/executor/write-outcomes.ts';
-import { sha256Hex } from '../../edit-authority/grants/canonical-bounds.ts';
 import type { SessionClients } from '../../session-supervisor/clients/session-clients.ts';
 import { createSessionClients } from '../../session-supervisor/clients/session-clients.ts';
 import type { DrainReport } from '../../session-supervisor/fence/drain-report.ts';
@@ -21,6 +20,7 @@ import {
 } from '../../session-supervisor/staging/session-supervisor.ts';
 import {
   type ControlledEdit,
+  committed,
   completeReport,
   controlledEdit,
   itemAt,
@@ -162,10 +162,6 @@ function expectOldAuthorityIntact(fx: Fixture, old: OldSession): void {
 }
 
 /** Commits one committed outcome for the queue seam. */
-function committed() {
-  return { type: 'committed' as const, revision: sha256Hex(new TextEncoder().encode('landed')) };
-}
-
 /** Fences the old session's edit pipeline with one accepted edit and two pending debounces. */
 function fenceForDrain(
   fx: Fixture,

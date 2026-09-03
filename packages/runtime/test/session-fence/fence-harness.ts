@@ -1,4 +1,5 @@
 import type { WriteOutcome } from '../../edit-authority/executor/write-outcomes.ts';
+import { sha256Hex } from '../../edit-authority/grants/canonical-bounds.ts';
 import type { SupervisionCloseReport } from '../../project-plane/supervision/close-report.ts';
 import {
   shutdownFailure,
@@ -35,6 +36,11 @@ export interface ControlledEdit {
 }
 
 /** One edit whose queue execution the test settles by hand. */
+/** A valid committed outcome — the digest currency's shape, built like production builds it. */
+export function committed(): WriteOutcome {
+  return { type: 'committed', revision: sha256Hex(new TextEncoder().encode('landed')) };
+}
+
 export function controlledEdit(key: string): ControlledEdit {
   let calls = 0;
   let settleOutcome: (outcome: WriteOutcome) => void = () => {};

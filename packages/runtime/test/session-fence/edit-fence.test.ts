@@ -4,7 +4,6 @@ import {
   writeFailure,
   writeRejection,
 } from '../../edit-authority/executor/write-outcomes.ts';
-import { sha256Hex } from '../../edit-authority/grants/canonical-bounds.ts';
 import {
   DRAIN_DEADLINE_MS,
   type DrainReport,
@@ -15,7 +14,14 @@ import {
   type EditFence,
   type QueuedEdit,
 } from '../../session-supervisor/fence/edit-fence.ts';
-import { controlledEdit, flush, itemAt, manualClock, settlementOf } from './fence-harness.ts';
+import {
+  committed,
+  controlledEdit,
+  flush,
+  itemAt,
+  manualClock,
+  settlementOf,
+} from './fence-harness.ts';
 
 /**
  * The #237 focused tests, part 1 — the fence machine itself: synchronous
@@ -24,11 +30,6 @@ import { controlledEdit, flush, itemAt, manualClock, settlementOf } from './fenc
  * five-second deadline on both sides, the no-silent-work law after a
  * timeout, and the resume legality window at every edge.
  */
-
-/** A valid committed outcome — the digest currency's shape, built like production builds it. */
-function committed(): WriteOutcome {
-  return { type: 'committed', revision: sha256Hex(new TextEncoder().encode('landed')) };
-}
 
 /** The begun drain of a fence over the given pending flush, or a thrown expectation when refused. */
 function begunFence(fence: EditFence, pending: () => Iterable<QueuedEdit> = () => []): EditDrain {

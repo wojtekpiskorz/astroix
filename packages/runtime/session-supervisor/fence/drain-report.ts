@@ -32,14 +32,6 @@ export type DrainOperationOutcome = 'success' | 'conflict' | 'failure';
 /** Why a drain failed on the write surface: a revision conflict, or a write that failed without conflicting. */
 export type DrainFailureCause = 'conflict' | 'write-failure';
 
-/**
- * The rollback reason a drain's abort carries into F4's rollback
- * vocabulary — the one abort language for the candidate (`staging/**`
- * declares and exports `RollbackReason` read-only; F5 consumes it,
- * never redefines it).
- */
-export type DrainRollbackReason = Extract<RollbackReason, 'drain-conflict' | 'drain-timeout'>;
-
 /** The first terminal failure a drain aborted on — the conflict report's own detail (the key, never a path). */
 export interface DrainFailureDetail {
   /** The failing operation's debounce key — sanitized reporting vocabulary, never a filesystem path. */
