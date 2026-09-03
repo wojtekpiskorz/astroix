@@ -22,6 +22,7 @@ import {
   createReceiptLedger,
   type ExecutorExitView,
   type PreparationResult,
+  type ReceiptBindings,
   type ReceiptLedger,
   type SwitchPreparationReceipt,
   type SwitchTarget,
@@ -134,6 +135,28 @@ export type ForcedPreparation =
   | { readonly kind: 'prepared'; readonly receipt: SwitchPreparationReceipt }
   | { readonly kind: 'refused'; readonly reason: PreparationRefusal }
   | { readonly kind: 'incomplete-reap' };
+
+/**
+ * The shared mint tail both prepare variants end in — a subset of both
+ * preparation unions, so the one helper serves both.
+ */
+type PreparedTail =
+  | { readonly kind: 'prepared'; readonly receipt: SwitchPreparationReceipt }
+  | { readonly kind: 'refused'; readonly reason: 'transition-already-prepared' };
+
+/**
+ * The linearization spine's answer: the spent receipt's frozen bindings
+ * plus the ordered revocation report (the caller runs only its distinct
+ * tail), or the pre-linearization rejection (nothing spent, nothing
+ * revoked).
+ */
+type SpentTransition =
+  | {
+      readonly kind: 'spent';
+      readonly bindings: ReceiptBindings;
+      readonly revoked: RevocationReport;
+    }
+  | { readonly kind: 'rejected'; readonly reason: ReceiptRejection };
 
 /** What one preparation freezes — the mint input (the receipt's bindings-to-be). */
 export interface SwitchPreparationInput {
@@ -287,14 +310,73 @@ export function createSwitchCoordinator(options: SwitchCoordinatorOptions): Swit
   const targetIsWellFormed = (input: SwitchPreparationInput): boolean =>
     input.target.kind !== 'deactivation' || input.stopOldRun !== undefined;
 
+  /**
+   * The preparations' shared preamble — the checks both variants run
+   * before their own preparation work: the authoritative-client law and
+   * the target's own sanity. One refusal or null.
+   */
+  const refusePreparation = (input: SwitchPreparationInput): PreparationRefusal | null => {
+    if (!clientIsAuthoritative(input)) return 'client-not-authoritative';
+    if (!targetIsWellFormed(input)) return 'deactivation-without-stop';
+    return null;
+  };
+
+  /** The mint's tail — the one place the input freezes into currency and the duplicate-live refusal translates. */
+  const mintFor = (input: SwitchPreparationInput, preparation: PreparationResult): PreparedTail => {
+    const minted = ledger.mint({
+      oldSession: input.oldSession,
+      target: input.target,
+      client: input.client,
+      fence: input.fence,
+      preparation,
+      host: input.host,
+      routes: input.routes,
+      stopOldRun: input.stopOldRun ?? null,
+    });
+    if (minted.kind === 'refused') return { kind: 'refused', reason: minted.reason };
+    return { kind: 'prepared', receipt: minted.receipt };
+  };
+
+  /**
+   * The linearization spine — the one place the pinned order lives:
+   * every binding check (the variant's own guard, then the fence's
+   * certified state) runs BEFORE the one-use flip, and the flip runs
+   * BEFORE the first revocation. A refusal linearizes nothing and
+   * spends nothing; a spend hands back the frozen bindings plus the
+   * ordered revocation report, and the caller runs only its distinct
+   * tail (the grant, or the deactivation stop).
+   */
+  const spendReceipt = async (
+    receipt: SwitchPreparationReceipt,
+    variantGuard: (bindings: ReceiptBindings) => ReceiptRejection | null,
+  ): Promise<SpentTransition> => {
+    const lookup = ledger.lookup(receipt);
+    if (lookup.kind !== 'valid') return { kind: 'rejected', reason: lookup.kind };
+    const bindings = lookup.bindings;
+    const guarded = variantGuard(bindings);
+    if (guarded !== null) return { kind: 'rejected', reason: guarded };
+    if (!fenceStillCertified(bindings.preparation, bindings.fence.state)) {
+      return { kind: 'rejected', reason: 'fence-resumed' };
+    }
+    if (!ledger.consume(receipt)) {
+      return { kind: 'rejected', reason: 'already-consumed' };
+    }
+    // THE LINEARIZATION: the receipt is spent. From here the pass is
+    // irreversible — the ordered revocation runs, then the tail.
+    const revoked = await revokeOldAuthority({
+      session: bindings.oldSession,
+      host: bindings.host,
+      clientCapability: bindings.client.httpCapability,
+      routes: bindings.routes,
+      surfaces,
+    });
+    return { kind: 'spent', bindings, revoked };
+  };
+
   const coordinator: SwitchCoordinator = {
     prepareNormal: async (input) => {
-      if (!clientIsAuthoritative(input)) {
-        return { kind: 'refused', reason: 'client-not-authoritative' };
-      }
-      if (!targetIsWellFormed(input)) {
-        return { kind: 'refused', reason: 'deactivation-without-stop' };
-      }
+      const preamble = refusePreparation(input);
+      if (preamble !== null) return { kind: 'refused', reason: preamble };
       // The sealed verdict first — the receipt reads the report, never the fence state.
       const report = await input.drain.outcome;
       if (report.kind === 'timed-out') return { kind: 'refused', reason: 'drain-timed-out' };
@@ -304,28 +386,12 @@ export function createSwitchCoordinator(options: SwitchCoordinatorOptions): Swit
       if (input.fence.state !== 'drained') {
         return { kind: 'refused', reason: 'fence-resumed' };
       }
-      const minted = ledger.mint({
-        oldSession: input.oldSession,
-        target: input.target,
-        client: input.client,
-        fence: input.fence,
-        drain: input.drain,
-        preparation: { kind: 'normal', report },
-        host: input.host,
-        routes: input.routes,
-        stopOldRun: input.stopOldRun ?? null,
-      });
-      if (minted.kind === 'refused') return { kind: 'refused', reason: minted.reason };
-      return { kind: 'prepared', receipt: minted.receipt };
+      return mintFor(input, { kind: 'normal', report });
     },
 
     prepareForced: async (input) => {
-      if (!clientIsAuthoritative(input)) {
-        return { kind: 'refused', reason: 'client-not-authoritative' };
-      }
-      if (!targetIsWellFormed(input)) {
-        return { kind: 'refused', reason: 'deactivation-without-stop' };
-      }
+      const preamble = refusePreparation(input);
+      if (preamble !== null) return { kind: 'refused', reason: preamble };
       const state = input.fence.state;
       if (state !== 'timed-out' && state !== 'terminal-after-timeout') {
         return { kind: 'refused', reason: 'fence-not-timed-out' };
@@ -336,84 +402,34 @@ export function createSwitchCoordinator(options: SwitchCoordinatorOptions): Swit
       void input.executor.kill().catch(() => {});
       const exit = await observeForcedExit(input.executor.exited, clock);
       if (exit === null) return { kind: 'incomplete-reap' };
-      const minted = ledger.mint({
-        oldSession: input.oldSession,
-        target: input.target,
-        client: input.client,
-        fence: input.fence,
-        drain: input.drain,
-        preparation: { kind: 'forced', exit },
-        host: input.host,
-        routes: input.routes,
-        stopOldRun: input.stopOldRun ?? null,
-      });
-      if (minted.kind === 'refused') return { kind: 'refused', reason: minted.reason };
-      return { kind: 'prepared', receipt: minted.receipt };
+      return mintFor(input, { kind: 'forced', exit });
     },
 
     commit: async (receipt, candidate) => {
-      // Every binding check precedes the one-use flip: a refusal
-      // linearizes nothing and spends nothing.
-      const lookup = ledger.lookup(receipt);
-      if (lookup.kind !== 'valid') {
-        return { kind: 'rejected', reason: lookup.kind };
-      }
-      const bindings = lookup.bindings;
-      if (bindings.target.kind !== 'replacement') {
-        return { kind: 'rejected', reason: 'not-a-replacement' };
-      }
-      if (!sameSession(bindings.target.candidate, candidate.ref)) {
-        return { kind: 'rejected', reason: 'candidate-mismatch' };
-      }
-      if (!fenceStillCertified(bindings.preparation, bindings.fence.state)) {
-        return { kind: 'rejected', reason: 'fence-resumed' };
-      }
-      if (!ledger.consume(receipt)) {
-        return { kind: 'rejected', reason: 'already-consumed' };
-      }
-      // THE LINEARIZATION: the receipt is spent. From here the pass is
-      // irreversible — the ordered revocation runs, then the grant.
-      const revoked = await revokeOldAuthority({
-        session: bindings.oldSession,
-        host: bindings.host,
-        clientCapability: bindings.client.httpCapability,
-        routes: bindings.routes,
-        surfaces,
+      const spent = await spendReceipt(receipt, (bindings) => {
+        if (bindings.target.kind !== 'replacement') return 'not-a-replacement';
+        if (!sameSession(bindings.target.candidate, candidate.ref)) return 'candidate-mismatch';
+        return null;
       });
+      if (spent.kind === 'rejected') return spent;
       try {
         const granted = await candidate.commit();
-        return { kind: 'committed', committed: granted.committed, revoked };
+        return { kind: 'committed', committed: granted.committed, revoked: spent.revoked };
       } catch {
         // The grant refused after revocation: irreversible (§4 step
         // 7) — report the failure with the revocation report; the
         // candidate's own machine has already converged its orphaned
         // run, and F7's completion owns the aftermath.
-        return { kind: 'failed', failure: POST_REVOCATION_FAILURE, revoked };
+        return { kind: 'failed', failure: POST_REVOCATION_FAILURE, revoked: spent.revoked };
       }
     },
 
     deactivate: async (receipt) => {
-      const lookup = ledger.lookup(receipt);
-      if (lookup.kind !== 'valid') {
-        return { kind: 'rejected', reason: lookup.kind };
-      }
-      const bindings = lookup.bindings;
-      if (bindings.target.kind !== 'deactivation') {
-        return { kind: 'rejected', reason: 'not-a-deactivation' };
-      }
-      if (!fenceStillCertified(bindings.preparation, bindings.fence.state)) {
-        return { kind: 'rejected', reason: 'fence-resumed' };
-      }
-      if (!ledger.consume(receipt)) {
-        return { kind: 'rejected', reason: 'already-consumed' };
-      }
-      const revoked = await revokeOldAuthority({
-        session: bindings.oldSession,
-        host: bindings.host,
-        clientCapability: bindings.client.httpCapability,
-        routes: bindings.routes,
-        surfaces,
-      });
+      const spent = await spendReceipt(receipt, (bindings) =>
+        bindings.target.kind !== 'deactivation' ? 'not-a-deactivation' : null,
+      );
+      if (spent.kind === 'rejected') return spent;
+      const { bindings, revoked } = spent;
       // The shutdown transition's own stop: authority is revoked, the
       // outgoing run stops now; its close report is the completion
       // lane's (F7), never this result's.

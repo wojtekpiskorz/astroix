@@ -142,7 +142,6 @@ describe('the normal preparation — issuance over the sealed terminal drain', (
     expect(prepared.receipt.target).toEqual({ kind: 'replacement', candidate: candidate.ref });
     expect(prepared.receipt.client.document).toEqual(EDITOR_DOC);
     expect(prepared.receipt.fence).toBe(sealed.fence); // identity-bound
-    expect(prepared.receipt.drain).toBe(sealed.drain);
     expect(prepared.receipt.preparation).toEqual({
       kind: 'normal',
       report: { kind: 'drained', settled: 0 },

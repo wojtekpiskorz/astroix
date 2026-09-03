@@ -221,6 +221,12 @@ async function switchSession(b: Battery, projectKey: ProjectKey): Promise<Seat> 
   return seat(b, committed.committed, projectKey, grantLease(b, projectKey));
 }
 
+/** The cycle's tail as one move: switch to B, then back to A — every old-tab leg starts from its A2 seat. */
+async function switchBThenBack(b: Battery): Promise<Seat> {
+  await switchSession(b, PROJECT_B);
+  return await switchSession(b, PROJECT_A);
+}
+
 /** The dispatch authority bound to the REAL supervisor snapshot and capability tables. */
 function dispatchAuthority(b: Battery, executed: unknown[]) {
   return {
@@ -371,10 +377,7 @@ describe('the A-to-B-to-A cycle — every axis of the first A’s tab is dead', 
   it('the old tab’s events admission is refused — dead cookie, and a rotated cookie cannot resurrect it', async () => {
     const b = battery as Battery;
     const a1 = await activateFirst(b, PROJECT_A);
-    const a2Seat = await (async () => {
-      await switchSession(b, PROJECT_B);
-      return await switchSession(b, PROJECT_A);
-    })();
+    const a2Seat = await switchBThenBack(b);
     const authority = {
       expectedPort: b.port,
       sessionState: () => {
@@ -477,10 +480,7 @@ describe('the A-to-B-to-A cycle — every axis of the first A’s tab is dead', 
   it('a stale query is refused by the real dispatch — revoked cookie first, stale pair even with fresh authority', async () => {
     const b = battery as Battery;
     const a1 = await activateFirst(b, PROJECT_A);
-    const a2Seat = await (async () => {
-      await switchSession(b, PROJECT_B);
-      return await switchSession(b, PROJECT_A);
-    })();
+    const a2Seat = await switchBThenBack(b);
     const executed: unknown[] = [];
     const authority = dispatchAuthority(b, executed);
 
@@ -518,10 +518,7 @@ describe('the A-to-B-to-A cycle — every axis of the first A’s tab is dead', 
   it('a stale selection restore is refused — the old tab’s document binding never covers the traffic', async () => {
     const b = battery as Battery;
     const a1 = await activateFirst(b, PROJECT_A);
-    const a2Seat = await (async () => {
-      await switchSession(b, PROJECT_B);
-      return await switchSession(b, PROJECT_A);
-    })();
+    const a2Seat = await switchBThenBack(b);
     const executed: unknown[] = [];
     // the selection-restore rehydrate rides a session-scoped read from
     // the old tab's document: its binding was unbound at the commit —
@@ -544,10 +541,7 @@ describe('the A-to-B-to-A cycle — every axis of the first A’s tab is dead', 
   it('a stale mutation is refused at every admission stage it could present', async () => {
     const b = battery as Battery;
     const a1 = await activateFirst(b, PROJECT_A);
-    const a2Seat = await (async () => {
-      await switchSession(b, PROJECT_B);
-      return await switchSession(b, PROJECT_A);
-    })();
+    const a2Seat = await switchBThenBack(b);
     const executed: unknown[] = [];
     const authority = dispatchAuthority(b, executed);
 
@@ -608,8 +602,7 @@ describe('the A-to-B-to-A cycle — every axis of the first A’s tab is dead', 
   it('the old tab cannot regain authority — every truth of its identity is dead after the cycle', async () => {
     const b = battery as Battery;
     const a1 = await activateFirst(b, PROJECT_A);
-    await switchSession(b, PROJECT_B);
-    const a2Seat = await switchSession(b, PROJECT_A);
+    const a2Seat = await switchBThenBack(b);
 
     // its host capability never verifies again
     expect(b.capabilityGrants.verify(a1.cookie, { host: 'project', projectKey: PROJECT_A })).toBe(

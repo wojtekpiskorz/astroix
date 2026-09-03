@@ -1,6 +1,8 @@
 import type { SessionRef } from '@wojciechpiskorz/astroix-protocol';
 import { describe, expect, it } from 'vitest';
+import type { SwitchPreparationInput } from '../../session-supervisor/commit/switch-coordinator.ts';
 import { createSwitchCoordinator } from '../../session-supervisor/commit/switch-coordinator.ts';
+import type { SwitchPreparationReceipt } from '../../session-supervisor/commit/switch-receipt.ts';
 import type { RevocationStep } from '../../session-supervisor/revocation/authority-revocation.ts';
 import type { StagedCandidate } from '../../session-supervisor/staging/session-supervisor.ts';
 import {
@@ -13,6 +15,7 @@ import {
   manualClock,
   PROJECT_A,
   PROJECT_B,
+  type SessionSeat,
   sameRef,
   switchTo,
 } from './commit-harness.ts';
@@ -51,6 +54,55 @@ function stubCandidate(ref: SessionRef, committed: { ran: boolean }): StagedCand
     },
     rollback: () => Promise.resolve(completeReport('stopped')),
   };
+}
+
+/** The prepared switch the shared prologue hands back: the seat, the candidate (replacements), the mint input, the receipt. */
+interface PreparedSwitch {
+  readonly first: SessionSeat;
+  readonly candidate: StagedCandidate | null;
+  readonly base: SwitchPreparationInput;
+  readonly receipt: SwitchPreparationReceipt;
+}
+
+/**
+ * The linearization legs' shared prologue (the neighboring
+ * `deactivationBase` idiom): activate A, drain it clean, begin the B
+ * candidate for replacements, and mint the receipt over the drained
+ * session. Each leg then varies exactly one variable around the spend.
+ */
+async function preparedSwitch(
+  fx: ReturnType<typeof commitFixture>,
+  tail:
+    | { readonly kind: 'replacement' }
+    | { readonly kind: 'deactivation'; readonly stopOldRun: () => void },
+): Promise<PreparedSwitch> {
+  const first = await activateFirst(fx, PROJECT_A);
+  const drain = await drainClean(first);
+  const candidate = tail.kind === 'replacement' ? await beginCandidate(fx, PROJECT_B) : null;
+  const base: SwitchPreparationInput = {
+    oldSession: first.ref,
+    target:
+      candidate !== null
+        ? { kind: 'replacement', candidate: candidate.ref }
+        : { kind: 'deactivation' },
+    client: first.client,
+    fence: first.fence,
+    drain,
+    host: { host: 'project', projectKey: PROJECT_A },
+    routes: first.lease,
+    stopOldRun: tail.kind === 'deactivation' ? tail.stopOldRun : undefined,
+  };
+  const prepared = await fx.coordinator.prepareNormal(base);
+  if (prepared.kind !== 'prepared') {
+    throw new Error(`expected a prepared receipt, refused: ${prepared.reason}`);
+  }
+  return { first, candidate, base, receipt: prepared.receipt };
+}
+
+/** The replacement legs' narrowing guard — a replacement prologue always carries its candidate. */
+function candidateOf(prepared: PreparedSwitch): StagedCandidate {
+  if (prepared.candidate === null) throw new Error('expected the replacement candidate');
+  return prepared.candidate;
 }
 
 describe('the commit linearization — consumption, ordering, and the grant', () => {
@@ -101,19 +153,9 @@ describe('the commit linearization — consumption, ordering, and the grant', ()
 
   it('a candidate that is not the bound one refuses without spending the receipt or revoking anything', async () => {
     const fx = commitFixture();
-    const first = await activateFirst(fx, PROJECT_A);
-    const drain = await drainClean(first);
-    const candidate = await beginCandidate(fx, PROJECT_B);
-    const prepared = await fx.coordinator.prepareNormal({
-      oldSession: first.ref,
-      target: { kind: 'replacement', candidate: candidate.ref },
-      client: first.client,
-      fence: first.fence,
-      drain,
-      host: { host: 'project', projectKey: PROJECT_A },
-      routes: first.lease,
-    });
-    if (prepared.kind !== 'prepared') throw new Error('unreachable');
+    const prepared = await preparedSwitch(fx, { kind: 'replacement' });
+    const { first, receipt } = prepared;
+    const candidate = candidateOf(prepared);
 
     // a candidate the receipt never bound: a foreign pair, its commit never called
     const strangerCommitted = { ran: false };
@@ -122,7 +164,7 @@ describe('the commit linearization — consumption, ordering, and the grant', ()
       strangerCommitted,
     );
     fx.journal.length = 0; // observe only what this commit attempt does
-    const rejected = await fx.coordinator.commit(prepared.receipt, stranger);
+    const rejected = await fx.coordinator.commit(receipt, stranger);
     expect(rejected).toEqual({ kind: 'rejected', reason: 'candidate-mismatch' });
     expect(strangerCommitted.ran).toBe(false);
     // nothing linearized: no revocation ran, old authority intact
@@ -131,25 +173,14 @@ describe('the commit linearization — consumption, ordering, and the grant', ()
       fx.capabilityGrants.verify(first.cookie, { host: 'project', projectKey: PROJECT_A }),
     ).toBe(true);
     // the receipt is unspent — the bound candidate still commits with it
-    const committed = await fx.coordinator.commit(prepared.receipt, candidate);
+    const committed = await fx.coordinator.commit(receipt, candidate);
     expect(committed.kind).toBe('committed');
   });
 
   it('a consumed receipt never replays — the sanitized refusal, with no second revocation', async () => {
     const fx = commitFixture();
-    const first = await activateFirst(fx, PROJECT_A);
-    const drain = await drainClean(first);
-    const candidate = await beginCandidate(fx, PROJECT_B);
-    const prepared = await fx.coordinator.prepareNormal({
-      oldSession: first.ref,
-      target: { kind: 'replacement', candidate: candidate.ref },
-      client: first.client,
-      fence: first.fence,
-      drain,
-      host: { host: 'project', projectKey: PROJECT_A },
-      routes: first.lease,
-    });
-    if (prepared.kind !== 'prepared') throw new Error('unreachable');
+    const prepared = await preparedSwitch(fx, { kind: 'replacement' });
+    const candidate = candidateOf(prepared);
     const firstCommit = await fx.coordinator.commit(prepared.receipt, candidate);
     expect(firstCommit.kind).toBe('committed');
     const afterCommit = fx.journal.length;
@@ -161,9 +192,10 @@ describe('the commit linearization — consumption, ordering, and the grant', ()
 
   it('a receipt another coordinator minted is unknown currency — nothing revokes', async () => {
     const fx = commitFixture();
-    const first = await activateFirst(fx, PROJECT_A);
-    const drain = await drainClean(first);
-    const candidate = await beginCandidate(fx, PROJECT_B);
+    const prepared = await preparedSwitch(fx, { kind: 'replacement' });
+    const { first, base, receipt } = prepared;
+    void receipt; // the fx-minted twin stays unspent — the foreign mint is the variable
+    const candidate = candidateOf(prepared);
     const foreign = createSwitchCoordinator({
       clients: fx.clients,
       hostCapabilities: fx.capabilityGrants,
@@ -172,15 +204,7 @@ describe('the commit linearization — consumption, ordering, and the grant', ()
       httpBindings: fx.httpBindings,
       reapClock: manualClock().clock,
     });
-    const minted = await foreign.prepareNormal({
-      oldSession: first.ref,
-      target: { kind: 'replacement', candidate: candidate.ref },
-      client: first.client,
-      fence: first.fence,
-      drain,
-      host: { host: 'project', projectKey: PROJECT_A },
-      routes: first.lease,
-    });
+    const minted = await foreign.prepareNormal(base);
     if (minted.kind !== 'prepared') throw new Error('unreachable');
     fx.journal.length = 0;
     const rejected = await fx.coordinator.commit(minted.receipt, candidate);
@@ -193,24 +217,14 @@ describe('the commit linearization — consumption, ordering, and the grant', ()
 
   it('a receipt whose fence left its certified state refuses at consumption — unspent, nothing revoked', async () => {
     const fx = commitFixture();
-    const first = await activateFirst(fx, PROJECT_A);
-    const drain = await drainClean(first);
-    const candidate = await beginCandidate(fx, PROJECT_B);
-    const prepared = await fx.coordinator.prepareNormal({
-      oldSession: first.ref,
-      target: { kind: 'replacement', candidate: candidate.ref },
-      client: first.client,
-      fence: first.fence,
-      drain,
-      host: { host: 'project', projectKey: PROJECT_A },
-      routes: first.lease,
-    });
-    if (prepared.kind !== 'prepared') throw new Error('unreachable');
+    const prepared = await preparedSwitch(fx, { kind: 'replacement' });
+    const { first, receipt } = prepared;
+    const candidate = candidateOf(prepared);
     // the fence resumes between mint and consumption: the certification
     // no longer covers the fence's state
     expect(first.drain?.resume()).toEqual({ kind: 'resumed' });
     fx.journal.length = 0;
-    const rejected = await fx.coordinator.commit(prepared.receipt, candidate);
+    const rejected = await fx.coordinator.commit(receipt, candidate);
     expect(rejected).toEqual({ kind: 'rejected', reason: 'fence-resumed' });
     expect(fx.journal).toEqual([]);
     expect(
@@ -220,19 +234,9 @@ describe('the commit linearization — consumption, ordering, and the grant', ()
 
   it('a grant refused after revocation is the irreversible failed result — authority stays revoked', async () => {
     const fx = commitFixture();
-    const first = await activateFirst(fx, PROJECT_A);
-    const drain = await drainClean(first);
-    const candidate = await beginCandidate(fx, PROJECT_B);
-    const prepared = await fx.coordinator.prepareNormal({
-      oldSession: first.ref,
-      target: { kind: 'replacement', candidate: candidate.ref },
-      client: first.client,
-      fence: first.fence,
-      drain,
-      host: { host: 'project', projectKey: PROJECT_A },
-      routes: first.lease,
-    });
-    if (prepared.kind !== 'prepared') throw new Error('unreachable');
+    const prepared = await preparedSwitch(fx, { kind: 'replacement' });
+    const { first, receipt } = prepared;
+    const candidate = candidateOf(prepared);
     // the candidate settles before the commit runs — the grant will refuse
     const candidateRun = fx.runs[1];
     if (candidateRun === undefined) throw new Error('expected the candidate run');
@@ -240,7 +244,7 @@ describe('the commit linearization — consumption, ordering, and the grant', ()
     candidateRun.closeWith(completeReport('stopped'));
     await rollback;
 
-    const failed = await fx.coordinator.commit(prepared.receipt, candidate);
+    const failed = await fx.coordinator.commit(receipt, candidate);
     expect(failed.kind).toBe('failed');
     if (failed.kind !== 'failed') throw new Error('unreachable');
     expect(failed.failure).toEqual({
@@ -254,7 +258,7 @@ describe('the commit linearization — consumption, ordering, and the grant', ()
     ).toBe(false);
     expect(first.lease.revocations).toBe(1);
     // and the spent receipt never replays
-    const replay = await fx.coordinator.commit(prepared.receipt, candidate);
+    const replay = await fx.coordinator.commit(receipt, candidate);
     expect(replay).toEqual({ kind: 'rejected', reason: 'already-consumed' });
   });
 
@@ -293,29 +297,18 @@ describe('the commit linearization — consumption, ordering, and the grant', ()
 describe('the deactivation variant — the same order, no grant', () => {
   it('consumes the receipt, revokes in order, stops the outgoing run after revocation, and grants nothing', async () => {
     const fx = commitFixture();
-    const first = await activateFirst(fx, PROJECT_A);
-    fx.liveGrants.set(`${first.ref.runtimeEpoch}#${first.ref.generation}`, 2);
-    fx.journal.length = 0;
-    const oldRun = fx.runs[0];
-    if (oldRun === undefined) throw new Error('unreachable');
     let stopped = false;
-
-    const drain = await drainClean(first);
-    const prepared = await fx.coordinator.prepareNormal({
-      oldSession: first.ref,
-      target: { kind: 'deactivation' },
-      client: first.client,
-      fence: first.fence,
-      drain,
-      host: { host: 'project', projectKey: PROJECT_A },
-      routes: first.lease,
+    const prepared = await preparedSwitch(fx, {
+      kind: 'deactivation',
       stopOldRun: () => {
         stopped = true;
         fx.journal.push('stop:old-run');
       },
     });
-    if (prepared.kind !== 'prepared') throw new Error('unreachable');
-    const result = await fx.coordinator.deactivate(prepared.receipt);
+    const { first, receipt } = prepared;
+    fx.liveGrants.set(`${first.ref.runtimeEpoch}#${first.ref.generation}`, 2);
+    fx.journal.length = 0; // observe exactly the deactivation's sequence
+    const result = await fx.coordinator.deactivate(receipt);
 
     expect(result.kind).toBe('deactivated');
     if (result.kind !== 'deactivated') throw new Error('unreachable');
@@ -343,19 +336,8 @@ describe('the deactivation variant — the same order, no grant', () => {
 
   it('refuses a replacement receipt handed to deactivate', async () => {
     const fx = commitFixture();
-    const first = await activateFirst(fx, PROJECT_A);
-    const drain = await drainClean(first);
-    const candidate = await beginCandidate(fx, PROJECT_B);
-    const replacement = await fx.coordinator.prepareNormal({
-      oldSession: first.ref,
-      target: { kind: 'replacement', candidate: candidate.ref },
-      client: first.client,
-      fence: first.fence,
-      drain,
-      host: { host: 'project', projectKey: PROJECT_A },
-      routes: first.lease,
-    });
-    if (replacement.kind !== 'prepared') throw new Error('unreachable');
+    const replacement = await preparedSwitch(fx, { kind: 'replacement' });
+    const candidate = candidateOf(replacement);
     fx.journal.length = 0;
     const wrongTarget = await fx.coordinator.deactivate(replacement.receipt);
     expect(wrongTarget).toEqual({ kind: 'rejected', reason: 'not-a-deactivation' });
@@ -366,26 +348,15 @@ describe('the deactivation variant — the same order, no grant', () => {
 
   it('refuses a deactivation receipt handed to commit', async () => {
     const fx = commitFixture();
-    const first = await activateFirst(fx, PROJECT_A);
-    const drain = await drainClean(first);
-    const prepared = await fx.coordinator.prepareNormal({
-      oldSession: first.ref,
-      target: { kind: 'deactivation' },
-      client: first.client,
-      fence: first.fence,
-      drain,
-      host: { host: 'project', projectKey: PROJECT_A },
-      routes: first.lease,
-      stopOldRun: () => {},
-    });
-    if (prepared.kind !== 'prepared') throw new Error('unreachable');
+    const prepared = await preparedSwitch(fx, { kind: 'deactivation', stopOldRun: () => {} });
+    const { first, receipt } = prepared;
     const strangerCommitted = { ran: false };
     const anyCandidate = stubCandidate(
       { runtimeEpoch: first.ref.runtimeEpoch, generation: 99 },
       strangerCommitted,
     );
     fx.journal.length = 0;
-    const wrongCommit = await fx.coordinator.commit(prepared.receipt, anyCandidate);
+    const wrongCommit = await fx.coordinator.commit(receipt, anyCandidate);
     expect(wrongCommit).toEqual({ kind: 'rejected', reason: 'not-a-replacement' });
     expect(strangerCommitted.ran).toBe(false);
     expect(fx.journal).toEqual([]);
@@ -393,19 +364,7 @@ describe('the deactivation variant — the same order, no grant', () => {
 
   it('a deactivated receipt never replays either', async () => {
     const fx = commitFixture();
-    const first = await activateFirst(fx, PROJECT_A);
-    const drain = await drainClean(first);
-    const prepared = await fx.coordinator.prepareNormal({
-      oldSession: first.ref,
-      target: { kind: 'deactivation' },
-      client: first.client,
-      fence: first.fence,
-      drain,
-      host: { host: 'project', projectKey: PROJECT_A },
-      routes: first.lease,
-      stopOldRun: () => {},
-    });
-    if (prepared.kind !== 'prepared') throw new Error('unreachable');
+    const prepared = await preparedSwitch(fx, { kind: 'deactivation', stopOldRun: () => {} });
     expect((await fx.coordinator.deactivate(prepared.receipt)).kind).toBe('deactivated');
     const replay = await fx.coordinator.deactivate(prepared.receipt);
     expect(replay).toEqual({ kind: 'rejected', reason: 'already-consumed' });

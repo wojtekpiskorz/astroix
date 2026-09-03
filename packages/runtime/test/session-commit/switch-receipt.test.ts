@@ -27,17 +27,11 @@ function bindings(overrides: Partial<ReceiptBindings> = {}): ReceiptBindings {
     submit: () => ({ kind: 'refused' as const }),
     fence: () => ({ kind: 'refused' as const, reason: 'not-open' as const }),
   };
-  const drain = {
-    outcome: Promise.resolve({ kind: 'drained' as const, settled: 0 }),
-    settled: Promise.resolve(),
-    resume: () => ({ kind: 'refused' as const, reason: 'not-fenced' as const }),
-  };
   return {
     oldSession: { runtimeEpoch: EPOCH, generation: 1 },
     target: { kind: 'replacement', candidate: { runtimeEpoch: EPOCH, generation: 2 } },
     client: { document: EDITOR_DOC, capability: 'client-a', httpCapability: 'http-a' },
     fence,
-    drain,
     preparation: { kind: 'normal', report: { kind: 'drained', settled: 0 } },
     host: { host: 'project', projectKey: 'aaaaaaaaaaaaaaaaaaaaaaaaaa' },
     routes: fakeLease([], ''),
@@ -69,7 +63,6 @@ describe('the switch-preparation receipt ledger', () => {
       httpCapability: 'http-a',
     });
     expect(receipt.fence).toBe(bound.fence); // identity-bound, not copied
-    expect(receipt.drain).toBe(bound.drain);
     expect(receipt.preparation).toEqual({
       kind: 'normal',
       report: { kind: 'drained', settled: 0 },
@@ -143,7 +136,6 @@ describe('the switch-preparation receipt ledger', () => {
       target: receipt.target,
       client: receipt.client,
       fence: receipt.fence,
-      drain: receipt.drain,
       preparation: receipt.preparation,
       host: receipt.host,
       routes: receipt.routes,

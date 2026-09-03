@@ -1,7 +1,7 @@
 import type { SessionRef } from '@wojciechpiskorz/astroix-protocol';
 import type { ClientDocument } from '../clients/session-clients.ts';
 import type { DrainReport } from '../fence/drain-report.ts';
-import type { EditDrain, EditFence } from '../fence/edit-fence.ts';
+import type { EditFence } from '../fence/edit-fence.ts';
 import type { ProjectHostTarget, RoutesTarget } from '../revocation/authority-revocation.ts';
 
 /**
@@ -17,9 +17,9 @@ import type { ProjectHostTarget, RoutesTarget } from '../revocation/authority-re
  *
  * **The bindings are the truth** (the ticket's migration policy): the
  * receipt freezes the exact old `SessionRef`, the candidate `SessionRef`
- * or the deactivation target, the authoritative client, the fence and
- * its drain, the preparation result, and the old-side revocation
- * targets (the project host scope and the origin lease). After
+ * or the deactivation target, the authoritative client, the fence, the
+ * preparation result, and the old-side revocation targets (the project
+ * host scope and the origin lease). After
  * acceptance nothing re-reads "what is active" to decide what to
  * revoke — consumption drives exactly what was bound, and a binding
  * that no longer matches the presented candidate refuses without
@@ -91,8 +91,17 @@ export interface AuthoritativeClient {
 
 /**
  * Everything a receipt freezes at issuance. The function-bearing
- * members (the fence, the drain, the lease) are bound by identity —
+ * members (the fence, the lease, the stop seam) are bound by identity —
  * the receipt is control-plane-internal currency and never serializes.
+ * Every member has a consumer: `oldSession`/`host`/`routes` drive the
+ * revocation, `client.httpCapability` unbinds the HTTP-side binding,
+ * `fence` and `preparation` gate consumption, `target` guards the
+ * grant, `stopOldRun` is the deactivation tail; `client`'s document and
+ * supervisor-side capability are the issuance-frozen identity of the
+ * authoritative editor the AC binds — F7's completion reports them, and
+ * nothing re-validates authority off a receipt (the mint validated it).
+ * The drain HANDLE is deliberately not frozen: its sealed verdict rides
+ * `preparation`, and no post-mint path consumes the handle.
  */
 export interface ReceiptBindings {
   /** The exact outgoing pair — every session-scoped revocation's key. */
@@ -103,8 +112,6 @@ export interface ReceiptBindings {
   readonly client: AuthoritativeClient;
   /** The fence the preparation drained — consumption re-checks it never left its certified state. */
   readonly fence: EditFence;
-  /** The exact drain whose sealed verdict the normal variant certifies. */
-  readonly drain: EditDrain;
   /** The preparation proof the receipt carries. */
   readonly preparation: PreparationResult;
   /** The outgoing session's project host scope — capability and route revocations' target. */
@@ -128,9 +135,17 @@ export interface SwitchPreparationReceipt extends ReceiptBindings {
   readonly [RECEIPT_BRAND]: true;
 }
 
-/** One ledger entry: the frozen bindings plus the one-use flag. */
+/**
+ * One ledger entry. A CONSUMED entry is reduced to its tombstone — the
+ * bindings (the fence, the lease, the stop seam closures) are dropped
+ * at the consume flip, so a long-lived control plane accumulates one
+ * spent flag per transition, never dead-session machinery; only the
+ * unconsumed entries carry live bindings (and the duplicate-live
+ * guard's identity scan).
+ */
 interface LedgerEntry {
-  readonly bindings: ReceiptBindings;
+  /** Null once consumed — the tombstone flip retires the machinery with the transition. */
+  bindings: ReceiptBindings | null;
   consumed: boolean;
 }
 
@@ -160,6 +175,8 @@ export type MintResult =
  * revoked surfaces. Consuming frees the identity for a fresh prepare;
  * an abandoned live receipt pins its identity until then (voiding an
  * abandoned preparation is the cancel lane's, not this currency's).
+ * And consumption retires the entry's whole binding set with it: the
+ * ledger keeps spent tombstones, not dead-session machinery.
  */
 export interface ReceiptLedger {
   /**
@@ -201,7 +218,11 @@ export function createReceiptLedger(): ReceiptLedger {
   return {
     mint: (bindings) => {
       for (const entry of entries.values()) {
-        if (!entry.consumed && sameTransition(entry.bindings, bindings)) {
+        if (
+          !entry.consumed &&
+          entry.bindings !== null &&
+          sameTransition(entry.bindings, bindings)
+        ) {
           return { kind: 'refused', reason: 'transition-already-prepared' };
         }
       }
@@ -213,12 +234,15 @@ export function createReceiptLedger(): ReceiptLedger {
       const entry = entries.get(receipt);
       if (entry === undefined) return { kind: 'unknown-receipt' };
       if (entry.consumed) return { kind: 'already-consumed' };
+      // the invariant: an unconsumed entry always carries its bindings
+      if (entry.bindings === null) return { kind: 'unknown-receipt' };
       return { kind: 'valid', bindings: entry.bindings };
     },
     consume: (receipt) => {
       const entry = entries.get(receipt);
       if (entry === undefined || entry.consumed) return false;
       entry.consumed = true;
+      entry.bindings = null; // the tombstone: the machinery dies with the transition
       return true;
     },
   };
