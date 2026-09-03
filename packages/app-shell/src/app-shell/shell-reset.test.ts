@@ -5,6 +5,7 @@ import { useAppStore } from '../state/app-store.ts';
 import { useEditSessionStore } from '../state/edit-session-store.ts';
 import { createSessionGate } from '../state/session-gate.ts';
 import { bindShellSession, clearShellStores, shellStoreSnapshot } from '../state/shell-stores.ts';
+import { aSelection } from '../state/test-fixtures.ts';
 import { composeShellReset, runShellReset, SHELL_RESET_STEPS } from './shell-reset.ts';
 
 /**
@@ -76,8 +77,8 @@ describe('composeShellReset', () => {
     clearShellStores();
     bindShellSession(FIRST);
     const app = useAppStore.getState();
-    app.setSelection(FIRST, { tag: 'h1', elementId: null });
-    app.setCanvasState(FIRST, { url: 'http://project.localhost/' });
+    app.setSelection(FIRST, aSelection());
+    app.setCanvasState(FIRST, { url: 'http://project.localhost/', origin: 'project' });
     app.setActiveEntry(FIRST, { entryId: 'entry-1' });
     const edit = useEditSessionStore.getState();
     edit.holdGrant(FIRST, { token: 'grant' });

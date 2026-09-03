@@ -1,5 +1,6 @@
 import type { SessionRef } from '@wojciechpiskorz/astroix-protocol';
 import { create } from 'zustand';
+import type { SelectionDescriptor } from './selection.ts';
 import { sameSessionPair } from './session-gate.ts';
 
 /**
@@ -7,8 +8,9 @@ import { sameSessionPair } from './session-gate.ts';
  * store holds cross-vertical state"): the cross-vertical session state
  * the commit-time reset must clear — live selection, canvas state, and
  * the active entry (ADR-0006 §5 / ADR-0002 amendment 3's list). The
- * canvas and content lanes grow the real interactions; the shell owns
- * the fields, their session binding, and their clearing.
+ * canvas lane (#242, G3) gave the selection and canvas slots their real
+ * shapes — the canvas component writes them, the shell binds and
+ * clears them; the content lanes grow the rest.
  *
  * The second belt lives in the setters: every write carries the ACTING
  * pair and lands only while the store is bound at that exact pair — a
@@ -16,15 +18,17 @@ import { sameSessionPair } from './session-gate.ts';
  * the reset unbound the store) writes nothing.
  */
 
-/** The clicked-element descriptor slot — the canvas/matcher lanes own the real shape; the shell only clears it. */
-export interface ShellSelection {
-  readonly tag: string;
-  readonly elementId: string | null;
-}
+/** The clicked-element identity slot — the re-matchable descriptor (#242, G3; CONTEXT.md "selection"). */
+export type ShellSelection = SelectionDescriptor;
 
-/** The canvas slot's session state — the live page the canvas frame shows. */
+/** The canvas's observed origin state — the fail-closed editing gate's input (the spec's user story 5). */
+export type CanvasOriginState = 'project' | 'external';
+
+/** The canvas slot's session state — the live page the canvas frame last observed. */
 export interface CanvasSessionState {
-  readonly url: string;
+  /** The observed natural URL; `null` while the canvas is off the project origin (unreadable by law). */
+  readonly url: string | null;
+  readonly origin: CanvasOriginState;
 }
 
 /** The active-entry slot — the entry open in the content editor (CONTEXT.md "active entry"). */
@@ -43,6 +47,16 @@ interface AppStoreState {
   setSelection(actor: SessionRef, selection: ShellSelection): void;
   setCanvasState(actor: SessionRef, canvas: CanvasSessionState): void;
   setActiveEntry(actor: SessionRef, entry: ActiveEntry): void;
+  /**
+   * Drops the live selection without touching the binding — the canvas's
+   * fail-closed off-origin action (#242: inspection disabled until the
+   * canvas returns). Clearing carries no pair: the ordered commit-time
+   * reset is the authority that empties this slot across sessions, and a
+   * drop is idempotent with it — a late off-origin observation landing
+   * after a transition can at worst clear a fresh session's empty-or-
+   * stale selection, never repopulate anything.
+   */
+  clearSelection(): void;
   /** The reset's clearing step: wipes the fields AND unbinds — post-clear writes cannot land. */
   clear(): void;
 }
@@ -62,5 +76,6 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
   setActiveEntry: (actor, activeEntry) => {
     if (sameSessionPair(actor, get().session)) set({ activeEntry });
   },
+  clearSelection: () => set({ selection: null }),
   clear: () => set({ session: null, selection: null, canvas: null, activeEntry: null }),
 }));

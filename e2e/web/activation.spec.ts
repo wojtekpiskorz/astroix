@@ -1,6 +1,7 @@
-import { expect, type Page, test } from '@playwright/test';
+import { expect, test } from '@playwright/test';
 import { rawExchange, rawStatus } from '../../apps/web/src/e2e-wire.ts';
 import { WEB_LANE_PORT } from '../../apps/web/src/stage-e2e.ts';
+import { activateButton } from './spec-helpers.ts';
 
 /**
  * The activation battery of the web host's product E2E (#240): the
@@ -21,11 +22,6 @@ import { WEB_LANE_PORT } from '../../apps/web/src/stage-e2e.ts';
  * for the next one (the launcher label at each boundary is the state
  * machine's own derivation, pinned along the way).
  */
-
-/** The list item whose staged copy is at `position` (0 and 1 are the fixture copies; 2 is broken). */
-function activateButton(page: Page, position: number) {
-  return page.getByTestId('project-list').locator('li').nth(position).getByTestId('activate');
-}
 
 test.describe.configure({ mode: 'serial' });
 

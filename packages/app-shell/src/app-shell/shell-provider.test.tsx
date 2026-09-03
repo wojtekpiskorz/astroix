@@ -3,6 +3,7 @@ import { createAppClient } from '../app-client.ts';
 import { useAppStore } from '../state/app-store.ts';
 import { useEditSessionStore } from '../state/edit-session-store.ts';
 import { clearShellStores, shellStoreSnapshot } from '../state/shell-stores.ts';
+import { aSelection } from '../state/test-fixtures.ts';
 import { AppShell } from './app-shell.tsx';
 import { ShellProvider } from './shell-provider.tsx';
 import { CAPABILITY, type FetchScript, ORIGIN, scriptFetch } from './shell-test-harness.ts';
@@ -19,6 +20,7 @@ import { actAsync, byTestId, click, type Mounted, mount, waitFor } from './test-
  */
 
 const G1 = { runtimeEpoch: 'epoch-fixture', generation: 1 };
+
 const LAUNCHER_URL = 'http://launcher.localhost:4426/__astroix/app/';
 const G2 = { runtimeEpoch: 'epoch-fixture', generation: 2 };
 
@@ -110,7 +112,7 @@ describe('the commit-time reset', () => {
     script.resolveInspect(11);
     await waitFor(() => byTestId(shell.container, 'inspect-revision').textContent === '11');
     // Populate the shell stores the way the lanes will (gated writes under the bound pair).
-    useAppStore.getState().setSelection(G1, { tag: 'h1', elementId: null });
+    useAppStore.getState().setSelection(G1, aSelection());
     useEditSessionStore.getState().holdGrant(G1, { token: 'grant' });
     await waitFor(() =>
       (byTestId(shell.container, 'shell-state').textContent ?? '').includes('selection=1'),
@@ -180,7 +182,7 @@ describe('the repeated generation change with delayed fetch and SSE delivery', (
     expect(marker).toContain('selection=0');
 
     // Late old-pair writes against the fresh generation's stores are dropped.
-    useAppStore.getState().setSelection(G1, { tag: 'h1', elementId: null });
+    useAppStore.getState().setSelection(G1, aSelection());
     useEditSessionStore.getState().holdGrant(G1, { token: 'stale-grant' });
     // A late old-pair SSE frame on the fresh stream is dropped too — a
     // dispatched invalidation would have refetched (a second inspect).

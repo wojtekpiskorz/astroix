@@ -1,4 +1,5 @@
 import { expect, type Page, type Route, test } from '@playwright/test';
+import { activateButton, LAUNCHER_APP_URL, PROJECT_APP_URL } from './spec-helpers.ts';
 
 /**
  * The rebuilt app shell's product E2E (#241, G2): the project document
@@ -27,14 +28,6 @@ import { expect, type Page, type Route, test } from '@playwright/test';
  * global active session — the legs walk one coherent session history and
  * restore the idle state for whatever follows.
  */
-
-/** The list item whose staged copy is at `position` (0 and 1 are the fixture copies; 2 is broken). */
-function activateButton(page: Page, position: number) {
-  return page.getByTestId('project-list').locator('li').nth(position).getByTestId('activate');
-}
-
-const PROJECT_APP_URL = /^http:\/\/(?!launcher)[a-z2-7]+\.localhost:\d+\/__astroix\/app\/$/;
-const LAUNCHER_APP_URL = /launcher\.localhost:\d+\/__astroix\/app\//;
 
 /**
  * Aborts the next launcher-document navigation so the OLD document
@@ -81,10 +74,15 @@ test('activation lands the rebuilt shell at a fresh generation with live session
   await expect(page.getByTestId('shell-state')).toContainText('queries=1');
   await expect(page.getByTestId('shell-state')).toContainText('reset=none');
 
-  // The three stable feature slots exist — placeholders, no vertical implemented.
-  for (const slot of ['sidebar', 'editor-dock', 'canvas']) {
+  // The stable feature slots exist. The sidebar and editor-dock slots
+  // stay placeholders (no vertical implemented yet); the canvas slot
+  // carries #242's natural-route same-origin canvas — the plain iframe
+  // on the project origin (its own battery pins the canvas's behavior;
+  // this leg pins only that the slot is filled by it).
+  for (const slot of ['sidebar', 'editor-dock']) {
     await expect(page.locator(`[data-slot="${slot}"]`)).toContainText(`slot: ${slot}`);
   }
+  await expect(page.locator('[data-slot="canvas"] [data-testid="canvas-frame"]')).toHaveCount(1);
 
   // Restore the idle state for the next leg.
   await page.getByTestId('deactivate').click();

@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { useAppStore } from './app-store.ts';
 import { useEditSessionStore } from './edit-session-store.ts';
 import { bindShellSession, clearShellStores, shellStoreSnapshot } from './shell-stores.ts';
+import { aSelection } from './test-fixtures.ts';
 
 /**
  * The shell stores' focused lane (#241): the reset-clearable fields,
@@ -22,14 +23,16 @@ beforeEach(() => {
 describe('the app store', () => {
   it('binds at one exact pair and takes writes only under it', () => {
     useAppStore.getState().bindSession(FIRST);
-    useAppStore.getState().setSelection(FIRST, { tag: 'h1', elementId: null });
-    expect(useAppStore.getState().selection).toEqual({ tag: 'h1', elementId: null });
+    useAppStore.getState().setSelection(FIRST, aSelection());
+    expect(useAppStore.getState().selection).toEqual(aSelection());
   });
 
   it('drops stale-pair writes — the second belt at the state layer', () => {
     useAppStore.getState().bindSession(FIRST);
-    useAppStore.getState().setSelection(NEXT, { tag: 'h1', elementId: null });
-    useAppStore.getState().setCanvasState(NEXT, { url: 'http://project.localhost/x' });
+    useAppStore.getState().setSelection(NEXT, aSelection());
+    useAppStore
+      .getState()
+      .setCanvasState(NEXT, { url: 'http://project.localhost/x', origin: 'project' });
     useAppStore.getState().setActiveEntry(NEXT, { entryId: 'entry-1' });
     expect(useAppStore.getState().selection).toBeNull();
     expect(useAppStore.getState().canvas).toBeNull();
@@ -92,8 +95,8 @@ describe('the shell-stores aggregate', () => {
   it('populates every reset-clearable field, then clears all seven at once', () => {
     bindShellSession(FIRST);
     const app = useAppStore.getState();
-    app.setSelection(FIRST, { tag: 'h1', elementId: null });
-    app.setCanvasState(FIRST, { url: 'http://project.localhost/' });
+    app.setSelection(FIRST, aSelection());
+    app.setCanvasState(FIRST, { url: 'http://project.localhost/', origin: 'project' });
     app.setActiveEntry(FIRST, { entryId: 'entry-1' });
     const edit = useEditSessionStore.getState();
     edit.holdGrant(FIRST, { token: 'grant-opaque-1' });
@@ -127,7 +130,7 @@ describe('the shell-stores aggregate', () => {
     clearShellStores();
     bindShellSession(NEXT);
     // A stale FIRST-pair write arrives late against the NEXT-bound stores.
-    useAppStore.getState().setSelection(FIRST, { tag: 'h1', elementId: null });
+    useAppStore.getState().setSelection(FIRST, aSelection());
     useEditSessionStore.getState().holdGrant(FIRST, { token: 'grant' });
     expect(shellStoreSnapshot().selection).toBe(false);
     expect(shellStoreSnapshot().grants).toBe(0);

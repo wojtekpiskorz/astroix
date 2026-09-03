@@ -1,15 +1,23 @@
 /**
  * `@wojciechpiskorz/astroix-app-shell/shell` — the rebuilt app shell
  * (#241, G2): the shell frame and provider composed over the ONE
- * AppClient at generation-scoped state — the role capability table, the
- * session-gated shell stores, the generation-scoped query discipline,
- * and the one ordered reset the transition-commit path executes. The
- * surface for renderer hosts (the web host's project document today,
- * the Electron renderer later); the domain-deaf foundation barrel (`.`
- * — negative-pinned) and the retained `./presentation` widgets are
- * untouched by it.
+ * AppClient at generation-scoped state — the role capability table,
+ * the session-gated shell stores, the generation-scoped query discipline,
+ * and the one ordered reset the transition-commit path executes — plus
+ * the shell-owned natural-route canvas (#242, G3) and its selection
+ * identity. The surface for renderer hosts (the web host's project
+ * document today, the Electron renderer later); the domain-deaf
+ * foundation barrel (`.` — negative-pinned) and the retained
+ * `./presentation` widgets are untouched by it.
+ *
+ * Canvas internals stay INSIDE the package: the rule walk
+ * (`canvas/canvas-rules.ts`) has no consumer beyond the canvas itself —
+ * the one-consumer rule keeps it off this barrel. The disclosed seam
+ * for the CSS vertical is `matchedSelectors` (the shared matching law)
+ * plus the selection identity, exported below.
  */
 
+export { ProjectCanvas, type ProjectCanvasProps } from '../canvas/project-canvas';
 export { gatedSessionFetch, StaleSessionResultError } from '../query/gated-session-fetch';
 export { type GatedEventCallbacks, gatedSseHandlers } from '../query/session-events';
 export {
@@ -29,6 +37,7 @@ export {
 } from '../roles/capabilities';
 export {
   type ActiveEntry,
+  type CanvasOriginState,
   type CanvasSessionState,
   type ShellSelection,
   useAppStore,
@@ -40,6 +49,15 @@ export {
   type UndoRecord,
   useEditSessionStore,
 } from '../state/edit-session-store';
+export {
+  matchedSelectors,
+  type RuntimeRuleSelector,
+  rematchSelection,
+  type SelectionDescriptor,
+  type SelectionMatch,
+  selectionDescriptorOf,
+  selectionSelector,
+} from '../state/selection';
 export {
   createSessionGate,
   type SessionGate,
