@@ -488,7 +488,6 @@ describe('crash observation — no automatic restart, ever', () => {
     expect(begunOf(supervisor.begin(PROJECT_A)).ref.generation).toBe(2);
   });
 });
-
 describe('authority retirement — authority never outlives its session', () => {
   /** The document the retirement legs bind at (distinct per webContents). */
   const doc = (webContentsId: number): ClientDocument => ({ webContentsId, navigationId: 1 });
