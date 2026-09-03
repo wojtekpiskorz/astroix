@@ -70,13 +70,6 @@ export const PROJECT_B: ProjectKey = 'bbbbbbbbbbbbbbbbbbbbbbbbbb';
 /** The authoritative editor's document — one webContents, its first navigation. */
 export const EDITOR_DOC = { webContentsId: 7, navigationId: 1 } as const;
 
-/** One macrotask boundary — every chained microtask of a settled promise has run. */
-export async function flush(): Promise<void> {
-  await new Promise<void>((resolve) => {
-    setTimeout(resolve, 0);
-  });
-}
-
 /** The ordered-event journal: the order-recording seam over every revocation entry point and the grant. */
 export type Journal = string[];
 

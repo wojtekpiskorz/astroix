@@ -136,16 +136,19 @@ export interface SwitchPreparationReceipt extends ReceiptBindings {
 }
 
 /**
- * One ledger entry. A CONSUMED entry is reduced to its tombstone — the
- * bindings (the fence, the lease, the stop seam closures) are dropped
- * at the consume flip, so a long-lived control plane accumulates one
- * spent flag per transition, never dead-session machinery; only the
- * unconsumed entries carry live bindings (and the duplicate-live
- * guard's identity scan).
+ * One ledger entry, held ONLY by the weak map keyed on its receipt: the
+ * ledger itself keeps no strong reference, so the entry — and the
+ * frozen machinery it names (the fence, the lease, the stop seam
+ * closure) — collects as soon as the composition drops the last
+ * reference to the receipt. A spent entry lives exactly as long as its
+ * caller's own receipt reference, which is precisely how a replay
+ * still answers `already-consumed`: the replay arrives HOLDING the
+ * receipt.
  */
 interface LedgerEntry {
-  /** Null once consumed — the tombstone flip retires the machinery with the transition. */
-  bindings: ReceiptBindings | null;
+  /** The transition identity this entry was minted under — the live map's deletion key at consume. */
+  readonly key: string;
+  readonly bindings: ReceiptBindings;
   consumed: boolean;
 }
 
@@ -172,11 +175,14 @@ export type MintResult =
  * identity, so a second receipt can never exist to pass the binding
  * checks after the first linearized (the old fence's post-mortem
  * `drained` state would let it) and re-run revocation over already-
- * revoked surfaces. Consuming frees the identity for a fresh prepare;
- * an abandoned live receipt pins its identity until then (voiding an
- * abandoned preparation is the cancel lane's, not this currency's).
- * And consumption retires the entry's whole binding set with it: the
- * ledger keeps spent tombstones, not dead-session machinery.
+ * revoked surfaces. Consuming frees the identity for a fresh prepare —
+ * LITERALLY: the identity's live-map entry is deleted at the consume
+ * flip, and nothing else holds it; an abandoned live receipt pins its
+ * identity until then (voiding an abandoned preparation is the cancel
+ * lane's, not this currency's). And the ledger retains nothing per
+ * spent transition: entries live in a weak map keyed by the receipt,
+ * so a spent receipt and its frozen machinery collect with the
+ * composition's own last reference to it.
  */
 export interface ReceiptLedger {
   /**
@@ -197,52 +203,58 @@ export interface ReceiptLedger {
   consume(receipt: SwitchPreparationReceipt): boolean;
 }
 
-/** Field-wise pair equality — `runtimeEpoch` and `generation` exact (the codebase idiom). */
-function sameSession(left: SessionRef, right: SessionRef): boolean {
-  return left.runtimeEpoch === right.runtimeEpoch && left.generation === right.generation;
+/**
+ * One transition's identity key — the exact old pair plus the target's
+ * own identity (the candidate pair, or the deactivation marker).
+ * `JSON.stringify` of a fixed-shape array: delimiter-free and
+ * collision-proof whatever alphabet the epoch mints.
+ */
+function transitionKey(bindings: ReceiptBindings): string {
+  const target = bindings.target;
+  return JSON.stringify([
+    bindings.oldSession.runtimeEpoch,
+    bindings.oldSession.generation,
+    target.kind,
+    target.kind === 'replacement' ? target.candidate.runtimeEpoch : null,
+    target.kind === 'replacement' ? target.candidate.generation : null,
+  ]);
 }
 
-/** One transition's identity: the exact old pair plus the same target (same candidate, or both deactivations). */
-function sameTransition(left: ReceiptBindings, right: ReceiptBindings): boolean {
-  if (!sameSession(left.oldSession, right.oldSession)) return false;
-  if (left.target.kind !== right.target.kind) return false;
-  return (
-    left.target.kind === 'deactivation' ||
-    sameSession(left.target.candidate, (right.target as { candidate: SessionRef }).candidate)
-  );
-}
-
-/** Builds one ledger — the switch coordinator owns its lifetime; one coordinator, one ledger. */
+/**
+ * Builds one ledger — the switch coordinator owns its lifetime; one
+ * coordinator, one ledger. The two structures are the whole retention
+ * story: `live` (strong) holds exactly one unconsumed receipt per
+ * transition identity — its entry is DELETED at consume, which is the
+ * documented "consuming frees the identity" law made literal — and
+ * `entries` (weak, keyed by the receipt) holds every entry only as
+ * long as some receipt reference exists. The duplicate-live refusal is
+ * one `live` lookup, never a scan over history.
+ */
 export function createReceiptLedger(): ReceiptLedger {
-  const entries = new Map<SwitchPreparationReceipt, LedgerEntry>();
+  const live = new Map<string, SwitchPreparationReceipt>();
+  const entries = new WeakMap<SwitchPreparationReceipt, LedgerEntry>();
   return {
     mint: (bindings) => {
-      for (const entry of entries.values()) {
-        if (
-          !entry.consumed &&
-          entry.bindings !== null &&
-          sameTransition(entry.bindings, bindings)
-        ) {
-          return { kind: 'refused', reason: 'transition-already-prepared' };
-        }
-      }
+      const key = transitionKey(bindings);
+      // the invariant: `live` holds only unconsumed receipts (consume
+      // deletes), so presence alone is the duplicate-live refusal
+      if (live.has(key)) return { kind: 'refused', reason: 'transition-already-prepared' };
       const receipt: SwitchPreparationReceipt = { ...bindings, [RECEIPT_BRAND]: true };
-      entries.set(receipt, { bindings, consumed: false });
+      entries.set(receipt, { key, bindings, consumed: false });
+      live.set(key, receipt);
       return { kind: 'minted', receipt };
     },
     lookup: (receipt) => {
       const entry = entries.get(receipt);
       if (entry === undefined) return { kind: 'unknown-receipt' };
       if (entry.consumed) return { kind: 'already-consumed' };
-      // the invariant: an unconsumed entry always carries its bindings
-      if (entry.bindings === null) return { kind: 'unknown-receipt' };
       return { kind: 'valid', bindings: entry.bindings };
     },
     consume: (receipt) => {
       const entry = entries.get(receipt);
       if (entry === undefined || entry.consumed) return false;
       entry.consumed = true;
-      entry.bindings = null; // the tombstone: the machinery dies with the transition
+      live.delete(entry.key); // consuming frees the identity — literally
       return true;
     },
   };
