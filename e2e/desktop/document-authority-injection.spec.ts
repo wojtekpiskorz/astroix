@@ -1,11 +1,9 @@
-import { type ChildProcess, spawn } from 'node:child_process';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { createServer, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { build } from 'vite';
+import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { buildHarnessMain, HarnessRun, REPO } from './harness-kit.ts';
 
 /**
  * The document-authority real-Electron lane (#246, H4 focused tests):
@@ -26,10 +24,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
  * leaves the host after every invalidation cause.
  */
 
-const HERE = dirname(fileURLToPath(import.meta.url));
-const REPO = join(HERE, '..', '..');
 const HARNESS_ENTRY = join(REPO, 'apps/desktop/src/document-authority/injection-harness.ts');
-const ELECTRON = join(REPO, 'node_modules', '.bin', 'electron');
 
 /** One recorded request: every raw header pair, in arrival order. */
 interface RecordedRequest {
@@ -91,111 +86,14 @@ function carriesForgedValue(request: RecordedRequest | undefined): boolean {
   return request.rawHeaders.includes('forged-renderer-value');
 }
 
-interface HarnessEvent {
-  readonly kind: string;
-  readonly [field: string]: unknown;
-}
-
-/** One spawned harness run: the line protocol over the real Electron main. */
-class HarnessRun {
-  readonly child: ChildProcess;
-  readonly events: HarnessEvent[] = [];
-  /** The child's stderr tail, bounded — a harness crash must surface as error text, never an opaque timeout (#129's law). */
-  readonly stderrLines: string[] = [];
-  private readonly waiters: {
-    match: (event: HarnessEvent) => boolean;
-    resolve: (event: HarnessEvent) => void;
-    timer: ReturnType<typeof setTimeout>;
-  }[] = [];
-
+/** One spawned harness run: the line protocol over the real Electron main (the shared kit, this lane's prefix and config argv). */
+class DaHarnessRun extends HarnessRun {
   constructor(bundle: string, origin: string) {
-    this.child = spawn(ELECTRON, [bundle, JSON.stringify({ origin })], {
-      cwd: REPO,
-      env: { ...process.env, ELECTRON_ENABLE_LOGGING: '0' },
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-    const pump = (chunk: Buffer): void => {
-      for (const raw of chunk.toString('utf8').split('\n')) {
-        const line = raw.trim();
-        if (!line.startsWith('astroix-da-harness: ')) continue;
-        let event: HarnessEvent;
-        try {
-          event = JSON.parse(line.slice('astroix-da-harness: '.length)) as HarnessEvent;
-        } catch {
-          continue;
-        }
-        this.events.push(event);
-        for (let index = 0; index < this.waiters.length; index += 1) {
-          const waiter = this.waiters[index];
-          if (waiter?.match(event)) {
-            clearTimeout(waiter.timer);
-            this.waiters.splice(index, 1);
-            waiter.resolve(event);
-            index -= 1;
-          }
-        }
-      }
-    };
-    this.child.stdout?.on('data', pump);
-    // Capture the full stderr, tail-bounded — the red-run diagnosis law
-    // (#129: keep the error text; truncation ate the one unexplained red).
-    this.child.stderr?.on('data', (chunk: Buffer) => {
-      for (const raw of chunk.toString('utf8').split('\n')) {
-        const line = raw.trim();
-        if (line.length > 0) this.stderrLines.push(line);
-      }
-      while (this.stderrLines.length > 50) this.stderrLines.shift();
-    });
-    // The quit write can race the child's own exit (the destroy-target
-    // leg leaves no windows, and Electron's default window-all-closed
-    // behavior is to quit): a dead-pipe write must stay a swallowed
-    // event, never an unhandled EPIPE.
-    this.child.stdin?.on('error', () => {});
-  }
-
-  send(command: Record<string, unknown>): void {
-    if (this.child.stdin?.writable) {
-      this.child.stdin.write(`${JSON.stringify(command)}\n`);
-    }
-  }
-
-  waitFor(match: (event: HarnessEvent) => boolean, what: string): Promise<HarnessEvent> {
-    const already = this.events.find(match);
-    if (already !== undefined) return Promise.resolve(already);
-    return new Promise((resolve, reject) => {
-      const waiter = {
-        match,
-        resolve,
-        timer: setTimeout(() => {
-          const at = this.waiters.indexOf(waiter);
-          if (at !== -1) this.waiters.splice(at, 1);
-          reject(
-            new Error(
-              `timed out waiting for ${what}; events so far:\n${JSON.stringify(this.events)}` +
-                `\nchild stderr tail:\n${this.stderrLines.slice(-20).join('\n') || '(empty)'}`,
-            ),
-          );
-        }, 30_000),
-      };
-      this.waiters.push(waiter);
-    });
-  }
-
-  async stop(): Promise<void> {
-    if (this.child.exitCode !== null) return;
-    this.send({ op: 'quit' });
-    await Promise.race([
-      new Promise((resolve) => this.child.once('exit', resolve)),
-      new Promise((resolve) => setTimeout(resolve, 5000)),
-    ]);
-    if (this.child.exitCode === null) {
-      this.child.kill('SIGKILL');
-      await new Promise((resolve) => this.child.once('exit', resolve));
-    }
+    super({ bundle, reportPrefix: 'astroix-da-harness: ', argv: [JSON.stringify({ origin })] });
   }
 }
 
-const runs: HarnessRun[] = [];
+const runs: DaHarnessRun[] = [];
 let origin: RecordingOrigin;
 let bundlePath: string;
 let scratchDir: string;
@@ -203,27 +101,7 @@ let scratchDir: string;
 beforeAll(async () => {
   origin = await startRecordingOrigin();
   scratchDir = await mkdtemp(join(tmpdir(), 'astroix-da-harness-'));
-  await build({
-    root: REPO,
-    configFile: false,
-    logLevel: 'silent',
-    build: {
-      target: 'node20',
-      outDir: scratchDir,
-      emptyOutDir: true,
-      minify: false,
-      lib: {
-        entry: HARNESS_ENTRY,
-        formats: ['es'],
-        fileName: () => 'harness.js',
-      },
-      rollupOptions: {
-        external: (id) => id === 'electron' || id.startsWith('node:'),
-        output: { entryFileNames: 'harness.js' },
-      },
-    },
-  });
-  bundlePath = join(scratchDir, 'harness.js');
+  bundlePath = await buildHarnessMain(HARNESS_ENTRY, scratchDir);
 }, 180_000);
 
 afterAll(async () => {
@@ -234,7 +112,7 @@ afterAll(async () => {
 
 /** One launched, loaded, editor-bound run — the shared prefix of every leg. */
 async function launchBoundRun(): Promise<{ run: HarnessRun; capability: string }> {
-  const run = new HarnessRun(bundlePath, origin.origin);
+  const run = new DaHarnessRun(bundlePath, origin.origin);
   runs.push(run);
   await run.waitFor((event) => event.kind === 'ready', 'the harness ready line');
   run.send({ op: 'load', url: `${origin.origin}/` });

@@ -80,6 +80,14 @@ export default defineConfig({
       // deterministic fakes, same tier as the main-process units above
       // (the real-Electron leg is e2e/desktop behind the smoke config).
       'apps/desktop/src/document-authority/**/*.test.{ts,tsx}',
+      // The service-worker bypass desktop units (#247, H5): the fresh
+      // nonpersistent editing partition, the fail-closed CDP debugger
+      // guard, the bypass-guarded target composition (over the REAL
+      // runtime document authority), and the post-unload partition
+      // hygiene — deterministic fakes at the structural Electron seams,
+      // same tier as the main-process units (the real-Electron leg is
+      // e2e/desktop behind the smoke config).
+      'apps/desktop/src/service-worker/**/*.test.{ts,tsx}',
       // apps/desktop (#244, H2): the packaged-runtime resource tests —
       // the internal packaged-asset adapter over real temp fixture
       // layouts (fake executables with recorded hashes), the desktop

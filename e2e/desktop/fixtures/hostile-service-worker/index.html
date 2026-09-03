@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>hostile-origin app stand-in</title>
+  </head>
+  <body>
+    <!-- The app-shell stand-in's real marker: a hostile SW that replaces
+         this document removes it; the bypassed target always sees it. -->
+    <div id="app-marker">REAL-APP-DOCUMENT</div>
+    <!-- The canvas: the same-origin iframe (ADR-0004's direct-DOM
+         contract) the hostile SW tries to replace wholesale. -->
+    <iframe id="canvas" src="/canvas.html" title="canvas"></iframe>
+    <div id="hmr-label"></div>
+    <script type="module" src="/app-client.js"></script>
+  </body>
+</html>
