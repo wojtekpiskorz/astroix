@@ -31,7 +31,8 @@
     "./api/pagination": "./api/pagination/page-contract.ts",
     "./sse": "./sse/sse-surface.ts",
     "./session-supervisor/staging": "./session-supervisor/staging/session-supervisor.ts",
-    "./session-supervisor/clients": "./session-supervisor/clients/session-clients.ts"
+    "./session-supervisor/clients": "./session-supervisor/clients/session-clients.ts",
+    "./session-supervisor/fence": "./session-supervisor/fence/edit-fence.ts"
   },
   "sideEffects": false,
   "dependencies": {

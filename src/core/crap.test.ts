@@ -270,8 +270,8 @@ describe('toRiskEntry', () => {
     });
     // a runtime seam outside the ruled prefixes has no per-function
     // coverage claim yet — CC-only watchlist until its lane rules otherwise
-    // (#236 ruled only staging/ + clients/; the supervisor's fence (F5)
-    // and commit/revocation (F6) subtrees are still unruled territory)
+    // (#237 ruled staging/ + clients/ + fence/; the supervisor's
+    // commit/revocation (F6) subtree is still unruled territory)
     const laterSeam = toRiskEntry('packages/runtime/session-supervisor/supervisor.ts', fn, fileCov);
     expect(laterSeam).toMatchObject({ metric: 'cc', coverage: null, crap: null, stop: 15 });
   });
@@ -318,6 +318,9 @@ describe('toRiskEntry', () => {
       // document-bound client registry (clients).
       'packages/runtime/session-supervisor/staging/session-supervisor.ts',
       'packages/runtime/session-supervisor/clients/session-clients.ts',
+      // #237 (F5): one representative per new covered prefix — the
+      // edit fence and bounded transition drain (fence).
+      'packages/runtime/session-supervisor/fence/edit-fence.ts',
     ];
     for (const file of covered) {
       expect(toRiskEntry(file, fn, fileCov).metric).toBe('crap');

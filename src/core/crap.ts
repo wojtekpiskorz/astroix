@@ -249,11 +249,19 @@ const COVERED_PREFIXES: readonly string[] = [
   // linearization's state side, crash observation) and the
   // document-bound client registry (the authoritative-editor/diagnostic
   // role caps, navigation/renderer/session revocation, the menu-action
-  // currency envelope) — deterministic units over run fakes. The fence
-  // (F5 #237) and commit/revocation (F6 #238) subtrees under
-  // session-supervisor/ stay watchlist until their lanes rule.
+  // currency envelope) — deterministic units over run fakes.
   'packages/runtime/session-supervisor/staging/',
   'packages/runtime/session-supervisor/clients/',
+  // `packages/runtime/session-supervisor/fence` since #237 (F5): the
+  // edit fence and bounded transition drain — synchronous admission
+  // closure with the pending-debounce flush, the one serialized queue
+  // pump, the five-second deadline verdicts (drained/failed/timed-out),
+  // the no-silent-work tracking after a timeout, and resume legality —
+  // deterministic units over injected clock and queue seams (no real
+  // timers; both sides of the deadline pinned through manual and fake
+  // clocks). The commit/revocation (F6 #238) subtree under
+  // session-supervisor/ stays watchlist until its lane rules.
+  'packages/runtime/session-supervisor/fence/',
 ];
 
 /**
