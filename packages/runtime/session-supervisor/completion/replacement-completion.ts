@@ -2,9 +2,6 @@ import type { ProjectKey, SessionFailure } from '@wojciechpiskorz/astroix-protoc
 import type { SupervisionCloseReport } from '../../project-plane/supervision/close-report.ts';
 import type { CommittedTransition } from '../commit/switch-coordinator.ts';
 
-/** The settled variants — every kind that carries the preserved `revoked` accounting. */
-type SettledTransition = Exclude<CommittedTransition, { readonly kind: 'rejected' }>;
-
 import {
   type RevocationReport,
   type RevocationSurfaces,
@@ -23,6 +20,9 @@ import {
   type IncompleteReapOutcome,
   type QuitResult,
 } from './completion-result.ts';
+
+/** The settled variants — every kind that carries the preserved `revoked` accounting. */
+type SettledTransition = Exclude<CommittedTransition, { readonly kind: 'rejected' }>;
 
 // The seam entry's own contract (the #305 re-export idiom): a consumer of
 // `session-supervisor/completion` names the whole public vocabulary — the

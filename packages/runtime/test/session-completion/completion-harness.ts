@@ -243,6 +243,8 @@ export function fakeLease(journal: Journal, mark: string): FakeLease {
 /** The granted candidate as the failure aftermath sees it — its reap settles by hand. */
 export interface FakeCandidate {
   readonly target: GrantedCandidateTarget;
+  /** The candidate's lease handle — `setOutcome('incomplete')` stages the incomplete revocation pass. */
+  readonly lease: FakeLease;
   settleClose(report: SupervisionCloseReport): void;
   /** Makes the next stopRun reject — the convergence leg (the E8 stop law's belt). */
   refuseClose(): void;
@@ -255,14 +257,16 @@ export function fakeCandidate(
   projectKey: ProjectKey,
   clientCapability: string,
 ): FakeCandidate {
+  const lease = fakeLease(journal, 'candidate-routes:revoke');
   let stopCalls = 0;
   let settle: (report: SupervisionCloseReport) => void = () => {};
   let reject: (reason: unknown) => void = () => {};
   return {
+    lease,
     target: {
       session,
       host: { host: 'project', projectKey },
-      routes: fakeLease(journal, 'candidate-routes:revoke').routes,
+      routes: lease.routes,
       clientCapability,
       stopRun: () => {
         stopCalls += 1;

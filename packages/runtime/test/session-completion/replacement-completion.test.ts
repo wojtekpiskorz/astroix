@@ -293,6 +293,41 @@ describe('host-observed completion failure — the irreversible aftermath (§4 s
     expect(fx.reported).toEqual([COMPLETION_FAILURE]);
   });
 
+  it('an incomplete candidate revocation pass reads as NOT revoked — but the reap, launcher, and report still run', async () => {
+    const fx = completionFixture();
+    const completion = completionDriver(fx, recordingTombstones(fx.journal).tombstones);
+    const observations = manualObservations(fx.journal);
+    const seated = seatGrantedCandidate(fx);
+    const candidate = fakeCandidate(fx.journal, NEW_REF, PROJECT_B, seated.httpCapability);
+    // the lease's revocation reports incomplete — the ordered pass fails
+    // one surface, and the derived boolean must honor it
+    candidate.lease.setOutcome('incomplete');
+
+    const pending = completion.completeReplacement({
+      commit: { kind: 'committed', committed: NEW_REF, revoked: cleanRevocation(OLD_REF) },
+      observations,
+      client: CLIENT_IDENTITY,
+      candidate: candidate.target,
+      targetRemains: true,
+    });
+    observations.settleMainFrame(false);
+    await flushMicrotasks(); // the revocation pass runs; the reap seam is called
+    candidate.settleClose(completeCloseReport('stopped'));
+    await flushMicrotasks(); // the reap resolves; the launcher show is called
+    observations.settleLauncher(true);
+    const result = await pending;
+
+    if (result.kind !== 'failed') throw new Error('unreachable');
+    // the exact claim: an incomplete pass NEVER reads as revoked
+    expect(result.aftermath.candidateRevoked).toBe(false);
+    expect(result.aftermath.candidateRevocation?.outcome).toBe('incomplete');
+    // ...and the rest of the §4 step 7 order still ran
+    expect(result.aftermath.candidateClose).toEqual(completeCloseReport('stopped'));
+    expect(result.aftermath.launcherObserved).toBe(true);
+    expect(candidate.stopCalls).toBe(1);
+    expect(fx.reported).toEqual([COMPLETION_FAILURE]);
+  });
+
   it('no target remains: the launcher is never shown, the failure is still reported', async () => {
     const fx = completionFixture();
     const completion = completionDriver(fx, recordingTombstones(fx.journal).tombstones);
