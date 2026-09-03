@@ -326,6 +326,11 @@ describe('toRiskEntry', () => {
       // authority revocation (revocation).
       'packages/runtime/session-supervisor/commit/switch-coordinator.ts',
       'packages/runtime/session-supervisor/revocation/authority-revocation.ts',
+      // #239 (F7): one representative per new covered prefix — the
+      // host-observed completion driver (completion) and the boot-scoped
+      // tombstone machine (tombstone).
+      'packages/runtime/session-supervisor/completion/replacement-completion.ts',
+      'packages/runtime/session-supervisor/tombstone/boot-tombstone.ts',
     ];
     for (const file of covered) {
       expect(toRiskEntry(file, fn, fileCov).metric).toBe('crap');

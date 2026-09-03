@@ -281,6 +281,21 @@ const COVERED_PREFIXES: readonly string[] = [
   // ride the real origin listener in the focused lane.
   'packages/runtime/session-supervisor/commit/',
   'packages/runtime/session-supervisor/revocation/',
+  // `packages/runtime/session-supervisor/{completion,tombstone}` since
+  // #239 (F7): the host-observed replacement completion (the exact
+  // main-frame ready handshake, launcher readiness, and the quit close
+  // without navigation over observed-promise seams) with its
+  // irreversible post-revocation failure aftermath (revoke and reap the
+  // granted candidate where applicable, the failed no-active state
+  // report, no old-session resume), the incomplete-reap tail (tombstone
+  // persisted first, candidate rolled back, blocked no-active state),
+  // and the boot-scoped tombstone (the versioned-JSON atomic store over
+  // real temp directories, same-boot activation denial, the exclusive
+  // edit-writer-lease recovery over an injected D3 proof seam, and
+  // later-boot stale-by-construction clearing) — deterministic units
+  // over injected seams and manual observations; no real timers.
+  'packages/runtime/session-supervisor/completion/',
+  'packages/runtime/session-supervisor/tombstone/',
 ];
 
 /**
