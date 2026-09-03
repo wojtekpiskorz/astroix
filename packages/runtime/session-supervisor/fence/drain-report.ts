@@ -1,6 +1,6 @@
 import type { SessionFailure } from '@wojciechpiskorz/astroix-protocol';
 import type { WriteOutcome } from '../../edit-authority/executor/write-outcomes.ts';
-import { FAILURE_MESSAGES, type RollbackReason } from '../staging/activation-attempt.ts';
+import { FAILURE_MESSAGES } from '../staging/activation-attempt.ts';
 
 /**
  * The drain's closed vocabulary (#237, F5; ADR-0006 §4 steps 2–4): how one
