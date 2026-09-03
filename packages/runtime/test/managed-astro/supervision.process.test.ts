@@ -452,23 +452,21 @@ describe('escalation and the reap bounds', () => {
 
   it('a TERM-delaying dev server dies by the SIGKILL ladder — observed reap, honest complete report, no PID', async () => {
     // #322: this leg was the "unobserved exit after SIGKILL" zero-bound
-    // gamble (killReapMs: 0 → 'incomplete'), but a zero reap bound is a
+    // gamble (killReapMs: 0 → 'incomplete'), but a zero reap bound was a
     // scheduling coin, not a construction: the SIGKILLed child dies in
     // microseconds and nothing test-side can delay its death or the
     // supervisor's exit-event observation, so the clamped 1 ms bound timer
-    // races the SIGCHLD-driven exit event on parent preemption — calm
+    // raced the SIGCHLD-driven exit event on parent preemption — calm
     // loops stamped 'incomplete', concurrent-suite load stamped 'complete'
-    // (4/90 probe runs; the CI signature). Both reports were honest; the
-    // unobserved-exit scenario is not constructible against real children
-    // without a product seam (a killReapMs ≤ 0 already-observed-only pin —
-    // filed as #326). Until that rules, this
-    // leg pins the scenario's deterministic half: the escalation ladder
-    // itself, its observed reap inside the lane's default bound, and the
-    // KILL-only death. The honest incomplete-reap CLASSIFICATION keeps its
-    // pure coverage in close-report.test.ts. (That half overlaps the
-    // ignoreTerm leg's assertions: until #326 makes the two children
-    // distinguishable, an ignoring child and a delaying one are one
-    // observable surface here.)
+    // (4/90 probe runs; the CI signature). #326's pin gave the zero bound
+    // already-observed-only semantics (the post-SIGKILL reap reads the
+    // child's exit observation synchronously), so the unobserved half is
+    // BACK as the zero-bound sibling leg below — deterministic now. This
+    // leg keeps the scenario's other half: the escalation ladder itself,
+    // its observed reap inside the lane's default (positive) bound, and
+    // the KILL-only death. (That half overlaps the ignoreTerm leg's
+    // assertions: at a positive bound an ignoring child and a delaying
+    // one are one observable surface here.)
     const lane = await startLane({ devServer: { termDelayMs: 5000 } });
     await lane.supervisor.ready;
     const report = await lane.supervisor.stop();
@@ -483,6 +481,35 @@ describe('escalation and the reap bounds', () => {
     // exit was still ~4.8 s away when the ladder escalated.
     expect(await markerStamps(lane.markerDir, 'astro-term-received')).toHaveLength(1);
     expect(await markerStamps(lane.markerDir, 'astro-exit')).toHaveLength(0);
+    expect(JSON.stringify(report)).not.toContain('pid');
+  }, 15_000);
+
+  it('an unobserved exit after SIGKILL reports the honest incomplete reap — no PID, no false complete', async () => {
+    // The zero-bound leg, restored verbatim (#326): killReapMs ≤ 0 means
+    // already-observed-only — the supervisor decides `reaped` from the
+    // child's synchronous exit observation instead of the timer race, so
+    // the unobserved-exit scenario is CONSTRUCTIBLE against real children
+    // again (before the pin it was not: SIGKILL kills in microseconds, and
+    // the clamped 1 ms timer racing the exit event answered by OS
+    // scheduling). Deterministic by the pin's invariant: the TERM grace
+    // just expired unresolved, and the exit event that would set
+    // exitCode/signalCode is the very event the supervisor still awaits —
+    // it cannot have been processed at the check, so a child alive at
+    // escalation (the delaying child, its own exit ~4.8 s away) reads
+    // reaped: false on any machine load. The real-IO wiring witness for
+    // the classification already covered in close-report.test.ts
+    // (managedAstroReaped: false ⇒ 'managed-astro-reap').
+    const lane = await startLane({
+      devServer: { termDelayMs: 5000 },
+      bounds: { killReapMs: 0 },
+    });
+    await lane.supervisor.ready;
+    const report = await lane.supervisor.stop();
+
+    expect(report.outcome).toBe('incomplete');
+    expect(report.failures).toContain('managed-astro-reap');
+    expect(report.accounting.managedAstroReaped).toBe(false);
+    expect(report.accounting.workerReaped).toBe(true);
     expect(JSON.stringify(report)).not.toContain('pid');
   }, 15_000);
 });

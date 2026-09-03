@@ -11,7 +11,11 @@
  * leg is the session lanes' (F2/F3), and the token is Vite's own — this
  * seam PRESERVES both, byte for byte, and validates everything that
  * exists today: the WebSocket upgrade shape, the `vite-hmr`
- * subprotocol, and the exact same-origin Origin.
+ * subprotocol, and the exact same-origin Origin. The pair list it
+ * reassembles arrives from the listener already stripped of the
+ * control-plane authority (ADR-0006 §3 — F2's definition module owns
+ * that leg, `stripAuthorityFromRawPairs`, #338); this seam reconstructs
+ * exactly what it is handed, byte for byte.
  */
 
 /** Why an upgrade was refused admission — sanitized vocabulary only. */

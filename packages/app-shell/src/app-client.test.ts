@@ -438,4 +438,102 @@ describe('the SSE engine', () => {
     client.close();
     await expect(subscription.closed).resolves.toBe('aborted');
   });
+
+  it('onOpen fires when the transport establishes an admitted stream — no frame needed', async () => {
+    let opens = 0;
+    let events = 0;
+    let endStream: (() => void) | undefined;
+    stubFetch(async () =>
+      streamResponse((controller) => {
+        // Held open with ZERO frames enqueued: the transport-open signal
+        // alone is the point (#342 — a quiet session is live, not
+        // eternally connecting).
+        endStream = () => controller.close();
+      }),
+    );
+    const client = createAppClient({
+      clientCapability: CAPABILITY,
+      origin: ORIGIN,
+      reconnectDelayMs: 0,
+    });
+    client.adoptSession(SESSION);
+    const subscription = client.forSession(SESSION).events({
+      onEvent: () => {
+        events += 1;
+      },
+      onOpen: () => {
+        opens += 1;
+      },
+    });
+    await vi.waitFor(() => expect(opens).toBe(1));
+    // The currency moves while the quiet stream is still open, THEN the
+    // server ends it: the ended stream finds a moved-past gate and
+    // settles stale — exactly one connection ever happened.
+    client.adoptSession(NEXT);
+    endStream?.();
+    await expect(subscription.closed).resolves.toBe('stale');
+    expect(opens).toBe(1);
+    expect(events).toBe(0);
+  });
+
+  it('onOpen fires again on each reconnect of a still-current stream', async () => {
+    let opens = 0;
+    stubFetch(async () =>
+      streamResponse((controller) => {
+        controller.close();
+      }),
+    );
+    const client = createAppClient({
+      clientCapability: CAPABILITY,
+      origin: ORIGIN,
+      reconnectDelayMs: 0,
+    });
+    client.adoptSession(SESSION);
+    const subscription = client.forSession(SESSION).events({
+      onEvent: () => {},
+      onOpen: () => {
+        opens += 1;
+      },
+    });
+    // Every stream the server ends reconnects while the pair is current —
+    // each successful (re)connection is another open signal.
+    await vi.waitFor(() => expect(opens).toBeGreaterThanOrEqual(2), { timeout: 3000 });
+    client.adoptSession(NEXT);
+    await expect(subscription.closed).resolves.toBe('stale');
+  });
+
+  it('onOpen never fires on a refusal — stale or otherwise', async () => {
+    let opens = 0;
+    stubFetch(async () => jsonResponse(errorBody('stale-session'), 409));
+    const staleClient = createAppClient({
+      clientCapability: CAPABILITY,
+      origin: ORIGIN,
+      reconnectDelayMs: 0,
+    });
+    staleClient.adoptSession(SESSION);
+    const stale = staleClient.forSession(SESSION).events({
+      onEvent: () => {},
+      onOpen: () => {
+        opens += 1;
+      },
+    });
+    await expect(stale.closed).resolves.toBe('stale');
+    expect(opens).toBe(0);
+
+    stubFetch(async () => jsonResponse(errorBody('unauthorized'), 403));
+    const refusedClient = createAppClient({
+      clientCapability: CAPABILITY,
+      origin: ORIGIN,
+      reconnectDelayMs: 0,
+    });
+    refusedClient.adoptSession(SESSION);
+    const refused = refusedClient.forSession(SESSION).events({
+      onEvent: () => {},
+      onOpen: () => {
+        opens += 1;
+      },
+    });
+    await expect(refused.closed).resolves.toBe('failed');
+    expect(opens).toBe(0);
+  });
 });

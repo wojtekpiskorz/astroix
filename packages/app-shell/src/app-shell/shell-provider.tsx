@@ -124,6 +124,12 @@ export function ShellProvider({
         },
         onStale: () => setStreamState('stale'),
         onTransportError: () => setStreamState('unavailable'),
+        // The transport-open convergence (#342): an admitted stream is
+        // live the moment it is established — a quiet session that
+        // delivers no frame must not read as eternally connecting.
+        // Ungated like the other stream-level callbacks; the onEvent
+        // line above stays (idempotent — same terminal state).
+        onOpen: () => setStreamState('open'),
       }),
     );
     subscriptionRef.current = subscription;

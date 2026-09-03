@@ -88,6 +88,22 @@ describe('the generation-scoped session query', () => {
   });
 });
 
+describe('the stream state converges on transport open (#342)', () => {
+  it("reaches open with ZERO events delivered — an admitted idle stream is live, not 'connecting'", async () => {
+    const shell = mountSession(G1);
+    script.resolveInspect(11);
+    await waitFor(() => byTestId(shell.container, 'inspect-revision').textContent === '11');
+    // No frame is ever delivered: the transport-open signal alone
+    // converges the state — the exact production shape of a quiet
+    // session (nothing happened since activation, so the server has
+    // nothing to send; the connection itself is the live truth).
+    await waitFor(() => byTestId(shell.container, 'stream-state').textContent === 'open');
+    // And nothing else moved: the wire carried no invalidation, so the
+    // one inspect is still the only exchange.
+    expect(script.inspectCount).toBe(1);
+  });
+});
+
 describe('the commit-time reset', () => {
   it('clears every session surface BEFORE the navigation — the marker proves the order', async () => {
     const shell = mountSession(G1);

@@ -69,6 +69,16 @@ export default defineConfig({
       // its own config, like certify:adapter — the root run stays
       // deterministic and network-free.
       'apps/desktop/src/main/**/*.test.{ts,tsx}',
+      // apps/desktop (#244, H2): the packaged-runtime resource tests —
+      // the internal packaged-asset adapter over real temp fixture
+      // layouts (fake executables with recorded hashes), the desktop
+      // resolver's packaged/dev/no-fallback matrix, manifest
+      // determinism, and the public-output no-leak legs. Deterministic
+      // and network-free: the real 100 MB Node binary never runs here —
+      // the packaged-layout spawn test self-skips unless the real
+      // assembly exists locally (`npm run assemble:runtime`, captured
+      // for the PR), the certify:adapter precedent.
+      'apps/desktop/test/runtime-resources/**/*.test.{ts,tsx}',
       // apps/web (#240, G1): the web host's focused composition units —
       // the bounded legs the live-browser lane cannot induce
       // deterministically (the stranded-adoption aftermath convergence,
@@ -260,6 +270,16 @@ export default defineConfig({
         // directories (the registry-store discipline).
         'packages/runtime/session-supervisor/completion/**',
         'packages/runtime/session-supervisor/tombstone/**',
+        // The internal packaged-asset adapter (#244, H2, additive): the
+        // layout vocabulary, pin table, manifest schema/builder/
+        // serializer, and the resource verifier are deterministic
+        // real-filesystem units over temp fixture layouts (fake
+        // executables with recorded hashes) — same covered-tier decision
+        // as the registry seam (#221). Its tests live under
+        // apps/desktop/test/runtime-resources per #244's owned paths;
+        // metric honesty lives in the tier decision (crap.ts), not the
+        // test location.
+        'packages/runtime/src/internal/**',
       ],
       reporter: ['json'],
       reportsDirectory: 'coverage',
