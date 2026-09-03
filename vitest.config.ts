@@ -90,6 +90,18 @@ export default defineConfig({
       // assembly exists locally (`npm run assemble:runtime`, captured
       // for the PR), the certify:adapter precedent.
       'apps/desktop/test/runtime-resources/**/*.test.{ts,tsx}',
+      // apps/desktop (#245, H3): the packaging-pipeline units — the Forge
+      // config shape (Packager + FusesPlugin + ZIP maker, the negative
+      // surface: no Vite plugin/DMG/universal/notarization/auto-update),
+      // the exact-pin law (Forge 7.11.2, Electron 44.1.0 — asserted
+      // against the installed tree, offline), the fuse-wire reader over
+      // synthetic binaries, the codesign target planning, and the
+      // candidate-manifest comparison — all deterministic and
+      // network-free. The REAL packaging lane (`npm run package`: real
+      // Electron download, real codesign, two-build comparison) is
+      // local-only like test:desktop/certify:adapter; its real-app legs
+      // live here and self-skip without a local package.
+      'apps/desktop/test/package-pipeline/**/*.test.{ts,tsx}',
       // apps/web (#240, G1): the web host's focused composition units —
       // the bounded legs the live-browser lane cannot induce
       // deterministically (the stranded-adoption aftermath convergence,

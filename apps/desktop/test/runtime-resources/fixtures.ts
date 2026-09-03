@@ -1,5 +1,3 @@
-import { createHash } from 'node:crypto';
-import { createReadStream } from 'node:fs';
 import { chmod, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -15,6 +13,7 @@ import {
   verifyPackagedAssets,
 } from '@wojciechpiskorz/astroix-runtime/internal/packaged-assets';
 import { afterEach } from 'vitest';
+import { sha256File } from '../../src/forge/inventory.ts';
 import type { RuntimeAssetHostFacts } from '../../src/runtime-assets/resolve-runtime-assets.ts';
 
 /**
@@ -130,14 +129,6 @@ export async function replaceWithOutsideSymlink(
   const absolute = join(root, resourcePath);
   await rm(absolute);
   await symlink(target, absolute);
-}
-
-export async function sha256File(absolute: string): Promise<string> {
-  const hash = createHash('sha256');
-  for await (const chunk of createReadStream(absolute)) {
-    hash.update(chunk as Buffer);
-  }
-  return hash.digest('hex');
 }
 
 async function manifestFacts(root: string, resourcePath: string, executable: boolean) {

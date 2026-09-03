@@ -13,6 +13,10 @@ apps/desktop/dist-main/
 apps/desktop/resources/*
 !apps/desktop/resources/.gitkeep
 apps/desktop/.assemble-cache/
+# the desktop host's packaging output (#245): the Forge out tree (the
+# packaged .app, the ZIP, the candidate manifests) is build evidence,
+# never source
+apps/desktop/out/
 *.tsbuildinfo
 
 # env & secrets
