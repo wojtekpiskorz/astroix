@@ -87,7 +87,6 @@ function carriesForgedValue(request: RecordedRequest | undefined): boolean {
 }
 
 /** One spawned harness run: the line protocol over the real Electron main (the shared kit, this lane's prefix and config argv). */
-/** One spawned harness run: the line protocol over the real Electron main (the shared kit, this lane's prefix and config argv). */
 class DaHarnessRun extends HarnessRun {
   constructor(bundle: string, origin: string) {
     super({ bundle, reportPrefix: 'astroix-da-harness: ', argv: [JSON.stringify({ origin })] });
