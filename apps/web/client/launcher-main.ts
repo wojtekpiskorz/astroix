@@ -23,7 +23,7 @@ import {
 const bootstrap = readBootstrap();
 const client = createAppClient({ clientCapability: bootstrap.clientCapability });
 
-const subscription = client.events({
+client.events({
   onEvent: (envelope) => {
     if (envelope.event.type === 'registry-changed') void refreshProjects();
     if (envelope.event.type === 'session-state') {
@@ -32,10 +32,6 @@ const subscription = client.events({
       if (failure !== undefined) showFailure('activation', failure);
     }
   },
-  onTransportError: () => setText('stream-state', 'unavailable'),
-});
-void subscription.closed.then((reason) => {
-  if (reason !== 'aborted') setText('stream-state', reason);
 });
 
 renderProjects([], activate);
