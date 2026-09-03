@@ -29,6 +29,16 @@ const ENV_FILE = join(SCRATCH_ROOT, 'web-host.env');
 /** The web lane's fixed port (≥4426, per the lane-port doctrine; never 4314/4313 outside CI). */
 export const WEB_LANE_PORT = 4426;
 
+/**
+ * The staged copies' root (exported for the specs that assert against
+ * the managed copies themselves — #242's zero-injection snapshots and
+ * its disposable-copy HMR mutations; the staging layout is this
+ * module's own contract, so the constant is too).
+ */
+export function stagedCopyRoot(name: string): string {
+  return join(SCRATCH_ROOT, name);
+}
+
 export interface WebLaneStage {
   readonly envFile: string;
   readonly launcherUrl: string;

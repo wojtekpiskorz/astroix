@@ -17,6 +17,16 @@ import { composeShellReset, runShellReset, SHELL_RESET_STEPS } from './shell-res
 
 const FIRST = { runtimeEpoch: 'epoch-fixture', generation: 1 };
 
+/** One selection descriptor — the #242 real shape of the store's selection slot. */
+function aSelection() {
+  return {
+    tag: 'h1',
+    id: null,
+    classes: ['hero-title'],
+    scopeAttributes: ['data-astro-cid-fixture'],
+  };
+}
+
 describe('runShellReset', () => {
   it('pins the step order — abort, close, remove, clear, then navigate', () => {
     expect([...SHELL_RESET_STEPS]).toEqual([
@@ -76,8 +86,8 @@ describe('composeShellReset', () => {
     clearShellStores();
     bindShellSession(FIRST);
     const app = useAppStore.getState();
-    app.setSelection(FIRST, { tag: 'h1', elementId: null });
-    app.setCanvasState(FIRST, { url: 'http://project.localhost/' });
+    app.setSelection(FIRST, aSelection());
+    app.setCanvasState(FIRST, { url: 'http://project.localhost/', origin: 'project' });
     app.setActiveEntry(FIRST, { entryId: 'entry-1' });
     const edit = useEditSessionStore.getState();
     edit.holdGrant(FIRST, { token: 'grant' });

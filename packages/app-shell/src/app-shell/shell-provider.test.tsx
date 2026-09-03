@@ -19,6 +19,16 @@ import { actAsync, byTestId, click, type Mounted, mount, waitFor } from './test-
  */
 
 const G1 = { runtimeEpoch: 'epoch-fixture', generation: 1 };
+
+/** One selection descriptor — the #242 real shape of the store's selection slot. */
+function aSelection() {
+  return {
+    tag: 'h1',
+    id: null,
+    classes: ['hero-title'],
+    scopeAttributes: ['data-astro-cid-fixture'],
+  };
+}
 const LAUNCHER_URL = 'http://launcher.localhost:4426/__astroix/app/';
 const G2 = { runtimeEpoch: 'epoch-fixture', generation: 2 };
 
@@ -94,7 +104,7 @@ describe('the commit-time reset', () => {
     script.resolveInspect(11);
     await waitFor(() => byTestId(shell.container, 'inspect-revision').textContent === '11');
     // Populate the shell stores the way the lanes will (gated writes under the bound pair).
-    useAppStore.getState().setSelection(G1, { tag: 'h1', elementId: null });
+    useAppStore.getState().setSelection(G1, aSelection());
     useEditSessionStore.getState().holdGrant(G1, { token: 'grant' });
     await waitFor(() =>
       (byTestId(shell.container, 'shell-state').textContent ?? '').includes('selection=1'),
@@ -164,7 +174,7 @@ describe('the repeated generation change with delayed fetch and SSE delivery', (
     expect(marker).toContain('selection=0');
 
     // Late old-pair writes against the fresh generation's stores are dropped.
-    useAppStore.getState().setSelection(G1, { tag: 'h1', elementId: null });
+    useAppStore.getState().setSelection(G1, aSelection());
     useEditSessionStore.getState().holdGrant(G1, { token: 'stale-grant' });
     // A late old-pair SSE frame on the fresh stream is dropped too — a
     // dispatched invalidation would have refetched (a second inspect).
