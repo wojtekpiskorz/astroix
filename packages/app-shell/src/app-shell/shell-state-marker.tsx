@@ -91,7 +91,6 @@ export function recordShellResetStepDone(step: ShellResetStep, queryClient: Quer
   });
   const element = document.querySelector('[data-testid="shell-state"]');
   if (element !== null) element.textContent = text;
-  document.documentElement.dataset.astroixResetTrace = shellResetTrace();
 }
 
 /** The marker's live component — React-rendered between resets, identical in format to the reset's direct write. */
@@ -123,9 +122,5 @@ export function ShellStateMarker(): ReactNode {
     pendingMutations,
     reset: trace,
   });
-  return (
-    <p data-testid="shell-state" data-astroix-reset={trace}>
-      {text}
-    </p>
-  );
+  return <p data-testid="shell-state">{text}</p>;
 }
