@@ -235,15 +235,24 @@ export interface FakeExecutor {
   readonly executor: ForcedExecutor;
   /** Resolves the exit observation — the observed exact exit. */
   settleExit(code: number | null, signal: NodeJS.Signals | null): void;
+  /** Rejects the exit observation — the un-observed-exit seam defect (the fail-closed arm). */
+  failExit(reason?: unknown): void;
   readonly killCalls: number;
 }
 
 export function fakeExecutor(): FakeExecutor {
   let killCalls = 0;
   let settleExit: (exit: { code: number | null; signal: NodeJS.Signals | null }) => void = () => {};
-  const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => {
-    settleExit = resolve;
-  });
+  let failExit: (reason: unknown) => void = () => {};
+  const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(
+    (resolve, reject) => {
+      settleExit = resolve;
+      failExit = reject;
+    },
+  );
+  // anchored: a leg may reject the observation without racing it
+  // through the coordinator; the anchor keeps that rejection handled
+  exited.catch(() => {});
   return {
     executor: {
       kill: () => {
@@ -254,6 +263,9 @@ export function fakeExecutor(): FakeExecutor {
     },
     settleExit: (code, signal) => {
       settleExit({ code, signal });
+    },
+    failExit: (reason: unknown = new Error('the exit observation was lost')) => {
+      failExit(reason);
     },
     get killCalls() {
       return killCalls;

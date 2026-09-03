@@ -86,7 +86,12 @@ export type {
  *   tombstone and blocked no-active state are the composition's).
  * - **Consumption is the linearization** (§4 step 5): every binding
  *   check runs BEFORE the one-use flip, so a refusal linearizes
- *   nothing and spends nothing. After the flip the pass is
+ *   nothing and spends nothing. And one transition holds at most ONE
+ *   live receipt — the ledger refuses a duplicate mint over the same
+ *   identity (exact old pair + target), so no second receipt can
+ *   exist to pass the binding checks after the first linearized (the
+ *   old fence's post-mortem state would let it) and re-run revocation
+ *   over already-revoked surfaces. After the flip the pass is
  *   irreversible — the ordered revocation runs fail-continue, and a
  *   candidate grant that then refuses lands in the `failed` result
  *   (category `revocation`, no active session) for F7's irreversible
@@ -115,7 +120,9 @@ export type PreparationRefusal =
   /** Forced preparation on a fence not in the timed-out states. */
   | 'fence-not-timed-out'
   /** A deactivation target minted without the outgoing run's stop seam. */
-  | 'deactivation-without-stop';
+  | 'deactivation-without-stop'
+  /** An unconsumed receipt already binds this transition (old pair + target) — one live receipt per transition. */
+  | 'transition-already-prepared';
 
 /** `prepareNormal`'s answer: the minted receipt, or the structured refusal. */
 export type NormalPreparation =
@@ -297,20 +304,19 @@ export function createSwitchCoordinator(options: SwitchCoordinatorOptions): Swit
       if (input.fence.state !== 'drained') {
         return { kind: 'refused', reason: 'fence-resumed' };
       }
-      return {
-        kind: 'prepared',
-        receipt: ledger.mint({
-          oldSession: input.oldSession,
-          target: input.target,
-          client: input.client,
-          fence: input.fence,
-          drain: input.drain,
-          preparation: { kind: 'normal', report },
-          host: input.host,
-          routes: input.routes,
-          stopOldRun: input.stopOldRun ?? null,
-        }),
-      };
+      const minted = ledger.mint({
+        oldSession: input.oldSession,
+        target: input.target,
+        client: input.client,
+        fence: input.fence,
+        drain: input.drain,
+        preparation: { kind: 'normal', report },
+        host: input.host,
+        routes: input.routes,
+        stopOldRun: input.stopOldRun ?? null,
+      });
+      if (minted.kind === 'refused') return { kind: 'refused', reason: minted.reason };
+      return { kind: 'prepared', receipt: minted.receipt };
     },
 
     prepareForced: async (input) => {
@@ -330,20 +336,19 @@ export function createSwitchCoordinator(options: SwitchCoordinatorOptions): Swit
       void input.executor.kill().catch(() => {});
       const exit = await observeForcedExit(input.executor.exited, clock);
       if (exit === null) return { kind: 'incomplete-reap' };
-      return {
-        kind: 'prepared',
-        receipt: ledger.mint({
-          oldSession: input.oldSession,
-          target: input.target,
-          client: input.client,
-          fence: input.fence,
-          drain: input.drain,
-          preparation: { kind: 'forced', exit },
-          host: input.host,
-          routes: input.routes,
-          stopOldRun: input.stopOldRun ?? null,
-        }),
-      };
+      const minted = ledger.mint({
+        oldSession: input.oldSession,
+        target: input.target,
+        client: input.client,
+        fence: input.fence,
+        drain: input.drain,
+        preparation: { kind: 'forced', exit },
+        host: input.host,
+        routes: input.routes,
+        stopOldRun: input.stopOldRun ?? null,
+      });
+      if (minted.kind === 'refused') return { kind: 'refused', reason: minted.reason };
+      return { kind: 'prepared', receipt: minted.receipt };
     },
 
     commit: async (receipt, candidate) => {

@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   createReceiptLedger,
+  type MintResult,
   type ReceiptBindings,
+  type ReceiptLedger,
   type SwitchPreparationReceipt,
 } from '../../session-supervisor/commit/switch-receipt.ts';
 import { EDITOR_DOC, EPOCH, fakeLease } from './commit-harness.ts';
@@ -9,10 +11,13 @@ import { EDITOR_DOC, EPOCH, fakeLease } from './commit-harness.ts';
 /**
  * The #238 focused tests, part 1 — the receipt currency itself
  * (ADR-0006 §4 step 5 and §9 `PreparedReplacement`): the one-use
- * ledger's mint, its frozen bindings, the single-use flip, and the two
- * sanitized rejections — replay (`already-consumed`) and the never-minted
- * (`unknown-receipt`, the brand's contribution: a structurally identical
- * forged object is not currency).
+ * ledger's mint, its frozen bindings, the single-use flip, the two
+ * sanitized consumption rejections — replay (`already-consumed`) and
+ * the never-minted (`unknown-receipt`, the brand's contribution: a
+ * structurally identical forged object is not currency) — and the
+ * mint-side invariant that one transition holds at most ONE live
+ * receipt (a duplicate mint over the same identity refuses; consuming
+ * frees the identity).
  */
 
 /** Builds the smallest honest binding set — every field the receipt freezes. */
@@ -41,11 +46,18 @@ function bindings(overrides: Partial<ReceiptBindings> = {}): ReceiptBindings {
   };
 }
 
+/** Mints and asserts success — the union's refusal arm has its own legs below. */
+function mintOk(ledger: ReceiptLedger, bound: ReceiptBindings): SwitchPreparationReceipt {
+  const minted = ledger.mint(bound);
+  if (minted.kind !== 'minted') throw new Error(`expected a mint, refused: ${minted.reason}`);
+  return minted.receipt;
+}
+
 describe('the switch-preparation receipt ledger', () => {
   it('freezes every binding at mint — the receipt reads back exactly what issuance bound', () => {
     const ledger = createReceiptLedger();
     const bound = bindings();
-    const receipt = ledger.mint(bound);
+    const receipt = mintOk(ledger, bound);
     expect(receipt.oldSession).toEqual({ runtimeEpoch: EPOCH, generation: 1 });
     expect(receipt.target).toEqual({
       kind: 'replacement',
@@ -70,7 +82,7 @@ describe('the switch-preparation receipt ledger', () => {
   it('is single-use: one consume spends it, the second refuses and the lookup reports it consumed', () => {
     const ledger = createReceiptLedger();
     const bound = bindings();
-    const receipt = ledger.mint(bound);
+    const receipt = mintOk(ledger, bound);
     const lookup = ledger.lookup(receipt);
     expect(lookup.kind).toBe('valid');
     if (lookup.kind !== 'valid') throw new Error('unreachable');
@@ -80,9 +92,49 @@ describe('the switch-preparation receipt ledger', () => {
     expect(ledger.lookup(receipt)).toEqual({ kind: 'already-consumed' });
   });
 
+  it('holds at most one live receipt per transition — a duplicate mint over the same identity refuses', () => {
+    const ledger = createReceiptLedger();
+    const receipt = mintOk(ledger, bindings());
+    // the same identity (exact old pair + same candidate): refused while the first is live
+    const duplicate = ledger.mint(bindings()); // a fresh binding set of the same identity
+    expect(duplicate).toEqual({ kind: 'refused', reason: 'transition-already-prepared' });
+    // a different candidate is a different transition — it mints
+    const otherCandidate = ledger.mint(
+      bindings({
+        target: { kind: 'replacement', candidate: { runtimeEpoch: EPOCH, generation: 3 } },
+      }),
+    );
+    expect(otherCandidate.kind).toBe('minted');
+    // another old pair is a different transition — it mints
+    const otherOld = ledger.mint(
+      bindings({
+        oldSession: { runtimeEpoch: EPOCH, generation: 9 },
+        target: { kind: 'replacement', candidate: { runtimeEpoch: EPOCH, generation: 2 } },
+      }),
+    );
+    expect(otherOld.kind).toBe('minted');
+    // the deactivation of the same old pair is its own identity — it mints
+    const deactivation = ledger.mint(
+      bindings({ target: { kind: 'deactivation' }, stopOldRun: () => {} }),
+    );
+    expect(deactivation.kind).toBe('minted');
+    // and the deactivation identity now refuses its own duplicate
+    const duplicateDeactivation = ledger.mint(
+      bindings({ target: { kind: 'deactivation' }, stopOldRun: () => {} }),
+    );
+    expect(duplicateDeactivation).toEqual({
+      kind: 'refused',
+      reason: 'transition-already-prepared',
+    });
+    // consuming the first frees its identity — a fresh prepare is legal again
+    expect(ledger.consume(receipt)).toBe(true);
+    const remint: MintResult = ledger.mint(bindings());
+    expect(remint.kind).toBe('minted');
+  });
+
   it('rejects a structurally identical forged object — the brand is unnameable outside the mint', () => {
     const ledger = createReceiptLedger();
-    const receipt = ledger.mint(bindings());
+    const receipt = mintOk(ledger, bindings());
     // The forge: every public field copied, the brand absent (it cannot
     // be named here). The ledger's membership check — not shape — is the
     // authority: manufactured request fields are never currency.
@@ -106,7 +158,7 @@ describe('the switch-preparation receipt ledger', () => {
   it('never crosses ledgers: a receipt is currency only at the coordinator that minted it', () => {
     const mine = createReceiptLedger();
     const theirs = createReceiptLedger();
-    const receipt = mine.mint(bindings());
+    const receipt = mintOk(mine, bindings());
     expect(theirs.lookup(receipt)).toEqual({ kind: 'unknown-receipt' });
     expect(theirs.consume(receipt)).toBe(false);
     expect(mine.consume(receipt)).toBe(true);

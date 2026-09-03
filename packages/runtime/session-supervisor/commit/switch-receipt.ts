@@ -30,7 +30,11 @@ import type { ProjectHostTarget, RoutesTarget } from '../revocation/authority-re
  * `already-consumed`; an object this coordinator never minted answers
  * `unknown-receipt` (the brand below is unnameable outside this
  * module, so a forged structurally-identical object fails the ledger's
- * membership check — it cannot be manufactured, only minted).
+ * membership check — it cannot be manufactured, only minted). And one
+ * transition holds at most one LIVE receipt: minting over the identity
+ * an unconsumed receipt already binds refuses with
+ * `transition-already-prepared`, so a second receipt can never exist
+ * to re-linearize a transition the first already committed.
  *
  * Deterministic by construction: no IO, no timers — the minting
  * validations (the drain report, the fence state, the authoritative
@@ -139,10 +143,32 @@ export type ReceiptLookup =
   | { readonly kind: 'unknown-receipt' }
   | { readonly kind: 'already-consumed' };
 
-/** The one-use ledger: the single place a receipt is minted and spent. */
+/** `mint`'s answer: one fresh receipt, or the duplicate-live refusal. */
+export type MintResult =
+  | { readonly kind: 'minted'; readonly receipt: SwitchPreparationReceipt }
+  | { readonly kind: 'refused'; readonly reason: 'transition-already-prepared' };
+
+/**
+ * The one-use ledger: the single place a receipt is minted and spent.
+ * Two invariants live here, both structural: a receipt is spent by one
+ * consumption (the one-use flip), and **one transition holds at most
+ * one live receipt** — an unconsumed receipt already binding the same
+ * `(oldSession, target identity)` pair refuses the next mint over that
+ * identity, so a second receipt can never exist to pass the binding
+ * checks after the first linearized (the old fence's post-mortem
+ * `drained` state would let it) and re-run revocation over already-
+ * revoked surfaces. Consuming frees the identity for a fresh prepare;
+ * an abandoned live receipt pins its identity until then (voiding an
+ * abandoned preparation is the cancel lane's, not this currency's).
+ */
 export interface ReceiptLedger {
-  /** Freezes validated bindings into one fresh, unconsumed receipt. */
-  mint(bindings: ReceiptBindings): SwitchPreparationReceipt;
+  /**
+   * Freezes validated bindings into one fresh, unconsumed receipt —
+   * unless an unconsumed receipt already binds the same transition
+   * identity (exact old pair + same target: the same candidate ref, or
+   * both deactivations).
+   */
+  mint(bindings: ReceiptBindings): MintResult;
   /** Resolves the receipt's bindings without spending it — the pre-linearization checks read here. */
   lookup(receipt: SwitchPreparationReceipt): ReceiptLookup;
   /**
@@ -154,14 +180,34 @@ export interface ReceiptLedger {
   consume(receipt: SwitchPreparationReceipt): boolean;
 }
 
+/** Field-wise pair equality — `runtimeEpoch` and `generation` exact (the codebase idiom). */
+function sameSession(left: SessionRef, right: SessionRef): boolean {
+  return left.runtimeEpoch === right.runtimeEpoch && left.generation === right.generation;
+}
+
+/** One transition's identity: the exact old pair plus the same target (same candidate, or both deactivations). */
+function sameTransition(left: ReceiptBindings, right: ReceiptBindings): boolean {
+  if (!sameSession(left.oldSession, right.oldSession)) return false;
+  if (left.target.kind !== right.target.kind) return false;
+  return (
+    left.target.kind === 'deactivation' ||
+    sameSession(left.target.candidate, (right.target as { candidate: SessionRef }).candidate)
+  );
+}
+
 /** Builds one ledger — the switch coordinator owns its lifetime; one coordinator, one ledger. */
 export function createReceiptLedger(): ReceiptLedger {
   const entries = new Map<SwitchPreparationReceipt, LedgerEntry>();
   return {
     mint: (bindings) => {
+      for (const entry of entries.values()) {
+        if (!entry.consumed && sameTransition(entry.bindings, bindings)) {
+          return { kind: 'refused', reason: 'transition-already-prepared' };
+        }
+      }
       const receipt: SwitchPreparationReceipt = { ...bindings, [RECEIPT_BRAND]: true };
       entries.set(receipt, { bindings, consumed: false });
-      return receipt;
+      return { kind: 'minted', receipt };
     },
     lookup: (receipt) => {
       const entry = entries.get(receipt);

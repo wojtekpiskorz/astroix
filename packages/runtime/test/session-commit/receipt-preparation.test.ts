@@ -259,6 +259,30 @@ describe('the normal preparation — issuance over the sealed terminal drain', (
     const refused = await fx.coordinator.prepareNormal(withoutStop);
     expect(refused).toEqual({ kind: 'refused', reason: 'deactivation-without-stop' });
   });
+
+  it('holds at most one live receipt per transition — the second prepare over the same identity refuses', async () => {
+    const fx = commitFixture();
+    const first = await firstRef(fx);
+    const sealed = await drainedFence();
+    const base = deactivationBase(fx, first, sealed);
+    const prepared = await fx.coordinator.prepareNormal(base);
+    expect(prepared.kind).toBe('prepared');
+    // the same identity again (old pair + deactivation target), a fresh
+    // input object: the ledger's duplicate-live guard answers through
+    // the prepare surface — no second receipt can exist to re-linearize
+    // the transition the first already binds
+    const duplicate = await fx.coordinator.prepareNormal({ ...base });
+    expect(duplicate).toEqual({ kind: 'refused', reason: 'transition-already-prepared' });
+    // a different target is a different transition — it still mints
+    const other = await fx.coordinator.prepareNormal({
+      ...base,
+      target: {
+        kind: 'replacement',
+        candidate: { runtimeEpoch: first.runtimeEpoch, generation: 42 },
+      },
+    });
+    expect(other.kind).toBe('prepared');
+  });
 });
 
 describe('the forced preparation — the observed exact write-executor exit', () => {
@@ -295,6 +319,46 @@ describe('the forced preparation — the observed exact write-executor exit', ()
       executor: reap.executor,
     });
     expect(prepared.kind).toBe('prepared');
+  });
+
+  it('a rejecting exit observation is an un-observed exit — incomplete reap, no receipt', async () => {
+    const fx = commitFixture();
+    const first = await firstRef(fx);
+    const sealed = await timedOutFence();
+    const reap = fakeExecutor();
+    reap.failExit(); // the observation seam itself fails: fail closed, never a guessed receipt
+    const outcome = await fx.coordinator.prepareForced({
+      ...deactivationBase(fx, first, sealed),
+      executor: reap.executor,
+    });
+    expect(outcome).toEqual({ kind: 'incomplete-reap' });
+    expect(reap.killCalls).toBe(1); // the force still fired; only the mint is refused
+  });
+
+  it('refuses the forced mint over an identity a live receipt already binds — the currency law crosses variants', async () => {
+    const fx = commitFixture();
+    const first = await firstRef(fx);
+    const clock = manualClock();
+    const fence = createEditFence({ clock: clock.clock });
+    const started = fence.fence();
+    if (started.kind !== 'fenced') throw new Error('unreachable');
+    await started.drain.outcome; // a clean drain: the normal variant mints
+    const base = deactivationBase(fx, first, { fence, drain: started.drain });
+    expect((await fx.coordinator.prepareNormal(base)).kind).toBe('prepared');
+    // the same identity forced (the fence is not part of the identity):
+    // the kill fires — the exact executor this identity's transition
+    // would retire — the exit is observed, and the mint refuses,
+    // because the identity already holds a live receipt
+    const stuck = await timedOutFence();
+    const reap = fakeExecutor();
+    reap.settleExit(null, 'SIGKILL');
+    const refused = await fx.coordinator.prepareForced({
+      ...base,
+      fence: stuck.fence,
+      drain: stuck.drain,
+      executor: reap.executor,
+    });
+    expect(refused).toEqual({ kind: 'refused', reason: 'transition-already-prepared' });
   });
 
   it('an incomplete forced reap creates NO receipt — the candidate rolls back and old authority stays unrevoked', async () => {
