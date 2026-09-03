@@ -1,9 +1,13 @@
 import { fork } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
 import type { BrowserWindow as BrowserWindowType } from 'electron';
 import { app, BrowserWindow, dialog, Menu, session } from 'electron';
+import {
+  type RuntimeAssets,
+  resolveRuntimeAssets,
+  runtimeAssetsBootDiagnostic,
+} from '../runtime-assets/resolve-runtime-assets.ts';
 import type { SpawnedChildHandle } from './control-plane-client.ts';
 import type { NativeMenuActionId, NativeMenuDeclarations } from './menus.ts';
 import type { NativeHostEvent } from './native-host.ts';
@@ -16,26 +20,23 @@ import {
 /**
  * The Electron main wiring (#243, H1): the ONLY module that imports
  * Electron — it adapts the real APIs onto the native host's injected
- * seams and supplies the dev runtime adapters. Everything behavioral
- * lives behind the seams (native-host.ts and siblings); the focused
- * units fake exactly these seams and the smoke lane runs this wiring for
- * real (`npm run test:desktop`).
+ * seams and supplies the host facts. Everything behavioral lives behind
+ * the seams (native-host.ts and siblings); the focused units fake
+ * exactly these seams and the smoke lane runs this wiring for real
+ * (`npm run test:desktop`).
  *
- * Dev runtime adapters until H2 (#244 supplies the packaged resources):
- * the control-plane child runs under an EXPLICIT node executable
- * (`ASTROIX_DESKTOP_NODE`) — there is no PATH discovery, no shell, no
- * system-Node guess, and no Electron-as-Node fallback; a missing
- * executable is a fail-closed boot diagnostic, never a search
- * (ADR-0008's no-fallback law). `ASTROIX_DESKTOP_USER_DATA` overrides
- * the user-data root for dev/smoke isolation; the product uses
- * Electron's standard Astroix directory (ADR-0008 identity).
+ * Runtime-asset resolution (#244, H2): a packaged boot resolves the
+ * bundled stock Node and the rebased control-plane entry from
+ * `process.resourcesPath` through the internal packaged-asset adapter —
+ * verified (types, containment, symlink policy, executable identity,
+ * hashes) before anything spawns, with NO fallback; a dev boot declares
+ * the explicit `ASTROIX_DESKTOP_NODE` executable (H1's law, unchanged).
+ * Either refusal is a fail-closed boot diagnostic (sanitized — never a
+ * packaged path), never a search (ADR-0008's no-fallback law).
+ * `ASTROIX_DESKTOP_USER_DATA` overrides the user-data root for dev/smoke
+ * isolation; the product uses Electron's standard Astroix directory
+ * (ADR-0008 identity).
  */
-
-const HERE = dirname(fileURLToPath(import.meta.url));
-
-/** The dev-checkout child entry and its raw-Node register (the #230/#240 idiom; H2's rebased entry needs neither). */
-const CHILD_ENTRY = join(HERE, '..', 'src', 'main', 'control-plane-child.ts');
-const RAW_NODE_REGISTER = join(HERE, '..', 'raw-node-register.mjs');
 
 function log(event: NativeHostEvent): void {
   console.log(`astroix-desktop: ${JSON.stringify(event)}`);
@@ -47,11 +48,18 @@ function failClosedBoot(diagnostic: string): void {
 }
 
 async function main(): Promise<void> {
-  const nodeExecutable = process.env.ASTROIX_DESKTOP_NODE;
-  if (nodeExecutable === undefined || nodeExecutable.length === 0) {
-    failClosedBoot(
-      'ASTROIX_DESKTOP_NODE is required (the explicit control-plane-child executable; the packaged asset adapter lands with H2)',
-    );
+  // The one resolution decision of the boot (#244, H2): packaged assets
+  // (verified, no fallback) or the declared dev executable — before any
+  // window, directory, or child exists.
+  const runtimeAssets = await resolveRuntimeAssets({
+    isPackaged: app.isPackaged,
+    resourcesPath: process.resourcesPath,
+    electronVersion: process.versions.electron ?? '',
+    architecture: process.arch,
+    env: process.env,
+  });
+  if ('code' in runtimeAssets) {
+    failClosedBoot(runtimeAssetsBootDiagnostic(runtimeAssets));
     return;
   }
   if (process.env.ASTROIX_DESKTOP_USER_DATA !== undefined) {
@@ -131,10 +139,11 @@ async function main(): Promise<void> {
         },
       },
       spawnControlPlaneChild: () =>
-        spawnChild(nodeExecutable, {
+        spawnChild(runtimeAssets, {
           privateStateDirectory,
           registryDirectory,
-          declareCurrentRuntimePin: process.env.ASTROIX_DESKTOP_DEV_CURRENT_PIN === '1',
+          declareCurrentRuntimePin:
+            runtimeAssets.mode === 'dev' && process.env.ASTROIX_DESKTOP_DEV_CURRENT_PIN === '1',
         }),
     },
     { observer: log, securityEvidence: denialRecorder.evidence },
@@ -150,12 +159,18 @@ async function main(): Promise<void> {
   }
 }
 
-/** One spawned control-plane child adapted to the handle seam. */
-function spawnChild(nodeExecutable: string, config: unknown): SpawnedChildHandle {
-  const child = fork(CHILD_ENTRY, [JSON.stringify(config)], {
-    execPath: nodeExecutable,
-    execArgv: ['--experimental-transform-types', '--import', RAW_NODE_REGISTER],
-    cwd: join(HERE, '..'),
+/**
+ * One spawned control-plane child adapted to the handle seam: the
+ * RESOLVED absolute executable (the bundled stock Node when packaged —
+ * `fork` never spawns a shell, and the exact-child plans the plane
+ * supervisor builds later carry the same executable), the resolved entry,
+ * and the mode's execArgv — dev loaders in dev, none when packaged.
+ */
+function spawnChild(assets: RuntimeAssets, config: unknown): SpawnedChildHandle {
+  const child = fork(assets.controlPlaneEntry, [JSON.stringify(config)], {
+    execPath: assets.nodeExecutable,
+    execArgv: [...assets.execArgv],
+    cwd: assets.childCwd,
     env: { HOME: process.env.HOME ?? '' },
     stdio: ['ignore', 'inherit', 'inherit', 'ipc'],
   });
