@@ -104,6 +104,11 @@ export type LeaseRecoveryOutcome =
   | { readonly kind: 'still-blocked' };
 
 /** The tombstone machine's surface. */
+// Caller-side serialization contract (the single-supervisor composition
+// provides it; the machine does not serialize internally): admission,
+// incomplete-reap recording, and lease-proof recovery are driven from one
+// serialized transition flow, so no read-absent window can race a fresh
+// record the way a concurrent caller would.
 export interface BootTombstone {
   /** Persists the boot-scoped tombstone — the durable-first step of the incomplete-reap aftermath. */
   recordIncompleteReap(record: IncompleteReapRecordInput): Promise<void>;

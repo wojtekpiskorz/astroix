@@ -139,6 +139,10 @@ export type CompletionResult =
   | { readonly kind: 'rejected'; readonly reason: CompletionRejection };
 
 /** The quit completion's answer: quit finishes either way — §8 lets an unobserved close still be an honest incomplete quit. */
+// No `client` target reference here, by design: quit rides a deactivation
+// whose completion already reported the frozen client identity, and a quit
+// leaves no live client to name — the "every result carries the target"
+// rule's one documented exception.
 export type QuitResult =
   | {
       /** The target's close was observed — without navigation (the quit path never touched a ready seam). */
