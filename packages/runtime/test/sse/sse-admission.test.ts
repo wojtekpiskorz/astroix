@@ -11,17 +11,20 @@ import {
   projectStreamHeaders,
   SESSION,
   type SseAuthorityFixture,
+  withoutHeader,
 } from './fixtures.ts';
 
 /**
- * The F3 SSE admission focused legs (#235): the pure core's every
- * refusal and admission, over the REAL grants and binding tables (F2's
- * machinery, imported read-only). The admission order is the ADR's —
- * route, method, duplicate headers, Host, capability, Origin, Fetch
- * Metadata, query shape, binding + role, then the SessionRef freshness
- * pair — and each leg pins one law of ADR-0006 §7's SSE sentence:
- * "SSE requires exact `Host`, `Origin`, host capability, client
- * binding, and `SessionRef`."
+ * The F3 SSE admission focused legs (#235; reads-law alignment #330):
+ * the pure core's every refusal and admission, over the REAL grants and
+ * binding tables (F2's machinery, imported read-only). The admission
+ * order is the ADR's — route, method, duplicate headers, Host,
+ * capability, Fetch Metadata, Origin, query shape, binding + role, then
+ * the SessionRef freshness pair — and each leg pins one law of
+ * ADR-0006 §7's amended SSE sentence: "SSE — a same-origin GET stream —
+ * follows the reads law: exact `Host`, the capability, same-origin
+ * Fetch Metadata, a client binding, and the current `SessionRef`;
+ * `Origin` is verified only when present."
  */
 
 function admit(
@@ -85,6 +88,47 @@ describe('the admitted admissions', () => {
       hostClass: 'launcher',
       session: null,
     });
+  });
+});
+
+describe('the reads-law relaxation (#330: no Origin on a same-origin GET)', () => {
+  it('admits a same-origin editor stream WITHOUT Origin — the real-Chromium shape', () => {
+    // `Origin` is a forbidden header on a same-origin GET in real
+    // browsers (fetch and `EventSource` alike): the strict law 403'd
+    // every real client while raw-socket pins masked the mismatch.
+    const fixture = createSseAuthorityFixture();
+    const admission = admit(
+      fixture,
+      `${EVENTS_PATH}${eventsQuery(SESSION)}`,
+      withoutHeader(projectStreamHeaders(fixture, 'editor'), 'Origin'),
+    );
+    expect(admission).toMatchObject({
+      kind: 'admitted',
+      role: 'editor',
+      hostClass: 'project',
+      session: SESSION,
+      clientCapability: 'client-editor',
+    });
+  });
+
+  it('admits a same-origin launcher stream WITHOUT Origin', () => {
+    const fixture = createSseAuthorityFixture();
+    const admission = admit(
+      fixture,
+      EVENTS_PATH,
+      withoutHeader(launcherStreamHeaders(fixture), 'Origin'),
+    );
+    expect(admission).toMatchObject({ kind: 'admitted', role: 'launcher', session: null });
+  });
+
+  it('admits a same-origin diagnostic stream WITHOUT Origin', () => {
+    const fixture = createSseAuthorityFixture();
+    const admission = admit(
+      fixture,
+      `${EVENTS_PATH}${eventsQuery(SESSION)}`,
+      withoutHeader(projectStreamHeaders(fixture, 'diagnostic'), 'Origin'),
+    );
+    expect(admission).toMatchObject({ kind: 'admitted', role: 'diagnostic', session: SESSION });
   });
 });
 
@@ -192,8 +236,11 @@ describe('the host capability law', () => {
   });
 });
 
-describe('the SSE-strict transport laws (exact Origin, Fetch Metadata, no mutation marker)', () => {
-  it('refuses a MISSING Origin — stricter than a read, whose Origin is checked only when present', () => {
+describe('the transport laws (the reads law: same-origin Fetch Metadata, Origin exact when present, no mutation marker)', () => {
+  it('refuses an EMPTY Origin — a present-but-mismatched value, not the absent-header shape', () => {
+    // `{ Origin: true }` sends `Origin: ` (present, empty): under the
+    // reads law that is a disagreeing value — only true ABSENCE is no
+    // refusal (the admitted legs above pin that shape).
     const fixture = createSseAuthorityFixture();
     const admission = admit(fixture, EVENTS_PATH, launcherStreamHeaders(fixture, { Origin: true }));
     expect(errorCode(admission)).toBe('unauthorized');
@@ -217,7 +264,7 @@ describe('the SSE-strict transport laws (exact Origin, Fetch Metadata, no mutati
     expect(errorCode(otherProject)).toBe('unauthorized');
   });
 
-  it('refuses missing or cross-site Fetch Metadata', () => {
+  it('refuses missing or non-same-origin Fetch Metadata', () => {
     const fixture = createSseAuthorityFixture();
     const missing = admit(
       fixture,
@@ -225,12 +272,14 @@ describe('the SSE-strict transport laws (exact Origin, Fetch Metadata, no mutati
       launcherStreamHeaders(fixture, { 'Sec-Fetch-Site': true }),
     );
     expect(errorCode(missing)).toBe('unauthorized');
-    const cross = admit(
-      fixture,
-      EVENTS_PATH,
-      launcherStreamHeaders(fixture, { 'Sec-Fetch-Site': 'cross-site' }),
-    );
-    expect(errorCode(cross)).toBe('unauthorized');
+    for (const site of ['cross-site', 'same-site', 'none']) {
+      const cross = admit(
+        fixture,
+        EVENTS_PATH,
+        launcherStreamHeaders(fixture, { 'Sec-Fetch-Site': site }),
+      );
+      expect(errorCode(cross), site).toBe('unauthorized');
+    }
   });
 
   it('refuses the mutation marker on a stream request as contradictory evidence', () => {

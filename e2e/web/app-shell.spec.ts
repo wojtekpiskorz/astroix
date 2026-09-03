@@ -14,13 +14,14 @@ import { expect, type Page, type Route, test } from '@playwright/test';
  * real (the held old-generation inspect dies aborted) and the fresh
  * generation's cache unpolluted.
  *
- * SSE disclosure (#330, owner ruling pending — STOP-disclosed-blocked):
- * live browser SSE streams are refused 403 today (F3 admission requires
- * `Origin`; real Chromium sends none on same-origin GET). Live-wire SSE
- * delivery legs are therefore blocked pending #330 exactly like G1's;
- * what IS asserted here is the pages' honest `stream-state` surface, and
- * delayed SSE-frame delivery is pinned at the unit tier
- * (`shell-provider.test.tsx`).
+ * SSE disclosure (#330, reads-law alignment — merged): a live
+ * same-origin GET stream presents `Sec-Fetch-Site: same-origin` and no
+ * `Origin` (a forbidden header on same-origin GET in real browsers),
+ * and SSE admission now verifies `Origin` only when present — the
+ * browser's own shape is admitted. Live-wire SSE delivery legs ride the
+ * I/J/K lanes (unblocked by #330); what IS asserted here is the pages'
+ * honest `stream-state` surface, and delayed SSE-frame delivery is
+ * pinned at the unit tier (`shell-provider.test.tsx`).
  *
  * SERIAL like the activation battery: one control plane, one supervisor-
  * global active session — the legs walk one coherent session history and
@@ -69,7 +70,8 @@ test('activation lands the rebuilt shell at a fresh generation with live session
 
   // The shell is bound at the committed pair: the retained identity
   // surfaces, the generation-scoped inspection, and the honest stream
-  // state (post-#330: the refusal, never a silent 'connecting').
+  // state (never a silent 'connecting'; under #330's reads law the live
+  // browser stream is admitted, so the state settles 'open').
   await expect(page.getByTestId('session-generation')).toHaveText(/^\d+$/);
   await expect(page.getByTestId('inspect-revision')).toHaveText(/^\d+$/);
   await expect(page.getByTestId('stream-state')).not.toHaveText('connecting');
