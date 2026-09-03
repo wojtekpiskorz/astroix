@@ -181,45 +181,29 @@ async function activate(
     if (!(error instanceof ActivationFailedError)) return notComposed();
     return activationResult(envelope.requestId, begun.attempt.ref, projectKey, inputs);
   }
-  const committed = await commitTransition(candidate, inputs);
-  if (!committed) {
-    // Either the drain aborted (rollback + resume, §4 step 3 — the old
-    // session is untouched) or authority was revoked and the grant
-    // failed (§4 step 7 — irreversible, F7's aftermath): the snapshot
-    // distinguishes them, and it is the answer either way.
-    return activationResult(envelope.requestId, candidate.ref, projectKey, inputs);
-  }
+  // The commit tail answers one way whether it committed, the drain
+  // aborted (rollback + resume, §4 step 3 — the old session untouched),
+  // or authority was revoked and the grant failed (§4 step 7 —
+  // irreversible, F7's aftermath): the snapshot distinguishes them, and
+  // it is the answer either way.
+  await commitTransition(candidate, inputs);
   return activationResult(envelope.requestId, candidate.ref, projectKey, inputs);
 }
 
-/** The transition's commit half: the plain first commit, or the receipt-gated switch. */
-async function commitTransition(
-  candidate: StagedCandidate,
-  inputs: ExecutorInputs,
-): Promise<boolean> {
+/** The transition's commit half: the plain first commit, or the receipt-gated switch, then the adoption. */
+async function commitTransition(candidate: StagedCandidate, inputs: ExecutorInputs): Promise<void> {
   const oldSeat = inputs.seatStore.active();
-  let outcome: 'committed' | 'failed';
-  if (oldSeat === null) {
-    outcome = await commitFirstActivation(candidate);
-  } else {
-    outcome = await commitSwitch(oldSeat, candidate, inputs);
-  }
-  if (outcome !== 'committed') return false;
+  const outcome =
+    oldSeat === null
+      ? await commitFirstActivation(candidate)
+      : await commitSwitch(oldSeat, candidate, inputs);
+  if (outcome !== 'committed') return;
   try {
-    await adoptSession(candidate, recordRoot(candidate, inputs), inputs);
-    return true;
+    await adoptSession(candidate, inputs);
   } catch {
-    return false;
+    // The stranded-adoption edge (#333): authority discipline holds, the
+    // snapshot is the answer — the composition-side recovery is filed.
   }
-}
-
-/** The root of the candidate's project record — the composition's own lookup, never browser-supplied. */
-function recordRoot(candidate: StagedCandidate, inputs: ExecutorInputs): string {
-  const active = inputs.supervisor.snapshot().active;
-  const key = active !== undefined && samePair(active.ref, candidate.ref) ? active.projectKey : '';
-  const record = inputs.registry.snapshot().records.find((entry) => entry.projectKey === key);
-  if (record === undefined) throw new Error('the committed session has no registry record');
-  return record.canonicalRoot;
 }
 
 /** The first activation's plain commit — no old session exists, so there is nothing to drain or revoke. */
@@ -345,15 +329,18 @@ async function inspect(
  * revoked the old one), the seat, and the worker event lift onto the
  * hub under the exact pair.
  */
-async function adoptSession(
-  candidate: StagedCandidate,
-  canonicalRoot: string,
-  inputs: ExecutorInputs,
-): Promise<void> {
+async function adoptSession(candidate: StagedCandidate, inputs: ExecutorInputs): Promise<void> {
   const active = inputs.supervisor.snapshot().active;
   if (active === undefined || !samePair(active.ref, candidate.ref)) {
     throw new Error('the committed candidate is not the active session');
   }
+  // The record root is the composition's own lookup over the ACTIVE
+  // session's project — never browser-supplied, never a coerced miss.
+  const record = inputs.registry
+    .snapshot()
+    .records.find((entry) => entry.projectKey === active.projectKey);
+  if (record === undefined) throw new Error('the committed session has no registry record');
+  const canonicalRoot = record.canonicalRoot;
   const document = { webContentsId: 1, navigationId: candidate.ref.generation };
   const httpBound = inputs.httpBindings.bind({
     role: 'editor',
