@@ -1,6 +1,16 @@
-import type { SessionFailure, SessionRef } from '@wojciechpiskorz/astroix-protocol';
+import {
+  findDisclosure,
+  type SessionFailure,
+  type SessionRef,
+  sanitizedTextSchema,
+  withinByteLimit,
+} from '@wojciechpiskorz/astroix-protocol';
 import type { SupervisionCloseReport } from '../../project-plane/supervision/close-report.ts';
-import { type ProjectRun, ProjectRunBootError } from '../../project-runtime/project-runtime.ts';
+import {
+  type CertificationFacts,
+  type ProjectRun,
+  ProjectRunBootError,
+} from '../../project-runtime/project-runtime.ts';
 
 /**
  * The activation attempt (#236, F4; ADR-0006 §4 step 1 and §9
@@ -135,20 +145,70 @@ export interface AttemptHooks {
 /** The attempt's own lifecycle, observed through its public surface. */
 type AttemptPhase = 'starting' | 'staged' | 'cancelling' | 'committing' | 'ended';
 
-/** Maps a candidate-run readiness rejection to the sanitized session failure. */
+/**
+ * Maps a candidate-run readiness rejection to the sanitized session
+ * failure. The certification boot code is the one enriched path: it
+ * reports the certification category with the detected pair, the
+ * certified pairs, and the rejected contract (ADR-0005's explicit
+ * requirement, made reachable by #319) instead of folding into
+ * `startup`.
+ */
 function readinessFailureOf(error: unknown): SessionFailure {
   // Only the facade's sanitized boot error carries decision data; anything
   // else — including free text — is 'unknown' and its text never surfaces.
   if (error instanceof ProjectRunBootError) {
     const category: SessionFailure['category'] =
-      error.code === 'startup-timeout'
-        ? 'startup-timeout'
-        : error.code === 'worker-crash' || error.code === 'managed-astro-crash'
-          ? 'crash'
-          : 'startup';
-    return { category, message: FAILURE_MESSAGES[category] };
+      error.code === 'uncertified-pair'
+        ? 'certification'
+        : error.code === 'startup-timeout'
+          ? 'startup-timeout'
+          : error.code === 'worker-crash' || error.code === 'managed-astro-crash'
+            ? 'crash'
+            : 'startup';
+    return {
+      category,
+      message:
+        category === 'certification'
+          ? certificationMessageOf(error.certification)
+          : FAILURE_MESSAGES[category],
+    };
   }
   return { category: 'unknown', message: FAILURE_MESSAGES.unknown };
+}
+
+/**
+ * The certification failure's message: the fixed template, enriched with
+ * the detected pair, the certified pairs, and the rejected contract. The
+ * enrichment is bounded by the protocol's own laws, applied twice: every
+ * fact string is validated STANDING ALONE (the facade admission's law,
+ * re-held here — a disclosure-shaped version string that would hide once
+ * embedded after `astro@` in the composed text is still caught at the
+ * belt), and the composed text must validate as a public sanitized text
+ * and fit the lifecycle byte budget the session snapshot rides in.
+ * Anything that fails either keeps the bare template: the category is
+ * the fact, the enrichment is dropped, never truncated into a guess.
+ */
+function certificationMessageOf(facts: CertificationFacts | undefined): string {
+  const bare = FAILURE_MESSAGES.certification;
+  if (facts === undefined) return bare;
+  const factTexts = [
+    facts.detected.astro,
+    facts.detected.vite,
+    facts.rejectedContract,
+    ...facts.certified.flatMap((pair) => [pair.astro, pair.vite]),
+  ];
+  if (factTexts.some((text) => text.length === 0 || findDisclosure(text) !== null)) {
+    return bare;
+  }
+  const certifiedList =
+    facts.certified.length === 0
+      ? 'none'
+      : facts.certified.map((pair) => `astro@${pair.astro} + vite@${pair.vite}`).join(', ');
+  const composed = `${bare} (detected astro@${facts.detected.astro} + vite@${facts.detected.vite}; certified pairs: ${certifiedList}; rejected contract: ${facts.rejectedContract})`;
+  return sanitizedTextSchema.safeParse(composed).success &&
+    withinByteLimit(composed, 'lifecycleJsonBytes')
+    ? composed
+    : bare;
 }
 
 /** The fixed templates behind every session failure this machine records — the E6 law, no free text. */

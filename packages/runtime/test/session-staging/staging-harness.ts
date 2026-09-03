@@ -4,6 +4,7 @@ import {
   WorkerRejectionError,
 } from '../../project-plane/worker/worker-failure.ts';
 import {
+  type CertificationFacts,
   type ProjectRun,
   ProjectRunBootError,
   type ProjectRunBootErrorCode,
@@ -44,7 +45,14 @@ export interface FakeRun {
   /** Resolves the run's readiness. */
   settleReady(): void;
   /** Rejects the run's readiness with the facade's sanitized boot error for the code. */
-  failReady(code: ProjectRunBootErrorCode): void;
+  failReady(code: Exclude<ProjectRunBootErrorCode, 'uncertified-pair'>): void;
+  /**
+   * Rejects the run's readiness with the facade's certification boot error
+   * carrying the pair facts (#319 — the payload is required, not optional).
+   */
+  failReadyUncertifiedPair(facts: CertificationFacts): void;
+  /** Rejects the run's readiness with exactly this error object — belt legs only. */
+  failReadyError(error: unknown): void;
   /** Rejects the run's readiness with raw hostile text — the unknown-failure path. */
   failReadyRaw(message: string): void;
   /** Settles stop/closed with one report — caller stop or unsupervised crash. */
@@ -54,7 +62,7 @@ export interface FakeRun {
 }
 
 const REPORT_BOOT_CODES: Partial<
-  Record<SupervisionCloseReport['reason'], ProjectRunBootErrorCode>
+  Record<SupervisionCloseReport['reason'], Exclude<ProjectRunBootErrorCode, 'uncertified-pair'>>
 > = {
   'startup-timeout': 'startup-timeout',
   'worker-crash': 'worker-crash',
@@ -124,6 +132,19 @@ export function fakeRun(): FakeRun {
       // a failed startup converges on its own (the E8 law): closed
       // settles without any stop
       settleOnce(completeReport(BOOT_REPORT_REASONS[code] ?? 'stopped'));
+    },
+    failReadyUncertifiedPair: (facts) => {
+      readySettled = true;
+      rejectReady(new ProjectRunBootError('uncertified-pair', facts));
+      // The certification pre-flight fails before any child exists: the
+      // launch-failure law converges on the never-spawned report shape
+      // (a caller-stop reason, complete, nothing to clean).
+      settleOnce(completeReport('cancelled'));
+    },
+    failReadyError: (error) => {
+      readySettled = true;
+      rejectReady(error as Error);
+      settleOnce(completeReport('stopped'));
     },
     failReadyRaw: (message) => {
       readySettled = true;
