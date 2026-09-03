@@ -3,8 +3,11 @@
  * request streams to the managed Astro dev server"): one proxied
  * exchange — the client's method, VERBATIM request target (natural URL,
  * resolved base included, query untouched), and headers, Host among
- * them preserved exactly, forwarded to the loopback upstream; the
- * upstream's status and headers written back and the body piped through
+ * them preserved exactly, forwarded to the loopback upstream — minus
+ * the control-plane authority (the host capability cookie and the
+ * client-capability header, ADR-0006 §3 — stripped through F2's one
+ * definition, #338); the upstream's status and headers written back and
+ * the body piped through
  * unmodified (SSE-compatible streaming: no buffering is added). The
  * upstream is never request-selected — the listener hands this leg the
  * active lease's upstream and nothing else.
@@ -19,6 +22,7 @@
 import { type IncomingMessage, type ServerResponse, request as upstreamRequest } from 'node:http';
 import { connect } from 'node:net';
 import type { Duplex } from 'node:stream';
+import { stripControlAuthority } from '../api/http/authority-strip.ts';
 import { astroixGeneratedHeaders } from '../origin/virtual-hosts.ts';
 
 /** The loopback upstream an active origin lease bound — the managed dev server's own address. */
@@ -58,10 +62,15 @@ export function proxyHttpStream(input: HttpStreamProxyInput): void {
     port: input.upstream.port,
     method: input.request.method,
     path: input.request.url,
-    // The parsed headers as received — the Host header rides verbatim:
-    // node:http uses a provided host instead of deriving one from the
-    // connection target (the AC's "HTTP preserves Host").
-    headers: { ...input.request.headers },
+    // The parsed headers minus the control-plane authority (#338;
+    // ADR-0006 §3 "strips it before forwarding either request to the
+    // managed Astro/Vite server"): the host capability cookie and the
+    // client-capability header never reach the dev server — F2's ONE
+    // strip definition, called here. The strip is surgical, and the Host
+    // header rides verbatim: node:http uses a provided host instead of
+    // deriving one from the connection target (the AC's "HTTP preserves
+    // Host").
+    headers: stripControlAuthority(input.request.headers),
     createConnection: () => {
       const socket = connect(input.upstream.port, input.upstream.host);
       input.track(socket);

@@ -9,13 +9,14 @@ import type { SessionGate } from '../state/session-gate.ts';
  * a moved-past generation, or one with no pair at all (the session
  * stream's frames always carry one; absence is fail-closed, never
  * assumed fresh) — never reaches the subscriber's dispatch. The
- * stream-level callbacks (`onStale`, `onTransportError`) pass through
- * un-gated: they describe the STREAM, not a pair.
+ * stream-level callbacks (`onOpen`, `onStale`, `onTransportError`) pass
+ * through un-gated: they describe the STREAM, not a pair.
  */
 
 /** The subscriber's dispatched callbacks — what a gated handler may invoke. */
 export interface GatedEventCallbacks {
   onEvent(envelope: SseEventEnvelope): void;
+  onOpen?(): void;
   onStale?(): void;
   onTransportError?(): void;
 }
@@ -26,6 +27,7 @@ export function gatedSseHandlers(gate: SessionGate, callbacks: GatedEventCallbac
     onEvent: (envelope) => {
       gate.whileCurrent(envelope.session, () => callbacks.onEvent(envelope));
     },
+    onOpen: () => callbacks.onOpen?.(),
     onStale: () => callbacks.onStale?.(),
     onTransportError: () => callbacks.onTransportError?.(),
   };
