@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { stripCapabilityCookie, stripControlAuthority } from '../../api/http/authority-strip.ts';
+import {
+  stripAuthorityFromPair,
+  stripAuthorityFromRawPairs,
+  stripCapabilityCookie,
+  stripControlAuthority,
+} from '../../api/http/authority-strip.ts';
 
 /**
  * The canonical authority strip (#234; ADR-0006 §3 "strips it before
@@ -7,8 +12,11 @@ import { stripCapabilityCookie, stripControlAuthority } from '../../api/http/aut
  * host-capability cookie and the injected client-capability header are
  * removed from everything handed onward — HTTP stream shapes and raw
  * HMR upgrade handshake shapes alike — while every other header passes
- * through untouched. The live wiring into the proxy path is #246's;
- * THIS is the one definition both transports call.
+ * through untouched. The live wiring is the two proxy legs' (#338);
+ * THIS is the one definition both transports call — the record shape,
+ * and (review round 1) the pair-level primitive the raw handshake view
+ * rides so a legal-but-exotic name like `__proto__` never touches
+ * object semantics.
  */
 
 const SECRET = 'f'.repeat(64);
@@ -159,5 +167,60 @@ describe('the strip under any name casing — the raw handshake view', () => {
     expect(forwarded.Host).toBe('abc.localhost:4408');
     expect(forwarded['Sec-WebSocket-Protocol']).toBe('vite-hmr');
     expect(forwarded.Cookie).toBe('vite-session=keep');
+  });
+});
+
+describe('the pair-level primitive — one raw handshake pair (#338 review round 1)', () => {
+  it('drops the client-capability name in any casing', () => {
+    expect(stripAuthorityFromPair('X-Astroix-Client', 'client-secret')).toBeUndefined();
+    expect(stripAuthorityFromPair('X-ASTROIX-CLIENT', 'client-secret')).toBeUndefined();
+    expect(stripAuthorityFromPair('x-astroix-client', 'client-secret')).toBeUndefined();
+  });
+
+  it('passes a non-Cookie pair through untouched — its own value bytes', () => {
+    expect(stripAuthorityFromPair('Host', 'abc.localhost:4408')).toBe('abc.localhost:4408');
+    expect(stripAuthorityFromPair('Sec-WebSocket-Key', 'dGhlIHRva2Vu')).toBe('dGhlIHRva2Vu');
+    expect(stripAuthorityFromPair('Cache-Control', 'no-cache')).toBe('no-cache');
+  });
+
+  it('rewrites a Cookie pair through stripCapabilityCookie — gone when only the capability rode it', () => {
+    expect(stripAuthorityFromPair('Cookie', `__astroix_host=${SECRET}; session=keep`)).toBe(
+      'session=keep',
+    );
+    expect(stripAuthorityFromPair('COOKIE', `session=keep; __astroix_host=${SECRET}`)).toBe(
+      'session=keep',
+    );
+    expect(stripAuthorityFromPair('Cookie', `__astroix_host=${SECRET}`)).toBeUndefined();
+  });
+});
+
+describe('the raw-pair leg — exotic names never touch object semantics', () => {
+  it('keeps a __proto__-named pair byte-identically, in position, while the authority dies', () => {
+    // A legal RFC 7230 token a hand-crafted client can send on the HMR
+    // upgrade. Routed through the record shape it would hit the
+    // Object.prototype setter and vanish from the forwarded view; the
+    // pair-level primitive keeps it like any other non-authority pair.
+    const kept = stripAuthorityFromRawPairs([
+      'Host',
+      'abc.localhost:4408',
+      '__proto__',
+      'not-an-object-just-bytes',
+      'X-Astroix-Client',
+      'client-secret',
+      'Cookie',
+      `__astroix_host=${SECRET}; session=keep`,
+    ]);
+    expect(kept).toEqual([
+      'Host',
+      'abc.localhost:4408',
+      '__proto__',
+      'not-an-object-just-bytes',
+      'Cookie',
+      'session=keep',
+    ]);
+    const forwarded = kept.join(': ');
+    expect(forwarded).toContain('__proto__: not-an-object-just-bytes');
+    expect(forwarded).not.toContain('client-secret');
+    expect(forwarded).not.toContain(SECRET);
   });
 });

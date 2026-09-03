@@ -223,6 +223,62 @@ describe('raw HMR upgrade tunnel', () => {
     expect(received.handshake).toBe(opening(hostname, listener.port).replace(/\r\n\r\n$/, ''));
   });
 
+  it('strips the control authority before tunnelling — the handshake arrives with neither, everything else byte-identical (#338)', async () => {
+    const hostname = `${KEY_A}.localhost`;
+    const capability = 'cap-338-hmr';
+    const hostCapability = 'host-cap-338';
+    // The renderer-cased authority a non-browser client (or a future
+    // injection into ws) could place on the upgrade: capitalized names,
+    // the capability cookie riding a Cookie line with a legitimate peer.
+    const sent = [
+      `GET /?token=${TOKEN} HTTP/1.1`,
+      `Host: ${hostname}:${listener.port}`,
+      `Origin: http://${hostname}:${listener.port}`,
+      'Connection: Upgrade',
+      'Upgrade: websocket',
+      `Sec-WebSocket-Key: ${CLIENT_KEY}`,
+      'Sec-WebSocket-Version: 13',
+      'Sec-WebSocket-Protocol: vite-hmr',
+      `X-Astroix-Client: ${capability}`,
+      `Cookie: __astroix_host=${hostCapability}; theme=dark`,
+      '',
+      '',
+    ].join('\r\n');
+    // The same opening minus the client-capability line and with the
+    // Cookie line reduced to its surviving cookie — position, casing,
+    // and every other byte unchanged.
+    const expected = [
+      `GET /?token=${TOKEN} HTTP/1.1`,
+      `Host: ${hostname}:${listener.port}`,
+      `Origin: http://${hostname}:${listener.port}`,
+      'Connection: Upgrade',
+      'Upgrade: websocket',
+      `Sec-WebSocket-Key: ${CLIENT_KEY}`,
+      'Sec-WebSocket-Version: 13',
+      'Sec-WebSocket-Protocol: vite-hmr',
+      'Cookie: theme=dark',
+      '',
+      '',
+    ]
+      .join('\r\n')
+      .replace(/\r\n\r\n$/, '');
+    const client = await rawClient(listener.port);
+    client.socket.write(sent, 'latin1');
+    // The response leg is untouched: the upstream's own 101 still answers
+    // THIS client's key with the accept digest.
+    const response = await client.waitFor(standIn.respond({ handshake: '' }).length);
+    const text = response.toString('latin1');
+    expect(text.startsWith('HTTP/1.1 101 Switching Protocols\r\n')).toBe(true);
+    expect(text).toContain(`Sec-WebSocket-Accept: ${acceptOf(CLIENT_KEY)}`);
+    await waitFor(() => (standIn.connections[0]?.handshake.length ?? 0) > 0);
+    const received = firstConnection(standIn);
+    expect(received.handshake).toBe(expected);
+    expect(received.handshake.toLowerCase()).not.toContain('astroix-client');
+    expect(received.handshake).not.toContain(capability);
+    expect(received.handshake).not.toContain(hostCapability);
+    client.socket.destroy();
+  });
+
   it('tunnels frames in both directions untouched', async () => {
     const hostname = `${KEY_A}.localhost`;
     const client = await rawClient(listener.port);
