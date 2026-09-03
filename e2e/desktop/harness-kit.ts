@@ -10,7 +10,11 @@ import { build } from 'vite';
  * shared vite bundling of a harness entry. Born at the second consumer
  * (#247's service-worker lane over #246's document-authority lane —
  * the house rule: a shared helper is born when the second consumer
- * appears, and stays as small as its job).
+ * appears, and stays as small as its job) and grown at the third
+ * (#248's packaged lane): `PackagedAppRun` (early-package-kit.ts)
+ * subclasses this run over the REAL packaged-app executable with an
+ * injected env/cwd — the pump, the waiter registry, the stderr bound,
+ * and the quit-then-SIGKILL stop live HERE, one law for every lane.
  *
  * The kit also carries the one behavioral fix the duplicated copies
  * hid: stdout is LINE-BUFFERED — a report line split across two `data`
@@ -35,20 +39,37 @@ export interface HarnessEvent {
   readonly [field: string]: unknown;
 }
 
-/** What one lane parameterizes: its bundle, its report-line prefix, extra argv. */
+/** What one lane parameterizes: its bundle or executable, its report-line prefix, extra argv. */
 export interface HarnessRunOptions {
-  /** The lane-built harness main (see `buildHarnessMain`). */
-  readonly bundle: string;
+  /**
+   * The lane-built harness main (see `buildHarnessMain`) — the default
+   * Electron launch's single argument. Optional only for a lane that
+   * supplies its own `executable` (the packaged lane runs the real app
+   * binary with its own argv).
+   */
+  readonly bundle?: string;
+  /** The executable to launch — the workspace Electron binary by default; the packaged lane overrides it with the real app binary. */
+  readonly executable?: string;
+  /** Extra argv after the bundle (e.g. a JSON config argument, or the packaged lane's browser switches). */
+  readonly argv?: readonly string[];
+  /** The full launch environment — when absent, the harness default (the parent env plus logging quiet). Lanes that must PRUNE the parent env (the packaged laws) compose their own. */
+  readonly env?: NodeJS.ProcessEnv;
+  /** The launch cwd — the repository root by default. */
+  readonly cwd?: string;
   /** The stdout prefix one lane's reports carry (`astroix-…-harness: `). */
   readonly reportPrefix: string;
-  /** Extra argv after the bundle (e.g. a JSON config argument). */
-  readonly argv?: readonly string[];
 }
 
 /** One spawned harness run: the line protocol over the real Electron main. */
 export class HarnessRun {
   readonly child: ChildProcess;
   readonly events: HarnessEvent[] = [];
+  /**
+   * Every complete stdout line, tail-bounded (the runaway guard — the
+   * #129 bounded-evidence law; the lanes' mains emit a handful of lines,
+   * and the packaged lane's sanitization audit scans exactly these).
+   */
+  readonly stdoutLines: string[] = [];
   /** The child's stderr tail, bounded — a harness crash must surface as error text, never an opaque timeout (#129's law: keep the error text; truncation ate the one unexplained red). */
   readonly stderrLines: string[] = [];
   private readonly reportPrefix: string;
@@ -59,12 +80,23 @@ export class HarnessRun {
     resolve: (event: HarnessEvent) => void;
     timer: ReturnType<typeof setTimeout>;
   }[] = [];
+  private exitSettled?: Promise<{ code: number | null; signal: string | null }>;
+  private static readonly MAX_LINES = 500;
 
   constructor(options: HarnessRunOptions) {
+    if (options.bundle === undefined && options.executable === undefined) {
+      throw new Error(
+        'harness-kit: a run needs a bundle (the Electron default) or its own executable',
+      );
+    }
     this.reportPrefix = options.reportPrefix;
-    this.child = spawn(ELECTRON, [options.bundle, ...(options.argv ?? [])], {
-      cwd: REPO,
-      env: { ...process.env, ELECTRON_ENABLE_LOGGING: '0' },
+    const args =
+      options.bundle === undefined
+        ? [...(options.argv ?? [])]
+        : [options.bundle, ...(options.argv ?? [])];
+    this.child = spawn(options.executable ?? ELECTRON, args, {
+      cwd: options.cwd ?? REPO,
+      env: options.env ?? { ...process.env, ELECTRON_ENABLE_LOGGING: '0' },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     this.child.stdout?.on('data', (chunk: Buffer) => {
@@ -96,6 +128,9 @@ export class HarnessRun {
     this.stdoutRemainder = lines.pop() ?? '';
     for (const raw of lines) {
       const line = raw.trim();
+      if (line.length === 0) continue;
+      this.stdoutLines.push(line);
+      while (this.stdoutLines.length > HarnessRun.MAX_LINES) this.stdoutLines.shift();
       if (!line.startsWith(this.reportPrefix)) continue;
       let event: HarnessEvent;
       try {
@@ -117,6 +152,30 @@ export class HarnessRun {
     }
   }
 
+  /**
+   * True when the child has SETTLED — exited by code or killed by
+   * signal. The ONE settled predicate (`exitCode === null` alone is the
+   * signal-death hole: a signal-killed child keeps `exitCode` null and
+   * carries the signal in `signalCode`, and cleanup that gates on
+   * `exitCode` then awaits a fresh `once('exit')` listener can never
+   * resolve — the hook-timeout hang). Shared by `exit` and `stop`.
+   */
+  private get settled(): boolean {
+    return this.child.exitCode !== null || this.child.signalCode !== null;
+  }
+
+  /** The exit settlement (idempotent; safe to await from many legs). */
+  get exit(): Promise<{ code: number | null; signal: string | null }> {
+    this.exitSettled ??= new Promise((resolve) => {
+      if (this.settled) {
+        resolve({ code: this.child.exitCode, signal: this.child.signalCode });
+        return;
+      }
+      this.child.once('exit', (code, signal) => resolve({ code, signal }));
+    });
+    return this.exitSettled;
+  }
+
   private timeoutError(what: string): Error {
     return new Error(
       `timed out waiting for ${what}; events so far:\n${JSON.stringify(this.events)}` +
@@ -130,11 +189,19 @@ export class HarnessRun {
     }
   }
 
-  /** Waits for the first event matching `match` — already-seen events included. */
-  waitFor(match: (event: HarnessEvent) => boolean, what: string): Promise<HarnessEvent> {
+  /**
+   * Waits for the first event matching `match` — already-seen events included.
+   * The timeout bound is the lane's to set (30 s default; the packaged
+   * lane's real-GUI legs need the longer bound).
+   */
+  waitFor(
+    match: (event: HarnessEvent) => boolean,
+    what: string,
+    timeoutMs = 30_000,
+  ): Promise<HarnessEvent> {
     const already = this.events.find(match);
     if (already !== undefined) return Promise.resolve(already);
-    return this.waitForNext((event) => match(event), what);
+    return this.waitForNext((event) => match(event), what, timeoutMs);
   }
 
   /**
@@ -145,6 +212,7 @@ export class HarnessRun {
   waitForNext(
     match: (event: HarnessEvent, seq: number) => boolean,
     what: string,
+    timeoutMs = 30_000,
   ): Promise<HarnessEvent> {
     return new Promise((resolve, reject) => {
       const waiter = {
@@ -154,24 +222,36 @@ export class HarnessRun {
           const at = this.waiters.indexOf(waiter);
           if (at !== -1) this.waiters.splice(at, 1);
           reject(this.timeoutError(what));
-        }, 30_000),
+        }, timeoutMs),
       };
       this.waiters.push(waiter);
     });
   }
 
+  /**
+   * The ordered stop: quit op (a lane whose main ignores stdin just
+   * never reads it), bounded graceful wait, SIGKILL, and a BOUNDED
+   * post-kill wait — cleanup can never hang. Already-settled children
+   * (code OR signal) return immediately: the settlement promise, never
+   * a fresh `once('exit')` listener that an already-exited child can
+   * never fire.
+   */
   async stop(): Promise<void> {
-    if (this.child.exitCode !== null) return;
+    if (this.settled) return;
     this.send({ op: 'quit' });
-    await Promise.race([
-      new Promise((resolve) => this.child.once('exit', resolve)),
-      new Promise((resolve) => setTimeout(resolve, 5000)),
-    ]);
-    if (this.child.exitCode === null) {
+    await Promise.race([this.exit, sleep(5000)]);
+    if (!this.settled) {
       this.child.kill('SIGKILL');
-      await new Promise((resolve) => this.child.once('exit', resolve));
+      // Bounded even against an unkillable child — the 180 s
+      // hook-timeout hang class dies here.
+      await Promise.race([this.exit, sleep(2000)]);
     }
   }
+}
+
+/** One bounded sleep. */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /**
