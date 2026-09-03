@@ -73,6 +73,7 @@ export {
   clearShellResetTrace,
   formatShellState,
   recordShellResetStepDone,
+  ShellStateMarker,
   type ShellStateMarkerState,
   shellResetTrace,
 } from './shell-state-marker';

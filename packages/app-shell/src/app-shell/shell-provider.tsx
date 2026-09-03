@@ -72,14 +72,26 @@ export function ShellProvider({
     queryClientRef.current = queryClient ?? createShellQueryClient();
   const ownedQueryClient = queryClientRef.current;
 
-  const runtimeRef = useRef<{ session: SessionClient; gate: SessionGate } | null>(null);
+  // The runtime freezes at the FIRST render's pair — one provider per
+  // project document, one session per document lifecycle; a changed
+  // session is a navigation (a new document), never a prop mutation.
+  // Everything downstream (the adoption included) reads the frozen
+  // `ref`, so a re-rendered sessionRef prop can never split the pair
+  // the subscription serves from the one the host adopted.
+  const runtimeRef = useRef<{
+    ref: SessionRef;
+    session: SessionClient;
+    gate: SessionGate;
+  } | null>(null);
   if (runtimeRef.current === null) {
     runtimeRef.current = {
+      ref: sessionRef,
       session: client.forSession(sessionRef),
       gate: createSessionGate(sessionRef),
     };
   }
   const { session, gate } = runtimeRef.current;
+  const frozenSessionRef = runtimeRef.current.ref;
 
   const [streamState, setStreamState] = useState<ShellStreamState>('connecting');
   const [commandError, setCommandError] = useState<string | null>(null);
@@ -92,8 +104,8 @@ export function ShellProvider({
   const subscriptionRef = useRef<{ close(): void } | null>(null);
 
   useEffect(() => {
-    client.adoptSession(sessionRef);
-    bindShellSession(sessionRef);
+    client.adoptSession(frozenSessionRef);
+    bindShellSession(frozenSessionRef);
     clearShellResetTrace();
     const controller = controllerRef.current;
     if (controller === null) return;
@@ -123,7 +135,10 @@ export function ShellProvider({
       controller.abort();
       subscriptionRef.current = null;
     };
-  }, [client, session, sessionRef, gate, ownedQueryClient]);
+    // frozenSessionRef is stable by construction (runtimeRef freezes on the
+    // first render) — listing it satisfies the exhaustive-deps law without
+    // ever re-running the effect: a re-rendered sessionRef prop cannot move it.
+  }, [client, session, gate, ownedQueryClient, frozenSessionRef]);
 
   const reset = (url?: string): void => {
     composeShellReset({
