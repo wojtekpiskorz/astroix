@@ -122,6 +122,11 @@ describe('the fuse-wire reader over synthetic binaries (#245)', () => {
     expect(read).toEqual({ code: 'wire-version-mismatch', found: '2' });
   });
 
+  it('rejects a LONGER wire — a tenth fuse is an unruled fuse, never a silent ride-along (#245 review finding)', async () => {
+    const read = await readFuseStates(await syntheticBinary([...RELEASE_WIRE, ENABLE]));
+    expect(read).toEqual({ code: 'wire-too-long', found: 10, expected: 9 });
+  });
+
   it('names exactly the offending fuses when a wire violates the law', () => {
     const expected = expectedReleaseFuseStates();
     const flipped: Record<string, 'enable' | 'disable'> = {
@@ -133,6 +138,16 @@ describe('the fuse-wire reader over synthetic binaries (#245)', () => {
     expect(violations).toEqual([
       { fuse: 'RunAsNode', actual: 'enable', expected: 'disable' },
       { fuse: 'OnlyLoadAppFromAsar', actual: 'disable', expected: 'enable' },
+    ]);
+  });
+
+  it('treats a fuse MISSING from the actual map as a violation — partial actuals never pass vacuously (#245 review finding)', () => {
+    const expected = expectedReleaseFuseStates();
+    const partial = { ...expected };
+    delete partial.WasmTrapHandlers;
+    const violations = fuseStateViolations(partial, expected);
+    expect(violations).toEqual([
+      { fuse: 'WasmTrapHandlers', actual: 'absent', expected: 'enable' },
     ]);
   });
 });

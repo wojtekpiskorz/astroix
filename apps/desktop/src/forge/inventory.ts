@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import { readdir, stat } from 'node:fs/promises';
+import { readdir, readlink, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 
 /**
@@ -15,8 +15,13 @@ import { join } from 'node:path';
  *
  * - **Normalized payload inventory** — every file in the `.app`, keyed by
  *   its bundle-relative posix path and sorted: same path set, same
- *   sizes, same executable bits. Two clean builds MUST produce
- *   identical inventories.
+ *   sizes, same executable bits. SYMLINKS ride the inventory too, as
+ *   presence + target rows (never hashes): the packaged tree's
+ *   framework symlinks are deterministic from the pinned Electron
+ *   distribution, but the comparison must never be able to silently
+ *   miss symlink drift — a changed target, or a path flipping between
+ *   symlink and file, is an inventory difference. Two clean builds
+ *   MUST produce identical inventories.
  * - **Immutable hashes** — the SHA-256 of every file whose bytes the
  *   build does not legitimately vary: the asar payload, the `Info.plist`
  *   files, and the immutable runtime resources under
@@ -32,8 +37,8 @@ import { join } from 'node:path';
 /** How one payload file participates in the two-build comparison. */
 export type PayloadClass = 'immutable' | 'sealed';
 
-/** One inventoried payload file. */
-export interface PayloadEntry {
+/** One inventoried payload FILE — content-addressed by SHA-256. */
+export interface PayloadFileEntry {
   /** Bundle-relative posix path (`Contents/Resources/node/bin/node`). */
   readonly path: string;
   readonly bytes: number;
@@ -41,6 +46,17 @@ export interface PayloadEntry {
   readonly sha256: string;
   readonly class: PayloadClass;
 }
+
+/** One inventoried SYMLINK — presence + target recorded, never hashed, so drift cannot ride silently. */
+export interface PayloadSymlinkEntry {
+  /** Bundle-relative posix path (`Contents/Frameworks/S.framework/Versions/Current`). */
+  readonly path: string;
+  /** The link's own recorded target string, exactly as `readlink` reports it. */
+  readonly symlinkTarget: string;
+}
+
+/** One inventoried payload row: a file or a symlink. */
+export type PayloadEntry = PayloadFileEntry | PayloadSymlinkEntry;
 
 /** The candidate manifest a package run emits. */
 export interface CandidateManifest {
@@ -135,13 +151,17 @@ export function serializeCandidateManifest(manifest: CandidateManifest): string 
     minimumSystemVersion: manifest.minimumSystemVersion,
     fuseStates: manifest.fuseStates,
     zip: manifest.zip,
-    payload: manifest.payload.map((entry) => ({
-      path: entry.path,
-      bytes: entry.bytes,
-      executable: entry.executable,
-      sha256: entry.sha256,
-      class: entry.class,
-    })),
+    payload: manifest.payload.map((entry) =>
+      'symlinkTarget' in entry
+        ? { path: entry.path, symlinkTarget: entry.symlinkTarget }
+        : {
+            path: entry.path,
+            bytes: entry.bytes,
+            executable: entry.executable,
+            sha256: entry.sha256,
+            class: entry.class,
+          },
+    ),
   };
   return `${JSON.stringify(ordered, null, 2)}\n`;
 }
@@ -182,12 +202,24 @@ export function compareCandidateManifests(
       inventoryDiffs.push(`${path}: ${rowA === undefined ? 'missing in A' : 'missing in B'}`);
       continue;
     }
-    if (rowA.bytes !== rowB.bytes || rowA.executable !== rowB.executable) {
+    if ('symlinkTarget' in rowA || 'symlinkTarget' in rowB) {
+      // a symlink's law is its target — and a path flipping between
+      // symlink and file is drift either way; there are no bytes to hash
+      const linkA = 'symlinkTarget' in rowA ? rowA.symlinkTarget : null;
+      const linkB = 'symlinkTarget' in rowB ? rowB.symlinkTarget : null;
+      if (linkA === null || linkB === null || linkA !== linkB) {
+        inventoryDiffs.push(`${path}: symlink ${String(linkA)} vs ${String(linkB)}`);
+      }
+      continue;
+    }
+    const fileA = rowA as PayloadFileEntry;
+    const fileB = rowB as PayloadFileEntry;
+    if (fileA.bytes !== fileB.bytes || fileA.executable !== fileB.executable) {
       inventoryDiffs.push(
-        `${path}: ${rowA.bytes}/${rowA.executable} vs ${rowB.bytes}/${rowB.executable}`,
+        `${path}: ${fileA.bytes}/${fileA.executable} vs ${fileB.bytes}/${fileB.executable}`,
       );
     }
-    if (rowA.class === 'immutable' && rowA.sha256 !== rowB.sha256) {
+    if (fileA.class === 'immutable' && fileA.sha256 !== fileB.sha256) {
       immutableHashDiffs.push(path);
     }
   }
@@ -237,8 +269,12 @@ async function walkPayload(
       await walkPayload(root, childRel, entries, isMachO);
       continue;
     }
-    if (!child.isFile()) continue; // symlinks and specials: the packaged tree has none; skipped, not invented
     const absolute = join(root, ...childRel.split('/'));
+    if (child.isSymbolicLink()) {
+      entries.push({ path: childRel, symlinkTarget: await readlink(absolute) });
+      continue;
+    }
+    if (!child.isFile()) continue; // fifo/socket/device specials: the packaged tree has none; skipped, not invented
     const info = await stat(absolute);
     entries.push({
       path: childRel,

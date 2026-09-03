@@ -1,4 +1,4 @@
-import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -31,13 +31,14 @@ let scratch: string | undefined;
 async function newSyntheticApp(): Promise<string> {
   scratch ??= await mkdtemp(join(tmpdir(), 'astroix-inventory-test-'));
   const app = join(scratch, 'a.app');
+  await rm(app, { recursive: true, force: true }); // symlinks cannot be recreated over themselves
   const rows: Array<[string[], string | Buffer, number?]> = [
     [['Contents', 'Info.plist'], 'plist-bytes'],
     [['Contents', 'MacOS', 'Astroix'], MACHO, 0o755],
     [['Contents', 'Resources', 'app.asar'], 'asar-bytes'],
     [['Contents', 'Resources', 'node', 'bin', 'node'], MACHO, 0o755],
     [['Contents', '_CodeSignature', 'CodeResources'], 'seal-bytes'],
-    [['Contents', 'Frameworks', 'S.framework', 'S'], MACHO, 0o755],
+    [['Contents', 'Frameworks', 'S.framework', 'Versions', 'A', 'S'], MACHO, 0o755],
   ];
   for (const [segments, bytes, mode] of rows) {
     const path = join(app, ...segments);
@@ -45,6 +46,8 @@ async function newSyntheticApp(): Promise<string> {
     await writeFile(path, bytes);
     if (mode !== undefined) await chmod(path, mode);
   }
+  // the framework's Current pointer — the real layout's deterministic symlink
+  await symlink('A', join(app, 'Contents', 'Frameworks', 'S.framework', 'Versions', 'Current'));
   return app;
 }
 
@@ -52,7 +55,7 @@ function machOByPath(relPath: string): Promise<boolean> {
   return Promise.resolve(
     relPath === 'Contents/MacOS/Astroix' ||
       relPath === 'Contents/Resources/node/bin/node' ||
-      relPath === 'Contents/Frameworks/S.framework/S',
+      relPath === 'Contents/Frameworks/S.framework/Versions/A/S',
   );
 }
 
@@ -91,19 +94,29 @@ describe('the payload walk (#245)', () => {
   it('inventories every file with path, size, executable bit, hash — sorted by path', async () => {
     const entries = await buildPayloadInventory(await newSyntheticApp(), machOByPath);
     expect(entries.map((entry) => entry.path)).toEqual([
-      'Contents/Frameworks/S.framework/S',
+      'Contents/Frameworks/S.framework/Versions/A/S',
+      'Contents/Frameworks/S.framework/Versions/Current',
       'Contents/Info.plist',
       'Contents/MacOS/Astroix',
       'Contents/Resources/app.asar',
       'Contents/Resources/node/bin/node',
       'Contents/_CodeSignature/CodeResources',
     ]);
-    const node = entries.find((entry) => entry.path === 'Contents/Resources/node/bin/node');
-    expect(node?.executable).toBe(true);
-    expect(node?.bytes).toBe(MACHO.length);
-    const asar = entries.find((entry) => entry.path === 'Contents/Resources/app.asar');
-    expect(asar?.executable).toBe(false);
-    expect(asar?.class).toBe('immutable');
+    const node = fileRow(entries, 'Contents/Resources/node/bin/node');
+    expect(node.executable).toBe(true);
+    expect(node.bytes).toBe(MACHO.length);
+    const asar = fileRow(entries, 'Contents/Resources/app.asar');
+    expect(asar.executable).toBe(false);
+    expect(asar.class).toBe('immutable');
+  });
+
+  it('records symlink PRESENCE + TARGET — never a silent skip (#245 review finding)', async () => {
+    const entries = await buildPayloadInventory(await newSyntheticApp(), machOByPath);
+    const current = entries.find(
+      (entry) => entry.path === 'Contents/Frameworks/S.framework/Versions/Current',
+    );
+    expect(current).toBeDefined();
+    expect(current && 'symlinkTarget' in current && current.symlinkTarget).toBe('A');
   });
 });
 
@@ -111,7 +124,7 @@ describe('the candidate manifest (#245)', () => {
   it('normalizes its payload (sorted) and serializes deterministically', async () => {
     const payload = await buildPayloadInventory(await newSyntheticApp(), machOByPath);
     const manifest = buildCandidateManifest({ ...MANIFEST_BASE, payload: [...payload].reverse() });
-    expect(manifest.payload[0]?.path).toBe('Contents/Frameworks/S.framework/S');
+    expect(manifest.payload[0]?.path).toBe('Contents/Frameworks/S.framework/Versions/A/S');
     expect(serializeCandidateManifest(manifest)).toBe(serializeCandidateManifest(manifest));
     expect(JSON.parse(serializeCandidateManifest(manifest))).toMatchObject({
       schema: 1,
@@ -139,7 +152,11 @@ describe('the two-build comparison (#245)', () => {
     const payloadA = await buildPayloadInventory(await newSyntheticApp(), machOByPath);
     const a = buildCandidateManifest({ ...MANIFEST_BASE, payload: payloadA });
     const mutated = payloadA.map((row) =>
-      row.path === 'Contents/Resources/app.asar' ? { ...row, sha256: 'f'.repeat(64) } : row,
+      'symlinkTarget' in row
+        ? row
+        : row.path === 'Contents/Resources/app.asar'
+          ? { ...row, sha256: 'f'.repeat(64) }
+          : row,
     ) satisfies PayloadEntry[];
     const b = buildCandidateManifest({ ...MANIFEST_BASE, payload: mutated });
     const comparison = compareCandidateManifests(a, b);
@@ -151,7 +168,11 @@ describe('the two-build comparison (#245)', () => {
     const payloadA = await buildPayloadInventory(await newSyntheticApp(), machOByPath);
     const a = buildCandidateManifest({ ...MANIFEST_BASE, payload: payloadA });
     const resealed = payloadA.map((row) =>
-      row.class === 'sealed' ? { ...row, sha256: 'e'.repeat(64) } : row,
+      'symlinkTarget' in row
+        ? row
+        : row.class === 'sealed'
+          ? { ...row, sha256: 'e'.repeat(64) }
+          : row,
     ) satisfies PayloadEntry[];
     const b = buildCandidateManifest({ ...MANIFEST_BASE, payload: resealed });
     const comparison = compareCandidateManifests(a, b);
@@ -163,7 +184,11 @@ describe('the two-build comparison (#245)', () => {
     const payloadA = await buildPayloadInventory(await newSyntheticApp(), machOByPath);
     const a = buildCandidateManifest({ ...MANIFEST_BASE, payload: payloadA });
     const grown = payloadA.map((row) =>
-      row.path === 'Contents/Resources/app.asar' ? { ...row, bytes: row.bytes + 1 } : row,
+      'symlinkTarget' in row
+        ? row
+        : row.path === 'Contents/Resources/app.asar'
+          ? { ...row, bytes: row.bytes + 1 }
+          : row,
     );
     const b = buildCandidateManifest({ ...MANIFEST_BASE, payload: grown });
     expect(compareCandidateManifests(a, b).inventoriesMatch).toBe(false);
@@ -175,6 +200,42 @@ describe('the two-build comparison (#245)', () => {
     // the hash facet compares rows present in both builds — the missing
     // row already failed the inventory above; no double-counting here
     expect(missingComparison.immutableHashesMatch).toBe(true);
+  });
+
+  it('symlink TARGET drift is an inventory difference — drift cannot ride silently (#245 review finding)', async () => {
+    const payloadA = await buildPayloadInventory(await newSyntheticApp(), machOByPath);
+    const a = buildCandidateManifest({ ...MANIFEST_BASE, payload: payloadA });
+    const drifted = payloadA.map((row) =>
+      'symlinkTarget' in row ? { ...row, symlinkTarget: 'B' } : row,
+    );
+    const b = buildCandidateManifest({ ...MANIFEST_BASE, payload: drifted });
+    const comparison = compareCandidateManifests(a, b);
+    expect(comparison.inventoriesMatch).toBe(false);
+    expect(comparison.inventoryDiffs).toEqual([
+      'Contents/Frameworks/S.framework/Versions/Current: symlink A vs B',
+    ]);
+    // the target is the whole law — no hash claim either way
+    expect(comparison.immutableHashesMatch).toBe(true);
+  });
+
+  it('a path flipping between symlink and file is an inventory difference', async () => {
+    const payloadA = await buildPayloadInventory(await newSyntheticApp(), machOByPath);
+    const a = buildCandidateManifest({ ...MANIFEST_BASE, payload: payloadA });
+    const flipped = payloadA.map((row) =>
+      row.path === 'Contents/Frameworks/S.framework/Versions/Current'
+        ? {
+            path: row.path,
+            bytes: 1,
+            executable: false,
+            sha256: '1'.repeat(64),
+            class: 'immutable' as const,
+          }
+        : row,
+    );
+    const b = buildCandidateManifest({ ...MANIFEST_BASE, payload: flipped });
+    const comparison = compareCandidateManifests(a, b);
+    expect(comparison.inventoriesMatch).toBe(false);
+    expect(comparison.inventoryDiffs[0]).toContain('symlink A vs null');
   });
 
   it('identity drift (commit, pins, fuses) is named even when the payload matches', () => {
@@ -201,6 +262,20 @@ describe('the two-build comparison (#245)', () => {
     expect(compareCandidateManifests(a, otherZip).identityMatches).toBe(true);
   });
 });
+
+/** Narrows a found row to its file shape — the walk test's fixture paths are all files except Versions/Current. */
+function fileRow(
+  entries: readonly PayloadEntry[],
+  path: string,
+): {
+  bytes: number;
+  executable: boolean;
+  class: 'immutable' | 'sealed';
+} {
+  const row = entries.find((entry) => entry.path === path);
+  if (row === undefined || 'symlinkTarget' in row) throw new Error(`file row missing: ${path}`);
+  return row;
+}
 
 it('cleans the inventory scratch root', async () => {
   if (scratch !== undefined) {

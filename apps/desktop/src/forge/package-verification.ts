@@ -11,6 +11,7 @@ import { PRODUCT_ARCH, PRODUCT_BUNDLE_ID, PRODUCT_MINIMUM_MACOS } from './produc
 import {
   expectedReleaseFuseStates,
   type FuseReadRejection,
+  type FuseViolationActual,
   fuseStateViolations,
   readFuseStates,
   type VerifiedFuseState,
@@ -67,7 +68,7 @@ export interface PackageVerificationReport {
     readonly states: Readonly<Record<string, VerifiedFuseState>> | null;
     readonly violations: ReadonlyArray<{
       fuse: string;
-      actual: VerifiedFuseState;
+      actual: FuseViolationActual;
       expected: VerifiedFuseState;
     }>;
     readonly rejection: FuseReadRejection | null;

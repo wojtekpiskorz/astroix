@@ -38,7 +38,7 @@ import { type FuseV1Config, FuseV1Options, FuseVersion, getCurrentFuseWire } fro
  * can set is explicitly ruled in {@link RELEASE_FUSE_CONFIG}, and the
  * riding ninth fuse is ruled in {@link RELEASE_RIDING_FUSE_STATES} —
  * the read-back verifies all nine by name, and a future Electron fuse
- * (a wire longer than nine) rejects as `wire-unknown-state` instead of
+ * (a wire longer than nine) rejects as `wire-too-long` instead of
  * riding along silently.
  *
  * `resetAdHocDarwinSignature` is deliberately `false`: flipping fuses
@@ -126,7 +126,8 @@ export type FuseReadRejection =
   | { readonly code: 'sentinel-missing' }
   | { readonly code: 'wire-version-mismatch'; readonly found: string }
   | { readonly code: 'wire-unknown-state'; readonly fuse: string }
-  | { readonly code: 'wire-too-short'; readonly found: number; readonly expected: number };
+  | { readonly code: 'wire-too-short'; readonly found: number; readonly expected: number }
+  | { readonly code: 'wire-too-long'; readonly found: number; readonly expected: number };
 
 const STATE_BYTES: Readonly<Record<number, VerifiedFuseState>> = Object.freeze({
   48: 'disable', // FuseState.DISABLE
@@ -167,8 +168,14 @@ export async function readFuseStates(
     states[fuse.name] = state;
   }
   const wireLength = Object.keys(wire).filter((key) => Number.isInteger(Number(key))).length;
+  // the ride-along belt, both directions: a SHORTER wire cannot carry the
+  // law's nine, and a LONGER one means an Electron fuse this table does
+  // not rule on — neither may pass verification silently
   if (wireLength < V1_WIRE.length) {
     return { code: 'wire-too-short', found: wireLength, expected: V1_WIRE.length };
+  }
+  if (wireLength > V1_WIRE.length) {
+    return { code: 'wire-too-long', found: wireLength, expected: V1_WIRE.length };
   }
   return states;
 }
@@ -199,25 +206,41 @@ export function expectedReleaseFuseStates(): VerifiedFuseStates {
 }
 
 /** The fuses whose read-back state differs from the law — the offending fuses only. */
+/**
+ * The state a violating fuse was actually found in — or `absent` when
+ * the actual map did not carry the fuse at all: a partial actual map is
+ * itself a violation, never a vacuous pass (the strictness split's
+ * other half — every wire fuse must be ruled on AND reported).
+ */
+export type FuseViolationActual = VerifiedFuseState | 'absent';
+
 export function fuseStateViolations(
-  actual: VerifiedFuseStates,
+  actual: Readonly<Record<string, VerifiedFuseState | undefined>>,
   expected: VerifiedFuseStates,
 ): ReadonlyArray<{
   readonly fuse: string;
-  readonly actual: VerifiedFuseState;
+  readonly actual: FuseViolationActual;
   readonly expected: VerifiedFuseState;
 }> {
   const violations: Array<{
     fuse: string;
-    actual: VerifiedFuseState;
+    actual: FuseViolationActual;
     expected: VerifiedFuseState;
   }> = [];
-  for (const name of V1_FUSE_NAMES) {
-    const actualState: VerifiedFuseState | undefined = actual[name];
-    const expectedState: VerifiedFuseState | undefined = expected[name];
-    if (actualState !== undefined && actualState !== expectedState) {
+  for (const fuse of V1_WIRE) {
+    const actualState = actual[fuse.name];
+    const expectedState: VerifiedFuseState | undefined = expected[fuse.name];
+    if (actualState === undefined) {
       violations.push({
-        fuse: name,
+        fuse: fuse.name,
+        actual: 'absent',
+        expected: expectedState as VerifiedFuseState,
+      });
+      continue;
+    }
+    if (actualState !== expectedState) {
+      violations.push({
+        fuse: fuse.name,
         actual: actualState,
         expected: expectedState as VerifiedFuseState,
       });
