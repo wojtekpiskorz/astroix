@@ -224,11 +224,6 @@ class HarnessRun {
   }
 
   /**
-   * Sends one command and waits for ITS OWN response — the next event
-   * of `kind` for `targetId`, never a stale earlier one (repeated
-   * probes with the same shape are this lane's norm).
-   */
-  /**
    * Sends one command and waits for ITS OWN event (see `probe`), returning
    * the whole event — for reports whose payload is the event itself, not a
    * probe `result` field (the authority-state snapshot).
@@ -261,6 +256,11 @@ class HarnessRun {
     });
   }
 
+  /**
+   * Sends one command and waits for ITS OWN response — the next event
+   * of `kind` for `targetId`, never a stale earlier one (repeated
+   * probes with the same shape are this lane's norm).
+   */
   async probe(
     command: Record<string, unknown>,
     kind: string,

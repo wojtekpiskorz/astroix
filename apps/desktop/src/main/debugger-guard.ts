@@ -76,13 +76,14 @@ export interface DebuggerSeam {
 /** One settled step of the activation sequence — the ordering evidence the composition logs. */
 export type DebuggerGuardStep = 'attached' | 'network-enabled' | 'bypass-set';
 
-/** How the bypass failed — sanitized vocabulary; `detail` carries the platform message, never secrets. */
+/** How the bypass failed — sanitized vocabulary; `detail` carries the platform message, never secrets. The `disposed` member is not a failure of the bypass at all: it answers an activation attempted on a deliberately torn-down guard. */
 export type BypassFailure =
   | { readonly kind: 'attach-failed'; readonly detail: string }
   | { readonly kind: 'network-enable-failed'; readonly detail: string }
   | { readonly kind: 'bypass-set-failed'; readonly detail: string }
   | { readonly kind: 'debugger-detached'; readonly detail: string }
-  | { readonly kind: 'devtools-opened'; readonly detail: string };
+  | { readonly kind: 'devtools-opened'; readonly detail: string }
+  | { readonly kind: 'disposed'; readonly detail: string };
 
 /** The fixed detail of the observed DevTools compromise. */
 export const DEVTOOLS_OPENED_DETAIL = 'DevTools opened for the authoritative editing target';
@@ -96,6 +97,9 @@ export interface DebuggerGuard {
    * while already bypassed; concurrent calls share one activation. A
    * failure compromises the guard and reports it through
    * `onCompromised` — never resolves `{ ok: true }` after a failure.
+   * An activation on a disposed guard answers the `disposed` failure
+   * kind (deliberate teardown, not a compromise, not an attach
+   * refusal).
    */
   activate(): Promise<{ ok: true } | { ok: false; failure: BypassFailure }>;
   state(): DebuggerGuardState;
@@ -214,10 +218,13 @@ export function createDebuggerGuard(options: DebuggerGuardOptions): DebuggerGuar
   return {
     activate: () => {
       if (disposed) {
-        // A closed target does not recover — and this is not a compromise.
+        // A closed target does not recover — and this is neither a
+        // compromise nor an attach refusal: `disposed` is its own kind,
+        // so a caller keying on `failure.kind` never misattributes
+        // deliberate teardown to the DevTools-holds-target class.
         return Promise.resolve({
           ok: false,
-          failure: { kind: 'attach-failed', detail: 'guard disposed (target closed)' },
+          failure: { kind: 'disposed', detail: 'guard disposed (target closed)' },
         });
       }
       if (state === 'bypassed') return Promise.resolve({ ok: true });

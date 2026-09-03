@@ -293,6 +293,11 @@ describe('createDebuggerGuard — the fail-closed CDP bypass sequence', () => {
     expect(guard.isBypassActive()).toBe(false);
     const afterClose = await guard.activate();
     expect(afterClose.ok).toBe(false);
+    // Deliberate teardown is its own failure kind — never misattributed
+    // to the attach-refused (DevTools-holds-target) class, and never a
+    // compromise report.
+    if (!afterClose.ok) expect(afterClose.failure.kind).toBe('disposed');
+    expect(failures).toEqual([]);
     expect(fake.detachListeners()).toBe(0);
   });
 });
