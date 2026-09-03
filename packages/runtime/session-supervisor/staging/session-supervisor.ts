@@ -322,8 +322,7 @@ export function createSessionSupervisor(options: SessionSupervisorOptions): Sess
         // session's report is internal history, the completion lane F7
         // reports post-commit outcomes — and a rejecting stop stays
         // anchored noise, never an unhandled one).
-        clients.revokeSession(outgoing.ref);
-        hostCapabilities.revoke({ host: 'project', projectKey: outgoing.projectKey });
+        retireActive(outgoing);
         outgoing.run.stop().catch(() => {});
       }
       const entry: ActiveEntry = { ref: ctx.ref, projectKey: ctx.projectKey, run: ctx.run };
