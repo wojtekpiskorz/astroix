@@ -13,7 +13,6 @@ import { createOriginListener, type OriginListener } from '@wojciechpiskorz/astr
 import { managedDevServerPlan } from '@wojciechpiskorz/astroix-runtime/project-plane/managed-astro';
 import {
   createProjectPlaneSupervisor,
-  DEFAULT_STARTUP_TIMEOUT_MS,
   workerSpawnPlan,
 } from '@wojciechpiskorz/astroix-runtime/project-plane/supervision';
 import {
@@ -262,14 +261,6 @@ export async function createWebControlPlane(
   };
 }
 
-/** The plane's startup budget: the ADR-0006 30 s production default, overridable for slow host environments (CI cold boots). */
-function planeStartupBudgetMs(): number {
-  const raw = process.env.ASTROIX_WEB_PLANE_STARTUP_MS;
-  if (raw === undefined) return DEFAULT_STARTUP_TIMEOUT_MS;
-  const parsed = Number.parseInt(raw, 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_STARTUP_TIMEOUT_MS;
-}
-
 /**
  * The web host's plane launch: the production launch composition with
  * ONE dev-checkout delta — the worker child receives the raw-Node
@@ -294,9 +285,6 @@ async function launchWebPlane(input: {
     worker,
     managedAstro,
     devServerPort: input.devServerPort,
-    // The production default (30 s, ADR-0006) stands unless the host's
-    // environment budgets wider — the test host's CI cold boots do.
-    startupTimeoutMs: planeStartupBudgetMs(),
   });
 }
 

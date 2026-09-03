@@ -156,12 +156,18 @@ async function activate(
     .records.find((entry) => entry.projectKey === projectKey);
   if (record === undefined) return notFoundProject();
   clearCandidates();
+  // The port is picked BEFORE `begin` — the supervisor's `startCandidate`
+  // seam consumes it synchronously inside `begin`. A refused begin
+  // returns it: the queue always holds exactly the ports of admitted
+  // attempts, never a stale leftover.
+  const devPort = await inputs.freePort();
+  inputs.pendingDevPorts.push(devPort);
   const begun = inputs.supervisor.begin(projectKey);
-  if (begun.kind === 'refused') return concurrentActivation();
-  // The port joins the queue only for an admitted attempt — a refused
-  // begin consumes nothing, so the queue always holds exactly the port
-  // each live activation picked.
-  inputs.pendingDevPorts.push(await inputs.freePort());
+  if (begun.kind === 'refused') {
+    const returned = inputs.pendingDevPorts.pop();
+    if (returned !== devPort) throw new Error('dispatch defect: port queue desync');
+    return concurrentActivation();
+  }
   let candidate: StagedCandidate;
   try {
     candidate = await begun.attempt.ready;

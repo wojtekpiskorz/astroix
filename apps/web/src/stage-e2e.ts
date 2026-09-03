@@ -49,11 +49,6 @@ export async function stageWebLane(): Promise<WebLaneStage> {
     `ASTROIX_WEB_PORT=${WEB_LANE_PORT}`,
     `ASTROIX_WEB_REGISTRY_DIR=${registry}`,
     `ASTROIX_WEB_REGISTER=${projectA}:${projectB}:${broken}`,
-    // The E7 carried warning, materialized: a CI cold boot (fresh vite
-    // optimize under a shared runner) can exceed the 30 s production
-    // startup deadline — the test host budgets 120 s through the
-    // composition's env seam, the production default stays untouched.
-    'ASTROIX_WEB_PLANE_STARTUP_MS=120000',
   ].join('\n');
   await mkdir(SCRATCH_ROOT, { recursive: true });
   await writeFile(ENV_FILE, `${env}\n`, 'utf8');
