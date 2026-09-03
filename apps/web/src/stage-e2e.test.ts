@@ -17,7 +17,10 @@ import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
  * (`reuseExistingServer: false` — a busy port must fail, never silently
  * drive a foreign control plane). The module resolves its knobs from
  * the environment at import, so every leg re-imports it under a
- * controlled environment.
+ * controlled environment — BOTH knobs, always: a concurrent lane's
+ * ambient `ASTROIX_WEB_E2E_PORT` (the AGENTS.md steering export) must
+ * never leak into an assertion, and a garbage ambient must never reject
+ * the import under test.
  */
 
 const PORT_ENV = 'ASTROIX_WEB_E2E_PORT';
@@ -70,7 +73,14 @@ describe('the web lane port knob (#350)', () => {
 });
 
 describe('the scratch root knob (#350)', () => {
-  it('honors the ASTROIX_WEB_E2E_SCRATCH override and publishes it', async () => {
+  // The staging legs copy the real fixture — real IO, seconds-scale cold
+  // and more under machine load; vitest's 5s default timed one out at
+  // 5001ms during a loaded gate run (observed twice), so they carry
+  // explicit timeouts like the e2e batteries' real-IO legs.
+  it('honors the ASTROIX_WEB_E2E_SCRATCH override and publishes it', {
+    timeout: 30_000,
+  }, async () => {
+    controlEnv(PORT_ENV, undefined);
     controlEnv(SCRATCH_ENV, undefined);
     const scratch = await mkdtemp(join(tmpdir(), 'astroix-stage-e2e-test-'));
     controlEnv(SCRATCH_ENV, scratch);
@@ -96,7 +106,10 @@ describe('the scratch root knob (#350)', () => {
     expect(existsSync(scratch)).toBe(false);
   });
 
-  it('mints a per-invocation nonce root by default — two stagings never share one', async () => {
+  it('mints a per-invocation nonce root by default — two stagings never share one', {
+    timeout: 30_000,
+  }, async () => {
+    controlEnv(PORT_ENV, undefined);
     controlEnv(SCRATCH_ENV, undefined);
     const stageE2e = await freshStageE2e();
     const first = await stageE2e.stageWebLane();
@@ -124,6 +137,7 @@ describe('the scratch root knob (#350)', () => {
   });
 
   it('stagedCopyRoot fails closed when no staging has published a root', async () => {
+    controlEnv(PORT_ENV, undefined);
     controlEnv(SCRATCH_ENV, undefined);
     const stageE2e = await freshStageE2e();
     expect(() => stageE2e.stagedCopyRoot('project-a')).toThrow(/ASTROIX_WEB_E2E_SCRATCH/);
@@ -132,6 +146,7 @@ describe('the scratch root knob (#350)', () => {
 
 describe('the lane teardown (#350)', () => {
   it('removes the root the staging published', async () => {
+    controlEnv(PORT_ENV, undefined);
     const scratch = await mkdtemp(join(tmpdir(), 'astroix-stage-e2e-test-'));
     await writeFile(join(scratch, 'web-host.env'), 'sentinel\n', 'utf8');
     controlEnv(SCRATCH_ENV, scratch);
@@ -142,6 +157,7 @@ describe('the lane teardown (#350)', () => {
   });
 
   it('is a no-op when no staging ran (nothing published)', async () => {
+    controlEnv(PORT_ENV, undefined);
     controlEnv(SCRATCH_ENV, undefined);
     vi.resetModules();
     const teardown = (await import('./teardown-e2e.ts')).default;
@@ -150,7 +166,9 @@ describe('the lane teardown (#350)', () => {
 });
 
 describe('the playwright config pins the loud-fail law (#350)', () => {
-  it('never reuses a server, and the port override flows end to end', async () => {
+  it('never reuses a server, and the port override flows end to end', {
+    timeout: 30_000,
+  }, async () => {
     const port = 4438;
     const scratch = await mkdtemp(join(tmpdir(), 'astroix-stage-e2e-test-'));
     controlEnv(PORT_ENV, String(port));
