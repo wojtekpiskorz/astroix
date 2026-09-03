@@ -94,7 +94,13 @@ export interface GrantedCandidateTarget {
  * no-active state reported.
  */
 export interface FailureAftermath {
-  /** The granted candidate's authority was revoked through the ordered pass. */
+  /**
+   * The granted candidate's ordered-revocation report — `null` when no
+   * candidate was applicable; the boolean below derives from its outcome
+   * (an incomplete pass never reads as revoked).
+   */
+  readonly candidateRevocation: RevocationReport | null;
+  /** Derived from the candidate revocation's outcome — `complete` alone reads true. */
   readonly candidateRevoked: boolean;
   /** The granted run's reap close report; `null` when no candidate was applicable. */
   readonly candidateClose: SupervisionCloseReport | null;

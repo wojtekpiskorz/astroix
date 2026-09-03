@@ -1,6 +1,10 @@
 import type { ProjectKey, SessionFailure } from '@wojciechpiskorz/astroix-protocol';
 import type { SupervisionCloseReport } from '../../project-plane/supervision/close-report.ts';
 import type { CommittedTransition } from '../commit/switch-coordinator.ts';
+
+/** The settled variants — every kind that carries the preserved `revoked` accounting. */
+type SettledTransition = Exclude<CommittedTransition, { readonly kind: 'rejected' }>;
+
 import {
   type RevocationReport,
   type RevocationSurfaces,
@@ -178,38 +182,41 @@ export function createSessionCompletion(options: SessionCompletionOptions): Sess
   const runFailureAftermath = async (
     input: ReplacementCompletionInput,
     failure: SessionFailure,
-    candidateGranted: boolean,
+    commit: SettledTransition,
   ): Promise<FailureAftermath> => {
-    let candidateRevoked = false;
+    let candidateRevocation: RevocationReport | null = null;
     let candidateClose: SupervisionCloseReport | null = null;
     const candidate = input.candidate ?? null;
-    if (candidateGranted && candidate !== null) {
-      await revokeOldAuthority({
+    if (commit.kind === 'committed' && candidate !== null) {
+      candidateRevocation = await revokeOldAuthority({
         session: candidate.session,
         host: candidate.host,
         clientCapability: candidate.clientCapability,
         routes: candidate.routes,
         surfaces: options,
       });
-      candidateRevoked = true;
       candidateClose = await reapRun(candidate);
     }
     const launcherObserved = input.targetRemains
       ? await observedOutcome(input.observations.launcherReady)
       : false;
     options.reportFailedNoActive(failure);
-    return { candidateRevoked, candidateClose, launcherObserved };
+    return {
+      candidateRevocation,
+      candidateRevoked: candidateRevocation?.outcome === 'complete',
+      candidateClose,
+      launcherObserved,
+    };
   };
 
   /** The failed result's shared tail — the aftermath plus the preserved revoked accounting. */
   const failedResult = async (
     input: ReplacementCompletionInput,
     failure: SessionFailure,
-    revoked: RevocationReport,
-    candidateGranted: boolean,
+    commit: SettledTransition,
   ): Promise<CompletionResult> => {
-    const aftermath = await runFailureAftermath(input, failure, candidateGranted);
-    return { kind: 'failed', failure, target: input.client, revoked, aftermath };
+    const aftermath = await runFailureAftermath(input, failure, commit);
+    return { kind: 'failed', failure, target: input.client, revoked: commit.revoked, aftermath };
   };
 
   return {
@@ -224,14 +231,14 @@ export function createSessionCompletion(options: SessionCompletionOptions): Sess
         // F6's irreversible failed grant — the fixed revocation-category
         // template and revoked accounting are the input; the candidate
         // was never granted, so no candidate authority exists to revoke.
-        return await failedResult(input, commit.failure, commit.revoked, false);
+        return await failedResult(input, commit.failure, commit);
       }
       if (commit.kind === 'committed') {
         // §4 step 6, activation: the exact main-frame ready handshake.
         if (await observedOutcome(input.observations.mainFrameReady)) {
           return { kind: 'activation-completed', session: commit.committed, target: input.client };
         }
-        return await failedResult(input, COMPLETION_FAILURE, commit.revoked, true);
+        return await failedResult(input, COMPLETION_FAILURE, commit);
       }
       // §4 step 6, deactivation: launcher readiness.
       if (await observedOutcome(input.observations.launcherReady)) {
@@ -241,7 +248,7 @@ export function createSessionCompletion(options: SessionCompletionOptions): Sess
           target: input.client,
         };
       }
-      return await failedResult(input, COMPLETION_FAILURE, commit.revoked, false);
+      return await failedResult(input, COMPLETION_FAILURE, commit);
     },
 
     completeQuit: async (input) => {

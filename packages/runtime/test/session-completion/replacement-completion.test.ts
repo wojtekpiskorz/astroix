@@ -189,6 +189,9 @@ describe('host-observed completion failure — the irreversible aftermath (§4 s
     expect(result.target).toEqual(CLIENT_IDENTITY);
     expect(result.revoked).toEqual(cleanRevocation(OLD_REF));
     expect(result.aftermath.candidateRevoked).toBe(true);
+    // the candidate's ordered-revocation report rides the aftermath —
+    // an incomplete pass would flip the derived boolean above
+    expect(result.aftermath.candidateRevocation?.outcome).toBe('complete');
     expect(result.aftermath.candidateClose).toBe(reapReport);
     expect(result.aftermath.launcherObserved).toBe(true);
     // The §4 step 7 order, exactly: the candidate's five-surface ordered
@@ -275,6 +278,7 @@ describe('host-observed completion failure — the irreversible aftermath (§4 s
     if (result.kind !== 'failed') throw new Error('unreachable');
     expect(result.failure).toEqual(COMPLETION_FAILURE);
     expect(result.aftermath).toEqual({
+      candidateRevocation: null,
       candidateRevoked: false,
       candidateClose: null,
       launcherObserved: false, // the launcher show itself was not observed
@@ -338,6 +342,7 @@ describe('host-observed completion failure — the irreversible aftermath (§4 s
     expect(result.failure).toEqual(f6Failure);
     expect(result.revoked).toEqual(cleanRevocation(OLD_REF));
     expect(result.aftermath).toEqual({
+      candidateRevocation: null,
       candidateRevoked: false, // the grant refused — no candidate authority exists
       candidateClose: null,
       launcherObserved: true,
