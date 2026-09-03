@@ -267,10 +267,13 @@ test('stock Vite HMR rides the proxied native websocket, updates the canvas with
     .locator('li[data-match-selector=".hero-title"]');
   await expect(heroTitleRows).toHaveCount(3);
 
-  // Mutate the DISPOSABLE copy's imported sheet (restored in finally):
-  // stock vite CSS HMR lands the new declaration as a hot style update.
+  // Mutate the DISPOSABLE copy (both files restored in the finally,
+  // whatever happens below): the imported sheet for the hot CSS update,
+  // the page template for vite's full-reload path.
   const cssPath = join(stagedCopyRoot('project-a'), 'src', 'pages', 'home.css');
   const originalCss = await readFile(cssPath, 'utf8');
+  const astroPath = join(stagedCopyRoot('project-a'), 'src', 'pages', 'index.astro');
+  const originalAstro = await readFile(astroPath, 'utf8');
   try {
     await writeFile(cssPath, `${originalCss}\n.hero-title { text-decoration: underline; }\n`);
     await expect(canvas(page).locator('.hero-title')).toHaveCSS(
@@ -287,8 +290,6 @@ test('stock Vite HMR rides the proxied native websocket, updates the canvas with
 
     // A template edit is vite's FULL-reload path — the vite-driven
     // eligible reload: the probe appears, and the selection survives it too.
-    const astroPath = join(stagedCopyRoot('project-a'), 'src', 'pages', 'index.astro');
-    const originalAstro = await readFile(astroPath, 'utf8');
     await writeFile(
       astroPath,
       originalAstro.replace(
@@ -303,10 +304,11 @@ test('stock Vite HMR rides the proxied native websocket, updates the canvas with
         .getByTestId('selection-matches')
         .locator("li[data-match-selector^='.hero-title[data-astro-cid-']"),
     ).toHaveCount(1);
-    await writeFile(astroPath, originalAstro);
   } finally {
-    // The canonical bytes go back — the zero-injection spec that
-    // follows re-proves it with its own snapshot.
+    // BOTH mutated files' canonical bytes go back whatever happened
+    // above — the zero-injection spec that follows re-proves it with
+    // its own snapshot.
+    await writeFile(astroPath, originalAstro);
     await writeFile(cssPath, originalCss);
   }
 

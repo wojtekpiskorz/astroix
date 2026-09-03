@@ -168,7 +168,17 @@ export function ProjectCanvas({ origin, initialRoute = '/' }: ProjectCanvasProps
     setLoadEpoch((epoch) => epoch + 1);
     if (state === 'project' && url !== null) {
       setCanvasState(session.ref, { url, origin: 'project' });
-      if (!addressDirty.current) setAddress(new URL(url).pathname);
+      // An in-flight typed address COMPLETES when the observed URL is
+      // exactly what it would navigate to (the user typed, and the page
+      // arrived there by any path — the address control, a link, a
+      // reload): the dirty flag clears and observed syncs resume.
+      // Otherwise a typed-but-not-yet-navigated address is never
+      // clobbered by an unrelated load.
+      if (addressTarget(address, projectOrigin) === url) {
+        addressDirty.current = false;
+      } else if (!addressDirty.current) {
+        setAddress(new URL(url).pathname);
+      }
       return;
     }
     if (state === 'loading') return;
@@ -285,6 +295,11 @@ function matchedRows(matches: readonly SelectionMatch[]): { key: string; match: 
     rows.push({ key: `${base}#${occurrence}`, match });
   }
   return rows;
+}
+
+/** What the address input would navigate to — the completion check's target. */
+function addressTarget(address: string, projectOrigin: string): string {
+  return new URL(address, projectOrigin).href;
 }
 
 /** The canvas document, when it is same-origin and reachable — `null` otherwise (fail closed). */

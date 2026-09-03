@@ -50,8 +50,11 @@ interface AppStoreState {
   /**
    * Drops the live selection without touching the binding — the canvas's
    * fail-closed off-origin action (#242: inspection disabled until the
-   * canvas returns). Clearing carries no pair: a drop can never land in
-   * the wrong session.
+   * canvas returns). Clearing carries no pair: the ordered commit-time
+   * reset is the authority that empties this slot across sessions, and a
+   * drop is idempotent with it — a late off-origin observation landing
+   * after a transition can at worst clear a fresh session's empty-or-
+   * stale selection, never repopulate anything.
    */
   clearSelection(): void;
   /** The reset's clearing step: wipes the fields AND unbinds — post-clear writes cannot land. */

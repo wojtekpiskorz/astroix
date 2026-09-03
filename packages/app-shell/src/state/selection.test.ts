@@ -95,6 +95,21 @@ describe('selection persistence across reloads', () => {
     document.body.innerHTML = '<h1 class="hero-title">scope lost</h1>';
     expect(rematchSelection(document, descriptor)).toBeNull();
   });
+
+  it('answers null — never throws — when the composed selector is unparseable', () => {
+    // A lone surrogate in an identifier survives no escape this side of
+    // the engine's parser: the composed selector is rejected, and the
+    // rematch must be a non-rematch (guarded like matchesSelector),
+    // never a crash of the recompute pass.
+    const descriptor: SelectionDescriptor = {
+      tag: 'p',
+      id: null,
+      classes: ['\uD800'],
+      scopeAttributes: [],
+    };
+    expect(() => selectionSelector(descriptor)).not.toThrow();
+    expect(rematchSelection(document, descriptor)).toBeNull();
+  });
 });
 
 describe('matching against runtime effective selectors', () => {

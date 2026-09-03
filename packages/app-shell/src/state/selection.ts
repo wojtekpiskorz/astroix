@@ -63,12 +63,23 @@ export function selectionSelector(descriptor: SelectionDescriptor): string {
   return `${descriptor.tag}${id}${classes}${scope}`;
 }
 
-/** Re-finds the selected element in a live document — `null` when this reload was not eligible for it. */
+/**
+ * Re-finds the selected element in a live document — `null` when this
+ * reload was not eligible for it, and `null` when the composed selector
+ * is one the engine rejects (a descriptor carrying an identifier no
+ * escape can make parseable — a lone surrogate, say). The query is
+ * guarded exactly like `matchesSelector`: a bad selector is a
+ * non-rematch, never a crash of the recompute pass.
+ */
 export function rematchSelection(
   root: ParentNode,
   descriptor: SelectionDescriptor,
 ): Element | null {
-  return root.querySelector(selectionSelector(descriptor));
+  try {
+    return root.querySelector(selectionSelector(descriptor));
+  } catch {
+    return null;
+  }
 }
 
 /**
