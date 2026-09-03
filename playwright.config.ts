@@ -23,7 +23,8 @@ import { stageWebLane, WEB_LANE_PORT } from './apps/web/src/stage-e2e.ts';
 // emptying one, or breaking its discovery fails EVERY playwright run at
 // config load — the plain-build project alone can never green the lane.
 const WEB_SPEC_DIR = join('e2e', 'web');
-const EXPECTED_WEB_SPECS = ['activation.spec.ts', 'launcher.spec.ts'] as const;
+// `app-shell.spec.ts` joined at #241 (G2): the rebuilt shell's own legs.
+const EXPECTED_WEB_SPECS = ['activation.spec.ts', 'app-shell.spec.ts', 'launcher.spec.ts'] as const;
 const MINIMUM_TESTS_PER_SPEC = 1;
 const specFiles = existsSync(WEB_SPEC_DIR)
   ? readdirSync(WEB_SPEC_DIR).filter((name) => name.endsWith('.spec.ts'))
