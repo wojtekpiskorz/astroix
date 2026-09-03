@@ -23,13 +23,14 @@ import { clearShellResetTrace, recordShellResetStepDone } from './shell-state-ma
  * ADR-0002 amendment 3): abort fetches, close SSE, remove
  * old-generation queries, clear the stores, THEN navigate.
  *
- * SSE admission note (#330, owner ruling pending): live browser streams
- * are refused today (F3 admission requires `Origin`; Chromium sends
- * none on same-origin GET). The subscription still opens — the honest
- * `stream-state` surface reports the refusal — and the gate, the
- * dispatch, and the reset's `close-sse` step are the same machinery a
- * admitted stream drives; delayed-delivery behavior is pinned at the
- * unit tier.
+ * SSE admission note (#330, reads-law alignment): a live same-origin
+ * GET stream presents `Sec-Fetch-Site: same-origin` and NO `Origin`
+ * (`Origin` is a forbidden header on a same-origin GET in real
+ * browsers), and admission verifies `Origin` only when present — so the
+ * browser's own `EventSource` shape is admitted. The gate, the
+ * dispatch, and the reset's `close-sse` step are the same machinery
+ * every admitted stream drives; live-wire delivery legs ride the
+ * product E2E (I/J/K, unblocked by #330).
  */
 
 /** Construction props; hosts inject their document facts and keep the navigation seam testable. */
