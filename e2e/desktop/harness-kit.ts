@@ -14,7 +14,7 @@ import { build } from 'vite';
  * (#248's packaged lane): `PackagedAppRun` (early-package-kit.ts)
  * subclasses this run over the REAL packaged-app executable with an
  * injected env/cwd — the pump, the waiter registry, the stderr bound,
- * and the TERM→KILL escalation live HERE, one law for every lane.
+ * and the quit-then-SIGKILL stop live HERE, one law for every lane.
  *
  * The kit also carries the one behavioral fix the duplicated copies
  * hid: stdout is LINE-BUFFERED — a report line split across two `data`

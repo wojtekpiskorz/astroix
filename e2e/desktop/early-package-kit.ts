@@ -27,8 +27,8 @@ import { type HarnessEvent, HarnessRun } from './harness-kit.ts';
  *   ZIP's root is exactly one `Astroix.app`.
  * - **The real launch** — `PackagedAppRun`, a thin subclass of the
  *   shared `harness-kit.ts` run (the third consumer of its one
- *   line-buffered pump, waiter registry, stderr bound, and TERM→KILL
- *   escalation): the app executable with an ISOLATED temp HOME and the
+ *   line-buffered pump, waiter registry, stderr bound, and
+ *   quit-then-SIGKILL stop): the app executable with an ISOLATED temp HOME and the
  *   product's `ASTROIX_DESKTOP_USER_DATA` override (the H1 isolation
  *   law), every dev-only env declaration REMOVED so the packaged laws
  *   are the only ones that can fire, plus the browser-level
@@ -147,7 +147,7 @@ export interface IsolationRoots {
 /**
  * One launched packaged app: the shared `harness-kit.ts` run (its one
  * line-buffered pump, waiter registry, bounded stderr tail, and
- * TERM→KILL escalation) over the REAL app executable — thin, carrying
+ * quit-then-SIGKILL stop) over the REAL app executable — thin, carrying
  * only the packaged lane's own laws.
  */
 export class PackagedAppRun extends HarnessRun {
