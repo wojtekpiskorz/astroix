@@ -15,7 +15,8 @@ import { join, relative } from 'node:path';
  *
  * - **Normalized payload inventory** — every file in the `.app`, keyed by
  *   its bundle-relative posix path and sorted: same path set, same
- *   sizes, same executable bits. SYMLINKS ride the inventory too, as
+ *   sizes, same executable bits, same class (sealed/immutable). SYMLINKS
+ *   ride the inventory too, as
  *   presence + target rows (never hashes): the packaged tree's
  *   framework symlinks are deterministic from the pinned Electron
  *   distribution, but the comparison must never be able to silently
@@ -81,7 +82,7 @@ export interface CandidateComparison {
   readonly inventoriesMatch: boolean;
   readonly immutableHashesMatch: boolean;
   readonly identityMatches: boolean;
-  /** Inventory rows that differ (path, size, or executable bit). */
+  /** Inventory rows that differ (path, size, executable bit, or class). */
   readonly inventoryDiffs: readonly string[];
   /** Immutable rows whose SHA-256 differs. */
   readonly immutableHashDiffs: readonly string[];
@@ -183,7 +184,8 @@ export async function buildPayloadInventory(
 
 /**
  * The two-build comparison: identical inventories (path set, sizes,
- * executable bits) and identical immutable hashes, with every difference
+ * executable bits, class, and symlink targets) and identical immutable
+ * hashes, with every difference
  * named. Sealed rows are compared for inventory facts only — their
  * bytes are outside the claim by design. ZIP bytes are never compared.
  */
