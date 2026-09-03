@@ -14,6 +14,7 @@ import { adHocSignApp, isMachOFile } from '../src/forge/codesign.ts';
 import {
   buildCandidateManifest,
   buildPayloadInventory,
+  findForbiddenArtifacts,
   serializeCandidateManifest,
   sha256File,
 } from '../src/forge/inventory.ts';
@@ -289,24 +290,7 @@ async function soleArtifact(dir, suffix, what) {
 }
 
 async function assertNoForbiddenArtifacts(dir) {
-  const forbidden = [];
-  const walkNames = async (current) => {
-    for (const entry of await readdir(current, { withFileTypes: true })) {
-      const absolute = join(current, entry.name);
-      if (entry.isDirectory()) {
-        await walkNames(absolute);
-        continue;
-      }
-      if (
-        entry.name.endsWith('.dmg') ||
-        entry.name.endsWith('.dmg.part') ||
-        entry.name === 'RELEASES.json'
-      ) {
-        forbidden.push(relative(OUT_DIR, absolute));
-      }
-    }
-  };
-  await walkNames(dir);
+  const forbidden = await findForbiddenArtifacts(dir);
   if (forbidden.length > 0) {
     console.error(
       `package: forbidden artifacts produced (ADR-0008 non-goals): ${JSON.stringify(forbidden)}`,

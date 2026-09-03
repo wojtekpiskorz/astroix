@@ -1,9 +1,13 @@
 import { existsSync } from 'node:fs';
-import { readdir, readFile } from 'node:fs/promises';
-import { dirname, join, relative } from 'node:path';
+import { readdir, readFile, stat } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { type CandidateManifest, sha256File } from '../../src/forge/inventory.ts';
+import {
+  type CandidateManifest,
+  findForbiddenArtifacts,
+  sha256File,
+} from '../../src/forge/inventory.ts';
 import { verifyPackagedApp } from '../../src/forge/package-verification.ts';
 import { expectedReleaseFuseStates, readFuseStates } from '../../src/forge/release-fuses.ts';
 
@@ -64,7 +68,6 @@ describe.skipIf(!packaged)(
     }, 180_000);
 
     it('bundles the Node executable as an executable real file outside the asar', async () => {
-      const { stat } = await import('node:fs/promises');
       const info = await stat(join(APP_PATH, 'Contents', 'Resources', 'node', 'bin', 'node'));
       expect(info.isFile()).toBe(true);
       expect((info.mode & 0o111) !== 0).toBe(true);
@@ -95,7 +98,6 @@ async function newestCandidateManifest(): Promise<CandidateManifest> {
   const candidatesDir = join(OUT_DIR, 'candidates');
   const labels = await readdir(candidatesDir);
   expect(labels.length).toBeGreaterThan(0);
-  const { stat } = await import('node:fs/promises');
   const stamped = await Promise.all(
     labels
       .map((label) => join(candidatesDir, label, 'manifest.json'))
@@ -108,21 +110,7 @@ async function newestCandidateManifest(): Promise<CandidateManifest> {
 }
 
 async function expectNoForbiddenArtifacts(dir: string): Promise<void> {
-  const forbidden: string[] = [];
-  const walk = async (current: string): Promise<void> => {
-    for (const entry of await readdir(current, { withFileTypes: true })) {
-      const absolute = join(current, entry.name);
-      if (entry.isDirectory()) {
-        await walk(absolute);
-      } else if (
-        entry.name.endsWith('.dmg') ||
-        entry.name.endsWith('.dmg.part') ||
-        entry.name === 'RELEASES.json'
-      ) {
-        forbidden.push(relative(OUT_DIR, absolute));
-      }
-    }
-  };
-  await walk(dir);
-  expect(forbidden, 'ADR-0008 non-goal artifacts produced').toEqual([]);
+  // the ONE forbidden-artifact law (inventory.ts), consumed — the
+  // script's sweep and this leg can never drift apart
+  expect(await findForbiddenArtifacts(dir), 'ADR-0008 non-goal artifacts produced').toEqual([]);
 }

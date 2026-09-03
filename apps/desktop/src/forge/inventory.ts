@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { readdir, readlink, stat } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 
 /**
  * The candidate-comparison manifest (#245, H3; ADR-0008 minimal
@@ -245,16 +245,23 @@ function appendSymlinkDiff(
   }
 }
 
-/** A file's law: inventory facts (size, executable bit) always; the hash claim for immutable files only. */
+/** A file's law: inventory facts (size, executable bit, comparison class) always; the hash claim for immutable files only. */
 function appendFileDiffs(
   path: string,
   fileA: PayloadFileEntry,
   fileB: PayloadFileEntry,
   diffs: { inventoryDiffs: string[]; immutableHashDiffs: string[] },
 ): void {
-  if (fileA.bytes !== fileB.bytes || fileA.executable !== fileB.executable) {
+  // the class is an inventory fact too: a path flipping between sealed
+  // and immutable between builds changes what the comparison claims
+  // about it — that drift must never ride silently
+  if (
+    fileA.bytes !== fileB.bytes ||
+    fileA.executable !== fileB.executable ||
+    fileA.class !== fileB.class
+  ) {
     diffs.inventoryDiffs.push(
-      `${path}: ${fileA.bytes}/${fileA.executable} vs ${fileB.bytes}/${fileB.executable}`,
+      `${path}: ${fileA.bytes}/${fileA.executable}/${fileA.class} vs ${fileB.bytes}/${fileB.executable}/${fileB.class}`,
     );
   }
   if (fileA.class === 'immutable' && fileA.sha256 !== fileB.sha256) {
@@ -277,6 +284,39 @@ function compareIdentityFields(a: CandidateManifest, b: CandidateManifest): stri
     if (valueA !== valueB) identityDiffs.push(`${field}: ${valueA} vs ${valueB}`);
   }
   return identityDiffs;
+}
+
+/**
+ * The forbidden artifact law (ADR-0008 explicit non-goals): no DMG
+ * packaging and no auto-update manifest may appear in a packaging
+ * output tree. Stated ONCE here and consumed by both ends — the
+ * pipeline's fail-closed sweep and the packaged-app lane's negative
+ * leg — so the script and the test can never drift apart.
+ */
+export const FORBIDDEN_ARTIFACT_SUFFIXES: readonly string[] = Object.freeze(['.dmg', '.dmg.part']);
+export const FORBIDDEN_ARTIFACT_NAMES: readonly string[] = Object.freeze(['RELEASES.json']);
+
+/** Walks the tree and names every forbidden artifact it holds (paths relative to the root). */
+export async function findForbiddenArtifacts(root: string): Promise<string[]> {
+  const forbidden: string[] = [];
+  const walk = async (current: string): Promise<void> => {
+    for (const entry of await readdir(current, { withFileTypes: true })) {
+      const absolute = join(current, entry.name);
+      if (entry.isDirectory()) {
+        await walk(absolute);
+        continue;
+      }
+      const forbiddenByName = FORBIDDEN_ARTIFACT_NAMES.includes(entry.name);
+      const forbiddenBySuffix = FORBIDDEN_ARTIFACT_SUFFIXES.some((suffix) =>
+        entry.name.endsWith(suffix),
+      );
+      if (forbiddenByName || forbiddenBySuffix) {
+        forbidden.push(relative(root, absolute));
+      }
+    }
+  };
+  await walk(root);
+  return forbidden.sort();
 }
 
 /** The streamed SHA-256 of one file — payload files are large, never buffered whole. */

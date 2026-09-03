@@ -8,6 +8,7 @@ import {
   type CandidateManifest,
   classifyPayload,
   compareCandidateManifests,
+  findForbiddenArtifacts,
   type PayloadEntry,
   serializeCandidateManifest,
 } from '../../src/forge/inventory.ts';
@@ -238,6 +239,28 @@ describe('the two-build comparison (#245)', () => {
     expect(comparison.inventoryDiffs[0]).toContain('symlink A vs null');
   });
 
+  it('a CLASS flip between builds is an inventory difference — equal size and exec bit cannot mask it (#245 review finding)', () => {
+    const payloadA = [
+      {
+        path: 'Contents/MacOS/Astroix',
+        bytes: 8,
+        executable: true,
+        sha256: 'a'.repeat(64),
+        class: 'sealed',
+      },
+    ] satisfies PayloadEntry[];
+    const a = buildCandidateManifest({ ...MANIFEST_BASE, payload: payloadA });
+    const flipped = payloadA.map((row) =>
+      row.path === 'Contents/MacOS/Astroix' ? { ...row, class: 'immutable' } : row,
+    ) satisfies PayloadEntry[];
+    const b = buildCandidateManifest({ ...MANIFEST_BASE, payload: flipped });
+    const comparison = compareCandidateManifests(a, b);
+    expect(comparison.inventoriesMatch).toBe(false);
+    expect(comparison.inventoryDiffs).toEqual([
+      'Contents/MacOS/Astroix: 8/true/sealed vs 8/true/immutable',
+    ]);
+  });
+
   it('identity drift (commit, pins, fuses) is named even when the payload matches', () => {
     const payload: PayloadEntry[] = [];
     const a = buildCandidateManifest({ ...MANIFEST_BASE, payload });
@@ -276,6 +299,21 @@ function fileRow(
   if (row === undefined || 'symlinkTarget' in row) throw new Error(`file row missing: ${path}`);
   return row;
 }
+
+it('the ONE forbidden-artifact walker names DMG images and the auto-update manifest, relative to the root (#245 review finding)', async () => {
+  scratch ??= await mkdtemp(join(tmpdir(), 'astroix-inventory-test-'));
+  const out = join(scratch, 'out');
+  await mkdir(join(out, 'make', 'zip'), { recursive: true });
+  await writeFile(join(out, 'make', 'zip', 'Astroix.zip'), 'zip');
+  await writeFile(join(out, 'make', 'Astroix.dmg'), 'dmg');
+  await writeFile(join(out, 'make', 'Astroix.dmg.part'), 'part');
+  await writeFile(join(out, 'RELEASES.json'), '{}');
+  expect(await findForbiddenArtifacts(out)).toEqual([
+    'RELEASES.json', // sorted: uppercase sorts before the lowercase subtree
+    join('make', 'Astroix.dmg'),
+    join('make', 'Astroix.dmg.part'),
+  ]);
+});
 
 it('cleans the inventory scratch root', async () => {
   if (scratch !== undefined) {

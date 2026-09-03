@@ -207,7 +207,6 @@ export function expectedReleaseFuseStates(): VerifiedFuseStates {
   return expected;
 }
 
-/** The fuses whose read-back state differs from the law — the offending fuses only. */
 /**
  * The state a violating fuse was actually found in — or `absent` when
  * the actual map did not carry the fuse at all: a partial actual map is
@@ -216,6 +215,7 @@ export function expectedReleaseFuseStates(): VerifiedFuseStates {
  */
 export type FuseViolationActual = VerifiedFuseState | 'absent';
 
+/** The fuses whose read-back state differs from the law — the offending fuses only. */
 export function fuseStateViolations(
   actual: Readonly<Record<string, VerifiedFuseState | undefined>>,
   expected: VerifiedFuseStates,
