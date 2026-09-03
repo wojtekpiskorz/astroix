@@ -90,12 +90,23 @@ export { mintRuntimeEpoch } from './runtime-epoch.ts';
  *   explicit new `begin`. The same law covers every attempt that ends
  *   without committing: its reserved reference will never become active,
  *   so its bindings die with it — authority never outlives its session.
+ * - **The deactivation-side clear** (#331; ADR-0006 §9 `revoke`): the
+ *   composition informs the supervisor that the coordinator's
+ *   deactivation linearized — the active entry empties **without**
+ *   recording a failure, the same idempotent authority retirement the
+ *   crash path holds runs once more as a belt (the ordered pass already
+ *   revoked through the shared tables), and listeners hear the clean
+ *   snapshot. The stopped run's late close is then history: the crash
+ *   observer's replaced-guard bails, so a supervised deactivation never
+ *   records a crash. The stop itself is never taken here — the
+ *   transition's own stop seam (`stopOldRun`) owns it — and a replay
+ *   with no active session answers the sanitized refusal.
  *
  * Deferred to their owning lanes, declared so the boundary is explicit:
- * `revoke`/deactivation and the external commit ordering — F6 (#238);
- * drain and forced transitions — F5 (#237), in
- * `session-supervisor/fence/**` and `session-supervisor/commit/**` +
- * `revocation/**` — none of them this module's territory.
+ * the external commit ordering — F6 (#238, in
+ * `session-supervisor/commit/**` + `revocation/**`); drain and forced
+ * transitions — F5 (#237, in `session-supervisor/fence/**`) — none of
+ * them this module's territory.
  *
  * Deterministic by construction: no timers, no sockets — the composition
  * injects the candidate-run factory (registry resolution, ProjectRuntime
@@ -124,6 +135,25 @@ export type BeginActivationResult =
   | { readonly kind: 'begun'; readonly attempt: ActivationAttempt }
   | { readonly kind: 'refused'; readonly reason: 'concurrent-activation' };
 
+/**
+ * Why the active session is being cleared deliberately — sanitized
+ * vocabulary only, never a value. One context exists today: the
+ * coordinator's settled deactivation transition (F6's receipt target of
+ * the same name) — the composition informs the supervisor after the
+ * linearization revoked authority and initiated the stop.
+ */
+export type RevokeReason = 'deactivation';
+
+/**
+ * The deactivation-side clear's answer: the cleared reference, or the
+ * sanitized refusal when no active session exists — replay, a crash that
+ * already cleared it, or an authority-less in-flight attempt (its own
+ * cancel/rollback machine owns ending that one).
+ */
+export type RevokeResult =
+  | { readonly kind: 'revoked'; readonly revoked: SessionRef }
+  | { readonly kind: 'refused'; readonly reason: 'no-active-session' };
+
 /** The supervisor's snapshot-change listener; a throwing listener never breaks the chain (the E6 law). */
 export type SessionListener = (snapshot: SessionSnapshot) => void;
 
@@ -133,6 +163,16 @@ export interface SessionSupervisor {
   snapshot(): SessionSnapshot;
   /** Reserves a new generation and starts one candidate privately; refuses while another attempt is in flight. */
   begin(projectKey: ProjectKey): BeginActivationResult;
+  /**
+   * The deactivation-side clear (ADR-0006 §9's declared shape, landed by
+   * #331): empties the active session WITHOUT recording a failure — the
+   * coordinator's ordered pass already revoked its authority and
+   * initiated its stop; this is the inform that keeps the snapshot
+   * honest. Re-revokes the session's own authority retirement as the
+   * same idempotent belt the crash path has, notifies with the clean
+   * snapshot, and answers a replay with no active session sanitized.
+   */
+  revoke(reason: RevokeReason): Promise<RevokeResult>;
   /** Subscribes to snapshot changes; the return unbinds. */
   subscribe(listener: SessionListener): () => void;
 }
@@ -218,6 +258,20 @@ export function createSessionSupervisor(options: SessionSupervisorOptions): Sess
   };
 
   /**
+   * The active-entry retirement every clear of `active` runs — the two
+   * close paths share it so the invariants cannot drift apart: the
+   * session's client bindings and its project host capability die with
+   * it (authority never outlives the session that minted it). Idempotent
+   * by the tables' own contract — the deactivation's ordered pass
+   * already revoked through the shared tables, and this belt is exactly
+   * the one the crash path runs.
+   */
+  const retireActive = (entry: ActiveEntry): void => {
+    clients.revokeSession(entry.ref);
+    hostCapabilities.revoke({ host: 'project', projectKey: entry.projectKey });
+  };
+
+  /**
    * Observes one active run's asynchronous close: without a replacement
    * it is a crash — no restart, ever — and the crashed session's
    * authority dies with it (its client bindings and its project host
@@ -230,10 +284,9 @@ export function createSessionSupervisor(options: SessionSupervisorOptions): Sess
    */
   const observeActiveClose = (entry: ActiveEntry): void => {
     const crashed = (category: SessionFailure['category']): void => {
-      if (active !== entry) return; // replaced already: authority moved, the report is history
+      if (active !== entry) return; // cleared already: deactivation or replacement — the report is history
       active = null;
-      clients.revokeSession(entry.ref);
-      hostCapabilities.revoke({ host: 'project', projectKey: entry.projectKey });
+      retireActive(entry);
       lastFailure = { category, message: FAILURE_MESSAGES[category] };
       notify();
     };
@@ -269,8 +322,7 @@ export function createSessionSupervisor(options: SessionSupervisorOptions): Sess
         // session's report is internal history, the completion lane F7
         // reports post-commit outcomes — and a rejecting stop stays
         // anchored noise, never an unhandled one).
-        clients.revokeSession(outgoing.ref);
-        hostCapabilities.revoke({ host: 'project', projectKey: outgoing.projectKey });
+        retireActive(outgoing);
         outgoing.run.stop().catch(() => {});
       }
       const entry: ActiveEntry = { ref: ctx.ref, projectKey: ctx.projectKey, run: ctx.run };
@@ -321,6 +373,25 @@ export function createSessionSupervisor(options: SessionSupervisorOptions): Sess
       const attempt = createActivationAttempt({ ref, run, hooks });
       notify();
       return { kind: 'begun', attempt };
+    },
+    revoke: async (_reason) => {
+      // The reason is ADR-0006 §9's declared shape; the one context that
+      // exists today (a settled deactivation) needs no branching on it —
+      // the vocabulary is here for the next ruled context.
+      const entry = active;
+      if (entry === null) {
+        return { kind: 'refused', reason: 'no-active-session' };
+      }
+      // THE CLEAN CLEAR: the supervisor's deactivation-side inform. The
+      // ordered pass already revoked authority and initiated the stop;
+      // the entry empties, the belt retirement runs once more (idempotent
+      // — the same law the crash path holds), NO failure is recorded, and
+      // the crash observer's guard makes the stopped run's late close
+      // history rather than a crash.
+      active = null;
+      retireActive(entry);
+      notify();
+      return { kind: 'revoked', revoked: entry.ref };
     },
     subscribe: (listener) => {
       listeners.add(listener);
