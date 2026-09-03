@@ -58,6 +58,9 @@ function resolveWebLanePort(): number {
     );
   }
   const port = Number.parseInt(raw, 10);
+  // The range checks are NaN-transparent (both comparisons false), so the
+  // regex above is the ONLY format rejection — if it is ever dropped as
+  // "redundant", `abc` parses to NaN and surfaces much later as a dead URL.
   if (port < 1 || port > 65535) {
     throw new Error(
       `stage-e2e: ${WEB_E2E_PORT_ENV} must be an integer TCP port 1-65535, got "${raw}"`,
