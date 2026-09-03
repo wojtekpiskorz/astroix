@@ -18,7 +18,9 @@
  * (`docs/spec.md` implementation decisions 2) that never reaches
  * routing. Non-reserved requests on the active project host stream to
  * the lease's loopback upstream — the natural URL verbatim, Host
- * preserved; admitted upgrades tunnel raw.
+ * preserved, and the control-plane authority stripped first (the host
+ * capability cookie and client-capability header, ADR-0006 §3 — #338);
+ * admitted upgrades tunnel raw, over the same strip.
  *
  * Lease revocation is the ticket's pre-reap step: revoke() flips the
  * route to retired FIRST, then destroys every tracked HTTP and upgrade
@@ -38,6 +40,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { Duplex } from 'node:stream';
 import type { ProjectKey } from '@wojciechpiskorz/astroix-protocol';
+import { stripAuthorityFromRawPairs } from '../api/http/authority-strip.ts';
 import { proxyHttpStream, sendGeneratedResponse } from '../proxy/http-stream.ts';
 import { reconstructUpgradeHandshake, validateUpgradeRequest } from '../proxy/upgrade-request.ts';
 import { respondRawAndClose, tunnelRawUpgrade } from '../proxy/upgrade-tunnel.ts';
@@ -315,11 +318,17 @@ export async function createOriginListener(
       return;
     }
     tunnelRawUpgrade({
+      // The handshake reconstructs from the STRIPPED pair view (#338;
+      // ADR-0006 §3): the control-plane authority (client-capability
+      // header, host capability cookie) never reaches the managed dev
+      // server over the tunnel either, while everything else keeps its
+      // exact bytes — URL token, Host, Origin, subprotocol, key, casing,
+      // order.
       handshake: reconstructUpgradeHandshake({
         method: request.method ?? '',
         url: request.url ?? '/',
         httpVersion: request.httpVersion,
-        rawHeaders: request.rawHeaders,
+        rawHeaders: stripAuthorityFromRawPairs(request.rawHeaders),
       }),
       head,
       clientSocket: socket,
