@@ -7,6 +7,7 @@ import type { ClientBindings } from '../../api/http/client-bindings.ts';
 import { createClientBindings } from '../../api/http/client-bindings.ts';
 import type { HostCapabilityGrants } from '../../api/http/host-capability.ts';
 import { createHostCapabilityGrants } from '../../api/http/host-capability.ts';
+import { writeRejection } from '../../edit-authority/executor/write-outcomes.ts';
 import type { SupervisionCloseReport } from '../../project-plane/supervision/close-report.ts';
 import {
   shutdownFailure,
@@ -30,6 +31,7 @@ import type {
   DrainClock,
   EditDrain,
   EditFence,
+  QueuedEdit,
 } from '../../session-supervisor/fence/edit-fence.ts';
 import { createEditFence } from '../../session-supervisor/fence/edit-fence.ts';
 import type {
@@ -76,6 +78,32 @@ export type Journal = string[];
 /** Field-wise pair equality — the tests' own oracle (never the modules'). */
 export function sameRef(left: SessionRef, right: SessionRef): boolean {
   return left.runtimeEpoch === right.runtimeEpoch && left.generation === right.generation;
+}
+
+// ——— the timed-out drain's stuck accepted write (shared by the preparation and spend legs) ———
+
+/** A stuck write's release: the test settles the hanging edit when it says. */
+export interface Release {
+  settled: boolean;
+  resolve: () => void;
+}
+
+/** One queued edit that settles only when the test releases it — the timed-out drain's accepted work (the #237 idiom). */
+export function hangingEdit(key: string, release: Release): QueuedEdit {
+  return {
+    key,
+    execute: () =>
+      new Promise((resolveOutcome) => {
+        release.resolve = () => resolveOutcome(writeRejection('changed-baseline'));
+      }),
+  };
+}
+
+/** One macrotask boundary — lets the serialized queue take an accepted edit in flight. */
+export async function flushMicrotasks(): Promise<void> {
+  await new Promise<void>((resolve) => {
+    setTimeout(resolve, 0);
+  });
 }
 
 // ——— the slim fake ProjectRun (the #236/#237 idiom, pared to this lane) ———

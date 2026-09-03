@@ -14,9 +14,12 @@ import {
   completeReport,
   EDITOR_DOC,
   fakeExecutor,
+  flushMicrotasks,
+  hangingEdit,
   manualClock,
   PROJECT_A,
   PROJECT_B,
+  type Release,
   type SessionSeat,
   sameRef,
 } from './commit-harness.ts';
@@ -35,22 +38,6 @@ import {
 /** One queued edit settling with the given terminal outcome (the #237 controlled-edit idiom). */
 function settledEdit(key: string, outcome: ReturnType<typeof writeRejection>): QueuedEdit {
   return { key, execute: () => Promise.resolve(outcome) };
-}
-
-/** A pending edit that settles only when the test releases it — the timed-out drain's accepted work. */
-interface Release {
-  settled: boolean;
-  resolve: () => void;
-}
-
-function hangingEdit(key: string, release: Release): QueuedEdit {
-  return {
-    key,
-    execute: () =>
-      new Promise((resolveOutcome) => {
-        release.resolve = () => resolveOutcome(writeRejection('changed-baseline'));
-      }),
-  };
 }
 
 /** One fence-and-drain pair in the given terminal state. */
@@ -80,13 +67,6 @@ async function timedOutFence(): Promise<SealedFence & { readonly release: Releas
   await flushMicrotasks(); // the queue takes the edit in flight
   clock.fireDeadline();
   return { fence, drain: started.drain, clock, release };
-}
-
-/** One macrotask boundary so the queue's in-flight edit is genuinely in flight. */
-async function flushMicrotasks(): Promise<void> {
-  await new Promise<void>((resolve) => {
-    setTimeout(resolve, 0);
-  });
 }
 
 /** The first activation's committed ref — the old session every mint binds against (no editor seated: the legs bind their own). */
@@ -180,7 +160,7 @@ describe('the normal preparation — issuance over the sealed terminal drain', (
     expect(still).toEqual({ kind: 'refused', reason: 'drain-timed-out' });
   });
 
-  it('refuses the terminal failed report — §4 step 3’s abort path owns it, never a receipt', async () => {
+  it("refuses the terminal failed report — §4 step 3's abort path owns it, never a receipt", async () => {
     const fx = commitFixture();
     const first = await firstRef(fx);
     const clock = manualClock();
@@ -249,7 +229,7 @@ describe('the normal preparation — issuance over the sealed terminal drain', (
     expect(crossHttp).toEqual({ kind: 'refused', reason: 'client-not-authoritative' });
   });
 
-  it('refuses a deactivation target minted without the outgoing run’s stop seam', async () => {
+  it("refuses a deactivation target minted without the outgoing run's stop seam", async () => {
     const fx = commitFixture();
     const first = await firstRef(fx);
     const sealed = await drainedFence();

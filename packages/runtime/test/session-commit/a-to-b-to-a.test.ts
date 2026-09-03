@@ -317,7 +317,7 @@ function applyEditBody(session: SessionRef, token: string): string {
   });
 }
 
-describe('the A-to-B-to-A cycle — every axis of the first A’s tab is dead', () => {
+describe("the A-to-B-to-A cycle — every axis of the first A's tab is dead", () => {
   it('commits three sessions with three fresh generations through the receipt-gated coordinator', async () => {
     const b = battery as Battery;
     const a1 = await activateFirst(b, PROJECT_A);
@@ -342,7 +342,7 @@ describe('the A-to-B-to-A cycle — every axis of the first A’s tab is dead', 
     expect(await rawStatus(b.port, rawGet('/', `${PROJECT_B}.localhost`))).toBe(421);
   });
 
-  it('the old session’s SSE stream ended at the commit and its publications are stale forever', async () => {
+  it("the old session's SSE stream ended at the commit and its publications are stale forever", async () => {
     const b = battery as Battery;
     const a1 = await activateFirst(b, PROJECT_A);
     let closes = 0;
@@ -374,7 +374,7 @@ describe('the A-to-B-to-A cycle — every axis of the first A’s tab is dead', 
     expect(b.hub.publish(stale).kind).toBe('refused');
   });
 
-  it('the old tab’s events admission is refused — dead cookie, and a rotated cookie cannot resurrect it', async () => {
+  it("the old tab's events admission is refused — dead cookie, and a rotated cookie cannot resurrect it", async () => {
     const b = battery as Battery;
     const a1 = await activateFirst(b, PROJECT_A);
     const a2Seat = await switchBThenBack(b);
@@ -431,7 +431,7 @@ describe('the A-to-B-to-A cycle — every axis of the first A’s tab is dead', 
     expect(regain.kind).toBe('refused');
   });
 
-  it('the old session’s resource grants are evicted — a mutation or undo replaying one reads unknown', async () => {
+  it("the old session's resource grants are evicted — a mutation or undo replaying one reads unknown", async () => {
     const b = battery as Battery;
     const a1 = await activateFirst(b, PROJECT_A);
     // a real discovered resource over the real table (the grants idiom)
@@ -515,7 +515,7 @@ describe('the A-to-B-to-A cycle — every axis of the first A’s tab is dead', 
     expect(executed).toEqual([]); // nothing ever reached the executor
   });
 
-  it('a stale selection restore is refused — the old tab’s document binding never covers the traffic', async () => {
+  it("a stale selection restore is refused — the old tab's document binding never covers the traffic", async () => {
     const b = battery as Battery;
     const a1 = await activateFirst(b, PROJECT_A);
     const a2Seat = await switchBThenBack(b);

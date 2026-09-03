@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { SwitchPreparationInput } from '../../session-supervisor/commit/switch-coordinator.ts';
 import { createSwitchCoordinator } from '../../session-supervisor/commit/switch-coordinator.ts';
 import type { SwitchPreparationReceipt } from '../../session-supervisor/commit/switch-receipt.ts';
+import type { EditDrain } from '../../session-supervisor/fence/edit-fence.ts';
 import type { RevocationStep } from '../../session-supervisor/revocation/authority-revocation.ts';
 import type { StagedCandidate } from '../../session-supervisor/staging/session-supervisor.ts';
 import {
@@ -12,9 +13,13 @@ import {
   completeReport,
   drainClean,
   EDITOR_DOC,
+  fakeExecutor,
+  flushMicrotasks,
+  hangingEdit,
   manualClock,
   PROJECT_A,
   PROJECT_B,
+  type Release,
   type SessionSeat,
   sameRef,
   switchTo,
@@ -103,6 +108,51 @@ async function preparedSwitch(
 function candidateOf(prepared: PreparedSwitch): StagedCandidate {
   if (prepared.candidate === null) throw new Error('expected the replacement candidate');
   return prepared.candidate;
+}
+
+/** The forced-spend prologue's hand-back: the seat, the candidate, the receipt, the stuck write's release, the timed-out drain. */
+interface ForcedPrepared {
+  readonly first: SessionSeat;
+  readonly candidate: StagedCandidate;
+  readonly receipt: SwitchPreparationReceipt;
+  readonly release: Release;
+  readonly drain: EditDrain;
+}
+
+/**
+ * The forced-spend legs' shared prologue: the old session's drain times
+ * out with one stuck accepted write, the executor's exit is observed,
+ * and the FORCED receipt mints over the replacement target — the arm
+ * the composition takes when the session is already in trouble.
+ */
+async function forcedPrepared(fx: ReturnType<typeof commitFixture>): Promise<ForcedPrepared> {
+  const first = await activateFirst(fx, PROJECT_A);
+  const release: Release = { settled: false, resolve: () => {} };
+  const started = first.fence.fence(() => [hangingEdit('stuck-write', release)]);
+  if (started.kind !== 'fenced') throw new Error('expected the drain to start');
+  first.drain = started.drain;
+  await flushMicrotasks(); // the queue takes the stuck edit in flight
+  first.fenceClock.fireDeadline(); // the five-second bound: the verdict is timed-out
+  if (first.fence.state !== 'timed-out') throw new Error('expected the timed-out verdict');
+
+  const candidate = await beginCandidate(fx, PROJECT_B);
+  const reap = fakeExecutor();
+  const pending = fx.coordinator.prepareForced({
+    oldSession: first.ref,
+    target: { kind: 'replacement', candidate: candidate.ref },
+    client: first.client,
+    fence: first.fence,
+    drain: started.drain,
+    host: { host: 'project', projectKey: PROJECT_A },
+    routes: first.lease,
+    executor: reap.executor,
+  });
+  reap.settleExit(null, 'SIGKILL'); // the exit observation arrives
+  const prepared = await pending;
+  if (prepared.kind !== 'prepared') {
+    throw new Error(`expected a forced receipt, refused: ${prepared.kind}`);
+  }
+  return { first, candidate, receipt: prepared.receipt, release, drain: started.drain };
 }
 
 describe('the commit linearization — consumption, ordering, and the grant', () => {
@@ -291,6 +341,58 @@ describe('the commit linearization — consumption, ordering, and the grant', ()
     expect(result.revoked.steps.map((step) => step.step)).toHaveLength(5);
     expect(fx.journal).toContain('host-capability:revoke');
     expect(fx.journal).toContain('grant:mint');
+  });
+
+  it('spends a forced-minted receipt — the revocation order holds over the forced arm', async () => {
+    const fx = commitFixture();
+    const forced = await forcedPrepared(fx);
+    expect(forced.receipt.preparation.kind).toBe('forced');
+
+    fx.journal.length = 0; // observe exactly this commit's sequence
+    const result = await fx.coordinator.commit(forced.receipt, forced.candidate);
+    expect(result.kind).toBe('committed');
+    if (result.kind !== 'committed') throw new Error('unreachable');
+    // the same order proof as the normal arm: every old-side revocation
+    // precedes the grant's mint, recorded steps in the one order
+    const grantAt = fx.journal.indexOf('grant:mint');
+    expect(grantAt).toBeGreaterThanOrEqual(0);
+    for (const mark of REVOCATION_MARKS) {
+      expect(fx.journal.indexOf(mark), `${mark} precedes the mint`).toBeGreaterThanOrEqual(0);
+      expect(fx.journal.indexOf(mark), `${mark} precedes the mint`).toBeLessThan(grantAt);
+    }
+    expect(result.revoked.steps.map((step) => step.step)).toEqual<RevocationStep[]>([
+      'streams',
+      'routes',
+      'edit-grants',
+      'client-bindings',
+      'host-capability',
+    ]);
+    // the stuck write's late settlement is history — the forced verdict sealed it
+    forced.release.resolve();
+    await forced.drain.settled;
+    expect(result.revoked.outcome).toBe('complete');
+  });
+
+  it('refuses a forced-minted receipt whose fence left the timed-out states — the world moved, nothing revoked', async () => {
+    const fx = commitFixture();
+    const forced = await forcedPrepared(fx);
+    // the world moves after the mint: the stuck write settles
+    // (terminal-after-timeout — still a certified state), then the
+    // fence resumes — out of the forced arm's certified set entirely
+    forced.release.resolve();
+    forced.release.settled = true;
+    await forced.drain.settled;
+    expect(forced.first.fence.state).toBe('terminal-after-timeout');
+    expect(forced.drain.resume()).toEqual({ kind: 'resumed' });
+    expect(forced.first.fence.state).toBe('open');
+
+    fx.journal.length = 0;
+    const rejected = await fx.coordinator.commit(forced.receipt, forced.candidate);
+    expect(rejected).toEqual({ kind: 'rejected', reason: 'fence-resumed' });
+    expect(fx.journal).toEqual([]); // nothing revoked, nothing granted
+    expect(
+      fx.capabilityGrants.verify(forced.first.cookie, { host: 'project', projectKey: PROJECT_A }),
+    ).toBe(true);
   });
 });
 
