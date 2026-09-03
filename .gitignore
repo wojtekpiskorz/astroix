@@ -5,6 +5,8 @@ node_modules/
 dist/
 # the web host's bundled client documents (built at host boot, #240)
 apps/web/dist-client/
+# the desktop host's bundled Electron main (built by the smoke lane, #243)
+apps/desktop/dist-main/
 *.tsbuildinfo
 
 # env & secrets
