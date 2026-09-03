@@ -1,3 +1,5 @@
+import { isCertifiedPair, uncertifiedPairError } from '../astro-project-adapter/certified-pair.ts';
+import { resolveInstalledPair } from '../astro-project-adapter/installed-pair.ts';
 import { managedDevServerPlan } from '../project-plane/managed-astro/dev-server-plan.ts';
 import {
   createProjectPlaneSupervisor,
@@ -57,16 +59,32 @@ export type ManagedPlaneBounds = Partial<
 >;
 
 /**
- * Launches one supervised managed plane: resolves both exact-child spawn
- * plans from the managed project's own installation, then hands them to
- * the plane supervisor — the sibling pair lifecycle (readiness
- * ok-gate, crash-terminal, ordered graceful stop, one recursive close
- * report) and the worker-wire facet (typed dispatch + events) are the
- * supervisor's, unchanged.
+ * Launches one supervised managed plane: the ADR-0005 pair pre-flight
+ * first, then both exact-child spawn plans from the managed project's
+ * own installation, then the plane supervisor — the sibling pair
+ * lifecycle (readiness ok-gate, crash-terminal, ordered graceful stop,
+ * one recursive close report) and the worker-wire facet (typed dispatch
+ * + events) are the supervisor's, unchanged.
  */
 export async function launchManagedPlane(
   input: LaunchManagedPlaneInput,
 ): Promise<ProjectPlaneSupervisor> {
+  // The compatibility pre-flight (#319, ADR-0005: an uncertified pair
+  // "fails before project config executes"): the adapter's own pair
+  // modules, run in the control plane BEFORE any child is spawned. An
+  // uncertified pair rejects the launch with the adapter's
+  // `uncertified-pair` origin — detected pair, certified pairs, rejected
+  // contract — which the facade's boot-error admission maps to the
+  // certification code, so the session layer reports the certification
+  // category instead of folding the failure into a launch shape. The
+  // worker's own E1 gate inside the composition stays the enforcement;
+  // this pre-flight is the reporting path, and it fails earlier — no
+  // child is ever spawned for a doomed run. A dependency that does not
+  // resolve rejects here too and fails closed as `launch-failed`.
+  const detected = await resolveInstalledPair(input.projectRoot);
+  if (!isCertifiedPair(detected)) {
+    throw uncertifiedPairError(detected);
+  }
   const [worker, managedAstro] = await Promise.all([
     workerSpawnPlan({
       projectRoot: input.projectRoot,

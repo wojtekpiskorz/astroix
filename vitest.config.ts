@@ -98,6 +98,15 @@ export default defineConfig({
       // assembly exists locally (`npm run assemble:runtime`, captured
       // for the PR), the certify:adapter precedent.
       'apps/desktop/test/runtime-resources/**/*.test.{ts,tsx}',
+      // apps/web (#240, G1): the web host's focused composition units —
+      // the bounded legs the live-browser lane cannot induce
+      // deterministically (the stranded-adoption aftermath convergence,
+      // #333), over the REAL landed supervisor, coordinator, completion,
+      // and tables with manual run/lease seams (the runtime harness
+      // idiom). The web host's full behavior truth stays e2e/web (the
+      // real-browser batteries over the booted host), and like the other
+      // CC-only watchlist packages these stay out of coverage.include.
+      'apps/web/src/**/*.test.{ts,tsx}',
       // Behavior-contract schema validators (#217, directive from B1's
       // review): the schemas are pure zod over frozen fixtures — the unit
       // doctrine's home, no browser needed. The corpus bytes stay owned by

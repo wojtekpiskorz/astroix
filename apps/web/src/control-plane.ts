@@ -32,6 +32,10 @@ import {
   type SwitchCoordinator,
 } from '@wojciechpiskorz/astroix-runtime/session-supervisor/commit';
 import {
+  createSessionCompletion,
+  type SessionCompletion,
+} from '@wojciechpiskorz/astroix-runtime/session-supervisor/completion';
+import {
   createSessionSupervisor,
   type SessionSupervisor,
 } from '@wojciechpiskorz/astroix-runtime/session-supervisor/staging';
@@ -56,8 +60,9 @@ const RAW_NODE_REGISTER = fileURLToPath(new URL('../raw-node-register.mjs', impo
  * hosts (F1), the real reserved HTTP API admission (F2), the real
  * events surface and SSE hub (F3), the real staged-activation
  * supervisor over the real project runtime (F4/E8), the real switch
- * coordinator (F6) — composed over ONE explicitly injected seam: the
- * registry directory. That injection is the whole isolation story
+ * coordinator (F6), the real session completion (F7) — composed over
+ * ONE explicitly injected seam: the registry directory. That injection
+ * is the whole isolation story
  * (ADR-0006 §2: "tests use an explicitly injected isolated registry"):
  * this host never acquires the kernel-backed registry-writer lease
  * (that authority belongs to the Electron main's privately-booted
@@ -79,7 +84,11 @@ const RAW_NODE_REGISTER = fileURLToPath(new URL('../raw-node-register.mjs', impo
  * and stops the outgoing run. The forced write-executor path is the
  * edit verticals' composition (no accepted edits exist here, so every
  * drain is empty and terminal); the completion lane's host-observed
- * handshakes are the Electron host's, never the wire's.
+ * handshakes are the Electron host's, never the wire's — but the
+ * completion's FAILURE half is composed (#333): a failed adoption after
+ * a committed transition converges through F7's aftermath, which
+ * revokes exactly what the failed adoption granted through F6's ordered
+ * pass and reaps the granted run, never a stranded session.
  */
 
 /** Construction options — the registry injection plus the host's own wiring. */
@@ -146,18 +155,40 @@ export async function createWebControlPlane(
       return run;
     },
   });
-  const coordinator: SwitchCoordinator = createSwitchCoordinator({
+  /** The composition's grant-table eviction — the one closure both F6's coordinator and F7's completion revoke through. */
+  const grantEviction = (session: SessionRef): number => {
+    const evicted = grantTables.get(pairKey(session))?.revokeSession(session) ?? 0;
+    grantTables.delete(pairKey(session));
+    return evicted;
+  };
+  const revocationSurfaces = {
     clients: sessionClients,
     hostCapabilities: grants,
     streams: hub,
-    grants: {
-      revokeSession: (session: SessionRef): number => {
-        const evicted = grantTables.get(pairKey(session))?.revokeSession(session) ?? 0;
-        grantTables.delete(pairKey(session));
-        return evicted;
-      },
-    },
+    grants: { revokeSession: grantEviction },
     httpBindings,
+  };
+  const coordinator: SwitchCoordinator = createSwitchCoordinator(revocationSurfaces);
+  const completion: SessionCompletion = createSessionCompletion({
+    ...revocationSurfaces,
+    reportFailedNoActive: () => {
+      // The supervisor's crash law is the failure-report surface this
+      // composition has (#333): the aftermath's reap settles the granted
+      // run's `closed`, and the observer the supervisor registered at the
+      // commit runs before the aftermath's own reactions (promise
+      // reaction order), so the snapshot already reports the failed
+      // no-active state here. The hook holds the slot for the
+      // supervisor's own report seam — F7's declared integration-lane
+      // surface — when that lands with the Electron host (#246).
+    },
+    tombstones: {
+      // Unreachable in this composition: the incomplete-reap tail belongs
+      // to the forced write-executor path (F6's `prepareForced`), and no
+      // edit vertical is composed here — every drain is empty and
+      // terminal. The real boot-scoped store (its private directory and
+      // D3 lease proof) lands with the Electron host's composition.
+      recordIncompleteReap: async () => {},
+    },
   });
 
   const seatStore: SeatStore = {
@@ -214,6 +245,7 @@ export async function createWebControlPlane(
     registry,
     supervisor,
     coordinator,
+    completion,
     seatStore,
     listener,
     sessionClients,
