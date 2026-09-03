@@ -112,19 +112,30 @@ function matchesSelector(element: Element, selector: string): boolean {
 const IDENTIFIER_CHAR =
   /[-\w\u{00b7}\u{00c0}-\u{00d6}\u{00d8}-\u{00f6}\u{00f8}-\u{037d}\u{037f}-\u{1fff}\u{200c}-\u{200d}\u{203f}\u{2040}\u{2070}-\u{218f}\u{2c00}-\u{2fef}\u{3001}-\u{d7ff}\u{f900}-\u{fdcf}\u{fdf0}-\u{fffd}\u{10000}-\u{effff}]/u;
 
-/** Escapes one identifier token (an id or class name) for selector composition. */
+/**
+ * Escapes one identifier token (an id or class name) for selector
+ * composition. Iterates CODE POINTS (`for…of` semantics), never UTF-16
+ * units: an astral identifier the DOM legally carries must pass (or
+ * escape) as one character — the escape set's `\u{10000}-\u{effff}`
+ * range is unreachable from a per-unit loop.
+ */
 export function cssEscapeIdent(value: string): string {
   let escaped = '';
-  for (let index = 0; index < value.length; index += 1) {
-    const char = value[index] as string;
-    const code = char.charCodeAt(0);
+  let index = 0;
+  for (const char of value) {
+    const code = char.codePointAt(0) ?? 0;
     // A leading digit (or a digit right after a leading hyphen) cannot
     // start an identifier — it escapes as a hex code point.
     const leadingDigit =
-      code >= 0x30 && code <= 0x39 && (index === 0 || (index === 1 && value[0] === '-'));
-    if (leadingDigit) escaped += `\\${code.toString(16)} `;
-    else if (IDENTIFIER_CHAR.test(char)) escaped += char;
-    else escaped += `\\${char}`;
+      code >= 0x30 && code <= 0x39 && (index === 0 || (index === 1 && value.startsWith('-')));
+    if (leadingDigit) {
+      escaped += `\\${code.toString(16)} `;
+    } else if (IDENTIFIER_CHAR.test(char)) {
+      escaped += char;
+    } else {
+      escaped += `\\${char}`;
+    }
+    index += 1;
   }
   return escaped;
 }

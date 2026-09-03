@@ -2,6 +2,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { expect, type Frame, type Page, test } from '@playwright/test';
 import { stagedCopyRoot } from '../../apps/web/src/stage-e2e.ts';
+import { activateButton, PROJECT_APP_URL, restoreIdle } from './spec-helpers.ts';
 
 /**
  * The natural-route same-origin canvas's product E2E (#242, G3): the
@@ -30,14 +31,6 @@ import { stagedCopyRoot } from '../../apps/web/src/stage-e2e.ts';
  * supervisor-global active session — every leg restores the idle state
  * for what follows.
  */
-
-/** The list item whose staged copy is at `position` (0 and 1 are the fixture copies; 2 is broken). */
-function activateButton(page: Page, position: number) {
-  return page.getByTestId('project-list').locator('li').nth(position).getByTestId('activate');
-}
-
-const PROJECT_APP_URL = /^http:\/\/(?!launcher)[a-z2-7]+\.localhost:\d+\/__astroix\/app\/$/;
-const LAUNCHER_APP_URL = /launcher\.localhost:\d+\/__astroix\/app\//;
 
 /** The canvas's frame locator — the plain iframe itself. */
 function canvas(page: Page) {
@@ -98,9 +91,7 @@ test('the canvas shares the project origin with direct contentDocument access at
   await expect(canvas(page).locator('.hero-title')).toHaveText('Astroix fixture');
 
   // Restore the idle state for the next leg.
-  await page.getByTestId('deactivate').click();
-  await page.waitForURL(LAUNCHER_APP_URL);
-  await expect(page.getByTestId('session-label')).toHaveText('idle');
+  await restoreIdle(page);
 });
 
 test('navigation follows natural routes and every load is observed', async ({ page }) => {
@@ -132,9 +123,7 @@ test('navigation follows natural routes and every load is observed', async ({ pa
   await expect(canvas(page).locator('.hero-title')).toHaveText('Astroix fixture');
 
   // Restore the idle state for the next leg.
-  await page.getByTestId('deactivate').click();
-  await page.waitForURL(LAUNCHER_APP_URL);
-  await expect(page.getByTestId('session-label')).toHaveText('idle');
+  await restoreIdle(page);
 });
 
 test('selection matches scoped runtime selectors through Element.matches and survives reloads', async ({
@@ -207,9 +196,7 @@ test('selection matches scoped runtime selectors through Element.matches and sur
   ).toHaveCount(3);
 
   // Restore the idle state for the next leg.
-  await page.getByTestId('deactivate').click();
-  await page.waitForURL(LAUNCHER_APP_URL);
-  await expect(page.getByTestId('session-label')).toHaveText('idle');
+  await restoreIdle(page);
 });
 
 test('stock Vite HMR rides the proxied native websocket, updates the canvas without a reload, and selection survives', async ({
@@ -232,14 +219,6 @@ test('stock Vite HMR rides the proxied native websocket, updates the canvas with
   const origin = new URL(page.url()).origin;
   await expect(page.getByTestId('canvas-url')).toHaveText(`${origin}/`);
 
-  // Settle past the fresh dev server's one post-connect self-reload
-  // (its initial content-scan invalidation lands right after the first
-  // client connect — the project's own behavior, nothing to do with the
-  // mutation below) so the no-navigation assertion measures only the
-  // HMR leg.
-  await page.waitForTimeout(3000);
-  frameNavigations.length = 0;
-
   // The canvas page's own HMR websocket: vite's native path on the
   // PROJECT origin (the transparent proxy tunnels it — never the dev
   // server's internal port), vite's own handshake query intact, and no
@@ -257,6 +236,17 @@ test('stock Vite HMR rides the proxied native websocket, updates the canvas with
   expect(hmrSocket).toBeDefined();
   expect(hmrSocket).toMatch(/token=/);
   expect(websockets.some((url) => url.includes('__astroix'))).toBe(false);
+
+  // The fresh dev server's one post-connect self-reload (its initial
+  // content-scan invalidation lands right after the first client
+  // connect — the project's own behavior, nothing to do with the
+  // mutation below): wait for IT, event-ordered, and only then start
+  // the no-navigation clock. Under load the connect poll itself can
+  // take tens of seconds; a time-ordered clear could straddle the
+  // reload and redden the zero-navigation assertion on machine load
+  // alone.
+  await expect.poll(() => frameNavigations.length, { timeout: 30_000 }).toBeGreaterThanOrEqual(1);
+  frameNavigations.length = 0;
 
   // Select before the mutation.
   await canvas(page).locator('.hero-title').click();
@@ -313,9 +303,7 @@ test('stock Vite HMR rides the proxied native websocket, updates the canvas with
   }
 
   // Restore the idle state for the next leg.
-  await page.getByTestId('deactivate').click();
-  await page.waitForURL(LAUNCHER_APP_URL);
-  await expect(page.getByTestId('session-label')).toHaveText('idle');
+  await restoreIdle(page);
 });
 
 test('an off-origin canvas stays visible with inspection disabled until it returns', async ({
@@ -372,7 +360,5 @@ test('an off-origin canvas stays visible with inspection disabled until it retur
 
   await page.unroute(/astro\.build/);
   // Restore the idle state for whatever follows the battery.
-  await page.getByTestId('deactivate').click();
-  await page.waitForURL(LAUNCHER_APP_URL);
-  await expect(page.getByTestId('session-label')).toHaveText('idle');
+  await restoreIdle(page);
 });

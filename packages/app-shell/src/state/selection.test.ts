@@ -110,6 +110,18 @@ describe('selection persistence across reloads', () => {
     expect(() => selectionSelector(descriptor)).not.toThrow();
     expect(rematchSelection(document, descriptor)).toBeNull();
   });
+
+  it('re-finds an element whose identifier carries an ASTRAL code point', () => {
+    // A name the DOM legally carries (an astral letter): the escaper
+    // walks code points, so it passes as one identifier character and
+    // the rematch SUCCEEDS — not merely fails honestly.
+    const astral = 'title\u{1D306}';
+    const element = mount(`<h1 class="${astral}">astral</h1>`);
+    const descriptor = selectionDescriptorOf(element);
+    expect(selectionSelector(descriptor)).toBe(`h1.title\u{1D306}`);
+    const found = rematchSelection(document, descriptor);
+    expect(found).toBe(element);
+  });
 });
 
 describe('matching against runtime effective selectors', () => {

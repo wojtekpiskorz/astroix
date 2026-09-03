@@ -3,6 +3,7 @@ import { createAppClient } from '../app-client.ts';
 import { useAppStore } from '../state/app-store.ts';
 import { useEditSessionStore } from '../state/edit-session-store.ts';
 import { clearShellStores, shellStoreSnapshot } from '../state/shell-stores.ts';
+import { aSelection } from '../state/test-fixtures.ts';
 import { AppShell } from './app-shell.tsx';
 import { ShellProvider } from './shell-provider.tsx';
 import { CAPABILITY, type FetchScript, ORIGIN, scriptFetch } from './shell-test-harness.ts';
@@ -20,15 +21,6 @@ import { actAsync, byTestId, click, type Mounted, mount, waitFor } from './test-
 
 const G1 = { runtimeEpoch: 'epoch-fixture', generation: 1 };
 
-/** One selection descriptor — the #242 real shape of the store's selection slot. */
-function aSelection() {
-  return {
-    tag: 'h1',
-    id: null,
-    classes: ['hero-title'],
-    scopeAttributes: ['data-astro-cid-fixture'],
-  };
-}
 const LAUNCHER_URL = 'http://launcher.localhost:4426/__astroix/app/';
 const G2 = { runtimeEpoch: 'epoch-fixture', generation: 2 };
 

@@ -9,13 +9,14 @@
  * document today, the Electron renderer later); the domain-deaf
  * foundation barrel (`.` — negative-pinned) and the retained
  * `./presentation` widgets are untouched by it.
+ *
+ * Canvas internals stay INSIDE the package: the rule walk
+ * (`canvas/canvas-rules.ts`) has no consumer beyond the canvas itself —
+ * the one-consumer rule keeps it off this barrel. The disclosed seam
+ * for the CSS vertical is `matchedSelectors` (the shared matching law)
+ * plus the selection identity, exported below.
  */
 
-export {
-  RUNTIME_SELECTOR_BOUND,
-  runtimeRuleSelectors,
-  type StyleSheetLike,
-} from '../canvas/canvas-rules';
 export { ProjectCanvas, type ProjectCanvasProps } from '../canvas/project-canvas';
 export { gatedSessionFetch, StaleSessionResultError } from '../query/gated-session-fetch';
 export { type GatedEventCallbacks, gatedSseHandlers } from '../query/session-events';

@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { useAppStore } from './app-store.ts';
 import { useEditSessionStore } from './edit-session-store.ts';
 import { bindShellSession, clearShellStores, shellStoreSnapshot } from './shell-stores.ts';
+import { aSelection } from './test-fixtures.ts';
 
 /**
  * The shell stores' focused lane (#241): the reset-clearable fields,
@@ -14,16 +15,6 @@ import { bindShellSession, clearShellStores, shellStoreSnapshot } from './shell-
 
 const FIRST: SessionRef = { runtimeEpoch: 'epoch-fixture', generation: 1 };
 const NEXT: SessionRef = { runtimeEpoch: 'epoch-fixture', generation: 2 };
-
-/** One selection descriptor — the #242 real shape of the store's selection slot. */
-function aSelection() {
-  return {
-    tag: 'h1',
-    id: null,
-    classes: ['hero-title'],
-    scopeAttributes: ['data-astro-cid-fixture'],
-  };
-}
 
 beforeEach(() => {
   clearShellStores();

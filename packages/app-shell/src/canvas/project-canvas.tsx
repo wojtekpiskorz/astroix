@@ -65,11 +65,10 @@ export interface ProjectCanvasProps {
 
 /** The canvas frame: the control strip, the plain iframe, and the selection surface. */
 export function ProjectCanvas({ origin, initialRoute = '/' }: ProjectCanvasProps): ReactNode {
-  const documentOrigin = globalThis.location?.origin;
-  if (origin === undefined && documentOrigin === undefined) {
+  const projectOrigin = origin ?? globalThis.location?.origin;
+  if (projectOrigin === undefined) {
     throw new Error('ProjectCanvas needs an origin (prop or its document)');
   }
-  const projectOrigin = origin ?? (documentOrigin as string);
   const initialUrl = new URL(initialRoute, projectOrigin).href;
   const { session } = useShell();
 

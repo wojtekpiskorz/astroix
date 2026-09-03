@@ -88,9 +88,13 @@ function collectRule(
   out: RuntimeRuleSelector[],
   bound: number,
 ): void {
-  // The style-rule check comes FIRST: some engines expose an inherited
-  // (empty) `cssRules` on style rules, so the grouping duck-type below
-  // must never see one.
+  // The style-rule check comes FIRST, and the early return is the
+  // point: a selector-bearing rule is collected AS ITSELF, and its
+  // nested rules (CSS Nesting lets a style rule carry a NON-empty
+  // `cssRules`) are deliberately OUT of this enumeration's scope — the
+  // matched panel's truth is the document's own top-level selector
+  // list. The check also keeps the grouping duck-type below from ever
+  // misreading a style rule as a grouping.
   if (isStyleRule(rule)) {
     out.push({ selector: rule.selectorText, media });
     return;

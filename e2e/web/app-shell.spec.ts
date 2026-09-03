@@ -1,4 +1,5 @@
 import { expect, type Page, type Route, test } from '@playwright/test';
+import { activateButton, LAUNCHER_APP_URL, PROJECT_APP_URL } from './spec-helpers.ts';
 
 /**
  * The rebuilt app shell's product E2E (#241, G2): the project document
@@ -27,14 +28,6 @@ import { expect, type Page, type Route, test } from '@playwright/test';
  * global active session — the legs walk one coherent session history and
  * restore the idle state for whatever follows.
  */
-
-/** The list item whose staged copy is at `position` (0 and 1 are the fixture copies; 2 is broken). */
-function activateButton(page: Page, position: number) {
-  return page.getByTestId('project-list').locator('li').nth(position).getByTestId('activate');
-}
-
-const PROJECT_APP_URL = /^http:\/\/(?!launcher)[a-z2-7]+\.localhost:\d+\/__astroix\/app\/$/;
-const LAUNCHER_APP_URL = /launcher\.localhost:\d+\/__astroix\/app\//;
 
 /**
  * Aborts the next launcher-document navigation so the OLD document

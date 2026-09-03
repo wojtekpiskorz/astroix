@@ -5,6 +5,7 @@ import { useAppStore } from '../state/app-store.ts';
 import { useEditSessionStore } from '../state/edit-session-store.ts';
 import { createSessionGate } from '../state/session-gate.ts';
 import { bindShellSession, clearShellStores, shellStoreSnapshot } from '../state/shell-stores.ts';
+import { aSelection } from '../state/test-fixtures.ts';
 import { composeShellReset, runShellReset, SHELL_RESET_STEPS } from './shell-reset.ts';
 
 /**
@@ -16,16 +17,6 @@ import { composeShellReset, runShellReset, SHELL_RESET_STEPS } from './shell-res
  */
 
 const FIRST = { runtimeEpoch: 'epoch-fixture', generation: 1 };
-
-/** One selection descriptor — the #242 real shape of the store's selection slot. */
-function aSelection() {
-  return {
-    tag: 'h1',
-    id: null,
-    classes: ['hero-title'],
-    scopeAttributes: ['data-astro-cid-fixture'],
-  };
-}
 
 describe('runShellReset', () => {
   it('pins the step order — abort, close, remove, clear, then navigate', () => {
