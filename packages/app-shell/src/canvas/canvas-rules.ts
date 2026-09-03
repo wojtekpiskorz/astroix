@@ -12,10 +12,17 @@ import type { RuntimeRuleSelector } from '../state/selection.ts';
  * onto this matching law, and this enumeration is the canvas-side leg
  * that stands alone today.
  *
+ * Every rule test is STRUCTURAL, never `instanceof`: the canvas
+ * document lives in its own realm, so a parent-realm `instanceof` is
+ * false for every canvas rule — a real browser would collect nothing.
+ * A rule carrying `selectorText` is collected; a rule carrying
+ * `cssRules` is descended (a media rule's `conditionText` + `media`
+ * pair is the one distinction the walk makes, carried as the condition
+ * badge); everything else is ignored.
+ *
  * Fail-closed by construction: a stylesheet that cannot be read (a
  * cross-origin sheet throws on `cssRules`) is skipped, never guessed;
- * a rule that is not a style rule or a known grouping is ignored; the
- * walk is bounded so a pathological document cannot stall the panel.
+ * the walk is bounded so a pathological document cannot stall the panel.
  */
 
 /** The hard bound on enumerated selectors — far past any honest dev page, small enough to never stall the panel. */
@@ -26,7 +33,7 @@ export interface StyleSheetLike {
   readonly cssRules: CSSRuleList | null;
 }
 
-/** One grouping rule — a media/supports/layer block (or an import) carrying nested rules. */
+/** One grouping rule — anything carrying nested rules (media, supports, layer blocks, imports). */
 interface GroupingRuleLike extends CSSRule {
   readonly cssRules: CSSRuleList;
 }
@@ -74,7 +81,7 @@ function collectRules(
   }
 }
 
-/** One rule: a style rule is collected; a media/supports/layer grouping descends (media conditions compose outermost-first); anything else is ignored. */
+/** One rule: a selector-bearing rule is collected; a nested-rule grouping descends (a media condition replaces the outer one); anything else is ignored. */
 function collectRule(
   rule: CSSRule,
   media: string | null,
@@ -84,17 +91,31 @@ function collectRule(
   // The style-rule check comes FIRST: some engines expose an inherited
   // (empty) `cssRules` on style rules, so the grouping duck-type below
   // must never see one.
-  if (rule instanceof CSSStyleRule) {
+  if (isStyleRule(rule)) {
     out.push({ selector: rule.selectorText, media });
     return;
   }
   if (isGrouping(rule)) {
-    const nestedMedia = rule instanceof CSSMediaRule ? rule.conditionText : media;
-    collectRules(listRules(rule.cssRules), nestedMedia, out, bound);
+    collectRules(listRules(rule.cssRules), mediaConditionOf(rule, media), out, bound);
   }
+}
+
+/** A selector-bearing rule — structural, realm-proof (never `instanceof CSSStyleRule`). */
+function isStyleRule(rule: CSSRule): rule is CSSStyleRule {
+  return 'selectorText' in rule;
+}
+
+/** A media rule — the one grouping whose condition the walk carries (conditionText beside a MediaList; supports/layer blocks carry no `media`). */
+function isMediaRule(rule: CSSRule): rule is CSSMediaRule {
+  return 'conditionText' in rule && 'media' in rule;
 }
 
 /** A rule carrying nested rules — the grouping forms the walk descends. */
 function isGrouping(rule: CSSRule): rule is GroupingRuleLike {
   return 'cssRules' in rule && rule.cssRules !== null;
+}
+
+/** The nested walk's condition: a media rule's own condition, else the inherited one. */
+function mediaConditionOf(rule: CSSRule, inherited: string | null): string | null {
+  return isMediaRule(rule) ? rule.conditionText : inherited;
 }

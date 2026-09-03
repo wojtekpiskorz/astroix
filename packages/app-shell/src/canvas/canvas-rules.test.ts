@@ -92,4 +92,26 @@ describe('the runtime selector walk', () => {
     expect(runtimeRuleSelectors([sheetOf('')])).toEqual([]);
     expect(runtimeRuleSelectors([], RUNTIME_SELECTOR_BOUND)).toEqual([]);
   });
+
+  it('walks a SECOND window\u2019s rules — a foreign document\u2019s sheets, structural checks only', () => {
+    // The canvas document is a foreign document to the shell: the walk
+    // gates on structure (`selectorText`, `cssRules`, `conditionText`),
+    // never on this realm's classes. A real browser's iframe realms
+    // reject every cross-realm instanceof (pinned live by the e2e leg);
+    // happy-dom's second window shares classes, so what this unit pins
+    // is the walk over a document that is not the walking one's own.
+    const other = new Window();
+    const style = other.document.createElement('style');
+    style.textContent =
+      '.hero-title[data-astro-cid-r34lm] { color: red; } @media (max-width: 640px) { .hero-title { font-size: 2rem; } }';
+    other.document.head.append(style);
+    const sheet = style.sheet;
+    if (sheet === null) throw new Error('the other window\u2019s style element carries no sheet');
+
+    const selectors = runtimeRuleSelectors([sheet]);
+    expect(selectors).toEqual([
+      { selector: '.hero-title[data-astro-cid-r34lm]', media: null },
+      { selector: '.hero-title', media: '(max-width: 640px)' },
+    ]);
+  });
 });

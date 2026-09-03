@@ -158,9 +158,16 @@ test('selection matches scoped runtime selectors through Element.matches and sur
       .getByTestId('selection-matches')
       .locator("li[data-match-selector^='.hero-title[data-astro-cid-']"),
   ).toHaveCount(1);
-  // …the GLOBAL form from the imported sheet (its plain occurrences)…
+  // …the GLOBAL form from the imported sheet: two plain occurrences
+  // plus the media-conditioned one (same selector string, its condition
+  // carried by the media attribute).
   await expect(
     page.getByTestId('selection-matches').locator('li[data-match-selector=".hero-title"]'),
+  ).toHaveCount(3);
+  await expect(
+    page
+      .getByTestId('selection-matches')
+      .locator('li[data-match-selector=".hero-title"][data-match-media=""]'),
   ).toHaveCount(2);
   // …and the media-conditioned occurrence, its condition surfaced.
   const media = page
@@ -197,7 +204,7 @@ test('selection matches scoped runtime selectors through Element.matches and sur
   ).toHaveCount(1);
   await expect(
     page.getByTestId('selection-matches').locator('li[data-match-selector=".hero-title"]'),
-  ).toHaveCount(2);
+  ).toHaveCount(3);
 
   // Restore the idle state for the next leg.
   await page.getByTestId('deactivate').click();
@@ -225,6 +232,14 @@ test('stock Vite HMR rides the proxied native websocket, updates the canvas with
   const origin = new URL(page.url()).origin;
   await expect(page.getByTestId('canvas-url')).toHaveText(`${origin}/`);
 
+  // Settle past the fresh dev server's one post-connect self-reload
+  // (its initial content-scan invalidation lands right after the first
+  // client connect — the project's own behavior, nothing to do with the
+  // mutation below) so the no-navigation assertion measures only the
+  // HMR leg.
+  await page.waitForTimeout(3000);
+  frameNavigations.length = 0;
+
   // The canvas page's own HMR websocket: vite's native path on the
   // PROJECT origin (the transparent proxy tunnels it — never the dev
   // server's internal port), vite's own handshake query intact, and no
@@ -250,7 +265,7 @@ test('stock Vite HMR rides the proxied native websocket, updates the canvas with
   const heroTitleRows = page
     .getByTestId('selection-matches')
     .locator('li[data-match-selector=".hero-title"]');
-  await expect(heroTitleRows).toHaveCount(2);
+  await expect(heroTitleRows).toHaveCount(3);
 
   // Mutate the DISPOSABLE copy's imported sheet (restored in finally):
   // stock vite CSS HMR lands the new declaration as a hot style update.
@@ -268,7 +283,7 @@ test('stock Vite HMR rides the proxied native websocket, updates the canvas with
     // list re-ran against the document's updated rules: the new
     // occurrence of the global selector is matched now.
     await expect(page.getByTestId('selection-tag')).toHaveText('h1');
-    await expect(heroTitleRows).toHaveCount(3);
+    await expect(heroTitleRows).toHaveCount(4);
 
     // A template edit is vite's FULL-reload path — the vite-driven
     // eligible reload: the probe appears, and the selection survives it too.
@@ -341,12 +356,15 @@ test('an off-origin canvas stays visible with inspection disabled until it retur
   await expect(page.getByTestId('canvas-selection-mode')).toBeDisabled();
   await expect(canvas(page).locator('body')).toContainText('external document');
 
-  // Return through the canvas's own navigation: the gate reopens and
-  // selection works again.
+  // Return through the canvas's own navigation: the gate reopens, the
+  // selection control becomes usable again, and selection works.
   await page.getByTestId('canvas-address').fill('/');
   await page.getByTestId('canvas-navigate').click();
   await expect(page.getByTestId('canvas-origin-state')).toHaveText('project');
   await expect(page.getByTestId('canvas-inspection')).toHaveText('enabled');
+  await expect(page.getByTestId('canvas-selection-mode')).toBeEnabled();
+  await page.getByTestId('canvas-selection-mode').click();
+  await expect(page.getByTestId('canvas-selection-mode')).toHaveText('selection: on');
   await canvas(page).locator('.hero-title').click();
   await expect(page.getByTestId('selection-tag')).toHaveText('h1');
 
