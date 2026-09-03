@@ -11,9 +11,10 @@ import {
  * meta-tag facts the document surface injects (the client capability,
  * and on the project host the exact `SessionRef`), the testid-bearing
  * DOM helpers, and the label derivation the protocol owns
- * (`sessionLabel`, ADR-0006 §4). Plain DOM — the launcher and the
- * project app are host documents, deliberately not React surfaces;
- * every exchange goes through the ONE AppClient.
+ * (`sessionLabel`, ADR-0006 §4). The launcher document stays plain DOM —
+ * deliberately not a React surface; the project document is the React
+ * shell host (#241, `app-entry.tsx`). Every exchange, either way, goes
+ * through the ONE AppClient.
  */
 
 /** The document's bootstrap facts, as the document surface injected them. */

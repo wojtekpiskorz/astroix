@@ -10,7 +10,6 @@ import { createRoot, type Root } from 'react-dom/client';
 
 export interface Mounted {
   readonly container: HTMLElement;
-  rerender(ui: ReactElement): void;
   unmount(): void;
 }
 
@@ -24,11 +23,6 @@ export function mount(ui: ReactElement): Mounted {
   });
   return {
     container,
-    rerender: (next: ReactElement) => {
-      act(() => {
-        root.render(next);
-      });
-    },
     unmount: () => {
       act(() => {
         root.unmount();
@@ -43,17 +37,6 @@ export async function actAsync(work: () => Promise<void>): Promise<void> {
   await act(async () => {
     await work();
   });
-}
-
-/**
- * Two macrotask hops — lets the query library's scheduled notification
- * batch (its own `setTimeout(0)`) land and re-render inside act; one hop
- * can queue ahead of the batch and assert too early.
- */
-export async function flush(): Promise<void> {
-  for (let hop = 0; hop < 2; hop += 1) {
-    await new Promise((resolve) => setTimeout(resolve, 0));
-  }
 }
 
 /**
