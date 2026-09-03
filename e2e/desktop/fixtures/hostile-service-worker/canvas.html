@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>canvas stand-in</title>
+  </head>
+  <body>
+    <div id="canvas-marker">REAL-CANVAS-DOCUMENT</div>
+    <script type="module">
+      // The canvas stand-in's own probes: its reserved-namespace API
+      // fetch and its subresource fetch — both are spoof targets of the
+      // hostile SW; the results are posted to the app document (the
+      // same-origin postMessage the direct-DOM contract allows).
+      const probe = {
+        documentMarker: document.getElementById('canvas-marker').textContent,
+        fetches: {},
+      };
+      for (const path of ['/__astroix/api/v1/ping', '/canvas-subresource']) {
+        try {
+          const response = await fetch(path, { cache: 'no-store' });
+          probe.fetches[path] = await response.text();
+        } catch (error) {
+          probe.fetches[path] = `error:${String(error)}`;
+        }
+      }
+      parent.postMessage({ canvas: probe }, '*');
+    </script>
+  </body>
+</html>
