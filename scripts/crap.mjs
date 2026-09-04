@@ -78,6 +78,13 @@ const SRC_ROOT = join(ROOT, 'src');
 // child) whose behavior truth is the focused unit fakes plus the
 // real-Electron smoke lane (`npm run test:desktop`), not honest
 // per-function coverage — CC-only watchlist, like apps/web.
+// scripts/qualification (#258, L1 — ruled #378) joins as a CC-only
+// watchlist root: the packaged-qualification harness drives real
+// subprocesses over a real ~169MB artifact (spawn, execution-identity
+// probes, quit escalation), so honest per-function unit coverage does
+// not exist there even though its tests share the vitest invocation —
+// its truth is the harness's own fail-closed battery plus the
+// exact-artifact leg, the same tier reasoning as apps/web/apps/desktop.
 const RISK_ROOTS = [
   SRC_ROOT,
   join(ROOT, 'packages/core'),
@@ -86,6 +93,7 @@ const RISK_ROOTS = [
   join(ROOT, 'packages/runtime'),
   join(ROOT, 'apps/web'),
   join(ROOT, 'apps/desktop'),
+  join(ROOT, 'scripts/qualification'),
 ];
 // the same roots as repo-relative path prefixes — isRiskScope derives from
 // these so the scope is stated once (advisory round 2 on #270: a second
