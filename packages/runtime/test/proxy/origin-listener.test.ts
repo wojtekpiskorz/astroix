@@ -1,4 +1,5 @@
-import { request as httpRequest } from 'node:http';
+import { listenerCount } from 'node:events';
+import { Agent, request as httpRequest } from 'node:http';
 import { connect, createServer as createNetServer, type Socket } from 'node:net';
 import { findDisclosure } from '@wojciechpiskorz/astroix-protocol';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -544,6 +545,87 @@ describe('A-to-B-to-A retired host', () => {
     } finally {
       await listener.close();
       await Promise.all([upstreamA.close(), upstreamA2.close(), upstreamB.close()]);
+    }
+  });
+});
+
+describe('tracked-socket bookkeeping under refetch churn (#382)', () => {
+  it('holds ONE close listener per tracked socket across N composed operations over one keep-alive connection', async () => {
+    // The churn shape of the finding: a keep-alive client socket serves
+    // one composed operation per request (reserved registrations AND
+    // proxied exchanges), and every one of them re-tracks the SAME
+    // socket. A per-track close listener accumulated there until Node's
+    // MaxListenersExceededWarning; the count must stay flat.
+    const upstream = await startStandInUpstream([
+      { path: '/', status: 200, body: 'canvas body', contentType: 'text/plain' },
+    ]);
+    let churnSocket: Socket | undefined;
+    const listener = await createOriginListener({
+      // The reserved surface is the probe's window onto the SERVER side
+      // of the churn connection — the very object the bookkeeping
+      // attaches to (the same `request.socket` the proxy leg tracks).
+      // It registers the socket per request exactly like the real
+      // reserved surface does (reserved-handler.ts / sse-surface.ts).
+      handleReserved: (request, response, track) => {
+        churnSocket = request.socket;
+        track(request.socket);
+        response.writeHead(200, { 'content-type': 'text/plain', 'content-length': '3' });
+        response.end('ack');
+      },
+    });
+    listener.grantProjectLease({
+      projectKey: KEY_A,
+      upstream: { host: '127.0.0.1', port: upstream.port },
+    });
+    // One pooled connection, sequential exchanges — the browser's
+    // generation-scoped refetch shape (never Connection: close).
+    const agent = new Agent({ keepAlive: true, maxSockets: 1 });
+    const leaked: string[] = [];
+    const onWarning = (warning: Error): void => {
+      if (warning.name === 'MaxListenersExceededWarning') leaked.push(warning.message);
+    };
+    process.on('warning', onWarning);
+    try {
+      const exchange = (path: string): Promise<void> =>
+        new Promise((resolve, reject) => {
+          const request = httpRequest(
+            {
+              host: '127.0.0.1',
+              port: listener.port,
+              agent,
+              path,
+              headers: { host: `${KEY_A}.localhost:${listener.port}` },
+            },
+            (response) => {
+              response.resume();
+              response.once('end', () => resolve());
+            },
+          );
+          request.on('error', reject);
+          request.end();
+        });
+      // Baseline after the first composed pair (one reserved, one proxied).
+      await exchange('/__astroix/churn-probe');
+      await exchange('/');
+      const baseline = listenerCount(churnSocket as Socket, 'close');
+      expect(baseline).toBeGreaterThan(0); // the one tracking listener is really attached
+      // The churn: 24 more composed pairs — far past Node's default
+      // 10-listener trip wire, which the pre-fix accumulation crossed.
+      for (let i = 0; i < 24; i += 1) {
+        await exchange('/__astroix/churn-probe');
+        await exchange('/');
+      }
+      expect(upstream.requests).toHaveLength(25); // every proxied leg really ran
+      expect(listenerCount(churnSocket as Socket, 'close')).toBe(baseline);
+      // The warning is emitted on a nextTick — drain the queue before
+      // judging its absence.
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(leaked).toEqual([]);
+    } finally {
+      process.off('warning', onWarning);
+      agent.destroy();
+      await listener.close();
+      await upstream.close();
     }
   });
 });
