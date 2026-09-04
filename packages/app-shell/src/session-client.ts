@@ -1,9 +1,11 @@
 import {
+  type EditResult,
   type InspectionRequest,
   type InspectionResult,
   type SessionRef,
   type SseEventEnvelope,
   sessionQueryKey,
+  type WritePlan,
 } from '@wojciechpiskorz/astroix-protocol';
 
 /**
@@ -39,6 +41,13 @@ export interface SessionTransport {
     request: InspectionRequest,
     signal?: AbortSignal,
   ): Promise<InspectionResult>;
+  /**
+   * Dispatches one session-scoped `apply-edit` command (ADR-0006 §6): the
+   * wire write plan carries an opaque grant the server issued from its own
+   * discovery — the transport echoes it verbatim, never interpreting it.
+   * The mutation marker rides the AppClient's request path (F2 #234).
+   */
+  applyEdit(ref: SessionRef, plan: WritePlan, signal?: AbortSignal): Promise<EditResult>;
   /**
    * Opens the session-scoped events stream at the exact pair — the
    * reconnect gate is the transport's (`reconnects only for the current
@@ -91,6 +100,14 @@ export interface SessionClient {
   /** Dispatches one typed inspection; carries the pair and aborts with `signal`. */
   inspect(request: InspectionRequest, signal?: AbortSignal): Promise<InspectionResult>;
   /**
+   * Submits one grant-bound write plan (`apply-edit`): the plan's grant is
+   * an opaque token this session's server-side discovery issued — the
+   * session client never mints, interprets, or accepts a client-selected
+   * resource (ADR-0006 §6). Settles with the edit result (the resulting
+   * revision plus the follow-on grant where editing may continue).
+   */
+  applyEdit(plan: WritePlan, signal?: AbortSignal): Promise<EditResult>;
+  /**
    * Opens the session-scoped events stream. The stream closes when the
    * server revokes the pair and reconnects only while this pair is still
    * the AppClient's current session (#240's SSE law).
@@ -109,6 +126,7 @@ export function createSessionClient(ref: SessionRef, transport: SessionTransport
   return {
     ref,
     inspect: (request, signal) => transport.inspect(ref, request, signal),
+    applyEdit: (plan, signal) => transport.applyEdit(ref, plan, signal),
     events: (handlers, options) => transport.openSessionEvents(ref, handlers, options),
     queryKey: (...scope) => sessionQueryKey(ref, ...scope),
   };

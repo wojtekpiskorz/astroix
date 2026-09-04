@@ -4,15 +4,18 @@ import { ContentForm } from '../../../presentation/content-form.tsx';
 import type { ActiveEntryView } from '../../../presentation/types.ts';
 import { RawTruthPane } from '../raw/raw-truth-pane.tsx';
 import { UnknownFieldsSection } from '../raw/unknown-fields-section.tsx';
+import { useEntryWrite } from '../write/use-entry-write.ts';
+import { ContentWriteControls } from '../write/write-controls.tsx';
 import { type EntryFormView, useEntryForm } from './use-entry-form.ts';
 
 /**
- * The Content vertical's entry-form pane (#252, J2): the editor dock's
- * surface — the active entry's inspected schema and values as SAFE
- * FORM STATE, the explicit raw representation beside it, the
- * deterministic validation report, and the validated edit intent as
- * feature state ONLY (no write endpoint, no optimistic persistence,
- * nothing leaves the document).
+ * The Content vertical's entry-form pane (#252, J2; #253, J3): the
+ * editor dock's surface — the active entry's inspected schema and
+ * values as SAFE FORM STATE, the explicit raw representation beside
+ * it, the deterministic validation report, and the validated edit
+ * intent feeding the grant-bound WRITE LOOP (J3: the intent leaves
+ * the document only as an opaque-grant plan through the one
+ * AppClient).
  *
  * The pane hosts the retained prop-driven widgets (the presentation
  * `ContentForm` and `RawField` — never another feature's modules) and
@@ -95,13 +98,13 @@ function DocumentIssues({ view }: { readonly view: EntryFormView }): ReactNode {
   );
 }
 
-/** The intent surface: the state vocabulary plus the materialized intent (feature state only — J3 consumes it). */
+/** The intent surface: the state vocabulary plus the materialized intent (the write loop's input). */
 function IntentSurface({ view }: { readonly view: EntryFormView }): ReactNode {
   const text =
     view.intentState === 'none'
       ? 'edit intent: none (the draft matches the inspected truth)'
       : view.intentState === 'ready'
-        ? `edit intent ready — baseline ${view.baselineRevision === null ? 'none' : view.baselineRevision.slice(0, 12)}… (not written; the write lane is future work)`
+        ? `edit intent ready — baseline ${view.baselineRevision === null ? 'none' : view.baselineRevision.slice(0, 12)}…`
         : 'edit intent blocked — the draft has validation diagnostics';
   return (
     <div
@@ -112,7 +115,7 @@ function IntentSurface({ view }: { readonly view: EntryFormView }): ReactNode {
       {text}
       {view.intent !== null && (
         <details data-testid="edit-intent" className="mt-1">
-          <summary className="cursor-pointer">the intent object (produced, never sent)</summary>
+          <summary className="cursor-pointer">the intent object (the write loop's input)</summary>
           <pre className="max-h-40 overflow-auto rounded-sm bg-muted p-2 font-mono text-[10px] whitespace-pre-wrap">
             {JSON.stringify(view.intent, null, 2)}
           </pre>
@@ -148,6 +151,7 @@ function PaneHeader({
 /** The entry-form pane — the editor dock slot's content. */
 export function ContentEntryForm(): ReactNode {
   const view = useEntryForm();
+  const write = useEntryWrite(view);
   return (
     <div
       data-astroix-entry-form
@@ -219,6 +223,7 @@ export function ContentEntryForm(): ReactNode {
             )}
             <DocumentIssues view={view} />
             <IntentSurface view={view} />
+            <ContentWriteControls controls={write} />
           </div>
         </>
       )}
