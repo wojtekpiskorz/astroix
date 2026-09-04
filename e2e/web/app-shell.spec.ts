@@ -1,5 +1,19 @@
 import { expect, type Page, type Route, test } from '@playwright/test';
-import { activateButton, LAUNCHER_APP_URL, PROJECT_APP_URL } from './spec-helpers.ts';
+import {
+  activateButton,
+  BOOT_BUDGET_MS,
+  LAUNCHER_APP_URL,
+  LOAD_BUDGET_MS,
+  PROJECT_APP_URL,
+} from './spec-helpers.ts';
+
+/** The complete four-step reset trace the marker carries once the sequencer finished (#393 capture). */
+const COMPLETE_RESET_TRACE = 'reset=abort-fetches,close-sse,remove-queries,clear-stores';
+
+/** The spec-injected snapshot slot on the app-shell document (page.evaluate context; zero-injection untouched). */
+interface E2eResetWindow {
+  __astroixE2eResetState?: string;
+}
 
 /**
  * The rebuilt app shell's product E2E (#241, G2): the project document
@@ -10,7 +24,8 @@ import { activateButton, LAUNCHER_APP_URL, PROJECT_APP_URL } from './spec-helper
  * session state and stable feature slots; deactivation's commit-time
  * reset removes state BEFORE the top-level replacement (the navigation
  * request is intercepted and the still-alive old document's
- * `shell-state` marker is read — the ordering proof); and a repeated
+ * `shell-state` marker is read — captured at the reset's own
+ * synchronous completion, #393 — the ordering proof); and a repeated
  * generation change with a DELAYED fetch proves the reset's abort step
  * real (the held old-generation inspect dies aborted) and the fresh
  * generation's cache unpolluted.
@@ -57,25 +72,37 @@ test('activation lands the rebuilt shell at a fresh generation with live session
 }) => {
   test.setTimeout(180_000);
   await page.goto('/__astroix/app/');
-  await expect(page.getByTestId('session-label')).toHaveText('idle');
+  await expect(page.getByTestId('session-label')).toHaveText('idle', { timeout: LOAD_BUDGET_MS });
   await activateButton(page, 0).click();
-  await page.waitForURL(PROJECT_APP_URL);
+  await page.waitForURL(PROJECT_APP_URL, { timeout: BOOT_BUDGET_MS });
 
   // The shell is bound at the committed pair: the retained identity
   // surfaces, the generation-scoped inspection, and the honest stream
   // state (never a silent 'connecting'; under #330's reads law the live
   // browser stream is admitted, so the state settles 'open').
-  await expect(page.getByTestId('session-generation')).toHaveText(/^\d+$/);
-  await expect(page.getByTestId('inspect-revision')).toHaveText(/^\d+$/);
-  await expect(page.getByTestId('stream-state')).not.toHaveText('connecting');
+  // Load-shaped waits sized for a loaded CI runner (#392): these land
+  // with the document's first React commits over a just-booted plane.
+  await expect(page.getByTestId('session-generation')).toHaveText(/^\d+$/, {
+    timeout: LOAD_BUDGET_MS,
+  });
+  await expect(page.getByTestId('inspect-revision')).toHaveText(/^\d+$/, {
+    timeout: LOAD_BUDGET_MS,
+  });
+  await expect(page.getByTestId('stream-state')).not.toHaveText('connecting', {
+    timeout: LOAD_BUDGET_MS,
+  });
 
   // The shell-state marker reports live session state: the queries
   // cached under their keys, no reset yet. Three at the G2 truth: the
   // shell's own project inspection plus the Content vertical's two
   // discovery queries (content + routes, J1 #251 — generation-scoped
   // like every session query, so they die with the cache at reset).
-  await expect(page.getByTestId('shell-state')).toContainText('queries=3');
-  await expect(page.getByTestId('shell-state')).toContainText('reset=none');
+  await expect(page.getByTestId('shell-state')).toContainText('queries=3', {
+    timeout: LOAD_BUDGET_MS,
+  });
+  await expect(page.getByTestId('shell-state')).toContainText('reset=none', {
+    timeout: LOAD_BUDGET_MS,
+  });
 
   // The stable feature slots exist. The sidebar slot carries the
   // Content vertical's discovery panel (J1, #251) and the editor-dock
@@ -87,26 +114,63 @@ test('activation lands the rebuilt shell at a fresh generation with live session
   // it).
   await expect(page.locator('[data-slot="sidebar"] [data-astroix-content-discovery]')).toHaveCount(
     1,
+    { timeout: LOAD_BUDGET_MS },
   );
-  await expect(page.locator('[data-slot="editor-dock"] [data-astroix-entry-form]')).toHaveCount(1);
-  await expect(page.locator('[data-slot="canvas"] [data-testid="canvas-frame"]')).toHaveCount(1);
+  await expect(page.locator('[data-slot="editor-dock"] [data-astroix-entry-form]')).toHaveCount(1, {
+    timeout: LOAD_BUDGET_MS,
+  });
+  await expect(page.locator('[data-slot="canvas"] [data-testid="canvas-frame"]')).toHaveCount(1, {
+    timeout: LOAD_BUDGET_MS,
+  });
 
   // Restore the idle state for the next leg.
   await page.getByTestId('deactivate').click();
-  await page.waitForURL(LAUNCHER_APP_URL);
-  await expect(page.getByTestId('session-label')).toHaveText('idle');
+  await page.waitForURL(LAUNCHER_APP_URL, { timeout: BOOT_BUDGET_MS });
+  await expect(page.getByTestId('session-label')).toHaveText('idle', { timeout: LOAD_BUDGET_MS });
 });
 
 test('deactivation removes shell state BEFORE the location replacement', async ({ page }) => {
   test.setTimeout(180_000);
   await page.goto('/__astroix/app/');
-  await expect(page.getByTestId('session-label')).toHaveText('idle');
+  await expect(page.getByTestId('session-label')).toHaveText('idle', { timeout: LOAD_BUDGET_MS });
   await activateButton(page, 0).click();
-  await page.waitForURL(PROJECT_APP_URL);
-  await expect(page.getByTestId('inspect-revision')).toHaveText(/^\d+$/);
-  await expect(page.getByTestId('shell-state')).toContainText('queries=3');
+  await page.waitForURL(PROJECT_APP_URL, { timeout: BOOT_BUDGET_MS });
+  await expect(page.getByTestId('inspect-revision')).toHaveText(/^\d+$/, {
+    timeout: LOAD_BUDGET_MS,
+  });
+  await expect(page.getByTestId('shell-state')).toContainText('queries=3', {
+    timeout: LOAD_BUDGET_MS,
+  });
 
   await abortNextLauncherNavigation(page);
+
+  // Pin the reset's OWN completion state before the click can race the
+  // dying document's later renders (#393, per the disposition): the
+  // reset writes the marker synchronously as each step completes (the
+  // direct DOM write — React state cannot commit synchronously ahead of
+  // `location.replace`), so a page-side observer capturing the FIRST
+  // marker text that carries the complete trace holds exactly the
+  // post-`clear-stores` truth, whatever renders follow. Still-mounted
+  // observers can re-subscribe their session queries in the async
+  // window between this synchronous reset and the aborted replacement's
+  // document teardown, re-minting session-scoped cache entries the
+  // dying document's marker then counts (observed on loaded runners as
+  // `queries=2` after a complete trace — they persist until the
+  // document dies; nothing in the kept-alive document re-removes them).
+  // That transient is out of the sequencer's jurisdiction; the fresh
+  // replacement document's across-session truth is K2's reset-safety
+  // battery's. The previous one-shot read raced that window (#392).
+  await page.evaluate(() => {
+    new MutationObserver(() => {
+      const holder = window as unknown as E2eResetWindow;
+      if (holder.__astroixE2eResetState !== undefined) return;
+      const text = document.querySelector('[data-testid="shell-state"]')?.textContent;
+      // literal, not the module const: page.evaluate callbacks close over nothing
+      if (text?.includes('reset=abort-fetches,close-sse,remove-queries,clear-stores')) {
+        holder.__astroixE2eResetState = text;
+      }
+    }).observe(document.body, { childList: true, subtree: true, characterData: true });
+  });
 
   await page.getByTestId('deactivate').click();
 
@@ -114,10 +178,21 @@ test('deactivation removes shell state BEFORE the location replacement', async (
   // aborted navigation request went out) and the still-alive document
   // shows the reset had ALREADY completed — every clearing step traced,
   // the query cache emptied, the stores cleared — before that request.
-  await expect(page.getByTestId('shell-state')).toContainText(
-    'reset=abort-fetches,close-sse,remove-queries,clear-stores',
+  // The live trace poll is safe across the re-subscription transient
+  // (the trace persists in every later render); the counters are
+  // asserted on the captured post-reset state. The captured snapshot is
+  // frozen at capture, so the read after the truthiness poll is exact.
+  await expect(page.getByTestId('shell-state')).toContainText(COMPLETE_RESET_TRACE, {
+    timeout: LOAD_BUDGET_MS,
+  });
+  await expect
+    .poll(() => page.evaluate(() => (window as unknown as E2eResetWindow).__astroixE2eResetState), {
+      timeout: LOAD_BUDGET_MS,
+    })
+    .toBeTruthy();
+  const cleared = await page.evaluate(
+    () => (window as unknown as E2eResetWindow).__astroixE2eResetState ?? '',
   );
-  const cleared = await page.getByTestId('shell-state').textContent();
   expect(cleared).toContain('queries=0');
   expect(cleared).toContain('selection=0');
   expect(cleared).toContain('grants=0');
@@ -129,7 +204,7 @@ test('deactivation removes shell state BEFORE the location replacement', async (
   // Restore the idle state for the next leg.
   await page.unroute(/launcher\.localhost/);
   await page.goto('/__astroix/app/');
-  await expect(page.getByTestId('session-label')).toHaveText('idle');
+  await expect(page.getByTestId('session-label')).toHaveText('idle', { timeout: LOAD_BUDGET_MS });
 });
 
 test('a repeated generation change with a delayed old-generation fetch aborts it and never pollutes the fresh generation', async ({
@@ -137,10 +212,17 @@ test('a repeated generation change with a delayed old-generation fetch aborts it
 }) => {
   test.setTimeout(300_000);
   await page.goto('/__astroix/app/');
-  await expect(page.getByTestId('session-label')).toHaveText('idle');
+  await expect(page.getByTestId('session-label')).toHaveText('idle', { timeout: LOAD_BUDGET_MS });
   await activateButton(page, 0).click();
-  await page.waitForURL(PROJECT_APP_URL);
-  await expect(page.getByTestId('inspect-revision')).toHaveText(/^\d+$/);
+  await page.waitForURL(PROJECT_APP_URL, { timeout: BOOT_BUDGET_MS });
+  await expect(page.getByTestId('inspect-revision')).toHaveText(/^\d+$/, {
+    timeout: LOAD_BUDGET_MS,
+  });
+  // Converge the generation text before the one-shot numeric read (#392:
+  // a one-shot read of rendered state races the first commits under load).
+  await expect(page.getByTestId('session-generation')).toHaveText(/^\d+$/, {
+    timeout: LOAD_BUDGET_MS,
+  });
   const generation = Number(await page.getByTestId('session-generation').textContent());
 
   // Hold EVERY inspect of the old generation at the wire: the response
@@ -167,7 +249,7 @@ test('a repeated generation change with a delayed old-generation fetch aborts it
   const failedInspect = page.waitForEvent('requestfailed', {
     predicate: (request) =>
       request.url().endsWith('/__astroix/api/v1') && request.method() === 'POST',
-    timeout: 30_000,
+    timeout: LOAD_BUDGET_MS,
   });
 
   // The repeated ordering proof: the same reset clears state before the
@@ -175,9 +257,9 @@ test('a repeated generation change with a delayed old-generation fetch aborts it
   await abortNextLauncherNavigation(page);
 
   await page.getByTestId('deactivate').click();
-  await expect(page.getByTestId('shell-state')).toContainText(
-    'reset=abort-fetches,close-sse,remove-queries,clear-stores',
-  );
+  await expect(page.getByTestId('shell-state')).toContainText(COMPLETE_RESET_TRACE, {
+    timeout: LOAD_BUDGET_MS,
+  });
 
   // The held old-generation fetch DIED ABORTED — the reset's first step
   // (abort old fetches) is real at the wire, not a UI gesture.
@@ -190,17 +272,26 @@ test('a repeated generation change with a delayed old-generation fetch aborts it
   await page.unroute('**/__astroix/api/v1');
   await page.unroute(/launcher\.localhost/);
   await page.goto('/__astroix/app/');
-  await expect(page.getByTestId('session-label')).toHaveText('idle');
+  await expect(page.getByTestId('session-label')).toHaveText('idle', { timeout: LOAD_BUDGET_MS });
   await activateButton(page, 0).click();
-  await page.waitForURL(PROJECT_APP_URL);
+  await page.waitForURL(PROJECT_APP_URL, { timeout: BOOT_BUDGET_MS });
+  await expect(page.getByTestId('session-generation')).toHaveText(/^\d+$/, {
+    timeout: LOAD_BUDGET_MS,
+  });
   const freshGeneration = Number(await page.getByTestId('session-generation').textContent());
   expect(freshGeneration).toBeGreaterThan(generation);
-  await expect(page.getByTestId('inspect-revision')).toHaveText(/^\d+$/);
-  await expect(page.getByTestId('shell-state')).toContainText('queries=3');
-  await expect(page.getByTestId('shell-state')).toContainText('reset=none');
+  await expect(page.getByTestId('inspect-revision')).toHaveText(/^\d+$/, {
+    timeout: LOAD_BUDGET_MS,
+  });
+  await expect(page.getByTestId('shell-state')).toContainText('queries=3', {
+    timeout: LOAD_BUDGET_MS,
+  });
+  await expect(page.getByTestId('shell-state')).toContainText('reset=none', {
+    timeout: LOAD_BUDGET_MS,
+  });
 
   // Restore the idle state for whatever follows the battery.
   await page.getByTestId('deactivate').click();
-  await page.waitForURL(LAUNCHER_APP_URL);
-  await expect(page.getByTestId('session-label')).toHaveText('idle');
+  await page.waitForURL(LAUNCHER_APP_URL, { timeout: BOOT_BUDGET_MS });
+  await expect(page.getByTestId('session-label')).toHaveText('idle', { timeout: LOAD_BUDGET_MS });
 });

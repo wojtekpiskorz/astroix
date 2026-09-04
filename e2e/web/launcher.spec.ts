@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { rawStatus } from '../../apps/web/src/e2e-wire.ts';
 import { WEB_LANE_PORT } from '../../apps/web/src/stage-e2e.ts';
+import { LOAD_BUDGET_MS } from './spec-helpers.ts';
 
 /**
  * The launcher legs of the web host's product E2E (#240): a real
@@ -13,16 +14,20 @@ import { WEB_LANE_PORT } from '../../apps/web/src/stage-e2e.ts';
  */
 
 test('the launcher document lists the registered projects over protocol v1', async ({ page }) => {
+  // The launcher's own render + registry wire read are load-shaped on a
+  // shared CI runner (#392): budgets grow, the leg's default test
+  // timeout follows.
+  test.setTimeout(60_000);
   await page.goto('/__astroix/app/');
   const list = page.getByTestId('project-list');
-  await expect(list).toBeVisible();
+  await expect(list).toBeVisible({ timeout: LOAD_BUDGET_MS });
   // Two healthy staged copies plus the broken root — every record the
   // test-owned registration created, availability included (the broken
   // root still exists on disk, so it reads available; its breakage is
   // the activation lane's cause, not the registry's).
-  await expect(list.locator('li')).toHaveCount(3);
-  await expect(list.locator('li').first()).toContainText('available');
-  await expect(page.getByTestId('session-label')).toHaveText('idle');
+  await expect(list.locator('li')).toHaveCount(3, { timeout: LOAD_BUDGET_MS });
+  await expect(list.locator('li').first()).toContainText('available', { timeout: LOAD_BUDGET_MS });
+  await expect(page.getByTestId('session-label')).toHaveText('idle', { timeout: LOAD_BUDGET_MS });
 });
 
 test('the launcher listener refuses unregistered hostnames before any upstream byte moves', async () => {
