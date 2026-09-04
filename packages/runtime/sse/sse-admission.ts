@@ -1,48 +1,40 @@
-import {
-  EVENTS_PATH,
-  MUTATION_HEADER_NAME,
-  type SessionRef,
-  sessionRefSchema,
-} from '@wojciechpiskorz/astroix-protocol';
+import { EVENTS_PATH, type SessionRef, sessionRefSchema } from '@wojciechpiskorz/astroix-protocol';
 import {
   type ApiResponseDraft,
   type ErrorParts,
   errorResponse,
 } from '../api/errors/error-responses.ts';
-import { type SessionStateView, sameSession } from '../api/http/api-dispatch.ts';
+import {
+  type AdmissionAuthority,
+  type AdmissionHost,
+  admitHeadersAndHost,
+  checkReadTransportMarkers,
+  claimReservedPath,
+  malformedTargetRefusal,
+} from '../api/http/admission-spine.ts';
+import { sameSession } from '../api/http/api-dispatch.ts';
 import { CLIENT_CAPABILITY_HEADER, type ClientBinding } from '../api/http/client-bindings.ts';
 import type { ClientRole, VirtualHostClass } from '../api/http/command-routes.ts';
-import { type CapabilityHost, capabilityFromCookieHeader } from '../api/http/host-capability.ts';
-import {
-  duplicatedSecurityHeader,
-  type HeaderEvidence,
-  headerEvidence,
-} from '../api/http/security-headers.ts';
-import {
-  classifyRequestTarget,
-  LAUNCHER_HOSTNAME,
-  launcherOrigin,
-  parseHostHeader,
-  projectHostname,
-  projectOrigin,
-  type TargetRejectionReason,
-} from '../origin/virtual-hosts.ts';
+import type { CapabilityHost } from '../api/http/host-capability.ts';
+import type { HeaderEvidence } from '../api/http/security-headers.ts';
+import type { TargetRejectionReason } from '../origin/virtual-hosts.ts';
 
 /**
  * The SSE admission core (#235, F3; ADR-0006 §7's SSE sentence as
  * amended by the reads-law alignment #330): the pure decision layer
- * that admits or refuses one `GET /__astroix/events` request. It reuses
- * F2's exact admission spine — the same {@link headerEvidence} single
- * entry point for header values, the same duplicate-header law, the
- * same strict Host re-derivation and timing-safe host capability, the
- * same client-binding resolution and role-matrix shape, the same
- * Fetch-Metadata same-origin reads law and zero-CORS posture
- * (`api/http/**` is imported, never edited) — with the one SSE-strict
- * delta the ADR names: the CURRENT `SessionRef` is required of every
- * session-bound stream (the pair rides the query string because an
- * `EventSource` carries no body; a launcher document's stream — the
- * idle-registry consumer — must not invent one). The transport laws
- * are the reads law verbatim (#330): same-origin Fetch Metadata
+ * that admits or refuses one `GET /__astroix/events` request. It sits
+ * ON F2's admission spine — single-homed in `api/http/admission-spine.ts`
+ * since #321 — calling the same {@link admitHeadersAndHost} stage
+ * (the header-evidence entry point, the duplicate-header law, the
+ * strict Host re-derivation, the timing-safe host capability) and the
+ * same {@link checkReadTransportMarkers} reads law, so the two
+ * surfaces' shared admission logic cannot drift. The SSE-strict deltas
+ * are this module's own: the GET-only events route, the CURRENT
+ * `SessionRef` required of every session-bound stream (the pair rides
+ * the query string because an `EventSource` carries no body; a
+ * launcher document's stream — the idle-registry consumer — must not
+ * invent one), and the closed two-key query vocabulary. The transport
+ * laws are the reads law verbatim (#330): same-origin Fetch Metadata
  * REQUIRED, `Origin` verified only when present — a real browser never
  * sends `Origin` on a same-origin GET, so its absence is the honest
  * same-origin shape, never a refusal.
@@ -68,15 +60,13 @@ export interface SseRequestEvidence {
 }
 
 /**
- * The authority the admission consults — the same injected seams F2's
- * dispatch consults, minus the executor (a stream admits or refuses; it
- * executes nothing). A real `ApiDispatchAuthority` is a structural
- * superset and binds here unchanged.
+ * The authority the admission consults — the shared admission spine's
+ * authority slice plus the client-binding resolution, minus the
+ * executor (a stream admits or refuses; it executes nothing). A real
+ * `ApiDispatchAuthority` is a structural superset and binds here
+ * unchanged.
  */
-export interface SseAuthority {
-  readonly expectedPort: number;
-  readonly sessionState: () => SessionStateView;
-  readonly verifyHostCapability: (presented: string | undefined, host: CapabilityHost) => boolean;
+export interface SseAuthority extends AdmissionAuthority {
   readonly resolveClientBinding: (presented: string | undefined) => ClientBinding | null;
 }
 
@@ -106,18 +96,18 @@ export type EventsRouteClaim =
 /**
  * Claims the events route for one raw request target — the composition's
  * "is this mine" check, decided before anything delegates to the API
- * fallback. Literal path match on the pre-query slice (the
- * `classifyApiRoute` idiom: no percent-decoded matching, no
- * normalization — an encoded lookalike simply is not the route), behind
- * the same reserved-boundary ambiguity re-check the dispatch performs.
+ * fallback. Literal path match on the shared spine's pre-query claim
+ * (no percent-decoded matching, no normalization — an encoded lookalike
+ * simply is not the route), behind the same reserved-boundary ambiguity
+ * re-check every reserved surface performs. A query is legal here,
+ * unlike the command endpoint: the session pair's vocabulary is parsed
+ * downstream.
  */
 export function classifyEventsRoute(rawTarget: string | undefined): EventsRouteClaim {
-  const target = classifyRequestTarget(rawTarget);
-  if (target.kind === 'rejected') return { kind: 'rejected-target', reason: target.reason };
-  if (target.kind !== 'reserved') return { kind: 'other-reserved' };
-  const queryAt = (rawTarget ?? '').indexOf('?');
-  const path = queryAt === -1 ? (rawTarget ?? '') : (rawTarget ?? '').slice(0, queryAt);
-  return path === EVENTS_PATH ? { kind: 'events-endpoint' } : { kind: 'other-reserved' };
+  const claim = claimReservedPath(rawTarget);
+  if (claim.kind === 'rejected-target') return { kind: 'rejected-target', reason: claim.reason };
+  if (claim.kind === 'not-reserved') return { kind: 'other-reserved' };
+  return claim.path === EVENTS_PATH ? { kind: 'events-endpoint' } : { kind: 'other-reserved' };
 }
 
 /** What the events query string said about the session pair — the only parameter vocabulary this route has. */
@@ -196,15 +186,7 @@ export function admitSseStream(
 ): SseAdmission {
   const route = classifyEventsRoute(evidence.url);
   if (route.kind === 'rejected-target') {
-    return refused({
-      code: 'malformed-request',
-      details: {
-        malformed:
-          route.reason === 'ambiguous-reserved-encoding'
-            ? { issue: 'ambiguous-encoding' }
-            : { issue: 'invalid-shape' },
-      },
-    });
+    return malformedTargetRefusal(route.reason);
   }
   if (route.kind !== 'events-endpoint' || evidence.method !== 'GET') {
     // The events endpoint is the one route this surface owns and it is
@@ -213,24 +195,12 @@ export function admitSseStream(
     // endpoint's law, verbatim).
     return refused({ code: 'resource-not-found', details: { notFound: { what: 'route' } } });
   }
-  const headers = headerEvidence(evidence.rawHeaders);
-  const duplicated = duplicatedSecurityHeader(headers);
-  if (duplicated !== null) {
-    // The duplicated NAME is the finding; the values never enter the response.
-    return refused({ code: 'malformed-request' });
-  }
-  const host = resolveHostClass(headers, authority);
-  if (host === null) {
-    return refused({ code: 'resource-not-found', details: { notFound: { what: 'route' } } });
-  }
-  const capability = capabilityFromCookieHeader(headers.values.cookie);
-  if (
-    capability.kind !== 'present' ||
-    !authority.verifyHostCapability(capability.value, host.capabilityHost)
-  ) {
-    return refused({ code: 'unauthorized' });
-  }
-  const transport = checkTransportMarkers(headers, host.expectedOrigin);
+  const headersHost = admitHeadersAndHost(evidence.rawHeaders, authority);
+  if (headersHost.kind === 'refused') return headersHost;
+  const transport = checkReadTransportMarkers(
+    headersHost.evidence,
+    headersHost.host.expectedOrigin,
+  );
   if (transport !== null) return transport;
   const query = parseEventsQuerySession(evidence.url);
   if (query.kind === 'malformed') {
@@ -239,71 +209,7 @@ export function admitSseStream(
       details: { malformed: { issue: 'invalid-shape', pointer: 'query' } },
     });
   }
-  return admitBinding(headers, host, query, authority);
-}
-
-/**
- * Re-derives the host class from the header evidence — defense in depth
- * behind the listener's own routing, exactly as the dispatch does: the
- * same `headerEvidence` view, the same strict Host parse, the launcher
- * hostname or the one exact active project-key hostname.
- */
-function resolveHostClass(
-  headers: HeaderEvidence,
-  authority: SseAuthority,
-): {
-  hostClass: VirtualHostClass;
-  capabilityHost: CapabilityHost;
-  expectedOrigin: string;
-} | null {
-  const parsed = parseHostHeader({
-    value: headers.values.host,
-    count: headers.counts.host ?? 0,
-    expectedPort: authority.expectedPort,
-  });
-  if (parsed.kind === 'rejected') return null;
-  if (parsed.hostname === LAUNCHER_HOSTNAME) {
-    return {
-      hostClass: 'launcher',
-      capabilityHost: { host: 'launcher' },
-      expectedOrigin: launcherOrigin(authority.expectedPort),
-    };
-  }
-  const { projectKey } = authority.sessionState();
-  if (projectKey !== null && parsed.hostname === projectHostname(projectKey)) {
-    return {
-      hostClass: 'project',
-      capabilityHost: { host: 'project', projectKey },
-      expectedOrigin: projectOrigin(projectKey, authority.expectedPort),
-    };
-  }
-  return null;
-}
-
-/**
- * The SSE transport laws (ADR-0006 §7, the reads-law alignment #330): a
- * stream request is browser read traffic — same-origin Fetch Metadata,
- * and a mutation marker is contradictory evidence, malformed — the
- * reads law of `api-dispatch.ts` verbatim: the stream's `Origin`, when
- * present, must agree (a disagreement is forged evidence), and its
- * ABSENCE is no refusal, because a real browser never sends `Origin`
- * on a same-origin GET (`Origin` is a forbidden header for fetch and
- * `EventSource` alike) — the strict-demand shape 403'd every real
- * client while raw-socket test pins masked the mismatch.
- */
-function checkTransportMarkers(
-  headers: HeaderEvidence,
-  expectedOrigin: string,
-): { kind: 'refused'; response: ApiResponseDraft } | null {
-  if (headers.values[MUTATION_HEADER_NAME.toLowerCase()] !== undefined) {
-    return refused({ code: 'malformed-request' });
-  }
-  if (headers.values['sec-fetch-site'] !== 'same-origin') return refused({ code: 'unauthorized' });
-  const origin = headers.values.origin;
-  if (origin !== undefined && origin.toLowerCase() !== expectedOrigin.toLowerCase()) {
-    return refused({ code: 'unauthorized' });
-  }
-  return null;
+  return admitBinding(headersHost.evidence, headersHost.host, query, authority);
 }
 
 /**
@@ -320,7 +226,7 @@ function checkTransportMarkers(
  */
 function admitBinding(
   headers: HeaderEvidence,
-  host: { hostClass: VirtualHostClass; capabilityHost: CapabilityHost },
+  host: AdmissionHost,
   query: EventsQuerySession,
   authority: SseAuthority,
 ): SseAdmission {

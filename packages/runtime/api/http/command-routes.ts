@@ -1,5 +1,10 @@
-import { API_V1_PREFIX, type CommandKind } from '@wojciechpiskorz/astroix-protocol';
-import { classifyRequestTarget, type TargetRejectionReason } from '../../origin/virtual-hosts.ts';
+import {
+  API_V1_PREFIX,
+  COMMAND_MUTATION,
+  type CommandKind,
+} from '@wojciechpiskorz/astroix-protocol';
+import type { TargetRejectionReason } from '../../origin/virtual-hosts.ts';
+import { claimReservedPath } from './admission-spine.ts';
 
 /**
  * The command-endpoint route and the command permission matrix (#234,
@@ -16,9 +21,11 @@ import { classifyRequestTarget, type TargetRejectionReason } from '../../origin/
  * whose decoded view disagrees about the reserved boundary; an encoded
  * lookalike such as `/__astroix/api%2Fv1` simply is not the literal
  * route and answers as an unknown route — fail closed, never
- * interpretively matched). A query string on the command endpoint is
- * not part of the route either: the request envelope is the whole
- * request, so a non-empty query is an unknown route, not a parameter.
+ * interpretively matched). The literal claim head itself is the shared
+ * admission spine's (`admission-spine.ts`, #321); this matrix adds the
+ * command endpoint's one law on top: a query string is not part of the
+ * route — the request envelope is the whole request, so a non-empty
+ * query is an unknown route, not a parameter.
  */
 
 /** The virtual host class a reserved request arrived on — re-derived at dispatch from the Host evidence. */
@@ -46,18 +53,18 @@ export type ApiRouteClassification =
  * Classifies one request target (path-plus-query, as received on the
  * reserved namespace): the command endpoint, an unknown route, or a
  * target the listener's own classification would have refused —
- * re-checked here so the dispatch stays fail-closed even if it is ever
- * mounted behind a different composition (absolute-form and ambiguous
- * encodings never reach the route match).
+ * re-checked through the shared spine claim so the dispatch stays
+ * fail-closed even if it is ever mounted behind a different
+ * composition (absolute-form and ambiguous encodings never reach the
+ * route match).
  */
 export function classifyApiRoute(rawTarget: string | undefined): ApiRouteClassification {
-  const target = classifyRequestTarget(rawTarget);
-  if (target.kind === 'rejected') return { kind: 'rejected-target', reason: target.reason };
-  if (target.kind !== 'reserved') return { kind: 'unknown-route' };
-  const queryAt = (rawTarget ?? '').indexOf('?');
-  const path = queryAt === -1 ? (rawTarget ?? '') : (rawTarget ?? '').slice(0, queryAt);
-  const hasQuery = queryAt !== -1 && (rawTarget ?? '').slice(queryAt + 1).length > 0;
-  if (!hasQuery && COMMAND_ENDPOINT_PATHS.includes(path)) return { kind: 'command-endpoint' };
+  const claim = claimReservedPath(rawTarget);
+  if (claim.kind === 'rejected-target') return { kind: 'rejected-target', reason: claim.reason };
+  if (claim.kind === 'not-reserved') return { kind: 'unknown-route' };
+  if (!claim.hasQuery && COMMAND_ENDPOINT_PATHS.includes(claim.path)) {
+    return { kind: 'command-endpoint' };
+  }
   return { kind: 'unknown-route' };
 }
 
@@ -70,7 +77,10 @@ export interface CommandRouteRule {
 }
 
 /**
- * The closed command permission matrix. Lifecycle commands
+ * The closed command permission matrix. The mutation bit of every cell
+ * is derived from the protocol's `COMMAND_MUTATION` table — the ONE
+ * home of that classification (#334) — so the server's transport law
+ * and the client's wire marker cannot drift apart. Lifecycle commands
  * (`list-projects`, `activate`, `deactivate`) are launcher and
  * authoritative-project-target operations (ADR-0006 §5); inspection and
  * editing exist only on the active project host — `inspect` is the
@@ -78,11 +88,26 @@ export interface CommandRouteRule {
  * launcher host serves no session-scoped command of the project plane.
  */
 export const COMMAND_ROUTES: Readonly<Record<CommandKind, CommandRouteRule>> = {
-  'list-projects': { mutation: false, roles: { launcher: ['launcher'], project: ['editor'] } },
-  activate: { mutation: true, roles: { launcher: ['launcher'], project: ['editor'] } },
-  deactivate: { mutation: true, roles: { launcher: ['launcher'], project: ['editor'] } },
-  inspect: { mutation: false, roles: { project: ['editor', 'diagnostic'] } },
-  'apply-edit': { mutation: true, roles: { project: ['editor'] } },
+  'list-projects': {
+    mutation: COMMAND_MUTATION['list-projects'],
+    roles: { launcher: ['launcher'], project: ['editor'] },
+  },
+  activate: {
+    mutation: COMMAND_MUTATION.activate,
+    roles: { launcher: ['launcher'], project: ['editor'] },
+  },
+  deactivate: {
+    mutation: COMMAND_MUTATION.deactivate,
+    roles: { launcher: ['launcher'], project: ['editor'] },
+  },
+  inspect: {
+    mutation: COMMAND_MUTATION.inspect,
+    roles: { project: ['editor', 'diagnostic'] },
+  },
+  'apply-edit': {
+    mutation: COMMAND_MUTATION['apply-edit'],
+    roles: { project: ['editor'] },
+  },
 };
 
 /** True when `role` is permitted to issue `command` on `host` — one matrix lookup, no other rule exists. */

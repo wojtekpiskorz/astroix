@@ -225,6 +225,44 @@ describe('session currency and SessionRef carriage', () => {
     expect(client.currentSession).toBeNull();
   });
 
+  it('marks exactly the protocol table’s mutations — deactivate carries the wire marker, inspect does not (#334)', async () => {
+    const captured = stubFetch(async (request) => {
+      const { command, requestId } = JSON.parse(request.body) as {
+        command: { kind: string };
+        requestId: string;
+      };
+      if (command.kind === 'deactivate') {
+        return jsonResponse(
+          successBody(
+            { kind: 'deactivation', target: { session: SESSION, projectKey: KEY }, snapshot: {} },
+            requestId,
+            SESSION,
+          ),
+        );
+      }
+      return jsonResponse(
+        successBody(
+          { kind: 'inspection', result: { kind: 'project', revision: 1, payload: { base: '/' } } },
+          requestId,
+          SESSION,
+        ),
+      );
+    });
+    const client = createAppClient({ clientCapability: CAPABILITY, origin: ORIGIN });
+    client.adoptSession(SESSION);
+    await client.deactivate();
+    await client.forSession(SESSION).inspect({ kind: 'project' });
+    // The wire marker rides exactly the protocol's COMMAND_MUTATION
+    // table — the same truth the server's route matrix derives from.
+    const deactivateHeaders = (captured[0] as CapturedRequest).init.headers as Record<
+      string,
+      string
+    >;
+    const inspectHeaders = (captured[1] as CapturedRequest).init.headers as Record<string, string>;
+    expect(deactivateHeaders['X-Astroix-Request']).toBe('1');
+    expect(inspectHeaders['X-Astroix-Request']).toBeUndefined();
+  });
+
   it('the session client’s query keys are generation-scoped by construction', () => {
     const client = createAppClient({ clientCapability: CAPABILITY, origin: ORIGIN });
     const key = client.forSession(NEXT).queryKey('styles', 'index');
