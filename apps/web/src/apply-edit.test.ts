@@ -175,7 +175,7 @@ async function makeExecutor(input?: {
       remember: () => {},
       runOf: () => null,
       portOf: () => 4310,
-      clear: () => {},
+      clearExcept: () => {},
     } as unknown as ExecutorInputs['candidates'],
     ...inertInputs(),
   };

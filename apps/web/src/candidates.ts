@@ -11,9 +11,12 @@ import type { ProjectRun } from '@wojciechpiskorz/astroix-runtime/project-runtim
  *
  * One store per composition — no module globals: the composition
  * creates it, shares it with the supervisor's `startCandidate` seam
- * (which remembers) and the executor (which reads and clears). Cleared
- * at each activation's start so a failed attempt's stragglers never
- * accumulate.
+ * (which remembers) and the executor (which reads and clears). The
+ * lifetime law (#412): ONLY an admitted activation clears — after
+ * `begin`'s refusal gate, sparing its own just-remembered pair — so a
+ * refused activation can never wipe a live in-flight attempt's run,
+ * while a failed attempt's stragglers still never accumulate past the
+ * next admitted one.
  */
 
 export interface CandidateStore {
@@ -29,8 +32,14 @@ export interface CandidateStore {
    * candidates too, never only the seated session's run.
    */
   runs(): readonly ProjectRun[];
-  /** Clears the bookkeeping — every activation starts with an empty slate. */
-  clear(): void;
+  /**
+   * Clears every pair's bookkeeping EXCEPT the named one — the admitted
+   * attempt's own slate reset (#412): its run was remembered
+   * synchronously inside `begin`, so the clear that once ran before
+   * `begin` (where a refused request could wipe an in-flight attempt's
+   * bookkeeping) now spares exactly the pair it reserved.
+   */
+  clearExcept(keep: SessionRef): void;
 }
 
 /** Builds one candidate store — the composition owns its lifetime. */
@@ -48,7 +57,12 @@ export function createCandidateStore(): CandidateStore {
       return run !== undefined ? (ports.get(run) ?? -1) : -1;
     },
     runs: () => [...runsByPair.values()],
-    clear: () => runsByPair.clear(),
+    clearExcept: (keep) => {
+      const keepKey = pairKey(keep);
+      for (const key of runsByPair.keys()) {
+        if (key !== keepKey) runsByPair.delete(key);
+      }
+    },
   };
 }
 

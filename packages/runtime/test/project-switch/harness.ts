@@ -201,6 +201,22 @@ export interface WireCredentials {
 }
 
 /** Boots the harness: stages A and B, composes the real control plane, registers both roots. */
+/**
+ * The plane's real child pids (the K-family's process oracle): the subtree
+ * minus this test process, keeping only the worker and the managed dev
+ * server by their spawn command shape. Single-homed here so a runtime lane
+ * changing the spawn argv breaks ONE copy, not a battery that then matches
+ * nothing and turns vacuously green (#419 review).
+ */
+export async function planePids(harness: SwitchHarness): Promise<number[]> {
+  const subtree = await harness.subtreePids();
+  return [...subtree]
+    .filter(
+      ([pid, command]) => pid !== process.pid && /worker-child\.ts|astro\.mjs dev/.test(command),
+    )
+    .map(([pid]) => pid);
+}
+
 export async function createSwitchHarness(): Promise<SwitchHarness> {
   const scratchRoot = await mkdtemp(join(tmpdir(), 'astroix-aba-'));
   const rootA = await stagedFixtureCopy(scratchRoot, 'project-a');
@@ -315,12 +331,12 @@ async function activate(
   }
   // A 200 activation envelope is NOT proof of a committed transition:
   // a failed attempt (ADR-0006 §4's `failed` label) also answers 200
-  // with the sanitized failure on its snapshot — and, today, the
-  // composition's deactivation never informs the supervisor's revoke
-  // seam (#331's landed clear is un-wired composition-side, #411), so a
-  // STALE crash failure can ride an otherwise-committed activation's
-  // envelope. The supervisor's own active truth is therefore the
-  // oracle: the exact project, ready, at a strictly newer generation.
+  // with the sanitized failure on its snapshot. The supervisor's own
+  // active truth is therefore the commit oracle; the ENVELOPE's own
+  // snapshot is asserted with it — the composition's switch discipline
+  // (#411's deactivation inform) keeps the envelope honest, so its
+  // result must carry the activation kind, the committed target, and a
+  // snapshot whose active pair is exactly that target, ready.
   const active = composition.supervisor.snapshot().active;
   if (
     active === undefined ||
@@ -333,8 +349,23 @@ async function activate(
         `(active: ${JSON.stringify(composition.supervisor.snapshot())})`,
     );
   }
+  const envelope = JSON.parse(response.body) as ResponseEnvelope;
+  const activation = envelope.result;
+  if (
+    activation.kind !== 'activation' ||
+    activation.target.session.runtimeEpoch !== active.ref.runtimeEpoch ||
+    activation.target.session.generation !== active.ref.generation ||
+    activation.snapshot.active?.ref.runtimeEpoch !== active.ref.runtimeEpoch ||
+    activation.snapshot.active?.ref.generation !== active.ref.generation ||
+    activation.snapshot.active?.state !== 'ready'
+  ) {
+    throw new Error(
+      `activation of project ${project.name} answered an envelope that does not carry the committed pair ` +
+        `(${JSON.stringify(activation)})`,
+    );
+  }
   const document = await documentOf(port, project, active.ref);
-  return { document, envelope: JSON.parse(response.body) as ResponseEnvelope };
+  return { document, envelope };
 }
 
 // ——— document surfaces ———

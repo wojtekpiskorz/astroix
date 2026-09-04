@@ -7,6 +7,7 @@ import {
   createSwitchHarness,
   type LiveProbe,
   launcherDocument,
+  planePids,
   pollUntil,
   rawExchange,
   SETTLE_BUDGET_MS,
@@ -53,13 +54,12 @@ import {
  *    the in-flight window is refused 409 concurrent-activation and the
  *    in-flight attempt still lands (the receipt-adjacent generation
  *    fencing; the one-use receipt ledger itself is F6's unit-proven
- *    law, cited not re-proved). THIS LEG RUNS LAST and asserts only
- *    its supervisor-visible truths: the harness's concurrent-activation
- *    probe found that a refused activation wipes the in-flight
- *    candidate's run bookkeeping (#412 — the winner adopts a
- *    never-spawned seat whose plane leaks past close), so the leg
- *    asserts nothing that rides the seat, and the afterAll reaps the
- *    leak's residue until #412's fix lands.
+ *    law, cited not re-proved). The winner's adoption is WHOLE (#412
+ *    fixed: the refused request no longer wipes the in-flight
+ *    candidate's run bookkeeping) — its inspects serve, its origin
+ *    lease routes to the real dev server, and its plane dies at the
+ *    deactivation, never past the composition's close. THIS LEG RUNS
+ *    LAST.
  *
  * Everything asserted is wire-oracle truth (statuses, envelopes,
  * streams, sockets, file bytes, real pids) PLUS the supervisor's own
@@ -212,15 +212,6 @@ async function entryOf(project: SwitchProject): Promise<string> {
  * polls themselves appear as pre-exec `(node)` children while their
  * exec is in flight, so a raw child count flickers and can never settle.
  */
-async function planePids(harness: SwitchHarness): Promise<number[]> {
-  const subtree = await harness.subtreePids();
-  return [...subtree]
-    .filter(
-      ([pid, command]) => pid !== process.pid && /worker-child\.ts|astro\.mjs dev/.test(command),
-    )
-    .map(([pid]) => pid);
-}
-
 /** Whether one promise settled inside the budget — a probe, never a naked sleep. */
 async function settledWithin(promise: Promise<unknown>, budgetMs: number): Promise<boolean> {
   return await Promise.race([
@@ -254,11 +245,12 @@ describe('the real control plane across A-B-A switching (K1 #254)', () => {
     // The canonical fixture is a read-only source (#254's migration
     // policy): the battery's staged writes may never reach it.
     await expectTreeExactly(fixtureSources, await harness.tree(FIXTURE_SOURCES), []);
-    // Runner hygiene, never an assertion: the concurrent-activation
-    // defect (#412) lets the raced winner's run escape its seat, so its
-    // plane children can survive the composition's close. Reap exactly
-    // this process's leftover plane children so the runner stays clean;
-    // when #412's fix lands this becomes a no-op.
+    // Runner hygiene, never an assertion: a leg that fails mid-history
+    // can leave plane children alive past the composition's close, so
+    // reap exactly this process's leftovers to keep the runner clean
+    // (#412's fix landed — the raced winner's run is registered and
+    // stopped at close; this belt exists for a RED history, not a green
+    // one).
     for (const pid of await planePids(harness)) {
       try {
         process.kill(pid, 'SIGTERM');
@@ -542,12 +534,25 @@ describe('the real control plane across A-B-A switching (K1 #254)', () => {
     );
 
     // the supervisor-visible truths of the winner: reserved, committed,
-    // active. (The winner's SEAT is corrupt today — the filed finding —
-    // so this leg asserts nothing that rides the seat.)
+    // active — and the winner's ADOPTION is whole (#412 fixed): the run
+    // the in-flight attempt remembered survived the refused request's
+    // path, so the seat dispatches real inspections and the origin
+    // lease routes to the real dev-server port (the pre-fix corruption
+    // answered 500 here and published upstream port -1).
     const landed = await inFlight;
     expect(landed.document.session.generation).toBeGreaterThan(before);
     const active = harness.snapshot().active;
     expect(active?.projectKey).toBe(harness.projectA.key);
     expect(active?.state).toBe('ready');
+    const wholeInspect = await harness.inspect({ kind: 'project' }, landed.document);
+    expect(wholeInspect.status, wholeInspect.body).toBe(200);
+    const routed = await harness.fetchProxied(landed.document, '/@vite/client');
+    expect(routed.status).toBe(200);
+
+    // and the winner's plane never outlives its session: the
+    // deactivation stops exactly the registered run — no orphaned
+    // children past the transition (the pre-fix leak).
+    expect((await harness.deactivate()).status).toBe(200);
+    await pollUntil(async () => (await planePids(harness)).length === 0, SETTLE_BUDGET_MS);
   });
 });
