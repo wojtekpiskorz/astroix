@@ -19,18 +19,25 @@ interface FakeHarness {
   readonly runners: FakeRunner[];
 }
 
-/** A fake runner that mirrors the real pin discipline: close() removes the send listener. */
+/**
+ * A fake runner that mirrors the real pin discipline by IDENTITY (#386):
+ * the constructor pins its send listeners, and `close()` removes exactly
+ * those functions — the certified Vite's transport stores its handler and
+ * `off`s that same reference, which positional removal would not mirror
+ * once two runners share one emitter.
+ */
 class FakeRunner {
   closed = false;
-  readonly listenersPinned: number;
+  readonly pinnedListeners: Array<() => void> = [];
 
   constructor(
     private readonly emitter: EventEmitter,
     private readonly behavior: { readonly surviveClose?: boolean } = {},
   ) {
-    this.listenersPinned = 3;
-    for (let i = 0; i < this.listenersPinned; i += 1) {
-      this.emitter.on('send', () => {});
+    for (let i = 0; i < 3; i += 1) {
+      const listener = (): void => {};
+      this.pinnedListeners.push(listener);
+      this.emitter.on('send', listener);
     }
   }
 
@@ -40,7 +47,7 @@ class FakeRunner {
 
   async close(): Promise<void> {
     if (this.behavior.surviveClose) return;
-    for (const listener of this.emitter.listeners('send').slice(0, this.listenersPinned)) {
+    for (const listener of this.pinnedListeners) {
       this.emitter.removeListener('send', listener);
     }
     this.closed = true;
@@ -258,5 +265,172 @@ describe('withFreshRunner', () => {
       expect(outcome.evidence.closedAfterClose).toBe(true);
     }
     expect(fake.runners).toHaveLength(3);
+  });
+});
+
+// ——— concurrent passes over the ONE composition transport (#386) ———
+//
+// The worker serves inspections concurrently, and a cancelled HTTP
+// dispatch still runs to completion server-side, so two fresh-runner
+// passes legitimately overlap on the same SSR environment. These legs
+// pin the deterministic interleavings of that overlap — the exact
+// shapes that tripped the retired shared-count proof (a sibling's
+// in-flight listener polluting the count in either direction) — and
+// prove the per-pass proof keeps its teeth under the same overlap.
+
+/** A manually-settled gate one pass's inspection body pends on. */
+function defer(): { readonly promise: Promise<void>; readonly resolve: () => void } {
+  let resolve!: () => void;
+  const promise = new Promise<void>((settle) => {
+    resolve = settle;
+  });
+  return { promise, resolve };
+}
+
+describe('withFreshRunner (concurrent passes over one transport, #386)', () => {
+  it('proves both passes clean when a sibling is still in flight at the after-close read', async () => {
+    // The issue's first trigger shape: pass A closes while pass B's runner
+    // is still open — A's after-close transport state contains B's pinned
+    // listener. The shared-count proof read `after: 3, before: 0` and
+    // rejected A as residue; the per-pass proof attributes B's listener to
+    // B and proves A's own pinned listeners gone.
+    const fake = harness();
+    const aGate = defer();
+    const bGate = defer();
+    const passA = withFreshRunner(
+      { createServerModuleRunner: fake.createServerModuleRunner, ssrEnvironment: fake.environment },
+      async () => aGate.promise.then(() => 'a'),
+    );
+    const passB = withFreshRunner(
+      { createServerModuleRunner: fake.createServerModuleRunner, ssrEnvironment: fake.environment },
+      async () => bGate.promise.then(() => 'b'),
+    );
+    aGate.resolve();
+    await expect(passA).resolves.toMatchObject({ result: 'a' });
+    bGate.resolve();
+    await expect(passB).resolves.toMatchObject({ result: 'b' });
+    expect(fake.emitter.listenerCount('send')).toBe(0);
+  });
+
+  it('proves a pass clean when siblings pinned before it all close during its body', async () => {
+    // The issue's pile-up direction (`before: 40, after: 3`): the pass
+    // starts with siblings' listeners in its baseline and they unwind while
+    // its own inspection body runs — the count DROPS across the pass, which
+    // the shared-count proof read as residue.
+    const fake = harness();
+    const gates = [defer(), defer(), defer()];
+    const siblings = gates.map((gate) =>
+      withFreshRunner(
+        {
+          createServerModuleRunner: fake.createServerModuleRunner,
+          ssrEnvironment: fake.environment,
+        },
+        async () => gate.promise.then(() => 'sibling'),
+      ),
+    );
+    const lateGate = defer();
+    const late = withFreshRunner(
+      { createServerModuleRunner: fake.createServerModuleRunner, ssrEnvironment: fake.environment },
+      async () => lateGate.promise.then(() => 'late'),
+    );
+    for (const gate of gates) gate.resolve();
+    await Promise.all(siblings);
+    lateGate.resolve();
+    const outcome = await late;
+    expect(outcome.result).toBe('late');
+    expect(outcome.evidence.closedAfterClose).toBe(true);
+    expect(fake.emitter.listenerCount('send')).toBe(0);
+  });
+
+  it('still rejects the leaking pass while its held-open sibling stays clean', async () => {
+    // Teeth under concurrency, the decisive order: the sibling's create
+    // block runs BEFORE the leaking pass pins, so the leaked listeners are
+    // absent from the sibling's beforeRoster — only their retained
+    // registration (attributed to the leaking pass) shields the sibling
+    // from a false `foreign` rejection. The leaking pass itself rejects as
+    // `own` residue. This is the false-positive class #386 exists to fix.
+    const fake = harness();
+    const siblingGate = defer();
+    const leakGate = defer();
+    const sibling = withFreshRunner(
+      { createServerModuleRunner: fake.createServerModuleRunner, ssrEnvironment: fake.environment },
+      async () => siblingGate.promise.then(() => 'sibling'),
+    );
+    const leak = withFreshRunner(
+      {
+        ssrEnvironment: fake.environment,
+        createServerModuleRunner: () => {
+          // Pins like the real runner, then reports closed while leaving
+          // every pinned listener on the transport.
+          for (let i = 0; i < 3; i += 1) fake.emitter.on('send', () => {});
+          return {
+            import: async () => ({}),
+            close: async () => {},
+            isClosed: () => true,
+          };
+        },
+      },
+      async () => leakGate.promise.then(() => 'leak'),
+    );
+    leakGate.resolve();
+    await expect(leak).rejects.toMatchObject({
+      code: 'runner-cleanup',
+      details: { residue: 'send-listeners' },
+    });
+    siblingGate.resolve();
+    await expect(sibling).resolves.toMatchObject({ result: 'sibling' });
+  });
+
+  it('rejects send listeners that appeared across the pass and belong to no in-flight pass', async () => {
+    // Teeth for foreign growth: anything that pins a send listener during
+    // the pass and leaves it there — other than a registered concurrent
+    // fresh-runner pass — is unattributable transport growth and rejects
+    // exactly like the pass's own leak.
+    const fake = harness();
+    const rejection = await withFreshRunner(
+      { createServerModuleRunner: fake.createServerModuleRunner, ssrEnvironment: fake.environment },
+      async () => {
+        fake.emitter.on('send', () => {});
+        return 'ok';
+      },
+    ).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    expect(rejection).toMatchObject({
+      code: 'runner-cleanup',
+      details: { residue: 'send-listeners' },
+    });
+    expect((rejection as AdapterError).message).toContain('no fresh-runner pass owns');
+  });
+
+  it('returns to a clean baseline after concurrent passes fully unwind', async () => {
+    // Registry hygiene: once concurrent passes settle, a later pass over
+    // the same transport observes a fully restored baseline. A lingering
+    // registration can only widen the foreign scan's allowance, never cause
+    // a verdict. The leg's value is the restored emitter baseline plus a
+    // clean later pass.
+    const fake = harness();
+    const gate = defer();
+    const first = withFreshRunner(
+      { createServerModuleRunner: fake.createServerModuleRunner, ssrEnvironment: fake.environment },
+      async () => gate.promise.then(() => 'first'),
+    );
+    const second = withFreshRunner(
+      { createServerModuleRunner: fake.createServerModuleRunner, ssrEnvironment: fake.environment },
+      async () => 'second',
+    );
+    await second;
+    gate.resolve();
+    await first;
+    const outcome = await withFreshRunner(
+      { createServerModuleRunner: fake.createServerModuleRunner, ssrEnvironment: fake.environment },
+      async () => 'later',
+    );
+    expect(outcome.evidence).toEqual({
+      sendListenersBefore: 0,
+      sendListenersAfterClose: 0,
+      closedAfterClose: true,
+    });
   });
 });

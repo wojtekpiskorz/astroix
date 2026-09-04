@@ -119,7 +119,7 @@ describe('readRunnerContract (public seam)', () => {
 });
 
 describe('readSsrEnvironment (fail-closed private seams)', () => {
-  const emitter = { listenerCount: () => 0 };
+  const emitter = { listenerCount: () => 0, listeners: () => [] };
   const environment = {
     moduleGraph: { getModuleById: () => null, getModuleByUrl: () => null },
     pluginContainer: { resolveId: async () => null },
@@ -151,6 +151,18 @@ describe('readSsrEnvironment (fail-closed private seams)', () => {
   it('fails closed without the outsideEmitter listener accounting', () => {
     expectSeamRejection(
       () => readSsrEnvironment({ ...environment, hot: { api: {} } }),
+      'vite SSR environment (module graph, plugin container, hot transport)',
+      'fail-closed private',
+    );
+  });
+
+  it('fails closed without the send listener roster (the per-pass residue proof subject, #386)', () => {
+    expectSeamRejection(
+      () =>
+        readSsrEnvironment({
+          ...environment,
+          hot: { api: { outsideEmitter: { listenerCount: () => 0 } } },
+        }),
       'vite SSR environment (module graph, plugin container, hot transport)',
       'fail-closed private',
     );
