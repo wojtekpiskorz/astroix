@@ -38,11 +38,11 @@ test('discovery lists the fixture collections and entries from the live content 
   test.setTimeout(180_000);
   await page.goto('/__astroix/app/');
   await expect(page.getByTestId('session-label')).toHaveText('idle');
-  await activateButton(page, 0).click();
-  await page.waitForURL(PROJECT_APP_URL);
 
   // The panel's data source is the wire: one content inspection and one
   // routes inspection under the bound pair — E4 and E5, nothing else.
+  // The listener attaches BEFORE activation: the shell mounts with the
+  // project document, so the queries may fire the moment it lands.
   const inspectionFamilies = new Set<string>();
   page.on('request', (request: Request) => {
     if (!request.url().endsWith('/__astroix/api/v1')) return;
@@ -53,6 +53,9 @@ test('discovery lists the fixture collections and entries from the live content 
       inspectionFamilies.add(body.command.request.kind);
     }
   });
+
+  await activateButton(page, 0).click();
+  await page.waitForURL(PROJECT_APP_URL);
 
   // First content inspection boots a fresh runner over the managed dev
   // server — generous bound, then the settled ready state.

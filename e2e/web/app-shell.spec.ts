@@ -69,9 +69,12 @@ test('activation lands the rebuilt shell at a fresh generation with live session
   await expect(page.getByTestId('inspect-revision')).toHaveText(/^\d+$/);
   await expect(page.getByTestId('stream-state')).not.toHaveText('connecting');
 
-  // The shell-state marker reports live session state: the query cached
-  // under its key, no reset yet.
-  await expect(page.getByTestId('shell-state')).toContainText('queries=1');
+  // The shell-state marker reports live session state: the queries
+  // cached under their keys, no reset yet. Three at the G2 truth: the
+  // shell's own project inspection plus the Content vertical's two
+  // discovery queries (content + routes, J1 #251 — generation-scoped
+  // like every session query, so they die with the cache at reset).
+  await expect(page.getByTestId('shell-state')).toContainText('queries=3');
   await expect(page.getByTestId('shell-state')).toContainText('reset=none');
 
   // The stable feature slots exist. The sidebar slot carries the
@@ -100,7 +103,7 @@ test('deactivation removes shell state BEFORE the location replacement', async (
   await activateButton(page, 0).click();
   await page.waitForURL(PROJECT_APP_URL);
   await expect(page.getByTestId('inspect-revision')).toHaveText(/^\d+$/);
-  await expect(page.getByTestId('shell-state')).toContainText('queries=1');
+  await expect(page.getByTestId('shell-state')).toContainText('queries=3');
 
   await abortNextLauncherNavigation(page);
 
@@ -192,7 +195,7 @@ test('a repeated generation change with a delayed old-generation fetch aborts it
   const freshGeneration = Number(await page.getByTestId('session-generation').textContent());
   expect(freshGeneration).toBeGreaterThan(generation);
   await expect(page.getByTestId('inspect-revision')).toHaveText(/^\d+$/);
-  await expect(page.getByTestId('shell-state')).toContainText('queries=1');
+  await expect(page.getByTestId('shell-state')).toContainText('queries=3');
   await expect(page.getByTestId('shell-state')).toContainText('reset=none');
 
   // Restore the idle state for whatever follows the battery.
