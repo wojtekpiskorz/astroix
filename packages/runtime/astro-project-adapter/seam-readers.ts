@@ -65,6 +65,14 @@ export interface SsrEnvironmentSeams {
 
 export interface SendListenerAccounting {
   listenerCount(event: 'send'): number;
+  /**
+   * The current `send` listener roster, by identity — the per-pass residue
+   * proof's subject (#386): a pass must prove the listeners IT pinned are
+   * gone after close, which a shared count alone cannot attribute under
+   * concurrent passes. The certified Vite's transport emitter is a plain
+   * `EventEmitter`, so the roster is its own `listeners()` array.
+   */
+  listeners(event: 'send'): readonly unknown[];
 }
 
 export interface ModuleGraphLike {
@@ -218,11 +226,16 @@ export function readSsrEnvironment(environment: unknown): SsrEnvironmentSeams {
       observedShape(environment),
     );
   }
-  if (emitter === null || emitter === undefined || typeof emitter.listenerCount !== 'function') {
+  if (
+    emitter === null ||
+    emitter === undefined ||
+    typeof emitter.listenerCount !== 'function' ||
+    typeof emitter.listeners !== 'function'
+  ) {
     throw seamRejection(
       SEAM_SSR_ENVIRONMENT,
       'fail-closed private',
-      'a hot transport outsideEmitter with send listener accounting',
+      'a hot transport outsideEmitter with send listener count and roster accounting',
       observedShape(environment),
     );
   }
