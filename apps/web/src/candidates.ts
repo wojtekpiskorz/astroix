@@ -23,6 +23,12 @@ export interface CandidateStore {
   runOf(ref: SessionRef): ProjectRun | null;
   /** The dev-server port the pair's run's plane was told to serve on — composition-only. */
   portOf(ref: SessionRef): number;
+  /**
+   * Every remembered run, in remembrance order — teardown's
+   * enumeration (#391): the composition's close stops the unseated
+   * candidates too, never only the seated session's run.
+   */
+  runs(): readonly ProjectRun[];
   /** Clears the bookkeeping — every activation starts with an empty slate. */
   clear(): void;
 }
@@ -41,6 +47,7 @@ export function createCandidateStore(): CandidateStore {
       const run = runsByPair.get(pairKey(ref));
       return run !== undefined ? (ports.get(run) ?? -1) : -1;
     },
+    runs: () => [...runsByPair.values()],
     clear: () => runsByPair.clear(),
   };
 }

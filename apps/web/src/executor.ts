@@ -177,9 +177,22 @@ export interface ExecutorInputs {
    * The write executors this composition forked, by pair key (#253, J3):
    * lazy — the session's executor is forked at its FIRST accepted edit
    * (nothing before then holds the app-global edit-writer lease), and
-   * stopped at the seat's teardown (the revocation pass's eviction).
+   * stopped at the seat's teardown (the revocation pass's eviction). A
+   * handle whose child EXITS is also evicted the moment the exit is
+   * observed (#391): a crashed executor never wedges the session's
+   * writes — the next accepted edit lazily respawns a fresh disposable
+   * child over the lease the exit released.
    */
   readonly writeExecutors: Map<string, WriteExecutorHandle>;
+  /**
+   * The per-edit outcome await's bound (#391): the F5 fence's drain
+   * deadline law (ADR-0006 §4 step 2's "up to 5 seconds"), restated at
+   * the composition — the runtime's `DRAIN_DEADLINE_MS` is not exported
+   * through the fence's package surface, and the ADR is the shared
+   * authority both constants cite. Injectable so the focused legs bound
+   * it tightly; production never overrides it.
+   */
+  readonly editOutcomeDeadlineMs?: number;
   /**
    * The private state directory the write executor's kernel lease files
    * live under (the web host's isolation story: an injected directory
@@ -840,7 +853,10 @@ async function enrichStylesFile(
  * frozen conflict contract's sanitized continuation), grant failures
  * name their policy category, and the `unknown`/`failed` outcomes stay
  * the honest catch-all — the client's post-commit uncertainty state is
- * its convergence, never a guess here.
+ * its convergence, never a guess here. The outcome AWAIT is bounded by
+ * the fence's drain-deadline law and the hung child disposed (#391):
+ * the response never hangs past the bound, and the disposable executor
+ * never wedges the session's later writes.
  */
 async function applyEdit(
   envelope: RequestEnvelope,
@@ -876,9 +892,47 @@ async function applyEdit(
     // the retryable answer, never a silent drop.
     return concurrentEditDrain();
   }
-  await submission.outcome;
+  // The outcome await is BOUNDED by the fence's own deadline law (#391):
+  // the per-op promise settles only at the child's terminality, so a
+  // hung write executor would otherwise hang this response past every
+  // bound. A timeout is the living sibling of the `unknown` outcome —
+  // the child is alive but unresponsive, the rename may or may not
+  // land — and the fence keeps tracking the accepted work either way
+  // (its no-silent-work law); the answer maps through the bounded-drain
+  // vocabulary's failure fold, the same closed catch-all `unknown` gets.
+  const awaited = await awaitEditOutcome(
+    submission.outcome,
+    inputs.editOutcomeDeadlineMs ?? EDIT_OUTCOME_DEADLINE_MS,
+  );
   const outcome: ExecutorOutcome | null = captured.outcome;
-  if (outcome === null) return notComposed();
+  if (outcome === null) {
+    // A hung child is also DISPOSED here — but only on the timeout
+    // verdict: a settled-but-null capture is a rejecting dispatch (the
+    // fenced admission of a stopped or exited handle), where the
+    // handle's own exit eviction is the recovery and a kill would fire
+    // on a possibly-healthy, merely-fenced executor.
+    if (awaited === 'timed-out') await disposeHungExecutor(inputs, seat.ref, executor);
+    return notComposed();
+  }
+  return editOutcomeResponse(envelope, seat, inputs, table, wire.grant, outcome);
+}
+
+/**
+ * The landed outcome's response mapping — the closed public vocabulary
+ * applied to one terminal executor outcome: the commit mints its
+ * follow-on grant (bound to the LANDED bytes' revision, through the
+ * same table that authorized the write), the revision-contract
+ * rejections hand back the disk truth's SHA, and everything else stays
+ * the honest catch-all.
+ */
+async function editOutcomeResponse(
+  envelope: RequestEnvelope,
+  seat: SessionSeat,
+  inputs: ExecutorInputs,
+  table: GrantTable,
+  grant: WritePlan['grant'],
+  outcome: ExecutorOutcome,
+): Promise<ResponseEnvelope | PublicError> {
   if (outcome.type === 'committed') {
     // The follow-on grant binds the LANDED bytes' revision (ADR-0006
     // §6), minted through the same table that authorized the write —
@@ -888,8 +942,8 @@ async function applyEdit(
     const next = await table.issue(
       {
         discovery: 'existing-text',
-        kind: wire.grant.kind,
-        path: wire.grant.displayPath,
+        kind: grant.kind,
+        path: grant.displayPath,
         revision: outcome.revision,
       },
       seat.ref,
@@ -907,7 +961,7 @@ async function applyEdit(
   }
   if (outcome.type === 'rejected') {
     return writeRejection(outcome).code === 'revision-conflict'
-      ? conflictWithCurrentSha(inputs, seat, wire.grant.displayPath)
+      ? conflictWithCurrentSha(inputs, seat, grant.displayPath)
       : writeRejection(outcome);
   }
   // failed | unknown: no bytes were proven landed by this response —
@@ -922,13 +976,21 @@ async function applyEdit(
  * have exited (the revocation pass stops the old seat's executor
  * before the new session adopts), and a boot that cannot take the
  * lease fails the write closed rather than bypassing the authority.
+ * Every retention point also tracks the handle's exit (#391): a
+ * crashed child is evicted from the table the moment its exit is
+ * observed, so the next accepted edit respawns instead of failing
+ * closed against a dead handle until some session switch.
  */
 async function writeExecutorFor(
   seat: SessionSeat,
   inputs: ExecutorInputs,
 ): Promise<WriteExecutorHandle | null> {
-  const existing = inputs.writeExecutors.get(pairKey(seat.ref));
-  if (existing !== undefined) return existing;
+  const key = pairKey(seat.ref);
+  const existing = inputs.writeExecutors.get(key);
+  if (existing !== undefined) {
+    trackExecutorExit(inputs, key, existing);
+    return existing;
+  }
   const root = inputs.registry
     .snapshot()
     .records.find((entry) => entry.projectKey === seat.projectKey)?.canonicalRoot;
@@ -939,15 +1001,93 @@ async function writeExecutorFor(
     session: seat.ref,
     qualifiedRuntime: currentRuntimePin(),
   });
-  inputs.writeExecutors.set(pairKey(seat.ref), handle);
+  inputs.writeExecutors.set(key, handle);
+  trackExecutorExit(inputs, key, handle);
   try {
     await handle.ready;
   } catch {
-    inputs.writeExecutors.delete(pairKey(seat.ref));
+    inputs.writeExecutors.delete(key);
     await handle.kill().catch(() => {});
     return null;
   }
   return handle;
+}
+
+/**
+ * The exit-listener memo — one listener per handle, never per read.
+ * Handle-identity bookkeeping, not composition state (the no-module-
+ * globals law is about composition state; this guard owns no lifetime
+ * of its own — the WeakSet frees a dead handle the moment nothing else
+ * holds it), so a cached read may re-track freely.
+ */
+const exitTracked = new WeakSet<WriteExecutorHandle>();
+
+/**
+ * The crashed-executor eviction (#391): one exit listener per handle,
+ * attached at every retention point — a spawned handle and a harness-
+ * seeded one are tracked alike at their first touch. The identity
+ * guard keeps a predecessor's late exit from evicting its successor:
+ * eviction removes exactly the handle that exited, never whatever the
+ * pair key holds now.
+ */
+function trackExecutorExit(inputs: ExecutorInputs, key: string, handle: WriteExecutorHandle): void {
+  if (exitTracked.has(handle)) return;
+  exitTracked.add(handle);
+  void handle.exited
+    .then(() => {
+      if (inputs.writeExecutors.get(key) === handle) inputs.writeExecutors.delete(key);
+    })
+    .catch(() => {});
+}
+
+/**
+ * Disposes one hung write executor (#391): the eviction is
+ * identity-guarded and the kill's own settlement — the exit the
+ * handle observes — is awaited before the caller answers, so the
+ * app-global edit-writer lease is released and the next accepted
+ * edit's lazy respawn does not race a dying predecessor's lease. The
+ * D5 executor is disposable by charter, and SIGKILL is its documented
+ * force path (the one F6's forced preparation takes): unsettled work
+ * resolves `unknown`, which is exactly the uncertainty the timed-out
+ * response already reported.
+ */
+async function disposeHungExecutor(
+  inputs: ExecutorInputs,
+  ref: SessionRef,
+  handle: WriteExecutorHandle,
+): Promise<void> {
+  const key = pairKey(ref);
+  if (inputs.writeExecutors.get(key) === handle) inputs.writeExecutors.delete(key);
+  await handle.kill().catch(() => {});
+}
+
+/** The outcome await's default bound — the F5 drain deadline's law, restated (see {@link ExecutorInputs.editOutcomeDeadlineMs}). */
+const EDIT_OUTCOME_DEADLINE_MS = 5000;
+
+/**
+ * The bounded outcome await (#391): races the fence's per-operation
+ * promise against the deadline, never against the child's terminality.
+ * The per-op promise resolves, never rejects (the fence settles a
+ * rejecting thunk as an honest failure) — the rejection belt below
+ * only preserves that contract if the fence surface itself drifts.
+ */
+function awaitEditOutcome(
+  outcome: Promise<unknown>,
+  deadlineMs: number,
+): Promise<'settled' | 'timed-out'> {
+  return new Promise((resolve, reject) => {
+    const disarm = setTimeout(() => resolve('timed-out'), deadlineMs);
+    outcome.then(
+      () => {
+        clearTimeout(disarm);
+        resolve('settled');
+      },
+      (error: unknown) => {
+        clearTimeout(disarm);
+        reject(error);
+      },
+    );
+  });
 }
 
 /** Stops a session's forked write executor, if any — the seat teardown's step. */
@@ -956,6 +1096,25 @@ export async function stopWriteExecutor(inputs: ExecutorInputs, ref: SessionRef)
   if (handle === undefined) return;
   inputs.writeExecutors.delete(pairKey(ref));
   await handle.stop().catch(() => {});
+}
+
+/**
+ * Stops every run this composition owns — the seated session's run and
+ * every staged candidate's (#365's addendum, #391): the composition's
+ * close previously awaited only the SEATED run, so an unseated
+ * candidate's managed dev server outlived teardown as an orphaned
+ * child. Each stop is the plane supervisor's own ordered graceful stop
+ * — internally bounded (its term/kill escalation), so the parallel
+ * pass converges inside one stop window — and the seated run may also
+ * be a remembered candidate: one run, one stop.
+ */
+export async function stopOwnedRuns(
+  seat: SessionSeat | null,
+  candidates: CandidateStore,
+): Promise<void> {
+  const runs = new Set<ProjectRun>(seat === null ? [] : [seat.run]);
+  for (const run of candidates.runs()) runs.add(run);
+  await Promise.all([...runs].map((run) => run.stop().catch(() => {})));
 }
 
 /** The edit result's monotonic per-session revision counter — the composition's own lift. */
