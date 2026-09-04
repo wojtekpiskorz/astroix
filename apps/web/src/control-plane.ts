@@ -214,7 +214,7 @@ export interface ControlPlaneCompositionOptions {
 export interface ControlPlaneComposition {
   readonly port: number;
   readonly launcherOrigin: string;
-  /** The isolated registry — test assertions and teardown only. */
+  /** The composed registry — the desktop child registers roots and reads persisted project summaries through it (#362, #367). */
   readonly registry: ProjectRegistry;
   readonly supervisor: SessionSupervisor;
   /** The command executor — the closed browser command set's driver (the desktop child drives it with synthesized envelopes). */
