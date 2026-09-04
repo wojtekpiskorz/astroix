@@ -38,7 +38,6 @@ import { readRunnerContract, readSsrEnvironment } from './seam-readers';
  * runner that pins nothing has no transport footprint to leak.
  */
 
-/** The cleanup proof one pass produced — the fresh-runner property, as evidence. */
 /** Cleanup context for triage: the transport counts bracket the pass. The
  * proof itself is identity-based (the own/foreign verdict in the rejection);
  * these counts ride the evidence for the reader diagnosing a rejection. */
@@ -180,6 +179,12 @@ export async function withFreshRunner<T>(
   };
 }
 
+/** The residue verdicts' rejection messages — one home so the two branches cannot drift apart. */
+const RESIDUE_VERDICT_WHAT: Readonly<Record<'own' | 'foreign', string>> = {
+  own: 'the runner pinned send listeners that outlived close',
+  foreign: 'send listeners appeared on the hot transport that no fresh-runner pass owns',
+};
+
 /**
  * The per-pass listener-residue verdict over the transport rosters
  * (#386): `'own'` when one of the pass's pinned listeners outlived
@@ -187,12 +192,6 @@ export async function withFreshRunner<T>(
  * without belonging to any registered in-flight pass, `null` when the
  * transport is provably clean for this pass.
  */
-/** The residue verdicts' rejection messages — one home so the two branches cannot drift apart. */
-const RESIDUE_VERDICT_WHAT: Readonly<Record<'own' | 'foreign', string>> = {
-  own: 'the runner pinned send listeners that outlived close',
-  foreign: 'send listeners appeared on the hot transport that no fresh-runner pass owns',
-};
-
 function listenerResidue(input: {
   readonly before: ReadonlySet<unknown>;
   readonly pinned: readonly unknown[];

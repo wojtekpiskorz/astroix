@@ -405,10 +405,10 @@ describe('withFreshRunner (concurrent passes over one transport, #386)', () => {
 
   it('returns to a clean baseline after concurrent passes fully unwind', async () => {
     // Registry hygiene: once concurrent passes settle, a later pass over
-    // the same transport observes a fully restored baseline — released
-    // registrations never over-exempt: a lingering one can only widen the
-    // foreign scan's allowance, never cause a verdict — the leg's value is the
-    // restored emitter baseline plus a clean later pass.
+    // the same transport observes a fully restored baseline. A lingering
+    // registration can only widen the foreign scan's allowance, never cause
+    // a verdict. The leg's value is the restored emitter baseline plus a
+    // clean later pass.
     const fake = harness();
     const gate = defer();
     const first = withFreshRunner(
