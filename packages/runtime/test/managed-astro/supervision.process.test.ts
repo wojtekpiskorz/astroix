@@ -1,5 +1,6 @@
 import { existsSync } from 'node:fs';
 import { mkdir, readFile, realpath, writeFile } from 'node:fs/promises';
+import { createConnection } from 'node:net';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -19,9 +20,12 @@ import { cleanupScratch, freePort, makeScratch } from './lane-harness.ts';
  * processes — the stand-in worker (E6's wire subset) and the stand-in dev
  * server (a real loopback socket) spawned through the same exact-child
  * spawn path production uses. Crash is terminal and never auto-restarts;
- * the graceful stop runs the ordered close (worker internals, sockets,
- * then terminate+reap both exact children); escalation and reap bounds
- * are exercised against children that really ignore or delay SIGTERM.
+ * the crash law reaps the managed dev-server sibling in the terminal
+ * transition's own tick (#365 — a crashed plane dies together, its
+ * sibling never left alive holding Astro's dev lock); the graceful stop
+ * runs the ordered close (worker internals, sockets, then terminate+reap
+ * both exact children); escalation and reap bounds are exercised against
+ * children that really ignore or delay SIGTERM.
  */
 
 const STAND_IN_WORKER = fileURLToPath(new URL('./stand-in-worker.js', import.meta.url));
@@ -33,6 +37,8 @@ interface Lane {
   readonly workerControlDir: string;
   readonly astroControlDir: string;
   readonly scratch: string;
+  /** The loopback port the lane's dev-server child serves on — the cross-process death witness. */
+  readonly port: number;
 }
 
 const lanes: Lane[] = [];
@@ -105,7 +111,14 @@ async function startLane(config: LaneConfig = {}): Promise<Lane> {
     probeIntervalMs: 15,
     ...config.bounds,
   });
-  const lane: Lane = { supervisor, markerDir, workerControlDir, astroControlDir, scratch };
+  const lane: Lane = {
+    supervisor,
+    markerDir,
+    workerControlDir,
+    astroControlDir,
+    scratch,
+    port,
+  };
   lanes.push(lane);
   return lane;
 }
@@ -124,6 +137,25 @@ async function markerStamps(markerDir: string, name: string): Promise<bigint[]> 
 
 function crash(controlDir: string): Promise<void> {
   return writeFile(join(controlDir, 'crash'), '', { mode: 0o600 });
+}
+
+/**
+ * True when nothing answers on the lane's dev-server port — the
+ * cross-process death witness (#365): a killed sibling's listener dies
+ * with its process (the kernel closes the sockets at process death),
+ * so a refused connection proves the dev server dead independently of
+ * anything the supervisor reports.
+ */
+async function portRefused(port: number): Promise<boolean> {
+  return await new Promise((resolve) => {
+    const socket = createConnection({ port, host: '127.0.0.1' });
+    const settle = (refused: boolean): void => {
+      socket.destroy();
+      resolve(refused);
+    };
+    socket.once('error', () => settle(true));
+    socket.once('connect', () => settle(false));
+  });
 }
 
 /** Awaits one stamp of a marker the stand-in child writes (receipt proof across processes). */
@@ -231,17 +263,89 @@ describe('crash is terminal — the sibling is cleaned, never restarted', () => 
     });
     expect(report.accounting.workerReaped).toBe(true);
     expect(report.accounting.managedAstroReaped).toBe(true);
+    // The crash law's ledger (#365): the sibling died by SIGKILL in the
+    // crash tick — no TERM rung ever ran, and the report says so instead
+    // of pretending a graceful termination.
+    expect(report.accounting.killEscalations).toEqual(['managed-astro']);
     expect(lane.supervisor.admission).toBe('revoked');
     expect(lane.supervisor.state).toBe('closed');
 
-    // The sibling really closed: its TERM handler ran and it exited.
-    expect(await markerStamps(lane.markerDir, 'astro-term-received')).toHaveLength(1);
-    expect(await markerStamps(lane.markerDir, 'astro-exit')).toHaveLength(1);
+    // The sibling really died in the crash tick: it never received a
+    // TERM (no marker) and a SIGKILLed process runs no exit handler —
+    // the port witness proves the death cross-process.
+    expect(await markerStamps(lane.markerDir, 'astro-term-received')).toHaveLength(0);
+    expect(await markerStamps(lane.markerDir, 'astro-exit')).toHaveLength(0);
+    expect(await portRefused(lane.port)).toBe(true);
 
     // No auto-restart: exactly one boot per child, ever.
     await new Promise((resolve) => setTimeout(resolve, 150));
     expect(await markerStamps(lane.markerDir, 'worker-boot')).toHaveLength(1);
     expect(await markerStamps(lane.markerDir, 'astro-boot')).toHaveLength(1);
+  }, 15_000);
+
+  it('a worker killed by SIGKILL reaps the TERM-immune dev sibling in the crash tick — the plane dies together (#365)', async () => {
+    // The #365 poisoning construction, both halves: the worker dies by a
+    // real OS signal (SIGKILL stays dead — no handler, no close report,
+    // exactly a crashed bundled worker), and the dev sibling is
+    // TERM-IMMUNE (the observed orphan's shape: an astro that survives a
+    // TERM long enough to outlive its supervisor and hold Astro's
+    // PID-checked dev lock). The crash law must still reap it — the
+    // SIGKILL is delivered in the terminal transition's own synchronous
+    // tick, before any awaited rung, so no degradation of the
+    // supervisor's own machinery (the crash path's defining risk) can
+    // leave the sibling alive.
+    const lane = await startLane({ devServer: { ignoreTerm: true } });
+    await lane.supervisor.ready;
+    const workerPid = Number.parseInt(
+      await readFile(join(lane.markerDir, 'worker-pid'), 'utf8'),
+      10,
+    );
+    process.kill(workerPid, 'SIGKILL');
+
+    const report = await lane.supervisor.closed;
+    expect(report).toMatchObject({
+      reason: 'worker-crash',
+      outcome: 'complete',
+      failures: [],
+    });
+    expect(report.accounting.workerReaped).toBe(true);
+    expect(report.accounting.managedAstroReaped).toBe(true);
+    expect(report.accounting.killEscalations).toEqual(['managed-astro']);
+    expect(lane.supervisor.admission).toBe('revoked');
+    expect(lane.supervisor.state).toBe('closed');
+
+    // The TERM-immune sibling is dead by construction: no TERM ever
+    // reached it, a SIGKILLed process runs no exit handler, and nothing
+    // answers on its port — the death is proven cross-process,
+    // independent of the report.
+    expect(await markerStamps(lane.markerDir, 'astro-term-received')).toHaveLength(0);
+    expect(await markerStamps(lane.markerDir, 'astro-exit')).toHaveLength(0);
+    expect(await portRefused(lane.port)).toBe(true);
+
+    // No auto-restart: exactly one boot per child, ever.
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(await markerStamps(lane.markerDir, 'worker-boot')).toHaveLength(1);
+    expect(await markerStamps(lane.markerDir, 'astro-boot')).toHaveLength(1);
+  }, 15_000);
+
+  it('a pre-report worker boot failure reaps the TERM-immune sibling too — a failed activation leaves no live dev server (#365)', async () => {
+    // The issue's exact failed-activation shape: the worker dies
+    // pre-report (exit 74 at boot, no readiness answer), the activation
+    // fails — and the TERM-immune dev sibling must not survive the
+    // failed activation as the observed orphan did.
+    const lane = await startLane({
+      workerBehaviors: { bootFail: true },
+      devServer: { ignoreTerm: true },
+    });
+    const rejection = await rejectedReady(lane.supervisor);
+    expect(rejection.code).toBe('worker-crash');
+
+    const report = await lane.supervisor.closed;
+    expect(report.reason).toBe('worker-crash');
+    expect(report.outcome).toBe('complete');
+    expect(report.accounting.managedAstroReaped).toBe(true);
+    expect(report.accounting.killEscalations).toEqual(['managed-astro']);
+    expect(await portRefused(lane.port)).toBe(true);
   }, 15_000);
 
   it('a managed-Astro crash stops the worker gracefully and reports it complete', async () => {
@@ -318,6 +422,7 @@ describe('crash is terminal — the sibling is cleaned, never restarted', () => 
       workerControlDir: broken,
       astroControlDir: broken,
       scratch: broken,
+      port,
     };
     lanes.push(lane);
 

@@ -56,6 +56,11 @@ if (config.behaviors?.bootFail) {
 }
 
 marker('worker-boot');
+// The real-fork crash knob (#365's leg): the child publishes its own PID
+// so a test can kill it with SIGKILL — the supervisor's surfaces carry no
+// PID (the no-PID law), and the file is test machinery exactly like the
+// env/cwd snapshot, never a supervision surface.
+writeFileSync(join(config.markerDir, 'worker-pid'), String(process.pid), { mode: 0o600 });
 process.on('exit', () => marker('worker-exit'));
 
 if (config.behaviors?.hangStop) {
