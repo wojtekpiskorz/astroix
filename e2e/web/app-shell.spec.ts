@@ -78,16 +78,17 @@ test('activation lands the rebuilt shell at a fresh generation with live session
   await expect(page.getByTestId('shell-state')).toContainText('reset=none');
 
   // The stable feature slots exist. The sidebar slot carries the
-  // Content vertical's discovery panel (J1, #251 — the first landed
-  // vertical); the editor-dock slot stays a placeholder until its
-  // vertical; the canvas slot carries #242's natural-route same-origin
-  // canvas — the plain iframe on the project origin (its own battery
-  // pins the canvas's behavior; this leg pins only that the slot is
-  // filled by it).
-  await expect(page.locator('[data-slot="editor-dock"]')).toContainText('slot: editor-dock');
+  // Content vertical's discovery panel (J1, #251) and the editor-dock
+  // slot its entry-form pane (J2, #252 — the honest no-entry state
+  // until an entry opens; its own battery pins the pane's behavior);
+  // the canvas slot carries #242's natural-route same-origin canvas —
+  // the plain iframe on the project origin (its own battery pins the
+  // canvas's behavior; this leg pins only that the slot is filled by
+  // it).
   await expect(page.locator('[data-slot="sidebar"] [data-astroix-content-discovery]')).toHaveCount(
     1,
   );
+  await expect(page.locator('[data-slot="editor-dock"] [data-astroix-entry-form]')).toHaveCount(1);
   await expect(page.locator('[data-slot="canvas"] [data-testid="canvas-frame"]')).toHaveCount(1);
 
   // Restore the idle state for the next leg.

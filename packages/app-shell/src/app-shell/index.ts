@@ -18,12 +18,14 @@
  *
  * The Content vertical's discovery panel (J1, #251) and the CSS
  * vertical's inspection panel (I1, #249) are exported for the hosts'
- * sidebar slots — features consuming this shell (useShell + the
- * generation-scoped query discipline), never parts of it.
+ * sidebar slots, and the Content vertical's entry-form pane (J2, #252)
+ * for the editor-dock slot — features consuming this shell (useShell +
+ * the generation-scoped query discipline), never parts of it.
  */
 
 export { ProjectCanvas, type ProjectCanvasProps } from '../canvas/project-canvas';
 export { ContentDiscovery } from '../features/content/discovery/content-discovery';
+export { ContentEntryForm } from '../features/content/forms/content-entry-form';
 export { CssSidebar } from '../features/css/css-sidebar';
 export { gatedSessionFetch, StaleSessionResultError } from '../query/gated-session-fetch';
 export { type GatedEventCallbacks, gatedSseHandlers } from '../query/session-events';
