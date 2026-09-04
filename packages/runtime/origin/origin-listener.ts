@@ -198,7 +198,14 @@ export async function createOriginListener(
   // belongs to exactly one owner — the lease whose exchange it serves,
   // or null for the launcher's reserved-surface connections — so a
   // lease revocation destroys only ITS sockets and never the launcher's.
-  const tracked = new Map<Duplex, LeaseHandle | null>();
+  // The entry also carries its close listener's detach (#382): the
+  // listener attaches ONCE per tracked socket and detaches when tracking
+  // ends, never per composed operation.
+  interface TrackedSocket {
+    owner: LeaseHandle | null;
+    readonly detachCloseListener: () => void;
+  }
+  const tracked = new Map<Duplex, TrackedSocket>();
   let active: LeaseHandle | null = null;
   let closeCall: Promise<void> | null = null;
 
@@ -223,10 +230,28 @@ export async function createOriginListener(
   /** One owner's tracking view: sockets registered here are destroyed by that owner's revocation alone. */
   function trackFor(owner: LeaseHandle | null): (socket: Duplex) => void {
     return (socket) => {
-      tracked.set(socket, owner);
-      socket.once('close', () => {
+      // The close listener attaches ONCE per tracked socket and comes
+      // off when tracking ends — never per composed operation (#382): a
+      // keep-alive socket is re-tracked once per exchange it serves
+      // (every proxied request, every reserved-surface registration), so
+      // a per-call attach accumulated close listeners under refetch
+      // churn until the MaxListenersExceededWarning. The one listener's
+      // dispatch is owner-independent bookkeeping — stop tracking the
+      // socket when it dies — so between the first and the Nth track of
+      // the same socket only the served owner changes.
+      const entry = tracked.get(socket);
+      if (entry !== undefined) {
+        entry.owner = owner;
+        return;
+      }
+      const onSocketClose = (): void => {
         tracked.delete(socket);
+      };
+      tracked.set(socket, {
+        owner,
+        detachCloseListener: () => socket.removeListener('close', onSocketClose),
       });
+      socket.once('close', onSocketClose);
     };
   }
 
@@ -382,10 +407,14 @@ export async function createOriginListener(
       closeCall ??= (async () => {
         await active?.revoke();
         // Terminal for the WHOLE listener: every tracked socket, both
-        // lease-owned and launcher-owned, dies with the listener.
-        const sockets = [...tracked.keys()];
+        // lease-owned and launcher-owned, dies with the listener — each
+        // one's bookkeeping listener detaching at its destroy (#382).
+        const entries = [...tracked.entries()];
         tracked.clear();
-        for (const socket of sockets) socket.destroy();
+        for (const [socket, entry] of entries) {
+          entry.detachCloseListener();
+          socket.destroy();
+        }
         server.close();
         server.closeAllConnections();
         await onceClosed(server);
@@ -396,12 +425,11 @@ export async function createOriginListener(
 
   /** Destroys the revoking lease's tracked sockets and settles when their closes are observed inside the bound. */
   async function destroyTrackedSockets(lease: LeaseHandle): Promise<LeaseRevocation> {
-    const owned: Duplex[] = [];
-    for (const [socket, owner] of tracked) {
-      if (owner === lease) {
-        owned.push(socket);
-        tracked.delete(socket);
-      }
+    const owned: { socket: Duplex; detachCloseListener: () => void }[] = [];
+    for (const [socket, entry] of tracked) {
+      if (entry.owner !== lease) continue;
+      owned.push({ socket, detachCloseListener: entry.detachCloseListener });
+      tracked.delete(socket);
     }
     // The close observers attach BEFORE destroying: `destroyed` flips
     // synchronously, so observing after the call would shortcut and
@@ -409,13 +437,19 @@ export async function createOriginListener(
     // accounting waits for the events, bounded. Launcher-owned sockets
     // are untouched: they outlive the lease and die with the listener.
     const closes = owned.map(
-      (socket) =>
+      ({ socket }) =>
         new Promise<void>((resolve) => {
           socket.once('close', resolve);
           if (socket.destroyed) resolve();
         }),
     );
-    for (const socket of owned) socket.destroy();
+    // The bookkeeping listener detaches at destroy (#382): the socket is
+    // no longer tracked, and one whose close never settles inside the
+    // bound (the honest `incomplete` tail) must not carry it forever.
+    for (const { socket, detachCloseListener } of owned) {
+      detachCloseListener();
+      socket.destroy();
+    }
     const settled = await raceBound(Promise.all(closes));
     return {
       projectKey: lease.projectKey,
