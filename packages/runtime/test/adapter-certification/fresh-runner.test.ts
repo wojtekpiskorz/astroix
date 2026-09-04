@@ -342,15 +342,20 @@ describe('withFreshRunner (concurrent passes over one transport, #386)', () => {
     expect(fake.emitter.listenerCount('send')).toBe(0);
   });
 
-  it('still rejects the leaking pass while its concurrent sibling stays clean', async () => {
-    // Teeth under concurrency: a runner whose close leaves its pinned
-    // listeners on the transport (while reporting closed) must reject its
-    // OWN pass — and the sibling pass overlapping it must not misattribute
-    // the leaked listeners as its own residue (the registry keeps them
-    // attributed to the pass that pinned them).
+  it('still rejects the leaking pass while its held-open sibling stays clean', async () => {
+    // Teeth under concurrency, the decisive order: the sibling's create
+    // block runs BEFORE the leaking pass pins, so the leaked listeners are
+    // absent from the sibling's beforeRoster — only their retained
+    // registration (attributed to the leaking pass) shields the sibling
+    // from a false `foreign` rejection. The leaking pass itself rejects as
+    // `own` residue. This is the false-positive class #386 exists to fix.
     const fake = harness();
-    const leakGate = defer();
     const siblingGate = defer();
+    const leakGate = defer();
+    const sibling = withFreshRunner(
+      { createServerModuleRunner: fake.createServerModuleRunner, ssrEnvironment: fake.environment },
+      async () => siblingGate.promise.then(() => 'sibling'),
+    );
     const leak = withFreshRunner(
       {
         ssrEnvironment: fake.environment,
@@ -366,10 +371,6 @@ describe('withFreshRunner (concurrent passes over one transport, #386)', () => {
         },
       },
       async () => leakGate.promise.then(() => 'leak'),
-    );
-    const sibling = withFreshRunner(
-      { createServerModuleRunner: fake.createServerModuleRunner, ssrEnvironment: fake.environment },
-      async () => siblingGate.promise.then(() => 'sibling'),
     );
     leakGate.resolve();
     await expect(leak).rejects.toMatchObject({
