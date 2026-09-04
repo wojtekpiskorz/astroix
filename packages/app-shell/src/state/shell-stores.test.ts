@@ -9,8 +9,10 @@ import { aSelection } from './test-fixtures.ts';
  * The shell stores' focused lane (#241): the reset-clearable fields,
  * their session binding, and the second belt — a write carrying a
  * moved-past pair (or any write after the reset unbound the store)
- * never lands. The six fields of the AC's clearing list are populated
- * and asserted cleared.
+ * never lands. The five observable fields of the AC's clearing list
+ * are populated and asserted cleared ("pending mutations" is no longer
+ * a store slot — #406's K2 deletion: the seam's machine is the
+ * accounting, the shell mirrors nothing).
  */
 
 const FIRST: SessionRef = { runtimeEpoch: 'epoch-fixture', generation: 1 };
@@ -50,16 +52,14 @@ describe('the app store', () => {
 });
 
 describe('the edit session store', () => {
-  it('holds grants, undo, and pending mutations under the bound pair', () => {
+  it('holds grants and undo under the bound pair', () => {
     useEditSessionStore.getState().bindSession(FIRST);
     const edit = useEditSessionStore.getState();
     edit.holdGrant(FIRST, { token: 'grant-opaque-1' });
     edit.pushUndo(FIRST, { token: 'undo-opaque-1' });
-    edit.trackPendingMutation(FIRST, { key: 'entry-2' });
     const snapshot = shellStoreSnapshot();
     expect(snapshot.grants).toBe(1);
     expect(snapshot.undo).toBe(1);
-    expect(snapshot.pendingMutations).toBe(1);
   });
 
   it('drops stale-pair writes on every setter', () => {
@@ -67,20 +67,18 @@ describe('the edit session store', () => {
     const edit = useEditSessionStore.getState();
     edit.holdGrant(NEXT, { token: 'grant' });
     edit.pushUndo(NEXT, { token: 'undo' });
-    edit.trackPendingMutation(NEXT, { key: 'm' });
     expect(shellStoreSnapshot()).toEqual({
       selection: false,
       canvas: false,
       activeEntry: false,
       grants: 0,
       undo: 0,
-      pendingMutations: 0,
     });
   });
 });
 
 describe('the shell-stores aggregate', () => {
-  it('populates every reset-clearable field, then clears all six at once', () => {
+  it('populates every reset-clearable field, then clears all at once', () => {
     bindShellSession(FIRST);
     const app = useAppStore.getState();
     app.setSelection(FIRST, aSelection());
@@ -89,14 +87,12 @@ describe('the shell-stores aggregate', () => {
     const edit = useEditSessionStore.getState();
     edit.holdGrant(FIRST, { token: 'grant-opaque-1' });
     edit.pushUndo(FIRST, { token: 'undo-opaque-1' });
-    edit.trackPendingMutation(FIRST, { key: 'entry-1' });
     expect(shellStoreSnapshot()).toEqual({
       selection: true,
       canvas: true,
       activeEntry: true,
       grants: 1,
       undo: 1,
-      pendingMutations: 1,
     });
 
     clearShellStores();
@@ -106,7 +102,6 @@ describe('the shell-stores aggregate', () => {
       activeEntry: false,
       grants: 0,
       undo: 0,
-      pendingMutations: 0,
     });
   });
 

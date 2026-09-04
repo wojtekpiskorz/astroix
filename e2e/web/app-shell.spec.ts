@@ -1,19 +1,14 @@
-import { expect, type Page, type Route, test } from '@playwright/test';
+import { expect, test } from '@playwright/test';
 import {
+  abortNextLauncherNavigation,
   activateButton,
   BOOT_BUDGET_MS,
+  COMPLETE_RESET_TRACE,
+  freezeResetState,
   LAUNCHER_APP_URL,
   LOAD_BUDGET_MS,
   PROJECT_APP_URL,
 } from './spec-helpers.ts';
-
-/** The complete four-step reset trace the marker carries once the sequencer finished (#393 capture). */
-const COMPLETE_RESET_TRACE = 'reset=abort-fetches,close-sse,remove-queries,clear-stores';
-
-/** The spec-injected snapshot slot on the app-shell document (page.evaluate context; zero-injection untouched). */
-interface E2eResetWindow {
-  __astroixE2eResetState?: string;
-}
 
 /**
  * The rebuilt app shell's product E2E (#241, G2): the project document
@@ -43,27 +38,6 @@ interface E2eResetWindow {
  * global active session — the legs walk one coherent session history and
  * restore the idle state for whatever follows.
  */
-
-/**
- * Aborts the next launcher-document navigation so the OLD document
- * SURVIVES with the replacement already attempted — the honest ordering
- * proof shape: the navigation request demonstrably went out (the abort
- * saw it), and the still-alive document's `shell-state` marker is read
- * afterwards, directly. (Intercept-and-continue with an in-handler
- * `page.evaluate` deadlocks: the renderer suspends during the pending
- * provisional navigation.)
- */
-async function abortNextLauncherNavigation(page: Page): Promise<void> {
-  let observed = false;
-  await page.route(/launcher\.localhost/, async (route: Route) => {
-    if (!observed && route.request().resourceType() === 'document') {
-      observed = true;
-      await route.abort('aborted');
-      return;
-    }
-    await route.continue().catch(() => {});
-  });
-}
 
 test.describe.configure({ mode: 'serial' });
 
@@ -146,31 +120,15 @@ test('deactivation removes shell state BEFORE the location replacement', async (
 
   // Pin the reset's OWN completion state before the click can race the
   // dying document's later renders (#393, per the disposition): the
-  // reset writes the marker synchronously as each step completes (the
-  // direct DOM write — React state cannot commit synchronously ahead of
-  // `location.replace`), so a page-side observer capturing the FIRST
-  // marker text that carries the complete trace holds exactly the
-  // post-`clear-stores` truth, whatever renders follow. Still-mounted
-  // observers can re-subscribe their session queries in the async
-  // window between this synchronous reset and the aborted replacement's
-  // document teardown, re-minting session-scoped cache entries the
-  // dying document's marker then counts (observed on loaded runners as
-  // `queries=2` after a complete trace — they persist until the
-  // document dies; nothing in the kept-alive document re-removes them).
-  // That transient is out of the sequencer's jurisdiction; the fresh
-  // replacement document's across-session truth is K2's reset-safety
-  // battery's. The previous one-shot read raced that window (#392).
-  await page.evaluate(() => {
-    new MutationObserver(() => {
-      const holder = window as unknown as E2eResetWindow;
-      if (holder.__astroixE2eResetState !== undefined) return;
-      const text = document.querySelector('[data-testid="shell-state"]')?.textContent;
-      // literal, not the module const: page.evaluate callbacks close over nothing
-      if (text?.includes('reset=abort-fetches,close-sse,remove-queries,clear-stores')) {
-        holder.__astroixE2eResetState = text;
-      }
-    }).observe(document.body, { childList: true, subtree: true, characterData: true });
-  });
+  // frozen capture — single-homed in `spec-helpers.ts` (#423 review),
+  // one spelling shared with the K-family's ordering proofs — freezes
+  // the FIRST marker text carrying the complete trace, holding exactly
+  // the post-`clear-stores` truth, whatever renders follow. The dying
+  // document's post-reset re-subscription transient (the loaded-runner
+  // `queries=2` observation, out of the sequencer's jurisdiction) and
+  // the previous one-shot read's race with it (#392) are documented at
+  // the helper's home.
+  const freeze = await freezeResetState(page);
 
   await page.getByTestId('deactivate').click();
 
@@ -185,18 +143,12 @@ test('deactivation removes shell state BEFORE the location replacement', async (
   await expect(page.getByTestId('shell-state')).toContainText(COMPLETE_RESET_TRACE, {
     timeout: LOAD_BUDGET_MS,
   });
-  await expect
-    .poll(() => page.evaluate(() => (window as unknown as E2eResetWindow).__astroixE2eResetState), {
-      timeout: LOAD_BUDGET_MS,
-    })
-    .toBeTruthy();
-  const cleared = await page.evaluate(
-    () => (window as unknown as E2eResetWindow).__astroixE2eResetState ?? '',
-  );
+  await expect.poll(async () => await freeze.read(), { timeout: LOAD_BUDGET_MS }).toBeTruthy();
+  const cleared = await freeze.read();
   expect(cleared).toContain('queries=0');
   expect(cleared).toContain('selection=0');
   expect(cleared).toContain('grants=0');
-  expect(cleared).toContain('pending=0');
+  expect(cleared).toContain('undo=0');
   // The document stayed: the replacement died at the abort, state still cleared.
   await expect(page).toHaveURL(PROJECT_APP_URL);
 

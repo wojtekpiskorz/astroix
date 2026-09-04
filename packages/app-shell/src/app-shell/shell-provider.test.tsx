@@ -137,7 +137,6 @@ describe('the commit-time reset', () => {
     expect(marker).toContain('selection=0');
     expect(marker).toContain('grants=0');
     expect(marker).toContain('reset=abort-fetches,close-sse,remove-queries,clear-stores');
-    expect(shellStoreSnapshot().pendingMutations).toBe(0);
     // Navigation happened — exactly once, to the launcher, and AFTER the clears (marker already written).
     expect(shell.navigations).toEqual([LAUNCHER_URL]);
   });
@@ -269,5 +268,70 @@ describe('the repeated generation change with delayed fetch and SSE delivery', (
     // The fresh pair's own frame still dispatches.
     script.deliverFrame(G2, { type: 'diagnostic', level: 'info', message: 'g2 frame' });
     await waitFor(() => byTestId(second.container, 'stream-state').textContent === 'open');
+  });
+});
+
+describe('the idempotent same-pair adoption (#413 over #419 — the client contract)', () => {
+  it('re-adopting the SAME pair clears nothing — no reset trigger, no cache eviction, the pair stays current', async () => {
+    // The idempotent re-activation's client face: activating the
+    // already-active project answers the CURRENT pair with no
+    // generation bump (#419's wired law), so the document that lands
+    // binds the SAME SessionRef. A same-pair adoption is therefore NOT
+    // a session switch: the reset sequencer must never fire (a naive
+    // "every activation clears" implementation is the defect this
+    // pins), the pair stays current, and the query re-mints under its
+    // SAME generation-scoped key — no flap, no eviction.
+    globalThis.fetch = script.fetch;
+    const queryClient = createShellQueryClient();
+    const client = createAppClient({ clientCapability: CAPABILITY, origin: ORIGIN });
+    const navigations: string[] = [];
+    const mountAt = (): HTMLElement => {
+      mounted = mount(
+        <ShellProvider
+          client={client}
+          sessionRef={G1}
+          launcherUrl={LAUNCHER_URL}
+          queryClient={queryClient}
+          navigate={(url) => navigations.push(url)}
+        >
+          <AppShell />
+        </ShellProvider>,
+      );
+      return mounted.container;
+    };
+
+    // The first document at G1: its inspection lands, cached once.
+    const first = mountAt();
+    script.resolveInspect(11);
+    await waitFor(() => byTestId(first, 'inspect-revision').textContent === '11');
+    expect(sessionQueryCount(queryClient)).toBe(1);
+
+    // The document is replaced (the launcher's navigation on the
+    // idempotent 200) and the next document binds the SAME pair.
+    mounted?.unmount();
+    clearShellStores();
+    const again = mountAt();
+
+    // No reset fired: no navigation, no trace, the store re-bound at
+    // the same pair (not unbound-and-cleared as a switch would leave
+    // it pre-adoption), and the gate's currency is untouched.
+    await waitFor(() => byTestId(again, 'inspect-revision').textContent === '11');
+    const marker = byTestId(again, 'shell-state').textContent ?? '';
+    expect(marker).toContain('reset=none');
+    expect(marker).toContain('queries=1');
+    expect(marker).toContain('selection=0');
+    expect(navigations).toEqual([]);
+    expect(shellStoreSnapshot()).toEqual({
+      selection: false,
+      canvas: false,
+      activeEntry: false,
+      grants: 0,
+      undo: 0,
+    });
+
+    // The cache never flapped: exactly one session-scoped entry, under
+    // the same pair's key — the re-adoption evicted nothing (a switch
+    // would have removed it; the pair did not move).
+    expect(sessionQueryCount(queryClient)).toBe(1);
   });
 });

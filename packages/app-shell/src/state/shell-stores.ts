@@ -21,7 +21,6 @@ export interface ShellStoreSnapshot {
   readonly activeEntry: boolean;
   readonly grants: number;
   readonly undo: number;
-  readonly pendingMutations: number;
 }
 
 /** Binds every shell store at one exact pair (the provider, at session adoption). */
@@ -50,6 +49,5 @@ export function shellStoreSnapshot(): ShellStoreSnapshot {
     activeEntry: app.activeEntry !== null,
     grants: edit.grants.length,
     undo: edit.undo.length,
-    pendingMutations: edit.pendingMutations.length,
   };
 }

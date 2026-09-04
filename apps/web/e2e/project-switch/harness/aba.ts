@@ -2,8 +2,14 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { expect, type Page } from '@playwright/test';
 import {
+  abortNextLauncherNavigation,
+  activateButton,
   activateSettled,
+  BOOT_BUDGET_MS,
+  freezeResetState,
   LOAD_BUDGET_MS,
+  PROJECT_APP_URL,
+  type ResetFreeze,
   restoreIdle,
 } from '../../../../../e2e/web/spec-helpers.ts';
 import { rawExchange } from '../../../src/e2e-wire.ts';
@@ -22,6 +28,9 @@ import { stagedCopyRoot } from '../../../src/stage-e2e.ts';
  * - `abaActivate(page, position)` — the settled deterministic
  *   activation (initial load, the young dev server's self-reload
  *   settle, the captured authority set of the committed document).
+ * - `abaReactivateIdempotent(page, position)` — the same-project
+ *   re-activation's landing (K2 #255's member: the #413/#419 client
+ *   contract's double-click shape, landing the CURRENT pair).
  * - `abaDeactivate(page)` — the deterministic exit back to idle.
  * - `abaCapture(page)` — the CURRENT document's authority set (origin,
  *   host, pair, capabilities) — the stale-authority replays' input.
@@ -30,6 +39,21 @@ import { stagedCopyRoot } from '../../../src/stage-e2e.ts';
  * - `abaRetiredHostStatus(port, host)` — the retired-host 421 probe.
  * - `abaSheetBytes` / `abaEntryBytes` — the staged copies' bytes
  *   (the wrong-project oracle, disk truth).
+ * - `abaShellState(page)` / `parseShellStateLine(text)` — the served
+ *   document's `shell-state` marker, parsed (K2 #255's member: the
+ *   client-reset proofs' zero-state observable, one spelling of the
+ *   marker contract for every K leg).
+ * - `abaFreezeResetState(page)` — the #393 frozen capture of the first
+ *   complete-reset marker text (K2 #255's member: the ordering proof's
+ *   capture discipline, immune to the dying document's re-render
+ *   transient) — the shared `e2e/web/spec-helpers.ts` spelling under
+ *   the K-family name (#423 review: the pair is single-homed there,
+ *   one spelling for every ordering proof).
+ * - `abaAbortNextLauncherNavigation(page)` — the one-shot launcher
+ *   navigation abort that keeps the old document alive past its
+ *   replacement attempt (K2 #255's member: the ordering proof's
+ *   interception half) — the shared `spec-helpers.ts` spelling under
+ *   the K-family name.
  */
 
 /** One captured document authority set — what a live tab holds. */
@@ -73,6 +97,32 @@ export async function abaActivate(page: Page, position: 0 | 1): Promise<AbaCaptu
 /** The deterministic exit — deactivate and land on the idle launcher. */
 export async function abaDeactivate(page: Page): Promise<void> {
   await restoreIdle(page);
+}
+
+/**
+ * The idempotent same-project re-activation's landing (K2 #255's
+ * member — the #413/#419 client contract): the launcher's double-click
+ * shape, activating the ALREADY-ACTIVE project. The composition
+ * answers the CURRENT pair's activation envelope with no generation
+ * bump (#419's wired law), and the launcher navigates exactly as on
+ * any committed activation — so this lands a document bound at the
+ * SAME pair the active session already holds, which is the whole
+ * point: the caller asserts the pair did not move.
+ *
+ * No `activateSettled` here, deliberately: that discipline waits out a
+ * YOUNG dev server's post-connect self-reload, and this landing rides
+ * a warm plane whose canvas may settle with one navigation fewer —
+ * waiting for two would hang. The landing's proofs (the marker, the
+ * capture, serving) ride the served document, never the canvas.
+ */
+export async function abaReactivateIdempotent(page: Page, position: 0 | 1): Promise<AbaCapture> {
+  await page.goto('/__astroix/app/');
+  await activateButton(page, position).click();
+  await page.waitForURL(PROJECT_APP_URL, { timeout: BOOT_BUDGET_MS });
+  await expect(page.getByTestId('session-generation')).toHaveText(/^\d+$/, {
+    timeout: LOAD_BUDGET_MS,
+  });
+  return await abaCapture(page);
 }
 
 /** The current document's authority set — read off the served page itself. */
@@ -149,3 +199,69 @@ export async function abaRetiredHostStatus(port: number, host: string): Promise<
   );
   return response.status;
 }
+
+// ——— the K2 client-reset members (#255) ———
+
+/** The shell-state marker's parsed line — the reset-clearable client state's observable. */
+export interface AbaShellState {
+  readonly queries: number;
+  readonly selection: boolean;
+  readonly canvas: boolean;
+  readonly activeEntry: boolean;
+  readonly grants: number;
+  readonly undo: number;
+  /** `none`, or the ordered trace of completed clearing steps. */
+  readonly reset: string;
+}
+
+/**
+ * Parses one `shell-state` marker line into its fields — the marker
+ * contract's one reader (a K leg never hand-greps the line). A
+ * malformed or absent field reads as its zero value, never a throw:
+ * the batteries assert the FRESH document's state, so a half-rendered
+ * line must fail an assertion, not the parse.
+ */
+export function parseShellStateLine(text: string): AbaShellState {
+  const fields = new Map<string, string>();
+  for (const token of text.split(/\s+/)) {
+    const split = token.indexOf('=');
+    if (split > 0) fields.set(token.slice(0, split), token.slice(split + 1));
+  }
+  return {
+    queries: Number.parseInt(fields.get('queries') ?? '0', 10),
+    selection: fields.get('selection') === '1',
+    canvas: fields.get('canvas') === '1',
+    activeEntry: fields.get('entry') === '1',
+    grants: Number.parseInt(fields.get('grants') ?? '0', 10),
+    undo: Number.parseInt(fields.get('undo') ?? '0', 10),
+    reset: fields.get('reset') ?? 'none',
+  };
+}
+
+/** The CURRENT document's shell-state marker, parsed — the fresh document's zero-state probe. */
+export async function abaShellState(page: Page): Promise<AbaShellState> {
+  const text = await page.getByTestId('shell-state').textContent();
+  return parseShellStateLine(text ?? '');
+}
+
+/**
+ * The #393 frozen capture of the first complete-reset marker text
+ * (K2 #255's member: the ordering proof's capture discipline, immune
+ * to the dying document's re-render transient) — the SHARED spelling
+ * homed in `e2e/web/spec-helpers.ts` (#423 review: this harness's
+ * former local copy was line-for-line the app-shell battery's),
+ * consumed under the K-family name. The discipline's rationale and
+ * history (#392's race, #393's capture shape) live at the home.
+ */
+export const abaFreezeResetState = freezeResetState;
+
+/** The frozen capture's read half — the shared home's type under the K-family name. */
+export type AbaResetFreeze = ResetFreeze;
+
+/**
+ * The one-shot launcher navigation abort that keeps the old document
+ * alive past its replacement attempt (K2 #255's member: the ordering
+ * proof's interception half) — the shared `e2e/web/spec-helpers.ts`
+ * spelling under the K-family name.
+ */
+export const abaAbortNextLauncherNavigation = abortNextLauncherNavigation;
