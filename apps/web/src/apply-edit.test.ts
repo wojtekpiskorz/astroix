@@ -13,6 +13,7 @@ import type {
 } from '@wojciechpiskorz/astroix-protocol';
 import type { ClientBindings } from '@wojciechpiskorz/astroix-runtime/api/http';
 import type { DocumentAuthority } from '@wojciechpiskorz/astroix-runtime/client-authority';
+import type { WriteExecutorHandle } from '@wojciechpiskorz/astroix-runtime/edit-authority/executor';
 import type { GrantTable } from '@wojciechpiskorz/astroix-runtime/edit-authority/grants';
 import { createGrantTable } from '@wojciechpiskorz/astroix-runtime/edit-authority/grants';
 import type { OriginLease, OriginListener } from '@wojciechpiskorz/astroix-runtime/origin';
@@ -109,7 +110,11 @@ function inertInputs(): Pick<
 }
 
 /** The minimal real harness: one adopted seat over a real fence and the real table. */
-async function makeExecutor(input?: { readonly runInspect?: ProjectRun['inspect'] }): Promise<{
+async function makeExecutor(input?: {
+  readonly runInspect?: ProjectRun['inspect'];
+  /** Pre-seeds the retained write executor — the outcome-mapping legs' scripted child. */
+  readonly writeExecutor?: WriteExecutorHandle;
+}): Promise<{
   execute(envelope: RequestEnvelope): Promise<ResponseEnvelope | PublicError>;
   table: GrantTable;
   root: string;
@@ -151,7 +156,10 @@ async function makeExecutor(input?: { readonly runInspect?: ProjectRun['inspect'
       drop: () => {},
     },
     grantTables: new Map<string, GrantTable>([[pairKey(SESSION), table]]),
-    writeExecutors: new Map(),
+    writeExecutors:
+      input?.writeExecutor === undefined
+        ? new Map()
+        : new Map([[pairKey(SESSION), input.writeExecutor]]),
     privateStateDirectory: join(root, '..', 'private-state'),
     editRevisions: new Map<string, number>(),
     pendingDevPorts: [],
@@ -178,17 +186,15 @@ function editEnvelope(plan: WritePlan, session: SessionRef = SESSION): RequestEn
   };
 }
 
-/** Issues one content existing-text grant over the discovered facts. */
+/** Issues one existing-text grant over the discovered facts. */
 async function issueGrant(
   table: GrantTable,
   path: string,
   revision: string,
   session: SessionRef = SESSION,
+  kind: 'content' | 'css' = 'content',
 ) {
-  const granted = await table.issue(
-    { discovery: 'existing-text', kind: 'content', path, revision },
-    session,
-  );
+  const granted = await table.issue({ discovery: 'existing-text', kind, path, revision }, session);
   if (!granted.ok) throw new Error(`grant issuance failed: ${granted.code}`);
   return granted.grant;
 }
@@ -361,5 +367,100 @@ describe('the grant-bound content write composition', () => {
     const storeEntry = enriched.collections[0]?.entries.find((entry) => entry.id === 'store-entry');
     expect(storeEntry?.grant).toBeUndefined();
     expect(storeEntry?.raw).toBeUndefined();
+  }, 30_000);
+
+  it('maps the style planner’s range-outside-baseline onto the conflict class with the disk SHA — never the catch-all', async () => {
+    const harness = await makeExecutor();
+    // a real CSS resource: staged, hashed, granted through the real table
+    const cssPath = 'src/styles/main.css';
+    const cssText = 'body { color: red; }\n';
+    await mkdir(dirname(join(harness.root, cssPath)), { recursive: true });
+    await writeFile(join(harness.root, cssPath), cssText, 'utf8');
+    const grant = await issueGrant(harness.table, cssPath, sha256Of(cssText), SESSION, 'css');
+    // a splice range beyond the verified baseline contents: incoherent
+    // with the revision contract — a DEFINITE non-write, and the closed
+    // table must answer the conflict class (SHA handback), never the
+    // internal-error catch-all (which the client would misread as
+    // post-commit uncertainty)
+    const outcome = await harness.execute(
+      editEnvelope({
+        operation: 'splice',
+        grant,
+        range: { start: 0, end: cssText.length + 10 },
+        replacement: 'body { color: blue; }',
+      }),
+    );
+    expect(outcome).toEqual({
+      code: 'revision-conflict',
+      message: expect.any(String),
+      retryable: false,
+      details: { currentSha256: sha256Of(cssText) },
+    });
+    // unchanged bytes: the incoherent plan wrote nothing
+    expect(await readFile(join(harness.root, cssPath), 'utf8')).toBe(cssText);
+  }, 30_000);
+
+  it('maps the executor’s admission-time rejections through the closed table — fenced is retryable, malformed-plan is the malformed refusal, the range proof conflicts', async () => {
+    // One scripted executor child (the injected handle the composition
+    // retains): each dispatch's terminal rejection flows through the
+    // REAL outcome mapping — the rows these legs pin live in the table,
+    // not in a spawned child's world.
+    const scripted: { outcome: Awaited<ReturnType<WriteExecutorHandle['execute']>> } = {
+      outcome: { type: 'rejected', code: 'fenced', message: 'fenced' },
+    };
+    const stub: WriteExecutorHandle = {
+      ready: Promise.resolve(),
+      execute: () => Promise.resolve(scripted.outcome),
+      stop: async () => {},
+      kill: async () => {},
+      exited: new Promise(() => {}),
+    };
+    const harness = await makeExecutor({ writeExecutor: stub });
+    const contract = editFixture('content-frontmatter-write.json');
+    const grant = await issueGrant(harness.table, contract.file, contract.baseline.hash);
+
+    // fenced: the executor never ACCEPTED the work — the retryable
+    // drain answer, never the catch-all's post-commit uncertainty
+    const fenced = await harness.execute(
+      editEnvelope({ operation: 'replace-contents', grant, contents: contract.written.contents }),
+    );
+    expect(fenced).toEqual({
+      code: 'concurrent-activation',
+      message: expect.any(String),
+      retryable: true,
+    });
+
+    // malformed-plan: the dispatch failed the executor's closed shape
+    // validation — the malformed-request refusal
+    scripted.outcome = { type: 'rejected', code: 'malformed-plan', message: 'malformed' };
+    const malformed = await harness.execute(
+      editEnvelope({ operation: 'replace-contents', grant, contents: contract.written.contents }),
+    );
+    expect(malformed).toEqual({
+      code: 'malformed-request',
+      message: expect.any(String),
+      retryable: false,
+      details: { issue: 'invalid-shape', pointer: 'command.plan' },
+    });
+
+    // range-outside-baseline at final validation: the conflict class
+    // with the disk-truth SHA handback (the baseline is untouched)
+    scripted.outcome = {
+      type: 'rejected',
+      code: 'range-outside-baseline',
+      message: 'range',
+    };
+    const outside = await harness.execute(
+      editEnvelope({ operation: 'replace-contents', grant, contents: contract.written.contents }),
+    );
+    expect(outside).toEqual({
+      code: 'revision-conflict',
+      message: expect.any(String),
+      retryable: false,
+      details: { currentSha256: contract.baseline.hash },
+    });
+    expect(await readFile(join(harness.root, contract.file), 'utf8')).toBe(
+      contract.baseline.contents,
+    );
   }, 30_000);
 });

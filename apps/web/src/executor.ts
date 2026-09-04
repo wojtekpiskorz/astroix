@@ -880,6 +880,11 @@ const PLAN_FAILURES: Readonly<Record<string, PublicError | FailureClass>> = {
   'target-moved': 'absent',
   'invalid-plan': malformedPlan(),
   'claim-mismatch': malformedPlan(),
+  // The style planner's range proof: a splice planned against bytes
+  // other than the world's verified contents is incoherent with the
+  // revision contract — the conflict class (the caller hands back the
+  // disk SHA), never the catch-all's post-commit uncertainty.
+  'range-outside-baseline': 'conflict',
 };
 
 /** The executor-rejection table — one row per closed rejection code. */
@@ -896,6 +901,14 @@ const WRITE_REJECTIONS: Readonly<Record<string, PublicError | FailureClass>> = {
   'not-a-file': 'absent',
   'parent-not-directory': 'absent',
   'target-moved': 'absent',
+  // Final validation repeats the range proof over the verified bytes —
+  // the same conflict class, with the SHA handback.
+  'range-outside-baseline': 'conflict',
+  // Admission-time, never world-time: the fenced executor never
+  // accepted the work, so nothing landed — the retryable drain answer,
+  // never the catch-all's post-commit uncertainty.
+  fenced: concurrentEditDrain(),
+  'malformed-plan': malformedPlan(),
 };
 
 /** Reads one failure table row — the closed catch-all for unknown codes. */
