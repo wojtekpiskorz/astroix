@@ -352,6 +352,17 @@ async function runFamilyInspection(
       }
       return { kind: 'styles', revision: outcome.payload.revision, payload: outcome.payload };
     }
+    case 'route-selection': {
+      // The control-plane-only resolution (#370): an unresolvable route is
+      // RESULT data (`selection: null` — the executor's 404), never a
+      // dispatch failure; only a rejected pass (seam drift, shutdown,
+      // abort) rejects here.
+      const payload = await context.branches.routeSelection({
+        route: request.route,
+        signal,
+      });
+      return { kind: 'route-selection', revision: payload.revision, payload };
+    }
   }
 }
 

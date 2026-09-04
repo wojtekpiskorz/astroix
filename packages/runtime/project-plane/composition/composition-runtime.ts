@@ -1,5 +1,6 @@
 import { createCompositionServer } from '../../astro-project-adapter/composition';
 import { inspectContent } from '../../astro-project-adapter/content/inspect-content';
+import { createRouteSelectionResolver } from '../../astro-project-adapter/routes/route-selection';
 import { createRoutesInspector } from '../../astro-project-adapter/routes/routes-inspection';
 import { createConvergedStylesInspection } from '../../astro-project-adapter/styles/convergence/converged-styles-inspection';
 import type { ProjectWorkerPlane } from '../worker/inspection-branches.ts';
@@ -46,6 +47,11 @@ export async function createCompositionRuntime(input: {
     seams: composition.seams,
   });
   const routesInspector = createRoutesInspector({ composition });
+  // #370: the executor's pathname→component resolution — the same
+  // composition seams, its own fresh passes. The answer's component is
+  // control-plane currency; the executor consumes it and never
+  // forwards the result (the no-disclosure law).
+  const routeSelectionResolver = createRouteSelectionResolver({ composition });
 
   return {
     inspections: {
@@ -57,6 +63,7 @@ export async function createCompositionRuntime(input: {
       // here — the property is proven, not re-checked.
       content: async () => (await inspectContent(composition)).result,
       routes: (pass) => routesInspector.inspect(pass),
+      routeSelection: (pass) => routeSelectionResolver.resolve(pass),
     },
     invalidations: stylesInspector.invalidations,
     close: async () => {

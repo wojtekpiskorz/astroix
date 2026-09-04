@@ -33,6 +33,7 @@ import {
 import { resolveInstalledPair } from '../../../astro-project-adapter/installed-pair';
 import { certifyPairBeforeConfig } from '../../../astro-project-adapter/pair-gate';
 import { readRouteMetadata } from '../../../astro-project-adapter/routes/route-metadata';
+import { createRouteSelectionResolver } from '../../../astro-project-adapter/routes/route-selection';
 import { createRoutesInspector } from '../../../astro-project-adapter/routes/routes-inspection';
 import type { RouteInfo } from '../../../astro-project-adapter/routes/routes-payload';
 import {
@@ -77,7 +78,11 @@ import { stageStubInstall } from '../stub-install';
  *                        routing, managed `getStaticPaths` enumeration,
  *                        live-field-free plain payload) over the real
  *                        installs, equal to the frozen routes corpus.
- *   6. fresh runners   — every pass closes its runner and restores the
+ *   6. route selection — the #370 pathname→component resolution seam,
+ *                        certified against Astro's OWN live route
+ *                        patterns (the raw export's RegExp oracle,
+ *                        test-only) over the real install.
+ *   7. fresh runners   — every pass closes its runner and restores the
  *                        hot transport's send accounting — no residue
  *                        across passes.
  *
@@ -262,6 +267,111 @@ it('certifies the routes inspection shape over the real install (#299 seam)', as
     for (const route of first.routes) {
       expect(Object.keys(route)).not.toContain('component');
     }
+  } finally {
+    await composition.close();
+  }
+});
+
+it('certifies the route-selection resolution against Astro’s own patterns over the real install (#370 seam)', async () => {
+  const composition = await createCompositionServer(attribute.root);
+  try {
+    // The oracle is Astro's own, read RAW here — test-only: the live
+    // `pattern` RegExps and `component` strings the adapter drops by
+    // law. The resolver's segment-based matcher must agree with the
+    // patterns the certified pair itself serves, for every pathname the
+    // wire can carry.
+    const oraclePass = await withFreshRunner(
+      {
+        createServerModuleRunner: composition.seams.vite.createServerModuleRunner,
+        ssrEnvironment: composition.server.environments.ssr,
+      },
+      async (runner) => {
+        const exports = (await runner.import('virtual:astro:routes')) as {
+          routes?: Array<{
+            routeData?: {
+              route?: string;
+              component?: string;
+              type?: string;
+              origin?: string;
+              pattern?: unknown;
+            };
+          }>;
+        };
+        return (exports.routes ?? [])
+          .map((route) => route.routeData)
+          .filter(
+            (data): data is { route: string; component: string; pattern: RegExp } =>
+              typeof data?.route === 'string' &&
+              typeof data?.component === 'string' &&
+              data?.type === 'page' &&
+              data?.origin === 'project' &&
+              data?.pattern instanceof RegExp,
+          );
+      },
+    );
+    assertRunnerEvidence(oraclePass.evidence);
+    expect(oraclePass.result.length).toBeGreaterThan(0);
+
+    const resolver = createRouteSelectionResolver({ composition });
+    const resolvable = [
+      '/',
+      '/blog/hello-builder',
+      '/blog/2024/post',
+      '/blog/2025/release-notes',
+      '/blog',
+      '/blog/hello-builder/',
+      // The catch-all serves arbitrary depth — a fifth segment is still
+      // its to match (the oracle's `(.*?)` tail).
+      '/blog/hello-builder/extra/deep/tail',
+    ];
+    for (const route of resolvable) {
+      const resolved = await resolver.resolve({ route });
+      // Astro's own router: the FIRST project page route whose live
+      // pattern tests true is the serving route (the manifest order the
+      // export preserves) — the resolver must return its component.
+      const oracleMatch = oraclePass.result.find((data) => data.pattern.test(route));
+      expect(oracleMatch, route).toBeDefined();
+      expect(resolved.selection?.component ?? null, route).toBe(oracleMatch?.component);
+      expect(resolved.selection?.pattern ?? null, route).toBe(oracleMatch?.route);
+    }
+
+    // Well-formed pathnames no route serves resolve to NOTHING — and the
+    // oracle agrees (no live pattern tests true).
+    const unresolvable = [
+      '/no/such/route',
+      // The degenerate percent-encoded STATIC case (review round 1): a
+      // reserved encoding inside a static-named segment position. Astro
+      // decodes the whole pathname (decodeURI keeps `%2F`), this seam
+      // decodes each segment strictly — for THIS corpus both refuse it
+      // (no pattern carries a percent-literal static part), so the pin
+      // is the seam's fail-closed answer witnessed against the live
+      // oracle. The DIVERGENT subclass — static content that itself
+      // carries `%2F`/`%3F`/`%23`, or `%5B`/`%5D`-named route files,
+      // where Astro matches and the seam refuses — is unreachable from
+      // the canonical corpus (no such route exists to match), so the
+      // oracle cannot witness it; the seam's fail-closed answer there
+      // is the disclosed module-doc edge, never a heuristic parse.
+      '/blog%2Fhello-builder',
+    ];
+    for (const route of unresolvable) {
+      expect(
+        oraclePass.result.some((data) => data.pattern.test(route)),
+        route,
+      ).toBe(false);
+      expect((await resolver.resolve({ route })).selection, route).toBeNull();
+    }
+
+    // Degenerate shapes the wire grammar refuses: fail-closed at the
+    // seam too (defense in depth) — never a heuristic parse.
+    for (const route of ['not-rooted', '/blog//x', '/blog\\x', '']) {
+      expect((await resolver.resolve({ route })).selection, route).toBeNull();
+    }
+
+    // The revision is the resolution resource's own monotonic counter.
+    const first = await resolver.resolve({ route: '/' });
+    const second = await resolver.resolve({ route: '/' });
+    expect(first.revision).toBeGreaterThan(0);
+    expect(second.revision).toBe(first.revision + 1);
   } finally {
     await composition.close();
   }

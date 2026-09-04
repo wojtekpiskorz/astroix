@@ -115,6 +115,30 @@ describe('isWorkerInspectionRequest', () => {
       }),
     ).toBe(true);
   });
+
+  // #370: the control-plane-only resolution family — a /-rooted pathname
+  // and nothing else; its ANSWER (the component) is the one payload-shape
+  // fact this union never lets the wire carry.
+  it('accepts exactly the route-selection shape: a kind and a /-rooted route', () => {
+    expect(isWorkerInspectionRequest({ kind: 'route-selection', route: '/' })).toBe(true);
+    expect(
+      isWorkerInspectionRequest({ kind: 'route-selection', route: '/blog/hello-builder' }),
+    ).toBe(true);
+  });
+
+  it('rejects route-selection inputs outside the observed-pathname contract', () => {
+    expect(isWorkerInspectionRequest({ kind: 'route-selection', route: '' })).toBe(false);
+    expect(isWorkerInspectionRequest({ kind: 'route-selection', route: 'blog/x' })).toBe(false);
+    expect(isWorkerInspectionRequest({ kind: 'route-selection', route: 7 })).toBe(false);
+    expect(isWorkerInspectionRequest({ kind: 'route-selection' })).toBe(false);
+    expect(
+      isWorkerInspectionRequest({
+        kind: 'route-selection',
+        route: '/',
+        routeComponent: 'src/pages/index.astro',
+      }),
+    ).toBe(false);
+  });
 });
 
 describe('invalidation family classification', () => {

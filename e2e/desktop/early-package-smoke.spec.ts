@@ -207,7 +207,8 @@ describe.skipIf(!PACKAGE_ZIP)('the exact packaged host — the early packaged sm
     // Application Support; the launch now carries the browser-level
     // --user-data-dir switch so every helper, first to last, holds the
     // temp root. The product half of that observation — the env
-    // override landing after the pre-boot verification — is #363).
+    // override landing after the pre-boot verification — was #363,
+    // hoisted above the verification).
     const homeFindings = realHomeIsolationFindings(tree, homedir());
     expect(homeFindings, `isolation leak: ${JSON.stringify(homeFindings)}`).toEqual([]);
     console.log(
