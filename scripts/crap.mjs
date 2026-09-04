@@ -84,7 +84,7 @@ const SRC_ROOT = join(ROOT, 'src');
 // probes, quit escalation), so honest per-function unit coverage does
 // not exist there even though its tests share the vitest invocation —
 // its truth is the harness's own fail-closed battery plus the
-// exact-artifact leg, the same tier reasoning as apps/web/apps/desktop.
+// exact-artifact leg, the same tier reasoning as apps/web and apps/desktop.
 const RISK_ROOTS = [
   SRC_ROOT,
   join(ROOT, 'packages/core'),

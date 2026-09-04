@@ -57,7 +57,7 @@ export interface QualificationResult {
 
 /**
  * The recording port the phase runners share: one stage-record call
- * (which ledgeres failures and echoes the log line) and one skip call
+ * (which ledgers failures and echoes the log line) and one skip call
  * (which records the dependents a failed stage owed nothing to).
  */
 interface StagePort {
