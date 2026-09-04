@@ -1,16 +1,14 @@
-import { createHash } from 'node:crypto';
-import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
-  PACKAGED_CERTIFIED_PAIR,
   PACKAGED_ELECTRON_PIN,
-  PACKAGED_FORGE_PIN,
   PACKAGED_NODE_PIN,
   verifyPackagedAssets,
 } from '../../packages/runtime/src/internal/packaged-assets.ts';
 import { verifyBundledNodeIdentity } from '../../scripts/qualification/battery.ts';
+import { STUB_RESOURCE_INVENTORY, writeHashedManifest } from './synthetic-artifact.ts';
 
 /**
  * The qualification battery's own facets (#258, L1 focused tests):
@@ -68,45 +66,12 @@ async function stubResources(appPath: string, nodeVersion = PACKAGED_NODE_PIN): 
   return resourcesRoot;
 }
 
-async function sha256(path: string): Promise<string> {
-  const hash = createHash('sha256');
-  hash.update(await readFile(path));
-  return hash.digest('hex');
-}
-
-/** Builds a manifest whose resource rows hash the REAL stub bytes (self-consistent, like the assembler's). */
+/** The shared self-consistent manifest writer (one home: `synthetic-artifact.ts`), adapted to an app path. */
 async function writeConsistentManifest(appPath: string, nodeVersion: string): Promise<void> {
-  const resourcesRoot = join(appPath, 'Contents', 'Resources');
-  const rows: { path: string; sha256: string; bytes: number; executable: boolean }[] = [];
-  for (const rel of [
-    join('node', 'bin', 'node'),
-    join('astroix-runtime', 'control-plane', 'child.js'),
-    join('astroix-runtime', 'package.json'),
-  ]) {
-    const absolute = join(resourcesRoot, ...rel.split('/'));
-    rows.push({
-      path: rel.split('/').join('/'),
-      sha256: await sha256(absolute),
-      bytes: (await readFile(absolute)).byteLength,
-      executable: rel === join('node', 'bin', 'node'),
-    });
-  }
-  await writeFile(
-    join(resourcesRoot, 'astroix-runtime', 'build-manifest.json'),
-    `${JSON.stringify(
-      {
-        schema: 1,
-        sourceCommit: '0123456789abcdef0123456789abcdef01234567',
-        architecture: 'arm64',
-        electron: PACKAGED_ELECTRON_PIN,
-        forge: PACKAGED_FORGE_PIN,
-        node: nodeVersion,
-        pair: { astro: PACKAGED_CERTIFIED_PAIR.astro, vite: PACKAGED_CERTIFIED_PAIR.vite },
-        resources: rows,
-      },
-      null,
-      2,
-    )}\n`,
+  await writeHashedManifest(
+    join(appPath, 'Contents', 'Resources'),
+    nodeVersion,
+    STUB_RESOURCE_INVENTORY,
   );
 }
 

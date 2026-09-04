@@ -95,19 +95,37 @@ export async function buildSyntheticZip(
   if (resources.extraResourceFile === true) {
     await writeFile(join(resourcesRoot, 'astroix-runtime', 'dropped-in.js'), 'export {}\n');
   }
-  await writeHashedManifest(resourcesRoot, resources.declaredNodeVersion ?? PACKAGED_NODE_PIN, [
-    'node/bin/node',
-    'astroix-runtime/control-plane/child.js',
-    'astroix-runtime/package.json',
-  ]);
+  await writeHashedManifest(
+    resourcesRoot,
+    resources.declaredNodeVersion ?? PACKAGED_NODE_PIN,
+    STUB_RESOURCE_INVENTORY,
+  );
   // -y keeps symlinks as links (the substitution leg must ride INTO the zip)
   await execFileAsync('zip', ['-q', '-r', '-y', zipPath, 'Astroix.app'], { cwd: buildDir });
   const bytes = await readFile(zipPath);
   return { zipPath, sha256: createHash('sha256').update(bytes).digest('hex') };
 }
 
-/** The assembler's discipline at stub scale: manifest rows hash the real stub bytes. */
-async function writeHashedManifest(
+/**
+ * The canonical stub resource inventory — the files every synthetic
+ * resource tree carries and every self-consistent manifest inventories
+ * (the build manifest itself never inventories itself, like the real
+ * assembler). One home, shared by the ZIP builder and the battery
+ * tests' direct-tree legs (review round 2 on #373: the manifest writer
+ * was built twice).
+ */
+export const STUB_RESOURCE_INVENTORY: readonly string[] = Object.freeze([
+  'node/bin/node',
+  'astroix-runtime/control-plane/child.js',
+  'astroix-runtime/package.json',
+]);
+
+/**
+ * The assembler's discipline at stub scale: manifest rows hash the REAL
+ * stub bytes — self-consistent, like the real build manifest. The one
+ * shared writer (imported by the battery tests too).
+ */
+export async function writeHashedManifest(
   resourcesRoot: string,
   nodeVersion: string,
   inventoried: readonly string[],

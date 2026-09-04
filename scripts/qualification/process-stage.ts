@@ -237,7 +237,10 @@ export async function launchTerminateAndAudit(
     // exited by itself between settle and the quit attempt: clean only at code 0
     outcome = 'exited-before-termination';
   } else if (input.quitMode === 'apple-event') {
-    const sent = await appleEventQuit(input.bundleId, 20_000);
+    // One knob governs the whole quit path: the event DELIVERY and the
+    // exit WAIT are each bounded by quitTimeoutMs (a per-phase bound,
+    // never a second silent constant beside it — review round 2 on #373)
+    const sent = await appleEventQuit(input.bundleId, input.quitTimeoutMs);
     steps.push({
       step: 'apple-event-quit',
       detail: sent.ok ? 'quit event delivered' : `quit surface unavailable (${sent.error})`,
