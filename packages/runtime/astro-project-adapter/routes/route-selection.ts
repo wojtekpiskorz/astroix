@@ -45,10 +45,20 @@ import { isProjectPageRoute } from './routes-payload';
  * filesystem guess (the adapter never guesses a route from the
  * filesystem; routes exist because the certified seam said so).
  *
- * Static literals carrying percent-encoded forms (`%3F` for a literal
- * `?`) are a known fail-closed edge: the seam compares DECODED
- * segments, so such a route simply never matches — never a heuristic
- * parse of drifted output.
+ * Decoding is the one DELIBERATE divergence from the certified pair,
+ * disclosed in full: astro@7.2.10's `matchRequest` decodes the WHOLE
+ * pathname (`validateAndDecodePathname` with an iterative `decodeURI`
+ * fallback — reserved encodings `%2F`/`%3F`/`%23` and multi-level
+ * forms stay intact), and `pattern.js` additionally maps static
+ * content `%5B`/`%5D` to literal brackets. This seam decodes each
+ * segment strictly (single-level `decodeURIComponent`), so static
+ * content carrying reserved encodings — or `%5B`/`%5D`-named route
+ * files — FAILS CLOSED: unresolvable where Astro would match. The
+ * divergent class is unreachable from the canonical corpus (no such
+ * route exists there to match, which is also why the certification
+ * leg's live-pattern oracle cannot witness it); the seam's fail-closed
+ * answer for the degenerate percent-encoded shapes is pinned there
+ * instead — never a heuristic parse of drifted output.
  */
 
 /** One resolved route selection — the matched project page route's identity and the styles request's component. */
@@ -104,7 +114,9 @@ export function matchRouteSelection(
  * `null` when the shape is not a pathname the canvas could observe:
  * not `/`-rooted, an empty inner segment, or a segment that does not
  * decode (the wire layer refuses these first; this is the seam's own
- * fail-closed re-validation, defense in depth).
+ * fail-closed re-validation, defense in depth). Each segment decodes
+ * STRICTLY — single-level `decodeURIComponent` — the module doc's
+ * disclosed delta from Astro's whole-pathname iterative `decodeURI`.
  */
 function pathnameSegments(route: string): readonly string[] | null {
   if (!route.startsWith('/') || route.includes('\\') || route.includes('//')) return null;

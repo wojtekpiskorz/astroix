@@ -337,7 +337,22 @@ it('certifies the route-selection resolution against Astro’s own patterns over
 
     // Well-formed pathnames no route serves resolve to NOTHING — and the
     // oracle agrees (no live pattern tests true).
-    const unresolvable = ['/no/such/route'];
+    const unresolvable = [
+      '/no/such/route',
+      // The degenerate percent-encoded STATIC case (review round 1): a
+      // reserved encoding inside a static-named segment position. Astro
+      // decodes the whole pathname (decodeURI keeps `%2F`), this seam
+      // decodes each segment strictly — for THIS corpus both refuse it
+      // (no pattern carries a percent-literal static part), so the pin
+      // is the seam's fail-closed answer witnessed against the live
+      // oracle. The DIVERGENT subclass — static content that itself
+      // carries `%2F`/`%3F`/`%23`, or `%5B`/`%5D`-named route files,
+      // where Astro matches and the seam refuses — is unreachable from
+      // the canonical corpus (no such route exists to match), so the
+      // oracle cannot witness it; the seam's fail-closed answer there
+      // is the disclosed module-doc edge, never a heuristic parse.
+      '/blog%2Fhello-builder',
+    ];
     for (const route of unresolvable) {
       expect(
         oraclePass.result.some((data) => data.pattern.test(route)),
