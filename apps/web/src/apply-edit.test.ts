@@ -114,10 +114,14 @@ async function makeExecutor(input?: {
   readonly runInspect?: ProjectRun['inspect'];
   /** Pre-seeds the retained write executor — the outcome-mapping legs' scripted child. */
   readonly writeExecutor?: WriteExecutorHandle;
+  /** The per-edit outcome await's bound — the lifecycle legs' tight deadline (#391). */
+  readonly editOutcomeDeadlineMs?: number;
 }): Promise<{
   execute(envelope: RequestEnvelope): Promise<ResponseEnvelope | PublicError>;
   table: GrantTable;
   root: string;
+  /** The retained-executor table — the eviction legs' observation point. */
+  writeExecutors: Map<string, WriteExecutorHandle>;
 }> {
   const { root, table } = await makeProject();
   const seat: SessionSeat = {
@@ -162,6 +166,9 @@ async function makeExecutor(input?: {
         : new Map([[pairKey(SESSION), input.writeExecutor]]),
     privateStateDirectory: join(root, '..', 'private-state'),
     editRevisions: new Map<string, number>(),
+    ...(input?.editOutcomeDeadlineMs === undefined
+      ? {}
+      : { editOutcomeDeadlineMs: input.editOutcomeDeadlineMs }),
     pendingDevPorts: [],
     freePort: async () => 4311,
     candidates: {
@@ -173,7 +180,12 @@ async function makeExecutor(input?: {
     ...inertInputs(),
   };
   await mkdir(inputs.privateStateDirectory, { recursive: true });
-  return { execute: createExecutor(inputs).execute, table, root };
+  return {
+    execute: createExecutor(inputs).execute,
+    table,
+    root,
+    writeExecutors: inputs.writeExecutors,
+  };
 }
 
 /** One apply-edit request envelope over a wire plan. */
@@ -462,5 +474,112 @@ describe('the grant-bound content write composition', () => {
     expect(await readFile(join(harness.root, contract.file), 'utf8')).toBe(
       contract.baseline.contents,
     );
+  }, 30_000);
+
+  it('bounds a hung executor at the deadline — the uncertainty answer, the child disposed and evicted (#391)', async () => {
+    // The hung child: alive, holding the dispatch, never answering —
+    // the shape that used to hang the HTTP response past every bound
+    let kills = 0;
+    const hung: WriteExecutorHandle = {
+      ready: Promise.resolve(),
+      execute: () => new Promise(() => {}),
+      stop: async () => {},
+      kill: async () => {
+        kills += 1;
+      },
+      exited: new Promise(() => {}),
+    };
+    const harness = await makeExecutor({ writeExecutor: hung, editOutcomeDeadlineMs: 25 });
+    const contract = editFixture('content-frontmatter-write.json');
+    const grant = await issueGrant(harness.table, contract.file, contract.baseline.hash);
+    const started = Date.now();
+    const outcome = await harness.execute(
+      editEnvelope({ operation: 'replace-contents', grant, contents: contract.written.contents }),
+    );
+    // The bounded failure tail: the response settles at the bound, not
+    // at the child's terminality — and the timeout maps through the
+    // bounded-drain vocabulary's failure fold, the same closed
+    // catch-all the `unknown` outcome gets (the client's post-commit
+    // uncertainty state, never a guess)
+    expect(Date.now() - started).toBeLessThan(5000);
+    expect(outcome).toEqual({
+      code: 'internal-error',
+      message: 'the request could not be completed',
+      retryable: false,
+    });
+    // The hung child is disposed: killed once (the D5 force path —
+    // unsettled work resolves `unknown`, exactly the uncertainty the
+    // response reported) and evicted from the retained table, so the
+    // next accepted edit respawns instead of inheriting the wedge
+    expect(kills).toBe(1);
+    expect(harness.writeExecutors.has(pairKey(SESSION))).toBe(false);
+    // Nothing landed: the plan never reached a live executor world
+    expect(await readFile(join(harness.root, contract.file), 'utf8')).toBe(
+      contract.baseline.contents,
+    );
+  }, 30_000);
+
+  it('evicts a crashed executor and lazily respawns on the next write — no session-wide fail-closed (#391)', async () => {
+    // The scripted child mimics the real handle's own exit discipline:
+    // the dispatch hangs until the crash, and the crash resolves the
+    // unsettled op `unknown` while `exited` settles — the composition's
+    // eviction observes the exit, the next write forks a REAL child
+    const pending: Array<(outcome: Awaited<ReturnType<WriteExecutorHandle['execute']>>) => void> =
+      [];
+    let crash: () => void = () => {};
+    const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(
+      (resolve) => {
+        crash = () => resolve({ code: 76, signal: null });
+      },
+    );
+    const scripted: WriteExecutorHandle = {
+      ready: Promise.resolve(),
+      execute: () => new Promise((resolve) => pending.push(resolve)),
+      stop: async () => {},
+      kill: async () => {},
+      exited,
+    };
+    const harness = await makeExecutor({ writeExecutor: scripted });
+    const contract = editFixture('content-frontmatter-write.json');
+    const grant = await issueGrant(harness.table, contract.file, contract.baseline.hash);
+
+    const first = harness.execute(
+      editEnvelope({ operation: 'replace-contents', grant, contents: contract.written.contents }),
+    );
+    // The planning boundary reads the WORLD (the revision contract's
+    // proof against the disk) before the dispatch — a macrotask — so
+    // the leg spins until the dispatch is actually in the child
+    while (pending.length === 0) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    crash();
+    for (const resolve of pending.splice(0)) resolve({ type: 'unknown' });
+    // The crashed write answers the honest uncertainty: no bytes were
+    // proven landed by that response
+    expect(await first).toEqual({
+      code: 'internal-error',
+      message: 'the request could not be completed',
+      retryable: false,
+    });
+    // The observed exit evicted the dead handle — the fail-closed
+    // session wedge is gone
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(harness.writeExecutors.has(pairKey(SESSION))).toBe(false);
+
+    // The next write lazily respawns: a REAL executor child forks,
+    // takes the lease the crash released, and lands the contract bytes
+    const second = await harness.execute(
+      editEnvelope({ operation: 'replace-contents', grant, contents: contract.written.contents }),
+    );
+    expect(second).toEqual({
+      protocolVersion: 1,
+      requestId: 'req-1',
+      session: SESSION,
+      result: {
+        kind: 'edit',
+        result: { revision: 1, nextGrant: expect.objectContaining({ kind: 'content' }) },
+      },
+    });
+    expect(await readFile(join(harness.root, contract.file), 'utf8')).toBe(contract.after.contents);
   }, 30_000);
 });

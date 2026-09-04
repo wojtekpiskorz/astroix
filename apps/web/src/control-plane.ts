@@ -66,6 +66,7 @@ import {
   type HostAdoptionSeam,
   type SeatStore,
   type SessionSeat,
+  stopOwnedRuns,
 } from './executor.ts';
 import { neverSpawnedRun } from './never-spawned.ts';
 
@@ -479,8 +480,12 @@ export async function createControlPlaneComposition(
         : { webContentsId: seat.document.webContentsId, capability: seat.editorCapability };
     },
     close: async () => {
-      const seat = seatStore.active();
-      if (seat !== null) await seat.run.stop().catch(() => {});
+      // Every run the composition owns stops and is AWAITED (#365's
+      // addendum, #391): the seated session's plus every staged
+      // candidate's — close previously awaited only the seated run,
+      // leaving an unseated candidate's managed dev server running
+      // past teardown as an orphaned child.
+      await stopOwnedRuns(seatStore.active(), candidates);
       // Every forked write executor (#253, J3) stops with the plane —
       // the edit-writer lease releases only through the exit, and an
       // orphaned holder would block the next boot's executor.
