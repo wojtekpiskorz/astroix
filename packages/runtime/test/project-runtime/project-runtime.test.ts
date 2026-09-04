@@ -156,6 +156,18 @@ async function rejectionOf(promise: Promise<unknown>): Promise<unknown> {
   );
 }
 
+/** One refused-origin assertion, single-homed (advisory r1): boot, fail, launch-failed, no facts. */
+async function expectRefusedOrigin(what: string, launchError: unknown): Promise<void> {
+  const control = controllableLaunch();
+  const runtime = createProjectRuntime({ launchPlane: control.launchPlane });
+  const run = runtime.start({ projectRoot: HOSTILE_ROOT, devServerPort: HOSTILE_PORT });
+
+  control.failWith(launchError);
+  const error = await bootErrorOf(run.ready);
+  expect(error.code, what).toBe('launch-failed');
+  expect(error.certification, what).toBeUndefined();
+}
+
 describe('start hands back the handle immediately', () => {
   it('returns the five-member run synchronously, before anything settles, and passes the identity through', async () => {
     const control = controllableLaunch();
@@ -471,20 +483,186 @@ describe('the certification boot code — the ADR-0005 origin admitted shape-gat
     ];
 
     for (const origin of hostileOrigins) {
+      await expectRefusedOrigin(origin.what, origin.error);
+    }
+  });
+
+  it('the pair facts are pinned semver-ish at the admission — every shape npm manifests emit is admitted (#415)', async () => {
+    // The real-fact evidence: the certified pair and the drift stubs are
+    // plain `MAJOR.MINOR.PATCH` (proven above through the REAL launch);
+    // these are the remaining semver allowances a real installed manifest
+    // can carry — prerelease, build, both, dot-separated identifiers,
+    // zeros — each admitted through the adapter's own origin.
+    const admittedPairs: ReadonlyArray<{ readonly astro: string; readonly vite: string }> = [
+      { astro: '7.3.0-beta.1', vite: '8.3.0' },
+      { astro: '7.3.0+build.20260904', vite: '8.3.0' },
+      { astro: '7.3.0-rc.1+build.2', vite: '8.3.0' },
+      { astro: '1.0.0-alpha.beta.1', vite: '1.0.0-x.7.z.92' },
+      { astro: '0.0.0', vite: '10.20.30' },
+    ];
+    for (const detected of admittedPairs) {
       const control = controllableLaunch();
       const runtime = createProjectRuntime({ launchPlane: control.launchPlane });
       const run = runtime.start({ projectRoot: HOSTILE_ROOT, devServerPort: HOSTILE_PORT });
 
-      control.failWith(origin.error);
+      control.failWith(uncertifiedPairError(detected));
       const error = await bootErrorOf(run.ready);
-      expect(error.code, origin.what).toBe('launch-failed');
-      expect(
-        error.certification,
-        `${origin.what} must not carry certification facts`,
-      ).toBeUndefined();
-      expect(error.message).toBe(
-        'the project plane could not be launched for the requested project',
-      );
+      expect(error.code, `the pair ${detected.astro} + ${detected.vite}`).toBe('uncertified-pair');
+      expect(error.certification).toEqual(expectedFacts(detected));
+    }
+  });
+
+  it('the letter-adjacent class never rides a fact: every non-version pair string refuses the admission honestly (#415)', async () => {
+    // The #352 ruling's facts pole: version facts are format-tight, so a
+    // tag-adjacent string (`node@lts/express` — the #414 reviewer's class,
+    // which escapes the pattern pole composed), a path, a range, a bare
+    // tag, an empty or overlong string, or a non-string is a shape drift
+    // — the admission classifies the origin `launch-failed` and carries
+    // no certification facts, never a silent pass.
+    const uncertifiedOrigin = (details: Record<string, unknown>): Error =>
+      Object.assign(new Error('drifted origin'), { code: 'uncertified-pair', details });
+    const wellFormedPair = { astro: '7.2.10', vite: '8.2.2' };
+    const shapeDrifts: ReadonlyArray<{ what: string; details: Record<string, unknown> }> = [
+      {
+        what: 'a tag-adjacent version (`node@lts/express` composed, the #414 reviewer class)',
+        details: {
+          detected: { astro: 'lts/express', vite: '8.3.0' },
+          certified: [wellFormedPair],
+          rejectedContract: 'contract',
+        },
+      },
+      {
+        what: 'the composed tag-adjacent form itself as a fact string',
+        details: {
+          detected: { astro: 'node@lts/express', vite: '8.3.0' },
+          certified: [wellFormedPair],
+          rejectedContract: 'contract',
+        },
+      },
+      {
+        what: 'a version-tail fragment path (`astro@24/bin/node` composed)',
+        details: {
+          detected: { astro: '24/bin/node', vite: '8.3.0' },
+          certified: [wellFormedPair],
+          rejectedContract: 'contract',
+        },
+      },
+      {
+        what: 'a digit-prefixed absolute path version',
+        details: {
+          detected: { astro: '7.3.0/Users/secret', vite: '8.3.0' },
+          certified: [wellFormedPair],
+          rejectedContract: 'contract',
+        },
+      },
+      {
+        what: 'an absolute path version (the disclosure belt, held behind the pin)',
+        details: {
+          detected: { astro: '/Users/secret/astro', vite: '8.3.0' },
+          certified: [wellFormedPair],
+          rejectedContract: 'contract',
+        },
+      },
+      {
+        what: 'a home-relative path version',
+        details: {
+          detected: { astro: '~/dev/project', vite: '8.3.0' },
+          certified: [wellFormedPair],
+          rejectedContract: 'contract',
+        },
+      },
+      {
+        what: 'a file-protocol version',
+        details: {
+          detected: { astro: 'file:../local/astro', vite: '8.3.0' },
+          certified: [wellFormedPair],
+          rejectedContract: 'contract',
+        },
+      },
+      {
+        what: 'a drifted `v`-prefixed version',
+        details: {
+          detected: { astro: 'v7.3.0', vite: '8.3.0' },
+          certified: [wellFormedPair],
+          rejectedContract: 'contract',
+        },
+      },
+      {
+        what: 'a leading-zero version (strict semver refuses)',
+        details: {
+          detected: { astro: '7.02.10', vite: '8.3.0' },
+          certified: [wellFormedPair],
+          rejectedContract: 'contract',
+        },
+      },
+      {
+        what: 'a range expression in a version field',
+        details: {
+          detected: { astro: '^7.2.10', vite: '8.3.0' },
+          certified: [wellFormedPair],
+          rejectedContract: 'contract',
+        },
+      },
+      {
+        what: 'a wildcard version',
+        details: {
+          detected: { astro: '*', vite: '8.3.0' },
+          certified: [wellFormedPair],
+          rejectedContract: 'contract',
+        },
+      },
+      {
+        what: 'a bare dist-tag version',
+        details: {
+          detected: { astro: 'latest', vite: '8.3.0' },
+          certified: [wellFormedPair],
+          rejectedContract: 'contract',
+        },
+      },
+      {
+        what: 'a two-component version',
+        details: {
+          detected: { astro: '7.3', vite: '8.3.0' },
+          certified: [wellFormedPair],
+          rejectedContract: 'contract',
+        },
+      },
+      {
+        what: 'an empty version',
+        details: {
+          detected: { astro: '', vite: '8.3.0' },
+          certified: [wellFormedPair],
+          rejectedContract: 'contract',
+        },
+      },
+      {
+        what: 'an overlong version (grammar-valid, over the fact ceiling)',
+        details: {
+          detected: { astro: `7.2.${'1'.repeat(200)}`, vite: '8.3.0' },
+          certified: [wellFormedPair],
+          rejectedContract: 'contract',
+        },
+      },
+      {
+        what: 'a non-string version',
+        details: {
+          detected: { astro: 72010, vite: '8.3.0' },
+          certified: [wellFormedPair],
+          rejectedContract: 'contract',
+        },
+      },
+      {
+        what: 'a tag-adjacent version inside the certified list (the pin covers every fact)',
+        details: {
+          detected: { astro: '7.3.0', vite: '8.3.0' },
+          certified: [{ astro: 'lts/express', vite: '8.2.2' }],
+          rejectedContract: 'contract',
+        },
+      },
+    ];
+
+    for (const drift of shapeDrifts) {
+      await expectRefusedOrigin(drift.what, uncertifiedOrigin(drift.details));
     }
   });
 

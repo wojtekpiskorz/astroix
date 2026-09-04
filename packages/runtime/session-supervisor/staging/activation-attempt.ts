@@ -194,15 +194,23 @@ function readinessFailureOf(error: unknown): SessionFailure {
  * The certification failure's message: the fixed template, enriched with
  * the detected pair, the certified pairs, and the rejected contract. The
  * enrichment is bounded by the protocol's own laws, applied twice: every
- * fact string is validated STANDING ALONE (the facade admission's law,
- * re-held here — a disclosure-shaped version string that would hide once
- * embedded after `astro@` in the composed text is still caught at the
- * belt), and the composed text must validate as a public sanitized text
- * and fit the lifecycle byte budget the session snapshot rides in.
- * Anything that fails either keeps the bare template: the category is
- * the fact, the enrichment is dropped, never truncated into a guess.
- * The pair rendering is the adapter's own `formatPair` — one template,
- * shared with the origin's diagnostic, never re-stated here.
+ * fact string is validated STANDING ALONE (the #351 belt — a
+ * disclosure-shaped version string that would hide once embedded after
+ * `astro@` in the composed text is still caught here), and the composed
+ * text must validate as a public sanitized text and fit the lifecycle
+ * byte budget the session snapshot rides in. Anything that fails either
+ * keeps the bare template: the category is the fact, the enrichment is
+ * dropped, never truncated into a guess. The pair rendering is the
+ * adapter's own `formatPair` — one template, shared with the origin's
+ * diagnostic, never re-stated here.
+ *
+ * The both-poles coherence (#352 ruling): this belt composes over
+ * ADMITTED facts — the facade's admission pins the version facts to
+ * their semver-ish shape at the source (#415), so a tag-adjacent string
+ * (`node@lts/express`) never reaches composition in production; the
+ * belt's own laws (standalone disclosure-freedom, sanitized composition,
+ * byte budget) are the composition side and stay shape-agnostic on
+ * purpose — the poles are layered, belt-and-braces.
  */
 function certificationMessageOf(facts: CertificationFacts | undefined): string {
   const bare = FAILURE_MESSAGES.certification;
