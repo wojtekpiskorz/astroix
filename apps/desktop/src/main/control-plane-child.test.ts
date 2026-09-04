@@ -8,7 +8,10 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   activateRequest,
   bootedReport,
+  listProjectsRequest,
   parseDesktopChildReport,
+  projectsResultReport,
+  type RegisteredProjectsResult,
   registerRootRequest,
   type TransitionOutcome,
   transitionResultReport,
@@ -24,7 +27,10 @@ import {
  * production registry — forked as raw node with the dev register (the
  * #230/#240 idiom), driven from this test process playing Electron main.
  * The native-grant validation runs the real registry; the booted report
- * carries the composition's origin port; delegated transitions answer
+ * carries the composition's origin port; the boot-time listing (#367)
+ * reads the SAME registry from a second child over the same registry
+ * directory — the persisted record survives the first child, exactly
+ * like the app's second launch; delegated transitions answer
  * the settled vocabulary through the REAL executor (an unknown project
  * is the executor's not-found path — `transition-failed`, never the
  * retired H1 refusal); closing the channel fences and exits the child
@@ -44,12 +50,16 @@ const scratchDirs: string[] = [];
 const children: ChildProcess[] = [];
 
 let shared: ChildRun;
+let sharedConfig: Record<string, unknown>;
 let grantedDir: string;
+/** The project key the shared child's first registration minted — the persisted record the second-launch leg lists. */
+let registeredKey: string;
 
 beforeAll(async () => {
   grantedDir = await mkdtemp(join(tmpdir(), 'astroix-grant-'));
   scratchDirs.push(grantedDir);
-  shared = spawnChild(await freshConfig());
+  sharedConfig = await freshConfig();
+  shared = spawnChild(sharedConfig);
   await shared.booted;
 }, CHILD_TIMEOUT);
 
@@ -158,7 +168,52 @@ describe('the control-plane child (process lane)', () => {
         availability: 'available',
         projectKey: expect.any(String),
       });
+      registeredKey = reply.result.summary?.projectKey as string;
       expect(JSON.stringify(reply)).not.toContain(grantedDir);
+    },
+    CHILD_TIMEOUT,
+  );
+
+  it(
+    "lists the persisted records at boot — the second launch reads the first launch's registry (#367)",
+    async () => {
+      // A SECOND child over the SAME registry directory (a fresh private
+      // state — kernel leases are per-boot): the registry outlived the
+      // first child, exactly like the app's second launch. The listing
+      // must answer the record the first child registered (order-shared
+      // with the registration leg above, the lane's one-shared-child
+      // discipline).
+      const root = await mkdtemp(join(tmpdir(), 'astroix-desktop-child-'));
+      scratchDirs.push(root);
+      const second = spawnChild({
+        privateStateDirectory: join(root, 'private-state'),
+        registryDirectory: sharedConfig.registryDirectory,
+        clientDist: join(root, 'client-dist'),
+        declareCurrentRuntimePin: true,
+      });
+      await second.booted;
+      second.child.send(listProjectsRequest(1));
+      const reply = await second.nextReport<{
+        kind: string;
+        requestId: number;
+        result: RegisteredProjectsResult;
+      }>((report) => isPrivateReport(report) && (report as { requestId?: number }).requestId === 1);
+      expect(reply.kind).toBe('projects-result');
+      if (reply.result.ok !== true) throw new Error('the listing must answer ok');
+      expect(reply.result.summaries).toEqual([
+        { projectKey: registeredKey, displayName: expect.any(String), availability: 'available' },
+      ]);
+      // the wire shape the child produced must be exactly what the main
+      // side's parser lifts — a builder round-trip, not a type check
+      expect(parseDesktopChildReport(projectsResultReport(1, reply.result))).toMatchObject({
+        kind: 'projects-result',
+        requestId: 1,
+      });
+      // no filesystem root ever crossed the listing
+      expect(JSON.stringify(reply)).not.toContain(grantedDir);
+      const exited = exitOf(second.child);
+      second.child.disconnect();
+      await exited; // the D3 disconnect contract reaps the second child cleanly
     },
     CHILD_TIMEOUT,
   );

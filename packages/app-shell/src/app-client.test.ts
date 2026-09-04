@@ -2,6 +2,7 @@ import type {
   ProjectSummary,
   SessionRef,
   SseEventEnvelope,
+  WritePlan,
 } from '@wojciechpiskorz/astroix-protocol';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { type AppClientError, collectPages, createAppClient } from './app-client.ts';
@@ -225,10 +226,94 @@ describe('session currency and SessionRef carriage', () => {
     expect(client.currentSession).toBeNull();
   });
 
+  it('marks exactly the protocol table’s mutations — deactivate carries the wire marker, inspect does not (#334)', async () => {
+    const captured = stubFetch(async (request) => {
+      const { command, requestId } = JSON.parse(request.body) as {
+        command: { kind: string };
+        requestId: string;
+      };
+      if (command.kind === 'deactivate') {
+        return jsonResponse(
+          successBody(
+            { kind: 'deactivation', target: { session: SESSION, projectKey: KEY }, snapshot: {} },
+            requestId,
+            SESSION,
+          ),
+        );
+      }
+      return jsonResponse(
+        successBody(
+          { kind: 'inspection', result: { kind: 'project', revision: 1, payload: { base: '/' } } },
+          requestId,
+          SESSION,
+        ),
+      );
+    });
+    const client = createAppClient({ clientCapability: CAPABILITY, origin: ORIGIN });
+    client.adoptSession(SESSION);
+    await client.deactivate();
+    await client.forSession(SESSION).inspect({ kind: 'project' });
+    // The wire marker rides exactly the protocol's COMMAND_MUTATION
+    // table — the same truth the server's route matrix derives from.
+    const deactivateHeaders = (captured[0] as CapturedRequest).init.headers as Record<
+      string,
+      string
+    >;
+    const inspectHeaders = (captured[1] as CapturedRequest).init.headers as Record<string, string>;
+    expect(deactivateHeaders['X-Astroix-Request']).toBe('1');
+    expect(inspectHeaders['X-Astroix-Request']).toBeUndefined();
+  });
+
   it('the session client’s query keys are generation-scoped by construction', () => {
     const client = createAppClient({ clientCapability: CAPABILITY, origin: ORIGIN });
     const key = client.forSession(NEXT).queryKey('styles', 'index');
     expect(key).toEqual(['astroix', NEXT.runtimeEpoch, NEXT.generation, 'styles', 'index']);
+  });
+
+  it('forSession(ref).applyEdit carries the exact pair, the mutation marker, and the echoed plan verbatim (J3)', async () => {
+    const captured = stubFetch(async () =>
+      jsonResponse(
+        successBody(
+          {
+            kind: 'edit',
+            result: {
+              revision: 1,
+              nextGrant: {
+                token: 'c'.repeat(48),
+                kind: 'content',
+                operations: ['replace-contents'],
+                displayPath: 'src/content/blog/hello-builder.md',
+                baseline: { type: 'sha256', sha256: 'e'.repeat(64) },
+              },
+            },
+          },
+          'req-1',
+          SESSION,
+        ),
+      ),
+    );
+    const client = createAppClient({ clientCapability: CAPABILITY, origin: ORIGIN });
+    const plan: WritePlan = {
+      operation: 'replace-contents',
+      grant: {
+        token: 'b'.repeat(48),
+        kind: 'content',
+        operations: ['replace-contents'],
+        displayPath: 'src/content/blog/hello-builder.md',
+        baseline: { type: 'sha256', sha256: 'f'.repeat(64) },
+      },
+      contents: '---\ntitle: Written\n---\n\nbody\n',
+    };
+    const result = await client.forSession(SESSION).applyEdit(plan);
+    const request = captured[0] as CapturedRequest;
+    const envelope = JSON.parse(request.body);
+    // the write law: the plan rides the apply-edit command VERBATIM (the
+    // grant echo is untouched), under the mutation marker F2 demands
+    expect(envelope.command).toEqual({ kind: 'apply-edit', plan });
+    expect(envelope.session).toEqual(SESSION);
+    expect((request.init.headers as Record<string, string>)['X-Astroix-Request']).toBe('1');
+    expect(result.revision).toBe(1);
+    expect(result.nextGrant?.token).toBe('c'.repeat(48));
   });
 });
 

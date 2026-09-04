@@ -20,6 +20,7 @@ import {
   createDocumentAuthority,
   type DocumentAuthority,
 } from '@wojciechpiskorz/astroix-runtime/client-authority';
+import type { WriteExecutorHandle } from '@wojciechpiskorz/astroix-runtime/edit-authority/executor';
 import type { GrantTable } from '@wojciechpiskorz/astroix-runtime/edit-authority/grants';
 import {
   type OriginLease,
@@ -295,6 +296,10 @@ async function bootHarness(
   const grants = createHostCapabilityGrants();
   const hub = createSseHub();
   const grantTables = new Map<string, GrantTable>();
+  const writeExecutors = new Map<string, WriteExecutorHandle>();
+  const editRevisions = new Map<string, number>();
+  const privateStateDirectory = join(scratch, 'private-state');
+  await mkdir(privateStateDirectory);
   const candidates = createCandidateStore();
   const seats = new Map<string, SessionSeat>();
   const pendingDevPorts: number[] = [];
@@ -383,6 +388,9 @@ async function bootHarness(
     sessionClients,
     httpBindings,
     grantTables,
+    writeExecutors,
+    privateStateDirectory,
+    editRevisions,
     pendingDevPorts,
     freePort: async () => {
       const port = 4100 + pendingDevPorts.length + runs.length;

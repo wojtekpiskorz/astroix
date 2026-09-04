@@ -19,9 +19,30 @@ export const PROJECT_APP_URL = /^http:\/\/(?!launcher)[a-z2-7]+\.localhost:\d+\/
 /** The launcher document URL. */
 export const LAUNCHER_APP_URL = /launcher\.localhost:\d+\/__astroix\/app\//;
 
-/** The batteries' restore tail: deactivate, land on the launcher, pin the idle state for whatever follows. */
+/**
+ * The batteries' load-shaped expect budget (#392 review round 1): one
+ * convergence point (a poll, a text settle, a generation read) on a
+ * loaded CI runner. Single-homed here so a future resize is one line,
+ * not another fleet-wide literal diff.
+ */
+export const LOAD_BUDGET_MS = 30_000;
+
+/**
+ * The batteries' boot-shaped budget (#392 review round 1): a plane boot —
+ * child spawn, dev-server readiness, first document — under CI load.
+ */
+export const BOOT_BUDGET_MS = 120_000;
+
+/**
+ * The batteries' restore tail: deactivate, land on the launcher, pin the
+ * idle state for whatever follows. Sized for a loaded CI runner (#392):
+ * the deactivation's commit-side work (fence drain, revocation, launcher
+ * readiness) and the launcher's first render are load-shaped waits.
+ */
 export async function restoreIdle(page: Page): Promise<void> {
   await page.getByTestId('deactivate').click();
-  await page.waitForURL(LAUNCHER_APP_URL);
-  await expect(page.getByTestId('session-label')).toHaveText('idle');
+  await page.waitForURL(LAUNCHER_APP_URL, { timeout: BOOT_BUDGET_MS });
+  await expect(page.getByTestId('session-label')).toHaveText('idle', {
+    timeout: LOAD_BUDGET_MS,
+  });
 }

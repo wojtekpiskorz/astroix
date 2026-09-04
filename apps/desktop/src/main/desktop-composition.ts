@@ -18,6 +18,8 @@ import {
   documentCapabilityReport,
   observeDocumentRequest,
   parseDesktopChildRequest,
+  projectsResultReport,
+  type RegisteredProjectsResult,
   type RegisterResult,
   registerResultReport,
   replaceTopLevelRequest,
@@ -35,6 +37,9 @@ import {
  *
  * - `register-root` stays the registry validation it always was (the
  *   composition's own registry store);
+ * - `list-projects` answers the registry's own persisted summaries
+ *   (#367) — the boot-time listing the second launch's activation menu
+ *   is built from;
  * - `activate`/`deactivate` drive the SAME executor the browser
  *   command set drives (synthesized protocol-v1 envelopes — the
  *   settled transition protocol, never a second driver), mapped onto
@@ -158,6 +163,9 @@ export async function bootDesktopComposition(
       case 'register-root':
         channel.send(registerResultReport(request.requestId, await registerRoot(request.root)));
         return;
+      case 'list-projects':
+        channel.send(projectsResultReport(request.requestId, await listRegisteredProjects()));
+        return;
       case 'activate':
       case 'deactivate':
         channel.send(transitionResultReport(request.requestId, await driveTransition(request)));
@@ -242,6 +250,28 @@ export async function bootDesktopComposition(
         displayName: result.record.displayName,
         availability: 'available',
       },
+    };
+  }
+
+  /**
+   * The boot-time listing (#367): the registry's own summaries read —
+   * the persisted records the second launch activates. A quarantined
+   * registry answers its own empty visible set (the registry's
+   * semantics, forwarded, never re-derived); the one refusal is the
+   * closed fence, mapped onto the channel's unavailable truth.
+   */
+  async function listRegisteredProjects(): Promise<RegisteredProjectsResult> {
+    const summaries = await composition.registry.projectSummaries();
+    if (!summaries.ok) {
+      return { ok: false, code: 'control-plane-unavailable' };
+    }
+    return {
+      ok: true,
+      summaries: summaries.summaries.map((summary) => ({
+        projectKey: summary.projectKey,
+        displayName: summary.displayName,
+        availability: summary.availability,
+      })),
     };
   }
 }

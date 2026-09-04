@@ -25,7 +25,7 @@ export async function readProjectCssSources(projectRoot: string): Promise<Source
       SEAM_JOIN_SOURCE_WALK,
       'a readable project source directory',
       'an absent or unreadable project source directory',
-      { cause },
+      cause,
     );
   }
   const sources: SourceFile[] = [];

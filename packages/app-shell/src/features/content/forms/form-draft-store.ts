@@ -107,7 +107,13 @@ interface FormDraftState {
   reportUnknownPart(part: Record<string, unknown>): void;
   /** The raw pane's text report — parsed values on success, the diagnostic on failure. */
   reportRawText(text: string): void;
-  /** Clears the draft entirely (tests; the future reset registry — the #372 carry). */
+  /**
+   * Clears the draft entirely. The write lane's landing (J3) clears
+   * through this after a committed write — the cleared (null) binding
+   * re-arms the form slice's open effect, which re-opens the draft on
+   * the served truth. Also tests; the future reset registry — the
+   * #372 carry.
+   */
   clear(): void;
 }
 

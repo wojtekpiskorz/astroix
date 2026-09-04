@@ -181,6 +181,13 @@ export default defineConfig({
         'packages/core/**',
         'packages/protocol/**',
         'packages/runtime/registry/**',
+        // The single-homed fixed-file store discipline (#329, additive):
+        // the shared temp+fsync+rename+dir-fsync discipline the registry
+        // and tombstone stores both project over — deterministic
+        // real-filesystem unit coverage through both consumers'
+        // temp-directory legs, same covered-tier decision as the
+        // registry seam it extracted from (#221).
+        'packages/runtime/persistence/**',
         'packages/runtime/kernel-lease/**',
         'packages/runtime/private-boot/**',
         'packages/runtime/astro-project-adapter/*.ts',

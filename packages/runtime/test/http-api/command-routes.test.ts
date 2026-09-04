@@ -1,3 +1,4 @@
+import { COMMAND_MUTATION } from '@wojciechpiskorz/astroix-protocol';
 import { describe, expect, it } from 'vitest';
 import {
   COMMAND_ENDPOINT_PATHS,
@@ -90,6 +91,12 @@ describe('command permission matrix (ADR-0006 §5)', () => {
     expect(COMMAND_ROUTES.activate.mutation).toBe(true);
     expect(COMMAND_ROUTES.deactivate.mutation).toBe(true);
     expect(COMMAND_ROUTES['apply-edit'].mutation).toBe(true);
+  });
+
+  it("derives every cell's mutation bit from the protocol table — the server and the client's marker set are one truth (#334)", () => {
+    for (const [kind, mutation] of Object.entries(COMMAND_MUTATION)) {
+      expect(COMMAND_ROUTES[kind as keyof typeof COMMAND_ROUTES].mutation, kind).toBe(mutation);
+    }
   });
 
   it('pins every cell: lifecycle is launcher+editor; inspection is project editor+diagnostic; editing is project editor alone', () => {

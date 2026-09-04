@@ -1,6 +1,8 @@
 import {
   API_V1_PREFIX,
+  COMMAND_MUTATION,
   type Command,
+  type EditResult,
   type ErrorEnvelope,
   EVENTS_PATH,
   errorEnvelopeSchema,
@@ -16,6 +18,7 @@ import {
   type SessionRef,
   type SessionSnapshot,
   sseEventEnvelopeSchema,
+  type WritePlan,
 } from '@wojciechpiskorz/astroix-protocol';
 import {
   createSessionClient,
@@ -220,13 +223,11 @@ export function createAppClient(options: AppClientOptions): AppClient {
   async function request(command: Command, session?: SessionRef, signal?: AbortSignal) {
     const requestId = `req-${nextRequestId}`;
     nextRequestId += 1;
-    // The mutation-marker set mirrors the server's COMMAND_ROUTES truth
-    // (`activate`, `deactivate`, `apply-edit` — F2 #234): an unmarked
-    // mutation envelope is refused at admission, so this fork must never
-    // drift behind it. The single home is a protocol-side table and is
-    // fenced to #334 — this set matches the server until that lands.
-    const mutation =
-      command.kind === 'activate' || command.kind === 'deactivate' || command.kind === 'apply-edit';
+    // The mutation classification is the protocol's one table
+    // (`COMMAND_MUTATION`, #334) — the server's route matrix derives
+    // from the same table, so an unmarked mutation envelope cannot
+    // exist because this fork drifted behind it.
+    const mutation = COMMAND_MUTATION[command.kind];
     let response: Response;
     try {
       response = await fetch(endpoint, {
@@ -280,6 +281,23 @@ export function createAppClient(options: AppClientOptions): AppClient {
   ): Promise<InspectionResult> {
     const envelope = await request({ kind: 'inspect', request: inspection }, ref, signal);
     if (envelope.result.kind !== 'inspection') throw AppClientError.transport();
+    return envelope.result.result;
+  }
+
+  /**
+   * The session-scoped `apply-edit` dispatch behind
+   * `SessionClient.applyEdit` (J3, #253): the wire plan — grant echo,
+   * operation, payload — travels verbatim under the mutation marker the
+   * request path already sets for this kind. The grant is opaque here by
+   * construction: this client never reads it, only carries it.
+   */
+  async function applyEdit(
+    ref: SessionRef,
+    plan: WritePlan,
+    signal?: AbortSignal,
+  ): Promise<EditResult> {
+    const envelope = await request({ kind: 'apply-edit', plan }, ref, signal);
+    if (envelope.result.kind !== 'edit') throw AppClientError.transport();
     return envelope.result.result;
   }
 
@@ -456,6 +474,7 @@ export function createAppClient(options: AppClientOptions): AppClient {
     forSession: (ref) =>
       createSessionClient(ref, {
         inspect,
+        applyEdit,
         openSessionEvents: (sessionRef, handlers, streamOptions) => {
           const url = `${eventsUrl}?runtimeEpoch=${encodeURIComponent(sessionRef.runtimeEpoch)}&generation=${sessionRef.generation}`;
           return openStream(

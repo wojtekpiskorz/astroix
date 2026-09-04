@@ -14,7 +14,10 @@ import type { SessionRef } from '@wojciechpiskorz/astroix-protocol';
  * messages).
  *
  * What the child serves: the native directory grant's registry
- * validation (`register-root`) and the settled-transition delegation
+ * validation (`register-root`), the boot-time listing of the registry's
+ * persisted records (`list-projects`, #367 — the registry outlives the
+ * child, so the app's second launch asks and activates previously
+ * registered projects), and the settled-transition delegation
  * (`activate`/`deactivate`) — since H7 (#362) driven by the REAL
  * control-plane composition booted inside the child (the shared seam
  * the web host consumes), so transitions answer the settled outcome
@@ -22,10 +25,10 @@ import type { SessionRef } from '@wojciechpiskorz/astroix-protocol';
  * composition's host observations ride the same channel: the child
  * asks, main observes the authoritative window and answers, and the
  * live document capability flows back for the H4 injection. Every
- * report is sanitized: the register result carries the wire-safe
- * project summary shape — key, display name, availability — never a
- * filesystem root, even though the receiving end is trusted main
- * (minimum disclosure, ADR-0006 §1).
+ * report is sanitized: the register result and the listing carry the
+ * wire-safe project summary shape — key, display name, availability —
+ * never a filesystem root, even though the receiving end is trusted
+ * main (minimum disclosure, ADR-0006 §1).
  */
 
 const CHANNEL_TAG = 'astroix.desktop-private-channel';
@@ -56,6 +59,25 @@ export type RegisterRefusalCode = (typeof REGISTER_REFUSAL_CODES)[number];
 export type RegisterResult =
   | { readonly ok: true; readonly summary: GrantedProjectSummary }
   | { readonly ok: false; readonly code: RegisterRefusalCode };
+
+/**
+ * Why a listing was refused — sanitized vocabulary only, derived from
+ * the one `as const` array (the drift-proof idiom). The listing has no
+ * domain refusals: a quarantined registry answers its own empty visible
+ * record set, so the one code is the unavailable-composition truth.
+ */
+const LISTING_REFUSAL_CODES = ['control-plane-unavailable'] as const;
+
+export type ListingRefusalCode = (typeof LISTING_REFUSAL_CODES)[number];
+
+/**
+ * One list-projects reply (#367): the sanitized summaries of every
+ * persisted registry record the child read at listing time — the boot
+ * surface the second launch's activation menu is built from.
+ */
+export type RegisteredProjectsResult =
+  | { readonly ok: true; readonly summaries: readonly GrantedProjectSummary[] }
+  | { readonly ok: false; readonly code: ListingRefusalCode };
 
 /**
  * Why a delegated session transition was refused — sanitized vocabulary
@@ -115,6 +137,11 @@ export type DesktopChildRequest =
     }
   | {
       readonly astroix: typeof CHANNEL_TAG;
+      readonly kind: 'list-projects';
+      readonly requestId: number;
+    }
+  | {
+      readonly astroix: typeof CHANNEL_TAG;
       readonly kind: 'activate';
       readonly requestId: number;
       readonly projectKey: string;
@@ -154,6 +181,12 @@ export type DesktopChildReport =
       readonly kind: 'register-result';
       readonly requestId: number;
       readonly result: RegisterResult;
+    }
+  | {
+      readonly astroix: typeof CHANNEL_TAG;
+      readonly kind: 'projects-result';
+      readonly requestId: number;
+      readonly result: RegisteredProjectsResult;
     }
   | {
       readonly astroix: typeof CHANNEL_TAG;
@@ -221,24 +254,44 @@ function isSessionRef(value: unknown): value is SessionRef {
   );
 }
 
+/** The sanitized summary's own shape — the register result's single entry and every listing entry. */
+function isGrantedProjectSummary(value: unknown): value is GrantedProjectSummary {
+  if (typeof value !== 'object' || value === null) return false;
+  const s = value as Record<string, unknown>;
+  return (
+    typeof s.projectKey === 'string' &&
+    s.projectKey.length > 0 &&
+    typeof s.displayName === 'string' &&
+    (s.availability === 'available' || s.availability === 'unavailable')
+  );
+}
+
 function isRegisterResult(value: unknown): value is RegisterResult {
   if (typeof value !== 'object' || value === null) return false;
   const record = value as Record<string, unknown>;
   if (record.ok === true) {
-    const summary = record.summary;
-    if (typeof summary !== 'object' || summary === null) return false;
-    const s = summary as Record<string, unknown>;
-    return (
-      typeof s.projectKey === 'string' &&
-      s.projectKey.length > 0 &&
-      typeof s.displayName === 'string' &&
-      (s.availability === 'available' || s.availability === 'unavailable')
-    );
+    return isGrantedProjectSummary(record.summary);
   }
   if (record.ok === false) {
     return (
       typeof record.code === 'string' &&
       (REGISTER_REFUSAL_CODES as readonly string[]).includes(record.code)
+    );
+  }
+  return false;
+}
+
+/** Every listing entry must be the sanitized summary shape — one drifted entry drops the whole reply. */
+function isRegisteredProjectsResult(value: unknown): value is RegisteredProjectsResult {
+  if (typeof value !== 'object' || value === null) return false;
+  const record = value as Record<string, unknown>;
+  if (record.ok === true) {
+    return Array.isArray(record.summaries) && record.summaries.every(isGrantedProjectSummary);
+  }
+  if (record.ok === false) {
+    return (
+      typeof record.code === 'string' &&
+      (LISTING_REFUSAL_CODES as readonly string[]).includes(record.code)
     );
   }
   return false;
@@ -308,6 +361,7 @@ export function parseDesktopChildRequest(message: unknown): DesktopChildRequest 
   if (!isOwnMessage(message)) return null;
   return (
     liftRegisterRootRequest(message) ??
+    liftListProjectsRequest(message) ??
     liftActivateRequest(message) ??
     liftDeactivateRequest(message) ??
     liftHostObservationResultRequest(message) ??
@@ -329,6 +383,17 @@ function liftRegisterRootRequest(message: Record<string, unknown>): DesktopChild
       requestId: message.requestId,
       root: message.root,
     };
+  }
+  return null;
+}
+
+function liftListProjectsRequest(message: Record<string, unknown>): DesktopChildRequest | null {
+  if (
+    message.kind === 'list-projects' &&
+    isRequestId(message.requestId) &&
+    hasExactKeys(message, ['astroix', 'kind', 'requestId'])
+  ) {
+    return { astroix: CHANNEL_TAG, kind: 'list-projects', requestId: message.requestId };
   }
   return null;
 }
@@ -436,6 +501,7 @@ export function parseDesktopChildReport(message: unknown): DesktopChildReport | 
     liftBootedReport(message) ??
     liftSessionStateReport(message) ??
     liftRegisterResultReport(message) ??
+    liftProjectsResultReport(message) ??
     liftTransitionResultReport(message) ??
     liftObserveDocumentReport(message) ??
     liftReplaceTopLevelReport(message) ??
@@ -554,6 +620,23 @@ function liftRegisterResultReport(message: Record<string, unknown>): DesktopChil
   return null;
 }
 
+function liftProjectsResultReport(message: Record<string, unknown>): DesktopChildReport | null {
+  if (
+    message.kind === 'projects-result' &&
+    isRequestId(message.requestId) &&
+    hasExactKeys(message, ['astroix', 'kind', 'requestId', 'result']) &&
+    isRegisteredProjectsResult(message.result)
+  ) {
+    return {
+      astroix: CHANNEL_TAG,
+      kind: 'projects-result',
+      requestId: message.requestId,
+      result: message.result,
+    };
+  }
+  return null;
+}
+
 function liftTransitionResultReport(message: Record<string, unknown>): DesktopChildReport | null {
   if (
     message.kind === 'transition-result' &&
@@ -574,6 +657,11 @@ function liftTransitionResultReport(message: Record<string, unknown>): DesktopCh
 /** Builds a register-root request (main side). */
 export function registerRootRequest(requestId: number, root: string): DesktopChildRequest {
   return { astroix: CHANNEL_TAG, kind: 'register-root', requestId, root };
+}
+
+/** Builds a list-projects request (main side) — the boot-time registry listing ask (#367). */
+export function listProjectsRequest(requestId: number): DesktopChildRequest {
+  return { astroix: CHANNEL_TAG, kind: 'list-projects', requestId };
 }
 
 /** Builds an activate request (main side). */
@@ -647,6 +735,14 @@ export function registerResultReport(
   result: RegisterResult,
 ): DesktopChildReport {
   return { astroix: CHANNEL_TAG, kind: 'register-result', requestId, result };
+}
+
+/** Builds a projects-result report (child side) — the listing's sanitized answer. */
+export function projectsResultReport(
+  requestId: number,
+  result: RegisteredProjectsResult,
+): DesktopChildReport {
+  return { astroix: CHANNEL_TAG, kind: 'projects-result', requestId, result };
 }
 
 /** Builds a transition outcome (child side). */

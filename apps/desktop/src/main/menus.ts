@@ -24,11 +24,13 @@ import type { GrantedProjectSummary } from './child-protocol.ts';
  * adapter maps them to real menu items and reports clicks back through
  * {@link dispatchMenuAction}.
  *
- * The activation surface (#362): one `Activate <project>` item per
- * REGISTERED project (the native registration flow's sanitized
- * summaries), enabled while no session is active — the activation is an
- * idle-state transition (ADR-0006 §4); a switch happens after a
- * deactivate, never through a concurrently-enabled activate item.
+ * The activation surface (#362, #367): one `Activate <project>` item per
+ * REGISTERED project — the native registration flow's sanitized
+ * summaries AND the boot-time registry listing's (the registry persists
+ * across launches; the second launch's menu is built from it), enabled
+ * while no session is active — the activation is an idle-state
+ * transition (ADR-0006 §4); a switch happens after a deactivate, never
+ * through a concurrently-enabled activate item.
  */
 
 /** The closed native action vocabulary — the seam carries these ids, nothing else. */

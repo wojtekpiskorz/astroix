@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
+  COMMAND_MUTATION,
   COMMAND_SESSION_PRESENCE,
+  type CommandKind,
   commandSchema,
   RESULT_SESSION_PRESENCE,
   resultSchema,
@@ -116,6 +118,21 @@ describe('session presence rules', () => {
       inspection: 'required',
       edit: 'required',
     });
+  });
+
+  it('classifies exactly the lifecycle and edit commands as mutations (ADR-0006 §7; the table every consumer derives from)', () => {
+    expect(COMMAND_MUTATION).toEqual({
+      'list-projects': false,
+      activate: true,
+      deactivate: true,
+      inspect: false,
+      'apply-edit': true,
+    });
+    // The table is closed over the command union — a new kind that
+    // forgets its classification fails this exhaustiveness pin at type
+    // check time, not at a consumer's admission refusal.
+    const kinds = Object.keys(COMMAND_SESSION_PRESENCE) as CommandKind[];
+    expect([...kinds].sort()).toEqual([...Object.keys(COMMAND_MUTATION)].sort());
   });
 
   it('reports exactly the required/forbidden violations and null otherwise', () => {

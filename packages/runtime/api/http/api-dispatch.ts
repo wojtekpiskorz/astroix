@@ -3,45 +3,37 @@ import {
   type CommandKind,
   MUTATION_HEADER_NAME,
   MUTATION_HEADER_VALUE,
-  type ProjectKey,
   type PublicError,
   type RequestEnvelope,
   type ResponseEnvelope,
   type SessionRef,
 } from '@wojciechpiskorz/astroix-protocol';
 import {
-  LAUNCHER_HOSTNAME,
-  launcherOrigin,
-  parseHostHeader,
-  projectHostname,
-  projectOrigin,
-} from '../../origin/virtual-hosts.ts';
-import {
   type ApiResponseDraft,
   errorResponse,
   publicErrorResponse,
   successResponse,
 } from '../errors/error-responses.ts';
+import {
+  type AdmissionAuthority,
+  admitHeadersAndHost,
+  checkReadTransportMarkers,
+  type HeadersHostAdmission,
+  malformedTargetRefusal,
+} from './admission-spine.ts';
 import { CLIENT_CAPABILITY_HEADER, type ClientBinding } from './client-bindings.ts';
 import {
   COMMAND_ROUTES,
   type CommandRouteRule,
   classifyApiRoute,
   rolePermitted,
-  type VirtualHostClass,
 } from './command-routes.ts';
 import {
   type EnvelopeRejection,
   responseWithinCap,
   validateRequestEnvelope,
 } from './envelope-validation.ts';
-import { type CapabilityHost, capabilityFromCookieHeader } from './host-capability.ts';
-import {
-  contentTypeIsJson,
-  duplicatedSecurityHeader,
-  type HeaderEvidence,
-  headerEvidence,
-} from './security-headers.ts';
+import { contentTypeIsJson } from './security-headers.ts';
 
 /**
  * The pure dispatch core of HTTP API v1 (#234, F2; ADR-0006 §7's
@@ -73,32 +65,20 @@ export interface ApiRequestEvidence {
   readonly body: string;
 }
 
-/** The session-state view the dispatch validates freshness against — injected, owned by the composition. */
-export interface SessionStateView {
-  readonly sessionRef: SessionRef | null;
-  readonly projectKey: ProjectKey | null;
-}
+// The session-state view (and the spine authority slice behind it) live
+// in the shared admission spine since #321 — re-exported here so the
+// dispatch's consumers name them from its surface unchanged.
+export type { AdmissionAuthority, SessionStateView } from './admission-spine.ts';
 
 /** The authority the dispatch consults — every seam is injected; none is opened here. */
-export interface ApiDispatchAuthority {
-  readonly expectedPort: number;
-  readonly sessionState: () => SessionStateView;
-  readonly verifyHostCapability: (presented: string | undefined, host: CapabilityHost) => boolean;
+export interface ApiDispatchAuthority extends AdmissionAuthority {
   readonly resolveClientBinding: (presented: string | undefined) => ClientBinding | null;
   /** The admitted command's executor — later lanes compose the real supervisors behind it. */
   readonly executeCommand: (envelope: RequestEnvelope) => Promise<ResponseEnvelope | PublicError>;
 }
 
-/** The transport-level admission outcome: the resolved host context, or a refusal draft. */
-type TransportAdmission =
-  | {
-      readonly kind: 'admitted';
-      readonly hostClass: VirtualHostClass;
-      readonly capabilityHost: CapabilityHost;
-      readonly expectedOrigin: string;
-      readonly evidence: HeaderEvidence;
-    }
-  | { readonly kind: 'refused'; readonly response: ApiResponseDraft };
+/** The transport-level admission outcome: the shared spine's headers-and-host stage, or its refusal draft. */
+type TransportAdmission = HeadersHostAdmission;
 
 /** The envelope-level admission outcome: the parsed, fully authorized envelope, or a refusal draft. */
 type EnvelopeAdmission =
@@ -117,22 +97,14 @@ export async function dispatchApiRequest(
   return execute(envelope.envelope, authority);
 }
 
-/** Stage one — everything decidable before the body: route, method, header duplicates, Host, capability, content type. */
+/** Stage one — everything decidable before the body: route, method, then the spine's headers/Host/capability, then the content type. */
 function admitTransport(
   evidence: ApiRequestEvidence,
   authority: ApiDispatchAuthority,
 ): TransportAdmission {
   const route = classifyApiRoute(evidence.url);
   if (route.kind === 'rejected-target') {
-    return refused({
-      code: 'malformed-request',
-      details: {
-        malformed:
-          route.reason === 'ambiguous-reserved-encoding'
-            ? { issue: 'ambiguous-encoding' }
-            : { issue: 'invalid-shape' },
-      },
-    });
+    return malformedTargetRefusal(route.reason);
   }
   if (route.kind !== 'command-endpoint' || evidence.method !== 'POST') {
     // The command endpoint is the one known route and it is POST-only:
@@ -140,63 +112,12 @@ function admitTransport(
     // unknown route — there is no method vocabulary to enumerate.
     return refused({ code: 'resource-not-found', details: { notFound: { what: 'route' } } });
   }
-  const headers = headerEvidence(evidence.rawHeaders);
-  const duplicated = duplicatedSecurityHeader(headers);
-  if (duplicated !== null) {
-    // The duplicated NAME is the finding; the values never enter the response.
+  const headersHost = admitHeadersAndHost(evidence.rawHeaders, authority);
+  if (headersHost.kind === 'refused') return headersHost;
+  if (!contentTypeIsJson(headersHost.evidence.values['content-type'])) {
     return refused({ code: 'malformed-request' });
   }
-  const host = resolveHostClass(headers, authority);
-  if (host === null) {
-    return refused({ code: 'resource-not-found', details: { notFound: { what: 'route' } } });
-  }
-  const capability = capabilityFromCookieHeader(headers.values.cookie);
-  if (
-    capability.kind !== 'present' ||
-    !authority.verifyHostCapability(capability.value, host.capabilityHost)
-  ) {
-    return refused({ code: 'unauthorized' });
-  }
-  if (!contentTypeIsJson(headers.values['content-type'])) {
-    return refused({ code: 'malformed-request' });
-  }
-  return { kind: 'admitted', ...host, evidence: headers };
-}
-
-/**
- * Re-derives the host class from the header evidence — defense in depth
- * behind the listener's own routing. The evidence is the SAME
- * `headerEvidence` view every other header decision reads (the single
- * entry point for header values the dispatch trusts): `values.host` is
- * the last pair's value and `counts.host` the pair count, exactly the
- * semantics the Host parse demands.
- */
-function resolveHostClass(
-  headers: HeaderEvidence,
-  authority: ApiDispatchAuthority,
-): { hostClass: VirtualHostClass; capabilityHost: CapabilityHost; expectedOrigin: string } | null {
-  const parsed = parseHostHeader({
-    value: headers.values.host,
-    count: headers.counts.host ?? 0,
-    expectedPort: authority.expectedPort,
-  });
-  if (parsed.kind === 'rejected') return null;
-  if (parsed.hostname === LAUNCHER_HOSTNAME) {
-    return {
-      hostClass: 'launcher',
-      capabilityHost: { host: 'launcher' },
-      expectedOrigin: launcherOrigin(authority.expectedPort),
-    };
-  }
-  const { projectKey } = authority.sessionState();
-  if (projectKey !== null && parsed.hostname === projectHostname(projectKey)) {
-    return {
-      hostClass: 'project',
-      capabilityHost: { host: 'project', projectKey },
-      expectedOrigin: projectOrigin(projectKey, authority.expectedPort),
-    };
-  }
-  return null;
+  return headersHost;
 }
 
 /** Stage two — the bounded envelope parse plus the command-dependent authorization matrix. */
@@ -224,8 +145,8 @@ async function admitEnvelope(
   );
   if (
     binding === null ||
-    binding.host !== transport.hostClass ||
-    !rolePermitted(command, transport.hostClass, binding.role)
+    binding.host !== transport.host.hostClass ||
+    !rolePermitted(command, transport.host.hostClass, binding.role)
   ) {
     return refused({ code: 'unauthorized' });
   }
@@ -236,32 +157,29 @@ async function admitEnvelope(
 
 /**
  * The mutation/read transport laws (ADR-0006 §7): mutations carry the
- * exact marker and the exact Origin; reads carry same-origin Fetch
- * Metadata — and a read's Origin, when present, must agree (a same-origin
- * browser request always sends the matching value; a disagreement is
- * forged evidence). A read carrying the mutation marker is
- * contradictory transport evidence and malformed.
+ * exact marker and the exact Origin — this surface's own half, stated
+ * here; reads carry the spine's reads law (`checkReadTransportMarkers`,
+ * the same law the events stream admits under — same-origin Fetch
+ * Metadata, no mutation marker, an Origin that agrees when present).
  */
 function checkTransportMarkers(
   rule: CommandRouteRule,
   transport: Extract<TransportAdmission, { kind: 'admitted' }>,
 ): EnvelopeAdmission | null {
   const values = transport.evidence.values;
-  const marker = values[MUTATION_HEADER_NAME.toLowerCase()];
-  const origin = values.origin;
   if (rule.mutation) {
+    const marker = values[MUTATION_HEADER_NAME.toLowerCase()];
+    const origin = values.origin;
     if (marker !== MUTATION_HEADER_VALUE) return refused({ code: 'unauthorized' });
-    if (origin === undefined || origin.toLowerCase() !== transport.expectedOrigin.toLowerCase()) {
+    if (
+      origin === undefined ||
+      origin.toLowerCase() !== transport.host.expectedOrigin.toLowerCase()
+    ) {
       return refused({ code: 'unauthorized' });
     }
     return null;
   }
-  if (marker !== undefined) return refused({ code: 'malformed-request' });
-  if (values['sec-fetch-site'] !== 'same-origin') return refused({ code: 'unauthorized' });
-  if (origin !== undefined && origin.toLowerCase() !== transport.expectedOrigin.toLowerCase()) {
-    return refused({ code: 'unauthorized' });
-  }
-  return null;
+  return checkReadTransportMarkers(transport.evidence, transport.host.expectedOrigin);
 }
 
 /**

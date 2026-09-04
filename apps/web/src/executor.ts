@@ -1,18 +1,29 @@
+import { createHash } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import type {
+  EditResult,
   ProjectKey,
   PublicError,
   RequestEnvelope,
   ResponseEnvelope,
   SessionRef,
   SseEvent,
+  WritePlan,
 } from '@wojciechpiskorz/astroix-protocol';
 import type { ClientBindings } from '@wojciechpiskorz/astroix-runtime/api/http';
 import { pagedProjectList } from '@wojciechpiskorz/astroix-runtime/api/pagination';
 import type { DocumentAuthority } from '@wojciechpiskorz/astroix-runtime/client-authority';
 import {
+  spawnWriteExecutor,
+  type WriteExecutorHandle,
+} from '@wojciechpiskorz/astroix-runtime/edit-authority/executor';
+import {
   createGrantTable,
   type GrantTable,
 } from '@wojciechpiskorz/astroix-runtime/edit-authority/grants';
+import { planEdit } from '@wojciechpiskorz/astroix-runtime/edit-authority/planning';
+import { currentRuntimePin } from '@wojciechpiskorz/astroix-runtime/kernel-lease';
 import type { OriginLease, OriginListener } from '@wojciechpiskorz/astroix-runtime/origin';
 import type {
   ProjectRun,
@@ -68,8 +79,25 @@ import { neverSpawnedRun } from './never-spawned.ts';
  *
  * One family is deliberately NOT composed here, and answers the
  * closed catch-all rather than a lie:
- * - `apply-edit`: the edit-authority executor composition is the edit
- *   verticals' lane; no browser flow can issue one yet.
+ * - none today: `apply-edit` IS composed (#253, J3 — the Content
+ *   vertical's write lane is its first browser flow), over the landed
+ *   D4 grant table + planning boundary and the real D5 write-executor
+ *   child (lazy-forked at the session's first edit, lifetime-held
+ *   edit-writer lease over the injected private state directory),
+ *   submitted through the seat's F5 edit fence — the serialized
+ *   server-side queue every transition drains.
+ *
+ * The content inspection is the write loop's discovery vehicle (#253):
+ * for the active session the composition enriches each file-backed
+ * entry with the server-issued opaque grant (D4 `issue` over the
+ * project's OWN served path + revision — ADR-0006 §6 "the server
+ * issues grants from its own Content discovery") and the file's raw
+ * text (the byte-exact serializer's anchor, the frozen raw-truth
+ * contract's continuation). Editor-safety is by construction in this
+ * host: the only project-host document ever bound is the editor's (the
+ * document surface binds exactly one client — the diagnostic-role
+ * documents the desktop host adds will re-derive enrichment from their
+ * binding's role there, where the role is in scope).
  *
  * The `styles` family IS composed (#370): its protocol envelope carries
  * the observed canvas pathname, and the executor resolves it to the
@@ -141,6 +169,21 @@ export interface ExecutorInputs {
   readonly sessionClients: SessionClients;
   readonly httpBindings: ClientBindings;
   readonly grantTables: Map<string, GrantTable>;
+  /**
+   * The write executors this composition forked, by pair key (#253, J3):
+   * lazy — the session's executor is forked at its FIRST accepted edit
+   * (nothing before then holds the app-global edit-writer lease), and
+   * stopped at the seat's teardown (the revocation pass's eviction).
+   */
+  readonly writeExecutors: Map<string, WriteExecutorHandle>;
+  /**
+   * The private state directory the write executor's kernel lease files
+   * live under (the web host's isolation story: an injected directory
+   * beside the isolated registry, never a production `userData` root).
+   */
+  readonly privateStateDirectory: string;
+  /** The edit results' monotonic per-session revision counters (by pair key). */
+  readonly editRevisions: Map<string, number>;
   readonly pendingDevPorts: number[];
   readonly freePort: () => Promise<number>;
   readonly hub: SseHub;
@@ -184,6 +227,9 @@ export interface CommandExecutor {
   execute(envelope: RequestEnvelope): Promise<ResponseEnvelope | PublicError>;
 }
 
+/** The write executor's terminal outcome, through the handle's own inference (the D5 closed surface). */
+type ExecutorOutcome = Awaited<ReturnType<WriteExecutorHandle['execute']>>;
+
 /** Builds the command executor. */
 export function createExecutor(inputs: ExecutorInputs): CommandExecutor {
   return { execute: (envelope) => dispatch(envelope, inputs) };
@@ -204,7 +250,7 @@ async function dispatch(
     case 'inspect':
       return inspect(envelope, inputs);
     case 'apply-edit':
-      return notComposed();
+      return applyEdit(envelope, inputs);
   }
 }
 
@@ -579,15 +625,393 @@ async function inspect(
     // and the component it carries (the no-disclosure law, enforced here
     // rather than trusted).
     if (result.kind === 'route-selection') return notComposed();
+    // The write loop's discovery enrichment (#253, J3): the content
+    // family's payload gains, per file-backed entry, the server-issued
+    // opaque grant at the inspected revision plus the file's raw text.
+    // Additive by construction (the frozen inspection contracts pin the
+    // fields they froze; the served payload already carries revision
+    // and issues beyond them); best-effort per entry — an enrichment
+    // that cannot prove the disk still matches the inspected revision
+    // serves the entry UN-enriched (read-only truth), never a stale
+    // grant.
+    const payload =
+      request.kind === 'content' && result.kind === 'content'
+        ? await enrichContentPayload(seat, inputs, result.payload)
+        : result.payload;
     return {
       protocolVersion: 1,
       requestId: envelope.requestId,
       session: seat.ref,
-      result: { kind: 'inspection', result },
+      result: { kind: 'inspection', result: { ...result, payload } },
     };
   } catch {
     return notComposed();
   }
+}
+
+/**
+ * Enriches one content-inspection payload with the write facts (#253):
+ * per file-backed entry whose bytes still hash to the inspected
+ * revision, the D4 grant issued from THOSE facts (the project's own
+ * served path and revision — never a client-selected resource) and the
+ * raw text itself. Issuance supersedes the session's previous grant for
+ * the same target (the table's own law), so the freshest inspection a
+ * document binds always carries the live grant; a stale one dies as
+ * `unknown-grant` at the next write, exactly the closed-table refusal.
+ */
+async function enrichContentPayload(
+  seat: SessionSeat,
+  inputs: ExecutorInputs,
+  payload: unknown,
+): Promise<unknown> {
+  const table = inputs.grantTables.get(pairKey(seat.ref));
+  const record = payload as { collections?: unknown };
+  if (table === undefined || !Array.isArray(record?.collections)) return payload;
+  const root = inputs.registry
+    .snapshot()
+    .records.find((entry) => entry.projectKey === seat.projectKey)?.canonicalRoot;
+  if (root === undefined) return payload;
+  const collections = await Promise.all(
+    record.collections.map(async (collection: unknown) => {
+      const named = collection as { entries?: unknown };
+      if (!Array.isArray(named?.entries)) return collection;
+      const entries = await Promise.all(
+        named.entries.map((entry: unknown) => enrichEntry(entry, root, table, seat.ref)),
+      );
+      return { ...(collection as object), entries };
+    }),
+  );
+  return { ...(payload as object), collections };
+}
+
+/** Enriches one entry record — verbatim when the facts cannot be proven. */
+async function enrichEntry(
+  entry: unknown,
+  root: string,
+  table: GrantTable,
+  session: SessionRef,
+): Promise<unknown> {
+  const record = entry as { filePath?: unknown; revision?: unknown };
+  if (typeof record?.filePath !== 'string' || typeof record?.revision !== 'string') return entry;
+  let bytes: Buffer;
+  try {
+    bytes = await readFile(join(root, record.filePath));
+  } catch {
+    return entry;
+  }
+  // The freshness proof: the disk's current bytes ARE the inspected
+  // revision — anything else serves the entry un-enriched.
+  if (sha256Of(bytes) !== record.revision) return entry;
+  const granted = await table.issue(
+    {
+      discovery: 'existing-text',
+      kind: 'content',
+      path: record.filePath,
+      revision: record.revision,
+    },
+    session,
+  );
+  if (!granted.ok) return entry;
+  return { ...(entry as object), grant: granted.grant, raw: bytes.toString('utf8') };
+}
+
+/** SHA-256 hex over bytes — the freshness proof's own oracle. */
+function sha256Of(bytes: Buffer): string {
+  return createHash('sha256').update(bytes).digest('hex');
+}
+
+/**
+ * The grant-bound edit execution (#253, J3; ADR-0006 §6): the wire plan
+ * through the D4 planning boundary (grant table + echo equality + the
+ * world's revision contract), the accepted domain plan through the
+ * seat's F5 fence (the serialized queue every transition drains), onto
+ * the real D5 write-executor child. The outcome mapping is the closed
+ * public vocabulary: conflicts hand back the disk truth's SHA (the
+ * frozen conflict contract's sanitized continuation), grant failures
+ * name their policy category, and the `unknown`/`failed` outcomes stay
+ * the honest catch-all — the client's post-commit uncertainty state is
+ * its convergence, never a guess here.
+ */
+async function applyEdit(
+  envelope: RequestEnvelope,
+  inputs: ExecutorInputs,
+): Promise<ResponseEnvelope | PublicError> {
+  if (envelope.command.kind !== 'apply-edit') throw new Error('dispatch defect');
+  const seat = inputs.seatStore.active();
+  if (seat === null || !samePair(seat.ref, envelope.session)) return staleSession();
+  const table = inputs.grantTables.get(pairKey(seat.ref));
+  if (table === undefined) return notComposed();
+  const wire: WritePlan = envelope.command.plan;
+  const planned = await planEdit(table, { session: seat.ref, plan: wire });
+  if (!planned.ok) {
+    return planFailure(planned).code === 'revision-conflict'
+      ? conflictWithCurrentSha(inputs, seat, wire.grant.displayPath)
+      : planFailure(planned);
+  }
+  const executor = await writeExecutorFor(seat, inputs);
+  if (executor === null) return notComposed();
+  // The raw outcome rides the closure beside the fence's classified one
+  // — the drain's vocabulary is the transition's; the edit result needs
+  // the committed revision the classification folds away.
+  const captured: { outcome: ExecutorOutcome | null } = { outcome: null };
+  const submission = seat.fence.submit({
+    key: `edit-${wire.grant.token.slice(0, 12)}`,
+    execute: async () => {
+      captured.outcome = await executor.execute(planned.plan);
+      return captured.outcome;
+    },
+  });
+  if (submission.kind === 'refused') {
+    // Admission closed: a transition is draining this session's edits —
+    // the retryable answer, never a silent drop.
+    return concurrentEditDrain();
+  }
+  await submission.outcome;
+  const outcome: ExecutorOutcome | null = captured.outcome;
+  if (outcome === null) return notComposed();
+  if (outcome.type === 'committed') {
+    // The follow-on grant binds the LANDED bytes' revision (ADR-0006
+    // §6), minted through the same table that authorized the write.
+    const next = await table.issue(
+      {
+        discovery: 'existing-text',
+        kind: 'content',
+        path: wire.grant.displayPath,
+        revision: outcome.revision,
+      },
+      seat.ref,
+    );
+    const result: EditResult = {
+      revision: nextEditRevision(inputs, seat.ref),
+      ...(next.ok ? { nextGrant: next.grant } : {}),
+    };
+    return {
+      protocolVersion: 1,
+      requestId: envelope.requestId,
+      session: seat.ref,
+      result: { kind: 'edit', result },
+    };
+  }
+  if (outcome.type === 'rejected') {
+    return writeRejection(outcome).code === 'revision-conflict'
+      ? conflictWithCurrentSha(inputs, seat, wire.grant.displayPath)
+      : writeRejection(outcome);
+  }
+  // failed | unknown: no bytes were proven landed by this response —
+  // the closed catch-all keeps the client's convergence honest.
+  return notComposed();
+}
+
+/**
+ * The session's write executor — forked lazily at the FIRST accepted
+ * edit and retained for the seat's lifetime. The kernel edit-writer
+ * lease is app-global and lifetime-held (D3/D5): a predecessor must
+ * have exited (the revocation pass stops the old seat's executor
+ * before the new session adopts), and a boot that cannot take the
+ * lease fails the write closed rather than bypassing the authority.
+ */
+async function writeExecutorFor(
+  seat: SessionSeat,
+  inputs: ExecutorInputs,
+): Promise<WriteExecutorHandle | null> {
+  const existing = inputs.writeExecutors.get(pairKey(seat.ref));
+  if (existing !== undefined) return existing;
+  const root = inputs.registry
+    .snapshot()
+    .records.find((entry) => entry.projectKey === seat.projectKey)?.canonicalRoot;
+  if (root === undefined) return null;
+  const handle = spawnWriteExecutor({
+    privateStateDirectory: inputs.privateStateDirectory,
+    canonicalRoot: root,
+    session: seat.ref,
+    qualifiedRuntime: currentRuntimePin(),
+  });
+  inputs.writeExecutors.set(pairKey(seat.ref), handle);
+  try {
+    await handle.ready;
+  } catch {
+    inputs.writeExecutors.delete(pairKey(seat.ref));
+    await handle.kill().catch(() => {});
+    return null;
+  }
+  return handle;
+}
+
+/** Stops a session's forked write executor, if any — the seat teardown's step. */
+export async function stopWriteExecutor(inputs: ExecutorInputs, ref: SessionRef): Promise<void> {
+  const handle = inputs.writeExecutors.get(pairKey(ref));
+  if (handle === undefined) return;
+  inputs.writeExecutors.delete(pairKey(ref));
+  await handle.stop().catch(() => {});
+}
+
+/** The edit result's monotonic per-session revision counter — the composition's own lift. */
+function nextEditRevision(inputs: ExecutorInputs, ref: SessionRef): number {
+  const key = pairKey(ref);
+  const next = (inputs.editRevisions.get(key) ?? 0) + 1;
+  inputs.editRevisions.set(key, next);
+  return next;
+}
+
+/**
+ * The failure classes both rejection mappings fold onto: the constant
+ * grant/malformed/refusal answers, plus the two classes the caller
+ * decorates (the conflict gains the disk-truth SHA; the absent answer
+ * stands alone).
+ */
+type FailureClass = 'conflict' | 'absent';
+
+/** The planning-boundary failure table — one row per closed failure code. */
+const PLAN_FAILURES: Readonly<Record<string, PublicError | FailureClass>> = {
+  'unknown-grant': grantRejected('revoked'),
+  revoked: grantRejected('revoked'),
+  'cross-session': grantRejected('cross-session'),
+  'wrong-kind': grantRejected('kind-mismatch'),
+  'operation-not-allowed': grantRejected('operation-not-allowed'),
+  'hard-linked-target': grantRejected('hard-link'),
+  'outside-root': grantRejected('external-symlink'),
+  'parent-outside-root': grantRejected('external-symlink'),
+  'changed-baseline': 'conflict',
+  'target-exists': 'conflict',
+  'target-absent': 'absent',
+  'parent-absent': 'absent',
+  'not-a-file': 'absent',
+  'parent-not-directory': 'absent',
+  'target-moved': 'absent',
+  'invalid-plan': malformedPlan(),
+  'claim-mismatch': malformedPlan(),
+  // The style planner's range proof: a splice planned against bytes
+  // other than the world's verified contents is incoherent with the
+  // revision contract — the conflict class (the caller hands back the
+  // disk SHA), never the catch-all's post-commit uncertainty.
+  'range-outside-baseline': 'conflict',
+};
+
+/** The executor-rejection table — one row per closed rejection code. */
+const WRITE_REJECTIONS: Readonly<Record<string, PublicError | FailureClass>> = {
+  'cross-session': grantRejected('cross-session'),
+  'wrong-root': grantRejected('external-symlink'),
+  'operation-not-allowed': grantRejected('operation-not-allowed'),
+  'operation-target-mismatch': grantRejected('operation-not-allowed'),
+  'hard-linked-target': grantRejected('hard-link'),
+  'changed-baseline': 'conflict',
+  'target-exists': 'conflict',
+  'target-absent': 'absent',
+  'parent-absent': 'absent',
+  'not-a-file': 'absent',
+  'parent-not-directory': 'absent',
+  'target-moved': 'absent',
+  // Final validation repeats the range proof over the verified bytes —
+  // the same conflict class, with the SHA handback.
+  'range-outside-baseline': 'conflict',
+  // Admission-time, never world-time: the fenced executor never
+  // accepted the work, so nothing landed — the retryable drain answer,
+  // never the catch-all's post-commit uncertainty.
+  fenced: concurrentEditDrain(),
+  'malformed-plan': malformedPlan(),
+};
+
+/** Reads one failure table row — the closed catch-all for unknown codes. */
+function tableAnswer(table: Readonly<Record<string, PublicError | FailureClass>>, code: string) {
+  return table[code] ?? notComposed();
+}
+
+/** Maps one planning-boundary failure onto the closed public vocabulary. */
+function planFailure(failure: { code: string }): PublicError {
+  const answer = tableAnswer(PLAN_FAILURES, failure.code);
+  return typeof answer === 'string' ? classFailure(answer) : answer;
+}
+
+/** Maps one executor rejection onto the closed public vocabulary. */
+function writeRejection(outcome: Extract<ExecutorOutcome, { type: 'rejected' }>): PublicError {
+  const answer = tableAnswer(WRITE_REJECTIONS, outcome.code);
+  return typeof answer === 'string' ? classFailure(answer) : answer;
+}
+
+/** The class-fold: the conflict and the absent refusal, never a branch per code. */
+function classFailure(failureClass: FailureClass): PublicError {
+  return failureClass === 'conflict' ? revisionConflict() : notFoundResource();
+}
+
+/**
+ * The revision-conflict answer with the target's current SHA attached —
+ * the disk-truth handback the client's next attempt serializes against
+ * (the frozen conflict contract's sanitized continuation). Best-effort:
+ * a target that cannot be re-read answers the bare conflict, never a
+ * guess.
+ */
+async function conflictWithCurrentSha(
+  inputs: ExecutorInputs,
+  seat: SessionSeat,
+  displayPath: string,
+): Promise<PublicError> {
+  const root = inputs.registry
+    .snapshot()
+    .records.find((entry) => entry.projectKey === seat.projectKey)?.canonicalRoot;
+  if (root === undefined) return revisionConflict();
+  try {
+    const current = sha256Of(await readFile(join(root, displayPath)));
+    return {
+      code: 'revision-conflict',
+      message: 'the resource no longer matches the expected revision',
+      retryable: false,
+      details: { currentSha256: current },
+    };
+  } catch {
+    return revisionConflict();
+  }
+}
+
+/** The bare revision-conflict answer — sanitized, no handback. */
+function revisionConflict(): PublicError {
+  return {
+    code: 'revision-conflict',
+    message: 'the resource no longer matches the expected revision',
+    retryable: false,
+  };
+}
+
+function grantRejected(
+  reason:
+    | 'revoked'
+    | 'cross-session'
+    | 'kind-mismatch'
+    | 'operation-not-allowed'
+    | 'hard-link'
+    | 'external-symlink',
+): PublicError {
+  return {
+    code: 'grant-rejected',
+    message: 'the presented grant was refused without writing',
+    retryable: false,
+    details: { reason },
+  };
+}
+
+function malformedPlan(): PublicError {
+  return {
+    code: 'malformed-request',
+    message: 'the write plan does not satisfy the protocol contract',
+    retryable: false,
+    details: { issue: 'invalid-shape', pointer: 'command.plan' },
+  };
+}
+
+function notFoundResource(): PublicError {
+  return {
+    code: 'resource-not-found',
+    message: 'the requested resource does not exist',
+    retryable: false,
+    details: { what: 'resource' },
+  };
+}
+
+function concurrentEditDrain(): PublicError {
+  return {
+    code: 'concurrent-activation',
+    message: 'a session transition is draining this session\u2019s edits',
+    retryable: true,
+  };
 }
 
 /**

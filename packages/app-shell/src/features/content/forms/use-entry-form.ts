@@ -65,6 +65,8 @@ export interface EntryFormView {
   readonly intentState: IntentState;
   readonly intent: ContentEditIntent | null;
   readonly baselineRevision: string | null;
+  /** The LIVE inspection's revision for the entry — the write lane's freshness signal (J3). */
+  readonly liveRevision: string | null;
   readonly body: string | null;
   setMode(mode: FormDraftMode): void;
   reportFormValues(values: unknown): void;
@@ -98,6 +100,7 @@ const NO_ENTRY_VIEW: EntryFormView = {
   intentState: 'none',
   intent: null,
   baselineRevision: null,
+  liveRevision: null,
   body: null,
   setMode: () => {},
   reportFormValues: () => {},
@@ -150,6 +153,7 @@ function draftView(
     intentState: derivation === null ? 'none' : intentStateOf(derivation),
     intent: derivation === null ? null : toEditIntent(derivation),
     baselineRevision: baseline?.revision ?? null,
+    liveRevision: truth.revision,
     body: baseline?.body ?? truth.body,
     ...actions,
   };
@@ -181,6 +185,7 @@ function truthView(
     documentIssues: validation.issues.filter((issue) => issue.path === ''),
     inspectedIssues: truth.inspectedIssues,
     baselineRevision: truth.revision,
+    liveRevision: truth.revision,
     body: truth.body,
     ...actions,
   };
@@ -199,9 +204,17 @@ export function useEntryForm(): EntryFormView {
   const content = useContentInspection();
 
   // The open effect: a bound truth for the ACTIVE entry opens the
-  // draft — once per binding (the store's same-binding no-op covers
-  // refetches, so a background invalidation never clobbers a draft;
-  // the stale-baseline diagnostic reports the moved revision instead).
+  // draft — once per binding (the same-binding guard covers refetches,
+  // so a background invalidation never clobbers a draft; the
+  // stale-baseline diagnostic reports the moved revision instead).
+  // The draft's own binding RE-ARMS the effect: the write lane's
+  // landing (J3) clears the committed draft on truth that has already
+  // arrived — no `content.data` change follows that clear (this effect
+  // already skipped over it while the draft was still bound) — so the
+  // cleared binding is the reopen's trigger: the draft re-opens on the
+  // served truth, and the pane stays editable for the next write.
+  // Without the re-arm the cleared pane renders the truth's own view
+  // with no draft behind it — display-correct, edit-dead.
   useEffect(() => {
     if (activeEntry === null || content.data === undefined) return;
     const bound = bindEntryTruth(content.data.payload, activeEntry.collection, activeEntry.entryId);
@@ -212,13 +225,14 @@ export function useEntryForm(): EntryFormView {
       collection: bound.truth.collection,
       entryId: bound.truth.entryId,
     };
+    if (sameDraftBinding(draft.binding, binding)) return;
     openDraft(
       session.ref,
       binding,
       { revision: bound.truth.revision, values: bound.truth.values, body: bound.truth.body },
       bound.truth.fields,
     );
-  }, [activeEntry, content.data, openDraft, session.ref]);
+  }, [activeEntry, content.data, draft.binding, openDraft, session.ref]);
 
   if (activeEntry === null) return NO_ENTRY_VIEW;
 

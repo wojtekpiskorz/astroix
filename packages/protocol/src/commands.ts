@@ -67,6 +67,24 @@ export const COMMAND_SESSION_PRESENCE: Record<CommandKind, SessionPresence> = {
   'apply-edit': 'required',
 };
 
+/**
+ * The mutation classification of commands (ADR-0006 §7 "Mutations
+ * require … / Reads require …"): mutations carry the request marker and
+ * the exact Origin; reads rely on same-origin Fetch Metadata. This
+ * table is the ONE home of that classification — the server derives
+ * its route matrix from it and the AppClient derives its wire marker
+ * from it, so an unmarked mutation envelope can never exist because a
+ * consumer's fork drifted (#334; the `COMMAND_SESSION_PRESENCE`
+ * per-command property-table shape, #220's D1 precedent).
+ */
+export const COMMAND_MUTATION: Record<CommandKind, boolean> = {
+  'list-projects': false,
+  activate: true,
+  deactivate: true,
+  inspect: false,
+  'apply-edit': true,
+};
+
 export const resultSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('project-list'), projects: z.array(projectSummarySchema) }),
   z.strictObject({

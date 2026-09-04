@@ -1,5 +1,5 @@
-import type { AdapterErrorDetails } from '../../astro-project-adapter/adapter-error.ts';
-import { AdapterError } from '../../astro-project-adapter/adapter-error.ts';
+import type { AdapterError } from '../../astro-project-adapter/adapter-error.ts';
+import { seamRejection } from '../../astro-project-adapter/adapter-error.ts';
 import type { ContentInspectionResult } from '../../astro-project-adapter/content/content-result.ts';
 import type { RouteSelectionResult } from '../../astro-project-adapter/routes/route-selection.ts';
 import type { RoutesInspectionResult } from '../../astro-project-adapter/routes/routes-inspection.ts';
@@ -110,16 +110,13 @@ function hanging<T>(
 
 /** The seam-rejection the 'adapter' behavior rejects with (sanitized by the adapter's own guard). */
 export function adapterSeamRejection(): AdapterError {
-  const details: AdapterErrorDetails = {
-    seam: 'vite root export createServer()',
-    seamClass: 'public',
-    expected: 'a function createServer',
-    observed: 'typeof undefined',
-  };
-  return new AdapterError(
-    'seam-rejected',
-    'AstroProjectAdapter seam rejection at vite root export createServer(): expected a function createServer; observed typeof undefined',
-    details,
+  // Born at the single home (#315) so the fake cannot silently drift
+  // from the real construction.
+  return seamRejection(
+    'vite root export createServer()',
+    'public',
+    'a function createServer',
+    'typeof undefined',
   );
 }
 

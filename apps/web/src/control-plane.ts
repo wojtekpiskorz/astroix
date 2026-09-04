@@ -1,4 +1,6 @@
+import { mkdir } from 'node:fs/promises';
 import { createServer } from 'node:http';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { ProjectKey, SessionRef, SessionSnapshot } from '@wojciechpiskorz/astroix-protocol';
 import {
@@ -12,6 +14,7 @@ import {
   createDocumentAuthority,
   type DocumentAuthority,
 } from '@wojciechpiskorz/astroix-runtime/client-authority';
+import type { WriteExecutorHandle } from '@wojciechpiskorz/astroix-runtime/edit-authority/executor';
 import type { GrantTable } from '@wojciechpiskorz/astroix-runtime/edit-authority/grants';
 import {
   createOriginListener,
@@ -198,6 +201,13 @@ export interface ControlPlaneCompositionOptions {
    * web host's stand-in adoption holds.
    */
   readonly hostHandshake?: HostMainFrameHandshake;
+  /**
+   * The write executor's private state directory (#253, J3): the
+   * kernel edit-writer lease files' home. The desktop child passes its
+   * own kernel-leased private directory; the web host defaults to a
+   * sibling of the injected registry directory (isolated with it).
+   */
+  readonly privateStateDirectory?: string;
 }
 
 /** The booted control-plane composition. */
@@ -244,6 +254,10 @@ export async function createControlPlaneComposition(
   });
   const seats = new Map<string, SessionSeat>();
   const grantTables = new Map<string, GrantTable>();
+  /** The sessions' forked write executors (#253, J3) — lazy at the first accepted edit, stopped at teardown. */
+  const writeExecutors = new Map<string, WriteExecutorHandle>();
+  /** The edit results' monotonic per-session revision counters (#253, J3). */
+  const editRevisions = new Map<string, number>();
   const candidates = createCandidateStore();
   /** The dev-server port each activation picked before `begin` — consumed by its `startCandidate`. */
   const pendingDevPorts: number[] = [];
@@ -282,6 +296,19 @@ export async function createControlPlaneComposition(
   const grantEviction = (session: SessionRef): number => {
     const evicted = grantTables.get(pairKey(session))?.revokeSession(session) ?? 0;
     grantTables.delete(pairKey(session));
+    // The session's write executor (#253, J3): the transition drained
+    // its fence before revocation, so its accepted work is terminal —
+    // the graceful stop releases the app-global edit-writer lease the
+    // successor's executor will need. Fire-and-forget with the exit
+    // observed by the handle's own `exited` bookkeeping; the next boot
+    // of an executor over the same private directory fails closed on
+    // lease contention, never writes around a live predecessor.
+    const handle = writeExecutors.get(pairKey(session));
+    if (handle !== undefined) {
+      writeExecutors.delete(pairKey(session));
+      editRevisions.delete(pairKey(session));
+      void handle.stop().catch(() => {});
+    }
     return evicted;
   };
   // The revocation pass drives the RAW tables (F6's settled contract);
@@ -394,6 +421,9 @@ export async function createControlPlaneComposition(
     sessionClients,
     httpBindings,
     grantTables,
+    writeExecutors,
+    privateStateDirectory: await resolvePrivateStateDirectory(options),
+    editRevisions,
     pendingDevPorts,
     freePort,
     hub,
@@ -451,10 +481,33 @@ export async function createControlPlaneComposition(
     close: async () => {
       const seat = seatStore.active();
       if (seat !== null) await seat.run.stop().catch(() => {});
+      // Every forked write executor (#253, J3) stops with the plane —
+      // the edit-writer lease releases only through the exit, and an
+      // orphaned holder would block the next boot's executor.
+      await Promise.all(
+        [...writeExecutors.values()].map((handle) => handle.stop().catch(() => {})),
+      );
+      writeExecutors.clear();
       await listener.close();
       await registry.close();
     },
   };
+}
+
+/**
+ * The write executor's private state directory (#253, J3): an explicit
+ * option when the host owns one (the desktop child's kernel-leased
+ * private directory), else a sibling of the injected registry directory
+ * — the web host's isolation story (never a production `userData`
+ * root), created here so the first lazy fork finds it ready.
+ */
+async function resolvePrivateStateDirectory(
+  options: ControlPlaneCompositionOptions,
+): Promise<string> {
+  if (options.privateStateDirectory !== undefined) return options.privateStateDirectory;
+  const directory = join(dirname(options.registryDirectory), 'private-state');
+  await mkdir(directory, { recursive: true });
+  return directory;
 }
 
 /**
