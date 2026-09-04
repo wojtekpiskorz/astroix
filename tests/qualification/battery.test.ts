@@ -138,13 +138,29 @@ describe('the bundled-Node identity law (#258)', () => {
     expect(outcome.executedVersion).toBe(PACKAGED_NODE_PIN);
   });
 
-  it('cannot be coached by an ambient NODE_OPTIONS preload — the binary speaks for itself', async () => {
+  it('cannot be coached by an ambient NODE_OPTIONS preload — the binary speaks for itself', async (context) => {
     // a REAL node binary (symlinked over the bundled slot — a thin
     // launcher must resolve its own dylibs) with an ambient NODE_OPTIONS
     // preload that would spoof process.version to the pin: the identity
     // exec strips the environment, so the proof reads the binary's TRUE
-    // version (this harness node's, ≠ the pin) and fails closed — never
-    // the spoofed value (review round 1 on #373)
+    // version and fails closed — never the spoofed value (review round 1
+    // on #373)
+    //
+    // The premise needs a host whose TRUE node version differs from the
+    // pin. On a host already running exactly v24.20.0 (CI's setup-node
+    // resolved there), the uncoached binary legitimately reports the
+    // pin, the spoof writes the same value, and the outcome is `ok`
+    // EITHER way — the leg degenerates to the ordinary pin-agreement
+    // leg above and proves nothing here. Skip with the reason, never a
+    // false failure inferred from a vacuous premise (the #339 pattern;
+    // CI red on 40aa416).
+    if (process.version === PACKAGED_NODE_PIN) {
+      console.log(
+        `qualification-evidence: NODE_OPTIONS-coaching leg SKIPPED — this host's node IS the pin (${process.version}); the uncoached proof degenerates to the ordinary pin-agreement leg`,
+      );
+      context.skip();
+      return;
+    }
     const appPath = join(scratch, 'Astroix.app');
     await stubResources(appPath, PACKAGED_NODE_PIN);
     const resourcesRoot = join(appPath, 'Contents', 'Resources');
