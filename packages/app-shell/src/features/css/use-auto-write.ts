@@ -257,29 +257,8 @@ export function useCssAutoWrite(payload: BoundStylesPayload | null): CssAutoWrit
     }
     const settled = classifySettle(outcome);
     if (settled.kind === 'committed') {
-      dispatchEvent({ type: 'committed', seq, revision: settled.revision });
-      const nextGrant: ResourceGrant | null =
-        outcome instanceof Error ? null : (outcome.nextGrant ?? null);
-      // The local derivation: the pure splice oracle's raw plus the
-      // follow-on grant — editing may continue while the refresh
-      // converges; the served facts supersede when they land.
-      if (anchorRaw !== null && nextGrant !== null) {
-        const nextRaw = spliceText(anchorRaw, {
-          start: plan.range.start,
-          end: plan.range.end,
-          replacement: plan.replacement,
-        });
-        useCssAnchorStore.getState().note(sessionRef.current.ref, file, {
-          raw: nextRaw,
-          grant: nextGrant,
-        });
-        holdGrant(sessionRef.current.ref, { token: nextGrant.token });
-      }
-      if (undoEntry !== null) {
-        useCssUndoStore.getState().push(sessionRef.current.ref, undoEntry);
-        pushUndoRecord(sessionRef.current.ref, { token: undoEntry.key });
-      }
-      await refreshAfterSettle(seq, 'committed');
+      const nextGrant = outcome instanceof Error ? null : (outcome.nextGrant ?? null);
+      await continueCommitted(file, plan, anchorRaw, nextGrant, undoEntry, seq, settled.revision);
       return;
     }
     if (settled.kind === 'conflict') {
@@ -299,6 +278,42 @@ export function useCssAutoWrite(payload: BoundStylesPayload | null): CssAutoWrit
     } else {
       await refreshAfterSettle(seq, 'uncertain');
     }
+  }
+
+  /**
+   * One committed settle's continuation: the machine's commit, the
+   * renewed anchor (the pure splice oracle's raw plus the follow-on
+   * grant — editing may continue while the refresh converges, the
+   * served facts superseding when they land), the undo entry, and the
+   * landing-gated refresh.
+   */
+  async function continueCommitted(
+    file: string,
+    plan: SpliceWritePlan,
+    anchorRaw: string | null,
+    nextGrant: ResourceGrant | null,
+    undoEntry: CssUndoEntry | null,
+    seq: number,
+    revision: number,
+  ): Promise<void> {
+    dispatchEvent({ type: 'committed', seq, revision });
+    if (anchorRaw !== null && nextGrant !== null) {
+      const nextRaw = spliceText(anchorRaw, {
+        start: plan.range.start,
+        end: plan.range.end,
+        replacement: plan.replacement,
+      });
+      useCssAnchorStore.getState().note(sessionRef.current.ref, file, {
+        raw: nextRaw,
+        grant: nextGrant,
+      });
+      holdGrant(sessionRef.current.ref, { token: nextGrant.token });
+    }
+    if (undoEntry !== null) {
+      useCssUndoStore.getState().push(sessionRef.current.ref, undoEntry);
+      pushUndoRecord(sessionRef.current.ref, { token: undoEntry.key });
+    }
+    await refreshAfterSettle(seq, 'committed');
   }
 
   /**

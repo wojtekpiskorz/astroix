@@ -3,12 +3,13 @@ import { useAppStore } from '../../state/app-store.ts';
 import type { SelectionDescriptor } from '../../state/selection.ts';
 import { observedRouteOf, useStylesInspection } from './api.ts';
 import { type RecordIdentity, recordIdentityOf, resolveRecord } from './editing/resolve-record.ts';
+import type { BoundStylesPayload } from './inspection/bind-styles.ts';
 import { selectedCanvasElement, subscribeCanvasMutations } from './inspection/canvas-element.ts';
-import { matchedStyleRows } from './inspection/match-rows.ts';
+import { type MatchedStyleRow, matchedStyleRows } from './inspection/match-rows.ts';
 import { CssRuleEditor } from './rule-editor.tsx';
 import { RuleList } from './rule-list.tsx';
 import { useCssInspectionStore } from './store.ts';
-import { useCssAutoWrite } from './use-auto-write.ts';
+import { type CssAutoWriteControls, useCssAutoWrite } from './use-auto-write.ts';
 
 /**
  * The CSS vertical's sidebar panel (#249, I1; the editing surface
@@ -90,30 +91,8 @@ export function CssSidebar(): ReactNode {
   );
 }
 
-/** The rules surface for one live selection on one observed route — mounts the styles query. */
-function CssRulesPanel({
-  descriptor,
-  route,
-}: {
-  readonly descriptor: SelectionDescriptor;
-  readonly route: string;
-}): ReactNode {
-  const inspection = useStylesInspection(route);
-  const openRowKey = useCssInspectionStore((state) => state.openRowKey);
-  const openRow = useCssInspectionStore((state) => state.openRow);
-  const closeRow = useCssInspectionStore((state) => state.closeRow);
-  // The editing target's semantic identity — the one piece of state the
-  // write's own refresh must survive (a fresh record re-resolves, never
-  // a lost editor), and the auto-write loop the editor schedules
-  // through. A no-facts payload keeps the read list but opens no
-  // editor: an un-enriched inspection is read-only truth.
-  const [editing, setEditing] = useState<RecordIdentity | null>(null);
-  const controls = useCssAutoWrite(inspection.payload);
-  const payload = inspection.payload;
-  const editingRecord =
-    editing !== null && payload !== null ? resolveRecord(payload.records, editing) : null;
-  const editingRaw = editing !== null ? (payload?.writeFacts.get(editing.file)?.raw ?? null) : null;
-
+/** The live element for one descriptor — the disclosed re-match seam plus its mutation subscription. */
+function useSelectedElement(descriptor: SelectionDescriptor): Element | null {
   // The live element through the disclosed re-match seam, held with the
   // descriptor it was found for (a descriptor change never renders the
   // previous element's rows). The canvas document's own mutations — an
@@ -133,7 +112,28 @@ function CssRulesPanel({
     find();
     return subscribeCanvasMutations(find);
   }, [descriptor]);
-  const element = found !== null && found.descriptor === descriptor ? found.element : null;
+  return found !== null && found.descriptor === descriptor ? found.element : null;
+}
+
+/** The rules surface for one live selection on one observed route — mounts the styles query. */
+function CssRulesPanel({
+  descriptor,
+  route,
+}: {
+  readonly descriptor: SelectionDescriptor;
+  readonly route: string;
+}): ReactNode {
+  const inspection = useStylesInspection(route);
+  const openRowKey = useCssInspectionStore((state) => state.openRowKey);
+  const openRow = useCssInspectionStore((state) => state.openRow);
+  const closeRow = useCssInspectionStore((state) => state.closeRow);
+  // The auto-write loop the editor schedules through — mounted for the
+  // whole panel so the loop's machine survives the editor's own
+  // re-resolution across the write's refresh.
+  const controls = useCssAutoWrite(inspection.payload);
+  const payload = inspection.payload;
+
+  const element = useSelectedElement(descriptor);
 
   if (element === null) {
     return (
@@ -167,14 +167,43 @@ function CssRulesPanel({
     return <StatePanel state="empty">no matching rules for this element</StatePanel>;
   }
   return (
+    <RulesSurface
+      rows={rows}
+      payload={payload}
+      controls={controls}
+      openRowKey={openRowKey}
+      onToggleDetail={(key) => {
+        if (openRowKey === key) closeRow();
+        else openRow(key);
+      }}
+    />
+  );
+}
+
+/** The ready surface — the list plus the open editor, re-resolving the editing target across refreshes. */
+function RulesSurface({
+  rows,
+  payload,
+  controls,
+  openRowKey,
+  onToggleDetail,
+}: {
+  readonly rows: readonly MatchedStyleRow[];
+  readonly payload: BoundStylesPayload | null;
+  readonly controls: CssAutoWriteControls;
+  readonly openRowKey: string | null;
+  onToggleDetail(key: string): void;
+}): ReactNode {
+  const [editing, setEditing] = useState<RecordIdentity | null>(null);
+  const editingRecord =
+    editing !== null && payload !== null ? resolveRecord(payload.records, editing) : null;
+  const editingRaw = editing !== null ? (payload?.writeFacts.get(editing.file)?.raw ?? null) : null;
+  return (
     <>
       <RuleList
         rows={rows}
         openKey={openRowKey}
-        onOpenDetail={(key) => {
-          if (openRowKey === key) closeRow();
-          else openRow(key);
-        }}
+        onOpenDetail={onToggleDetail}
         onEdit={
           payload !== null && payload.writeFacts.size > 0
             ? (row) => {

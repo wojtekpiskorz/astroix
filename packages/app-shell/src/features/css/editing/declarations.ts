@@ -58,6 +58,40 @@ export function selectorHeadBounds(ruleText: string): { start: number; end: numb
  * property/value pair) — the honest read-only refusal, never a
  * heuristic splice.
  */
+/**
+ * Binds one body segment into a declaration — `null` when the segment
+ * is not a property/value pair (the honest refusal), `{ skip: true }`
+ * for blank filler between semicolons. `hasSemicolon` carries whether
+ * the source wrote a `;` after this segment (the declaration's own
+ * text includes it when it did).
+ */
+function bindSegment(
+  segment: string,
+  start: number,
+  offset: number,
+  hasSemicolon: boolean,
+): { readonly skip: boolean; readonly declaration?: ParsedDeclaration } | null {
+  const trimmed = segment.trim();
+  if (trimmed.length === 0) return { skip: true };
+  const colon = trimmed.indexOf(':');
+  if (colon <= 0 || colon === trimmed.length - 1) return null;
+  const property = trimmed.slice(0, colon).trim();
+  const value = trimmed.slice(colon + 1).trim();
+  if (property.length === 0 || value.length === 0) return null;
+  const lead = segment.length - segment.trimStart().length;
+  const declStart = offset + start + lead;
+  return {
+    skip: false,
+    declaration: {
+      property,
+      value,
+      text: `${trimmed}${hasSemicolon ? ';' : ''}`,
+      start: declStart,
+      end: declStart + trimmed.length + (hasSemicolon ? 1 : 0),
+    },
+  };
+}
+
 export function parseRule(ruleText: string): ParsedRule | null {
   const brace = ruleText.indexOf('{');
   const close = ruleText.indexOf('}');
@@ -77,26 +111,17 @@ export function parseRule(ruleText: string): ParsedRule | null {
     const segment = segments[index] as string;
     const start = cursor;
     cursor += segment.length + 1;
-    const trimmed = segment.trim();
-    if (trimmed.length === 0) continue;
-    const colon = trimmed.indexOf(':');
-    if (colon <= 0 || colon === trimmed.length - 1) return null;
-    const property = trimmed.slice(0, colon).trim();
-    const value = trimmed.slice(colon + 1).trim();
-    if (property.length === 0 || value.length === 0) return null;
-    const lead = segment.length - segment.trimStart().length;
-    const declStart = offset + start + lead;
     // The trailing `;` belongs to the declaration's written text when
     // the source carries one after this segment — every segment but
     // the last, plus the last when the body ends with `;`.
-    const semicolon = index < segments.length - 1 || body.endsWith(';') ? 1 : 0;
-    declarations.push({
-      property,
-      value,
-      text: `${trimmed}${semicolon === 1 ? ';' : ''}`,
-      start: declStart,
-      end: declStart + trimmed.length + semicolon,
-    });
+    const bound = bindSegment(
+      segment,
+      start,
+      offset,
+      index < segments.length - 1 || body.endsWith(';'),
+    );
+    if (bound === null) return null;
+    if (bound.declaration !== undefined) declarations.push(bound.declaration);
   }
   return { selector: head, declarations };
 }
