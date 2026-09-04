@@ -5,7 +5,13 @@ import { fileURLToPath } from 'node:url';
 import { expect, test } from '@playwright/test';
 import { stagedCopyRoot } from '../../apps/web/src/stage-e2e.ts';
 import { snapshotManagedProject as snapshotProject } from '../managed-project-snapshot.ts';
-import { activateButton, PROJECT_APP_URL, restoreIdle } from './spec-helpers.ts';
+import {
+  activateButton,
+  BOOT_BUDGET_MS,
+  LOAD_BUDGET_MS,
+  PROJECT_APP_URL,
+  restoreIdle,
+} from './spec-helpers.ts';
 
 /**
  * The zero-injection battery (#242, G3) — the guarantee the whole
@@ -54,20 +60,22 @@ test('a full hosting loop leaves the managed project untouched — bytes and met
   expect([...before.keys()]).toContain('package.json');
 
   await page.goto('/__astroix/app/');
-  await expect(page.getByTestId('session-label')).toHaveText('idle', { timeout: 30_000 });
+  await expect(page.getByTestId('session-label')).toHaveText('idle', { timeout: LOAD_BUDGET_MS });
   await activateButton(page, 0).click();
-  await page.waitForURL(PROJECT_APP_URL, { timeout: 120_000 });
+  await page.waitForURL(PROJECT_APP_URL, { timeout: BOOT_BUDGET_MS });
   // Start + inspect: the shell's live inspection and the loaded canvas.
   // Load-shaped landing waits, sized for a shared CI runner (#392).
-  await expect(page.getByTestId('inspect-revision')).toHaveText(/^\d+$/, { timeout: 30_000 });
+  await expect(page.getByTestId('inspect-revision')).toHaveText(/^\d+$/, {
+    timeout: LOAD_BUDGET_MS,
+  });
   await expect(page.getByTestId('canvas-origin-state')).toHaveText('project', {
-    timeout: 30_000,
+    timeout: LOAD_BUDGET_MS,
   });
   // Navigation through the canvas: the project's own natural route.
   await page.getByTestId('canvas-address').fill('/blog/hello-builder');
   await page.getByTestId('canvas-navigate').click();
   await expect(page.getByTestId('canvas-url')).toContainText('/blog/hello-builder', {
-    timeout: 30_000,
+    timeout: LOAD_BUDGET_MS,
   });
   // Stop.
   await restoreIdle(page);
@@ -76,9 +84,9 @@ test('a full hosting loop leaves the managed project untouched — bytes and met
   // state in the project on the second pass either.
   await page.goto('/__astroix/app/');
   await activateButton(page, 0).click();
-  await page.waitForURL(PROJECT_APP_URL, { timeout: 120_000 });
+  await page.waitForURL(PROJECT_APP_URL, { timeout: BOOT_BUDGET_MS });
   await expect(page.getByTestId('canvas-origin-state')).toHaveText('project', {
-    timeout: 30_000,
+    timeout: LOAD_BUDGET_MS,
   });
   await restoreIdle(page);
 

@@ -2,7 +2,13 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { expect, type Page, test } from '@playwright/test';
 import { stagedCopyRoot } from '../../apps/web/src/stage-e2e.ts';
-import { activateButton, PROJECT_APP_URL, restoreIdle } from './spec-helpers.ts';
+import {
+  activateButton,
+  BOOT_BUDGET_MS,
+  LOAD_BUDGET_MS,
+  PROJECT_APP_URL,
+  restoreIdle,
+} from './spec-helpers.ts';
 
 /**
  * The CSS vertical's read-only inspection battery (#249, I1): the
@@ -47,7 +53,7 @@ function panelState(page: Page) {
 
 /** Waits for the panel's ready list and returns its row locators. */
 async function readyRows(page: Page) {
-  await expect(page.getByTestId('css-rule-list')).toBeVisible({ timeout: 120_000 });
+  await expect(page.getByTestId('css-rule-list')).toBeVisible({ timeout: BOOT_BUDGET_MS });
   return page.locator('[data-testid="css-rule"]');
 }
 
@@ -76,10 +82,12 @@ async function activateSettled(page: Page): Promise<void> {
   };
   page.on('framenavigated', onNavigated);
   await page.goto('/__astroix/app/');
-  await expect(page.getByTestId('session-label')).toHaveText('idle', { timeout: 30_000 });
+  await expect(page.getByTestId('session-label')).toHaveText('idle', { timeout: LOAD_BUDGET_MS });
   await activateButton(page, 0).click();
-  await page.waitForURL(PROJECT_APP_URL, { timeout: 120_000 });
-  await expect(page.getByTestId('canvas-origin-state')).toHaveText('project', { timeout: 30_000 });
+  await page.waitForURL(PROJECT_APP_URL, { timeout: BOOT_BUDGET_MS });
+  await expect(page.getByTestId('canvas-origin-state')).toHaveText('project', {
+    timeout: LOAD_BUDGET_MS,
+  });
   await expect.poll(() => frameNavigations.length, { timeout: 60_000 }).toBeGreaterThanOrEqual(2);
   frameNavigations.length = 0;
   await page.waitForTimeout(1500);
@@ -113,9 +121,9 @@ test('the joined list renders the live truth: scoped effective form, global sour
   // Select the fixture's doubly-styled element: the scoped compiled form
   // plus the three global occurrences join into one deterministic list.
   await canvasSelect(page, '.hero-title');
-  await expect(page.getByTestId('selection-tag')).toHaveText('h1', { timeout: 30_000 });
+  await expect(page.getByTestId('selection-tag')).toHaveText('h1', { timeout: LOAD_BUDGET_MS });
   const rows = await readyRows(page);
-  await expect(rows).toHaveCount(4, { timeout: 30_000 });
+  await expect(rows).toHaveCount(4, { timeout: LOAD_BUDGET_MS });
 
   // The scoped compiled form leads as the cascade winner: the effective
   // selector rides verbatim (the compiler's cid attribute, never a
@@ -140,7 +148,7 @@ test('the joined list renders the live truth: scoped effective form, global sour
         await rows.evaluateAll((nodes) =>
           nodes.map((node) => (node as HTMLElement).getAttribute('data-css-file')),
         ),
-      { timeout: 30_000 },
+      { timeout: LOAD_BUDGET_MS },
     )
     .toEqual([
       'src/pages/index.astro',
@@ -149,12 +157,12 @@ test('the joined list renders the live truth: scoped effective form, global sour
       'src/pages/home.css',
     ]);
   const mediaRows = page.locator('[data-testid="css-rule"][data-css-media="(max-width: 640px)"]');
-  await expect(mediaRows).toHaveCount(1, { timeout: 30_000 });
+  await expect(mediaRows).toHaveCount(1, { timeout: LOAD_BUDGET_MS });
   await expect(mediaRows.first()).toHaveAttribute('data-css-selector', '.hero-title');
 
   // Exactly one winner; the effective form never renders for globals.
   await expect(page.locator('[data-testid="css-rule"][data-css-winner="true"]')).toHaveCount(1, {
-    timeout: 30_000,
+    timeout: LOAD_BUDGET_MS,
   });
   await expect(rows.nth(1)).toHaveAttribute('data-css-effective', '');
 
@@ -189,14 +197,14 @@ test('the read-only rule detail discloses, and a global-only element shows its s
   const rows = await readyRows(page);
   await rows.first().getByTestId('css-rule-detail-toggle').click();
   const detail = page.getByTestId('css-rule-detail').first();
-  await expect(detail).toBeVisible({ timeout: 30_000 });
-  await expect(detail).toContainText('scoped style block 0', { timeout: 30_000 });
-  await expect(detail).toContainText('source range:', { timeout: 30_000 });
+  await expect(detail).toBeVisible({ timeout: LOAD_BUDGET_MS });
+  await expect(detail).toContainText('scoped style block 0', { timeout: LOAD_BUDGET_MS });
+  await expect(detail).toContainText('source range:', { timeout: LOAD_BUDGET_MS });
 
   // A global-only element: one row, no effective form, its own place.
   await canvasSelect(page, '.hero-lead');
   const leadRows = await readyRows(page);
-  await expect(leadRows).toHaveCount(1, { timeout: 30_000 });
+  await expect(leadRows).toHaveCount(1, { timeout: LOAD_BUDGET_MS });
   await expect(leadRows.first()).toHaveAttribute('data-css-selector', '.hero-lead');
   await expect(leadRows.first()).toHaveAttribute('data-css-effective', '');
   await expect(leadRows.first()).toHaveAttribute('data-css-file', 'src/pages/home.css');
@@ -216,7 +224,7 @@ test('a canvas navigation changes the observed route — a route that styles not
   await page.getByTestId('canvas-address').fill('/blog/hello-builder');
   await page.getByTestId('canvas-navigate').click();
   await expect(page.getByTestId('canvas-url')).toContainText('/blog/hello-builder', {
-    timeout: 30_000,
+    timeout: LOAD_BUDGET_MS,
   });
 
   // The blog component imports no sheet and carries no scoped block:
@@ -224,9 +232,9 @@ test('a canvas navigation changes the observed route — a route that styles not
   await canvasSelect(page, '.blog-title');
   // A fresh route's inspection settles on its own clock (the young
   // dev server's churn rides the panel's settle-poll) — wait it out.
-  await expect.poll(async () => await panelState(page), { timeout: 120_000 }).toBe('empty');
+  await expect.poll(async () => await panelState(page), { timeout: BOOT_BUDGET_MS }).toBe('empty');
   await expect(page.getByTestId('css-rules-state')).toContainText('no matching rules', {
-    timeout: 30_000,
+    timeout: LOAD_BUDGET_MS,
   });
 
   // An unroutable observed pathname (the dev server's own 404 page is a
@@ -235,16 +243,16 @@ test('a canvas navigation changes the observed route — a route that styles not
   await page.getByTestId('canvas-address').fill('/no/such/route');
   await page.getByTestId('canvas-navigate').click();
   await expect(page.getByTestId('canvas-url')).toContainText('/no/such/route', {
-    timeout: 30_000,
+    timeout: LOAD_BUDGET_MS,
   });
   await canvasSelect(page, 'h1');
   await expect
-    .poll(async () => await panelState(page), { timeout: 120_000 })
+    .poll(async () => await panelState(page), { timeout: BOOT_BUDGET_MS })
     .toBe('unresolved-route');
   await expect(page.getByTestId('css-rules-state')).toContainText('resolves to no route', {
-    timeout: 30_000,
+    timeout: LOAD_BUDGET_MS,
   });
-  await expect(page.getByTestId('css-rule-list')).toHaveCount(0, { timeout: 30_000 });
+  await expect(page.getByTestId('css-rule-list')).toHaveCount(0, { timeout: LOAD_BUDGET_MS });
 
   // Restore the idle state for the next leg.
   await restoreIdle(page);
@@ -257,7 +265,7 @@ test('a style invalidation re-matches: the SSE refetch grows the list for the sa
   await activateSettled(page);
   await canvasSelect(page, '.hero-title');
   const rows = page.locator('[data-testid="css-rule"]');
-  await expect(rows).toHaveCount(4, { timeout: 30_000 });
+  await expect(rows).toHaveCount(4, { timeout: LOAD_BUDGET_MS });
 
   // Mutate the DISPOSABLE copy's imported sheet: the invalidation rides
   // the worker's revisioned event → SSE frame → the provider's family
@@ -267,8 +275,8 @@ test('a style invalidation re-matches: the SSE refetch grows the list for the sa
   const original = await readFile(cssPath, 'utf8');
   try {
     await writeFile(cssPath, `${original}\n.hero-title { text-decoration: underline; }\n`);
-    await expect(rows).toHaveCount(5, { timeout: 120_000 });
-    await expect(page.getByTestId('selection-tag')).toHaveText('h1', { timeout: 30_000 });
+    await expect(rows).toHaveCount(5, { timeout: BOOT_BUDGET_MS });
+    await expect(page.getByTestId('selection-tag')).toHaveText('h1', { timeout: LOAD_BUDGET_MS });
     // the new occurrence joins as a global source row from the same sheet
     const lastRow = rows.nth(4);
     await expect(lastRow).toHaveAttribute('data-css-selector', '.hero-title');
@@ -287,7 +295,9 @@ test('a DOM rebuild that drops the selected element clears the list — the miss
   test.setTimeout(300_000);
   await activateSettled(page);
   await canvasSelect(page, '.hero-title');
-  await expect(page.locator('[data-testid="css-rule"]')).toHaveCount(4, { timeout: 30_000 });
+  await expect(page.locator('[data-testid="css-rule"]')).toHaveCount(4, {
+    timeout: LOAD_BUDGET_MS,
+  });
 
   // Rename the element's class in the staged template: vite's full
   // reload rebuilds the document without the selected element — the
@@ -297,9 +307,9 @@ test('a DOM rebuild that drops the selected element clears the list — the miss
   try {
     await writeFile(astroPath, original.replace('class="hero-title"', 'class="hero-title-gone"'));
     await expect
-      .poll(async () => await panelState(page), { timeout: 120_000 })
+      .poll(async () => await panelState(page), { timeout: BOOT_BUDGET_MS })
       .toBe('missing-element');
-    await expect(page.getByTestId('css-rule-list')).toHaveCount(0, { timeout: 30_000 });
+    await expect(page.getByTestId('css-rule-list')).toHaveCount(0, { timeout: LOAD_BUDGET_MS });
   } finally {
     await writeFile(astroPath, original);
   }
@@ -314,7 +324,9 @@ test('a canvas navigation with a SURVIVING selection re-derives at the load epoc
   test.setTimeout(300_000);
   await activateSettled(page);
   await canvasSelect(page, '.hero-title');
-  await expect(page.locator('[data-testid="css-rule"]')).toHaveCount(4, { timeout: 30_000 });
+  await expect(page.locator('[data-testid="css-rule"]')).toHaveCount(4, {
+    timeout: LOAD_BUDGET_MS,
+  });
 
   // The canvas's own address control navigates a natural route; the
   // SELECTION SURVIVES (it is a descriptor, the new document stays on
@@ -326,15 +338,15 @@ test('a canvas navigation with a SURVIVING selection re-derives at the load epoc
   await page.getByTestId('canvas-address').fill('/blog/hello-builder');
   await page.getByTestId('canvas-navigate').click();
   await expect(page.getByTestId('canvas-url')).toContainText('/blog/hello-builder', {
-    timeout: 30_000,
+    timeout: LOAD_BUDGET_MS,
   });
-  await expect(page.getByTestId('selection-tag')).toHaveText('h1', { timeout: 30_000 });
+  await expect(page.getByTestId('selection-tag')).toHaveText('h1', { timeout: LOAD_BUDGET_MS });
   await expect
-    .poll(async () => await panelState(page), { timeout: 120_000 })
+    .poll(async () => await panelState(page), { timeout: BOOT_BUDGET_MS })
     .toBe('missing-element');
-  await expect(page.getByTestId('css-rule-list')).toHaveCount(0, { timeout: 30_000 });
+  await expect(page.getByTestId('css-rule-list')).toHaveCount(0, { timeout: LOAD_BUDGET_MS });
   await expect(page.getByTestId('css-rules-state')).toContainText('no longer in the canvas', {
-    timeout: 30_000,
+    timeout: LOAD_BUDGET_MS,
   });
 
   // Restore the idle state for the next leg.
@@ -347,10 +359,14 @@ test('a generation reset clears the selection — the fresh session serves fresh
   test.setTimeout(300_000);
   await activateSettled(page);
   await canvasSelect(page, '.hero-title');
-  await expect(page.locator('[data-testid="css-rule"]')).toHaveCount(4, { timeout: 30_000 });
+  await expect(page.locator('[data-testid="css-rule"]')).toHaveCount(4, {
+    timeout: LOAD_BUDGET_MS,
+  });
   // Converge the generation text before the one-shot numeric read (#392:
   // a one-shot read of rendered state races the first commits under load).
-  await expect(page.getByTestId('session-generation')).toHaveText(/^\d+$/, { timeout: 30_000 });
+  await expect(page.getByTestId('session-generation')).toHaveText(/^\d+$/, {
+    timeout: LOAD_BUDGET_MS,
+  });
   const generation = await page.getByTestId('session-generation').textContent();
 
   // The transition's commit-time reset: the old generation's selection
@@ -358,13 +374,17 @@ test('a generation reset clears the selection — the fresh session serves fresh
   // no-selection and serves only after a FRESH selection.
   await restoreIdle(page);
   await activateSettled(page);
-  await expect(page.getByTestId('session-generation')).toHaveText(/^\d+$/, { timeout: 30_000 });
+  await expect(page.getByTestId('session-generation')).toHaveText(/^\d+$/, {
+    timeout: LOAD_BUDGET_MS,
+  });
   const freshGeneration = await page.getByTestId('session-generation').textContent();
   expect(Number(freshGeneration)).toBeGreaterThan(Number(generation));
-  await expect.poll(async () => await panelState(page), { timeout: 30_000 }).toBe('no-selection');
+  await expect
+    .poll(async () => await panelState(page), { timeout: LOAD_BUDGET_MS })
+    .toBe('no-selection');
   await page.frameLocator(CANVAS_FRAME).locator('.hero-title').click();
   const rows = await readyRows(page);
-  await expect(rows).toHaveCount(4, { timeout: 30_000 });
+  await expect(rows).toHaveCount(4, { timeout: LOAD_BUDGET_MS });
 
   // Restore the idle state for whatever follows the battery.
   await restoreIdle(page);
