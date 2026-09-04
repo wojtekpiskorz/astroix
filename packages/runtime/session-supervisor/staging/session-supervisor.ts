@@ -64,6 +64,16 @@ export { mintRuntimeEpoch } from './runtime-epoch.ts';
  *   concurrent activation (`concurrent-activation`, HTTP 409 by the
  *   protocol's `ERROR_HTTP_STATUS` mapping — transport truth, not a
  *   supervisor concern).
+ * - **One active plane per root** (#420): `begin` refuses a second plane
+ *   for a root that already holds one — the active session's root or the
+ *   in-flight attempt's root (`same-root-active`; two concurrent
+ *   `astro dev` children over one root crash both planes). The
+ *   composition's idempotence belt (#413) answers a same-project
+ *   re-activation 200 first, so this structural refusal is
+ *   defense-in-depth for races that bypass the belt — including the
+ *   drain window, where the active truth stays set until the
+ *   deactivation-side clear and the belt's point-in-time-honest 200 is
+ *   what the client sees.
  * - **Private candidate readiness** (§4 step 1): the candidate run starts
  *   at `begin` and readies while the old session stays authoritative —
  *   the snapshot keeps `active` untouched and `attempt` at `starting`
@@ -130,10 +140,23 @@ export interface CandidateStartRequest {
  */
 export type StartCandidateRun = (request: CandidateStartRequest) => ProjectRun;
 
-/** What `begin` answered: the begun attempt, or the concurrent-activation refusal (the protocol's 409). */
+/**
+ * Why `begin` refused — the admission's two laws, each answered by its
+ * own classified reason: `concurrent-activation` is another attempt
+ * already in flight for a different root (the protocol's 409 by its
+ * `ERROR_HTTP_STATUS` mapping); `same-root-active` is #420's
+ * one-active-plane-per-root law — the requested root already holds its
+ * one plane, committed (the active session) or staging (the in-flight
+ * attempt). Composition-side both map to the same public 409 (the belt
+ * is reason-agnostic); the classification is the seam's diagnostic
+ * truth.
+ */
+export type BeginRefusalReason = 'concurrent-activation' | 'same-root-active';
+
+/** What `begin` answered: the begun attempt, or the admission's classified refusal. */
 export type BeginActivationResult =
   | { readonly kind: 'begun'; readonly attempt: ActivationAttempt }
-  | { readonly kind: 'refused'; readonly reason: 'concurrent-activation' };
+  | { readonly kind: 'refused'; readonly reason: BeginRefusalReason };
 
 /**
  * Why the active session is being cleared deliberately — sanitized
@@ -161,7 +184,14 @@ export type SessionListener = (snapshot: SessionSnapshot) => void;
 export interface SessionSupervisor {
   /** The source of truth: active, attempt, lastFailure — never a flat enum. */
   snapshot(): SessionSnapshot;
-  /** Reserves a new generation and starts one candidate privately; refuses while another attempt is in flight. */
+  /**
+   * Reserves a new generation and starts one candidate privately. The
+   * admission refuses both of its laws atomically in this one synchronous
+   * call: a concurrent activation (another attempt in flight for a
+   * different root), and a second plane for a root that already holds
+   * one — the active session's root or the in-flight attempt's root
+   * (#420's one-active-plane-per-root law).
+   */
   begin(projectKey: ProjectKey): BeginActivationResult;
   /**
    * The deactivation-side clear (ADR-0006 §9's declared shape, landed by
@@ -352,9 +382,31 @@ export function createSessionSupervisor(options: SessionSupervisorOptions): Sess
     },
   };
 
+  /**
+   * The structural same-root truth (#420, the one-active-plane-per-root
+   * law): the requested root already holds its one plane — committed
+   * (the active session) or staging (the in-flight attempt). Read only
+   * inside `begin`'s synchronous admission, so the two checks are one
+   * atomic truth — never a separate racy read beside the in-flight law.
+   * ProjectKey equality is plain string equality (the protocol's
+   * canonical identity; the belt's own idiom).
+   */
+  const rootHasPlane = (projectKey: ProjectKey): boolean =>
+    (active !== null && active.projectKey === projectKey) ||
+    (attemptCtx !== null && attemptCtx.projectKey === projectKey);
+
   return {
     snapshot,
     begin: (projectKey) => {
+      // The structural law first (#420): the specific refusal — this root
+      // already holds its one plane — outranks the general one (an
+      // attempt is in flight) when both would trip, so the classified
+      // reason names the sharper truth: a same-root begin beside a live
+      // or staging plane is the two-plane crash the law exists to refuse,
+      // whatever else is in flight.
+      if (rootHasPlane(projectKey)) {
+        return { kind: 'refused', reason: 'same-root-active' };
+      }
       if (attemptCtx !== null) {
         return { kind: 'refused', reason: 'concurrent-activation' };
       }
