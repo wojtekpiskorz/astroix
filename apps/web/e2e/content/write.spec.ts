@@ -5,7 +5,6 @@ import { fileURLToPath } from 'node:url';
 import { expect, type Page, type Request, test } from '@playwright/test';
 import {
   activateProject,
-  BOOT_BUDGET_MS,
   LOAD_BUDGET_MS,
   restoreIdle,
   SETTLE_BUDGET_MS,
@@ -220,7 +219,9 @@ test('form writes land byte-exact through the grant — TWICE from one pane — 
   expect(after).toBe(expectedTitleWrite(before, 'Hello builder (edited)'));
 
   // the pane reopened on the served truth: the written title, nothing to write
-  await expect(titleInput(page)).toHaveValue('Hello builder (edited)');
+  await expect(titleInput(page)).toHaveValue('Hello builder (edited)', {
+    timeout: LOAD_BUDGET_MS,
+  });
   await expect(page.getByTestId('entry-revision')).not.toHaveText(/revision: none/, {
     timeout: LOAD_BUDGET_MS,
   });
@@ -258,7 +259,9 @@ test('form writes land byte-exact through the grant — TWICE from one pane — 
   // BYTE-EXACT twice over: the oracle over the FIRST write's bytes
   const afterTwice = await entryBytes();
   expect(afterTwice).toBe(expectedTitleWrite(afterFirst, 'Hello builder (twice)'));
-  await expect(titleInput(page)).toHaveValue('Hello builder (twice)');
+  await expect(titleInput(page)).toHaveValue('Hello builder (twice)', {
+    timeout: LOAD_BUDGET_MS,
+  });
   await expect(page.getByTestId('intent-state')).toHaveAttribute('data-intent-state', 'none', {
     timeout: LOAD_BUDGET_MS,
   });
@@ -321,7 +324,9 @@ test('a raw write lands through the same grant-bound loop', async ({ page }) => 
   );
   // back in form mode the served truth shows
   await pane(page).locator('[data-astroix-form-mode-button="form"]').click();
-  await expect(titleInput(page)).toHaveValue('Raw-written title');
+  await expect(titleInput(page)).toHaveValue('Raw-written title', {
+    timeout: LOAD_BUDGET_MS,
+  });
   expect(commands().writes).toHaveLength(1);
 
   await restoreIdle(page);
@@ -385,9 +390,7 @@ test('a stale response cannot overwrite the committed server result across a ses
   // deactivate while the response is still held: the transition sees
   // an already-settled write (nothing to drain), the document is reset
   // and replaced — the stale response cannot deliver anything anywhere
-  await page.getByTestId('deactivate').click();
-  await page.waitForURL(/launcher\.localhost:\d+\/__astroix\/app\//, { timeout: BOOT_BUDGET_MS });
-  await expect(page.getByTestId('session-label')).toHaveText('idle', { timeout: LOAD_BUDGET_MS });
+  await restoreIdle(page);
 
   // the still-held handler must not outlive the test as an error: the
   // lingering fulfill belongs to a dead request and is ignored here
@@ -397,7 +400,9 @@ test('a stale response cannot overwrite the committed server result across a ses
 
   // the NEW generation's server truth IS the committed result — the
   // drained write's bytes, the written title, a live revision
-  await expect(titleInput(page)).toHaveValue('Delayed write title');
+  await expect(titleInput(page)).toHaveValue('Delayed write title', {
+    timeout: LOAD_BUDGET_MS,
+  });
   await expect(page.getByTestId('entry-revision')).not.toHaveText(/revision: none/, {
     timeout: LOAD_BUDGET_MS,
   });

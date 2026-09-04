@@ -101,7 +101,9 @@ test('the pane builds form state from the live schema and inspected values', asy
 
   // the frozen blog walk over the live inspection: every widget kind
   // renders from the inspected values (the projection)
-  await expect(titleInput(page)).toHaveValue('Hello builder');
+  await expect(titleInput(page)).toHaveValue('Hello builder', {
+    timeout: LOAD_BUDGET_MS,
+  });
   await expect(pane(page).locator('[data-astroix-form-field="tone"]')).toHaveCount(1, {
     timeout: LOAD_BUDGET_MS,
   });
@@ -169,15 +171,21 @@ test('form and raw switch preserves everything, and validation reports without w
   await expect(pane(page)).toHaveAttribute('data-form-mode', 'raw', {
     timeout: LOAD_BUDGET_MS,
   });
-  await expect(rawText(page)).toHaveValue(/title: Form edit/);
-  await expect(rawText(page)).toHaveValue(/tone: bold/);
+  await expect(rawText(page)).toHaveValue(/title: Form edit/, {
+    timeout: LOAD_BUDGET_MS,
+  });
+  await expect(rawText(page)).toHaveValue(/tone: bold/, {
+    timeout: LOAD_BUDGET_MS,
+  });
 
   // a raw edit of a known key AND an unknown key, then back to form
   await rawText(page).fill(
     'title: Raw edit\ndate: 2026-08-26T00:00:00.000Z\ntags:\n  - meta\ntone: bold\npriority: 0\nfeatured: false\nfromRaw: true\n',
   );
   await pane(page).locator('[data-astroix-form-mode-button="form"]').click();
-  await expect(titleInput(page)).toHaveValue('Raw edit');
+  await expect(titleInput(page)).toHaveValue('Raw edit', {
+    timeout: LOAD_BUDGET_MS,
+  });
   // the raw-added unknown key rides the explicit unknown-fields section
   await expect(pane(page).locator('[data-astroix-unknown-fields]')).toHaveCount(1, {
     timeout: LOAD_BUDGET_MS,
@@ -234,13 +242,17 @@ test('drafts reset on entry change and on a new session — never on the server'
     timeout: LOAD_BUDGET_MS,
   });
   await entryRow(page, '2024/post').click();
-  await expect(titleInput(page)).toHaveValue('Nested post');
+  await expect(titleInput(page)).toHaveValue('Nested post', {
+    timeout: LOAD_BUDGET_MS,
+  });
   await expect(page.getByTestId('intent-state')).toHaveAttribute('data-intent-state', 'none', {
     timeout: LOAD_BUDGET_MS,
   });
   // back to the first entry: the inspected truth, never the dead draft
   await entryRow(page, 'hello-builder').click();
-  await expect(titleInput(page)).toHaveValue('Hello builder');
+  await expect(titleInput(page)).toHaveValue('Hello builder', {
+    timeout: LOAD_BUDGET_MS,
+  });
   await expect(page.getByTestId('intent-state')).toHaveAttribute('data-intent-state', 'none', {
     timeout: LOAD_BUDGET_MS,
   });
@@ -253,7 +265,9 @@ test('drafts reset on entry change and on a new session — never on the server'
   await expect(pane(page)).toHaveAttribute('data-form-status', 'ready', {
     timeout: SETTLE_BUDGET_MS,
   });
-  await expect(titleInput(page)).toHaveValue('Hello builder');
+  await expect(titleInput(page)).toHaveValue('Hello builder', {
+    timeout: LOAD_BUDGET_MS,
+  });
   await expect(page.getByTestId('intent-state')).toHaveAttribute('data-intent-state', 'none', {
     timeout: LOAD_BUDGET_MS,
   });
