@@ -1,6 +1,7 @@
 import type { SessionRef } from '@wojciechpiskorz/astroix-protocol';
 import { create } from 'zustand';
 import type { FormFieldNode } from '../../../../../core/src/form-tree.ts';
+import { registerFeatureStoreReset } from '../../../state/feature-store-registry.ts';
 import { parseRawText, toRawText } from '../raw/raw-text.ts';
 import { mergeValues, partitionValues } from '../raw/value-partition.ts';
 
@@ -17,11 +18,12 @@ import { mergeValues, partitionValues } from '../raw/value-partition.ts';
  * ProjectKey change is a different document and therefore a different
  * pair (the pair IS the project binding at the document, per J1's
  * query-key ruling), so the one binding check covers the whole list.
- * The #372 ruling (feature stores outside the commit-time reset
- * registry) is OPEN: this store follows J1's precedent — feature-local,
- * document-replacement lifetime — and additionally self-gates through
- * the binding check, so a NEW document's first open resets any stale
- * draft before anything renders from it.
+ * The #372 ruling (feature stores join the commit-time reset registry,
+ * 2026-09-04) is implemented: the store registers its `clear` below,
+ * so the ordered clear-stores step empties it at every commit. The
+ * binding self-gate STAYS as the mid-session belt — a changed binding
+ * resets any stale draft before anything renders from it — defense in
+ * depth beside the sequencer's timing, never instead of it.
  *
  * The values discipline (CONTEXT.md "raw truth"): the draft values are
  * the editing truth-space. The form reports its KNOWN half (it mounts
@@ -111,8 +113,8 @@ interface FormDraftState {
    * Clears the draft entirely. The write lane's landing (J3) clears
    * through this after a committed write — the cleared (null) binding
    * re-arms the form slice's open effect, which re-opens the draft on
-   * the served truth. Also tests; the future reset registry — the
-   * #372 carry.
+   * the served truth. Also the registered commit-time reset (#372) and
+   * the tests' own cleanup.
    */
   clear(): void;
 }
@@ -225,3 +227,7 @@ export const useFormDraftStore = create<FormDraftState>((set, get) => ({
       parseError: null,
     }),
 }));
+
+// The #372 registration: module scope, beside the store's creation —
+// the sequencer's clear-stores step clears this store at every commit.
+registerFeatureStoreReset('content:form-draft', () => useFormDraftStore.getState().clear());

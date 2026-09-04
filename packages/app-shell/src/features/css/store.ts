@@ -1,15 +1,16 @@
 import { create } from 'zustand';
+import { registerFeatureStoreReset } from '../../state/feature-store-registry.ts';
 import type { ServedRevision } from './inspection/freshness.ts';
 
 /**
  * The CSS panel's feature-local store (#249, I1; the Content vertical's
- * `discovery-store.ts` discipline, J1 #251 — the #372 ruling is open,
- * so the landed precedent governs): presentation-only state plus the
- * freshness belt's memory, nothing else. A session change is a
- * top-level replacement (the one ordered reset navigates the document),
- * so this state dies with the document exactly like the
- * generation-scoped query cache beside it — no registration into the
- * shell reset's clearing list is needed or wanted.
+ * `discovery-store.ts` discipline, J1 #251): presentation-only state plus the
+ * freshness belt's memory, nothing else. Registered with the shell's
+ * commit-time reset registry (#372, ruled 2026-09-04 — supersedes I1's
+ * landed "dies with the document" precedent): the ordered clear-stores
+ * step drops the open row and the belt's memory, so a same-document
+ * session switch cannot inherit the dead session's inspection state —
+ * exactly like the generation-scoped query cache beside it.
  */
 
 interface CssInspectionState {
@@ -29,6 +30,8 @@ interface CssInspectionState {
    * the caller rejects). A different route resets the belt to it.
    */
   noteServed(route: string, revision: number): void;
+  /** The commit-time reset's clear — no open row, no belt memory. */
+  reset(): void;
 }
 
 export const useCssInspectionStore = create<CssInspectionState>((set) => ({
@@ -44,4 +47,9 @@ export const useCssInspectionStore = create<CssInspectionState>((set) => ({
       }
       return { served: { route, revision } };
     }),
+  reset: () => set({ openRowKey: null, served: null }),
 }));
+
+// The #372 registration: module scope, beside the store's creation —
+// the sequencer's clear-stores step clears this store at every commit.
+registerFeatureStoreReset('css:inspection', () => useCssInspectionStore.getState().reset());
