@@ -1,5 +1,12 @@
 import { expect, type Page, type Request, test } from '@playwright/test';
-import { activateButton, PROJECT_APP_URL, restoreIdle } from '../../../../e2e/web/spec-helpers.ts';
+import {
+  activateButton,
+  BOOT_BUDGET_MS,
+  LOAD_BUDGET_MS,
+  PROJECT_APP_URL,
+  restoreIdle,
+  SETTLE_BUDGET_MS,
+} from '../../../../e2e/web/spec-helpers.ts';
 
 /**
  * The Content vertical's discovery-navigation product E2E (#251, J1):
@@ -23,6 +30,14 @@ import { activateButton, PROJECT_APP_URL, restoreIdle } from '../../../../e2e/we
  *
  * SERIAL like the lane's other batteries: one control plane, one
  * supervisor-global active session.
+ *
+ * Every landing/transition wait is load-shaped (#396, the #392 pass
+ * extended to this battery): the launcher's first render and the
+ * project-document landings carry the 30s landing budget, the
+ * activation transition the 120s plane-boot budget, and the settles
+ * over the young managed dev server (the first inspection's fresh
+ * runner, the canvas's first route compile) the 60s settle budget.
+ * The asserted values never change.
  */
 
 /** The discovery panel's root, at a given derived state. */
@@ -37,7 +52,7 @@ test('discovery lists the fixture collections and entries from the live content 
 }) => {
   test.setTimeout(180_000);
   await page.goto('/__astroix/app/');
-  await expect(page.getByTestId('session-label')).toHaveText('idle');
+  await expect(page.getByTestId('session-label')).toHaveText('idle', { timeout: LOAD_BUDGET_MS });
 
   // The panel's data source is the wire: one content inspection and one
   // routes inspection under the bound pair — E4 and E5, nothing else.
@@ -55,12 +70,14 @@ test('discovery lists the fixture collections and entries from the live content 
   });
 
   await activateButton(page, 0).click();
-  await page.waitForURL(PROJECT_APP_URL);
+  await page.waitForURL(PROJECT_APP_URL, { timeout: BOOT_BUDGET_MS });
 
   // First content inspection boots a fresh runner over the managed dev
   // server — generous bound, then the settled ready state.
   await expect
-    .poll(() => discoveryPanel(page).getAttribute('data-discovery-status'), { timeout: 60_000 })
+    .poll(() => discoveryPanel(page).getAttribute('data-discovery-status'), {
+      timeout: SETTLE_BUDGET_MS,
+    })
     .toBe('ready');
   expect(inspectionFamilies.has('content')).toBe(true);
   expect(inspectionFamilies.has('routes')).toBe(true);
@@ -103,25 +120,32 @@ test('discovery lists the fixture collections and entries from the live content 
 test('selecting a nested-id entry navigates the canvas to its natural route', async ({ page }) => {
   test.setTimeout(180_000);
   await page.goto('/__astroix/app/');
-  await expect(page.getByTestId('session-label')).toHaveText('idle');
+  await expect(page.getByTestId('session-label')).toHaveText('idle', { timeout: LOAD_BUDGET_MS });
   await activateButton(page, 0).click();
-  await page.waitForURL(PROJECT_APP_URL);
+  await page.waitForURL(PROJECT_APP_URL, { timeout: BOOT_BUDGET_MS });
   const origin = new URL(page.url()).origin;
-  await expect(discoveryPanel(page)).toHaveAttribute('data-discovery-status', 'ready');
-  await expect(page.getByTestId('canvas-url')).toHaveText(`${origin}/`);
+  await expect(discoveryPanel(page)).toHaveAttribute('data-discovery-status', 'ready', {
+    timeout: SETTLE_BUDGET_MS,
+  });
+  await expect(page.getByTestId('canvas-url')).toHaveText(`${origin}/`, {
+    timeout: LOAD_BUDGET_MS,
+  });
 
   // The frozen resolution contract's candidate for the nested id: the
   // catch-all spelling /blog/2024/post — resolved from E5's payload,
   // never composed from the entry's source path.
   await discoveryPanel(page).locator('[data-astroix-entry="2024/post"]').click();
   await expect(page.getByTestId('canvas-url')).toHaveText(`${origin}/blog/2024/post`, {
-    timeout: 60_000,
+    timeout: SETTLE_BUDGET_MS,
   });
   // The canvas rendered the entry's own page — the project's own route,
   // on the shared project origin, the gate still open.
-  await expect(page.getByTestId('canvas-origin-state')).toHaveText('project');
+  await expect(page.getByTestId('canvas-origin-state')).toHaveText('project', {
+    timeout: LOAD_BUDGET_MS,
+  });
   await expect(page.frameLocator('[data-testid="canvas-frame"]').locator('.blog-title')).toHaveText(
     'Nested post',
+    { timeout: LOAD_BUDGET_MS },
   );
 
   // The navigation feedback and the active-entry highlight.
@@ -138,20 +162,23 @@ test('selecting a nested-id entry navigates the canvas to its natural route', as
 test('the flat blog id takes the segment-param spelling over the catch-all', async ({ page }) => {
   test.setTimeout(180_000);
   await page.goto('/__astroix/app/');
-  await expect(page.getByTestId('session-label')).toHaveText('idle');
+  await expect(page.getByTestId('session-label')).toHaveText('idle', { timeout: LOAD_BUDGET_MS });
   await activateButton(page, 0).click();
-  await page.waitForURL(PROJECT_APP_URL);
+  await page.waitForURL(PROJECT_APP_URL, { timeout: BOOT_BUDGET_MS });
   const origin = new URL(page.url()).origin;
-  await expect(discoveryPanel(page)).toHaveAttribute('data-discovery-status', 'ready');
+  await expect(discoveryPanel(page)).toHaveAttribute('data-discovery-status', 'ready', {
+    timeout: SETTLE_BUDGET_MS,
+  });
 
   // The plurality rule: hello-builder fills both patterns; the picker
   // takes the more specific segment param — /blog/hello-builder.
   await discoveryPanel(page).locator('[data-astroix-entry="hello-builder"]').click();
   await expect(page.getByTestId('canvas-url')).toHaveText(`${origin}/blog/hello-builder`, {
-    timeout: 60_000,
+    timeout: SETTLE_BUDGET_MS,
   });
   await expect(page.frameLocator('[data-testid="canvas-frame"]').locator('.blog-title')).toHaveText(
     'Hello builder',
+    { timeout: LOAD_BUDGET_MS },
   );
 
   // Restore the idle state for the next leg.
@@ -161,19 +188,27 @@ test('the flat blog id takes the segment-param spelling over the catch-all', asy
 test('an unrouted entry click navigates nothing and reports the legend', async ({ page }) => {
   test.setTimeout(180_000);
   await page.goto('/__astroix/app/');
-  await expect(page.getByTestId('session-label')).toHaveText('idle');
+  await expect(page.getByTestId('session-label')).toHaveText('idle', { timeout: LOAD_BUDGET_MS });
   await activateButton(page, 0).click();
-  await page.waitForURL(PROJECT_APP_URL);
+  await page.waitForURL(PROJECT_APP_URL, { timeout: BOOT_BUDGET_MS });
   const origin = new URL(page.url()).origin;
-  await expect(discoveryPanel(page)).toHaveAttribute('data-discovery-status', 'ready');
-  await expect(page.getByTestId('canvas-url')).toHaveText(`${origin}/`);
+  await expect(discoveryPanel(page)).toHaveAttribute('data-discovery-status', 'ready', {
+    timeout: SETTLE_BUDGET_MS,
+  });
+  await expect(page.getByTestId('canvas-url')).toHaveText(`${origin}/`, {
+    timeout: LOAD_BUDGET_MS,
+  });
 
   // notes/scratch has no route in E5's payload: the click selects the
   // row, reports the legend, and the canvas stays exactly where it was.
   await discoveryPanel(page).locator('[data-astroix-entry="scratch"]').click();
   await expect(page.getByTestId('navigation-feedback')).toHaveText('no route renders scratch');
-  await expect(page.getByTestId('canvas-url')).toHaveText(`${origin}/`);
-  await expect(page.getByTestId('canvas-origin-state')).toHaveText('project');
+  await expect(page.getByTestId('canvas-url')).toHaveText(`${origin}/`, {
+    timeout: LOAD_BUDGET_MS,
+  });
+  await expect(page.getByTestId('canvas-origin-state')).toHaveText('project', {
+    timeout: LOAD_BUDGET_MS,
+  });
 
   // Restore the idle state for whatever follows the battery.
   await restoreIdle(page);

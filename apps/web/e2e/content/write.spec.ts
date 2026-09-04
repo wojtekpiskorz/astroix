@@ -3,7 +3,15 @@ import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expect, type Page, type Request, test } from '@playwright/test';
-import { activateButton, PROJECT_APP_URL, restoreIdle } from '../../../../e2e/web/spec-helpers.ts';
+import {
+  activateButton,
+  BOOT_BUDGET_MS,
+  LOAD_BUDGET_MS,
+  PROJECT_APP_URL,
+  restoreIdle,
+  SETTLE_BUDGET_MS,
+  WRITE_SETTLE_MS,
+} from '../../../../e2e/web/spec-helpers.ts';
 import { parseEntryDraft, serializeEntry } from '../../../../packages/core/src/entry-writer.ts';
 import { stagedCopyRoot } from '../../src/stage-e2e.ts';
 
@@ -27,6 +35,14 @@ import { stagedCopyRoot } from '../../src/stage-e2e.ts';
  *
  * SERIAL like the lane's other batteries: one control plane, one
  * supervisor-global active session.
+ *
+ * Every landing/transition wait is load-shaped (#396, the #392 pass
+ * extended to this battery): the shared activation prefix carries the
+ * 30s landing and 120s plane-boot budgets, the pane's first inspection
+ * and the canvas convergences the 60s settle budget, and the write
+ * settles (the dispatch observation, the terminal quiet state, the
+ * server-side disk settlement) the #250 write budget. The asserted
+ * values never change.
  */
 
 /** The staged copy the battery writes into (registered first — position 0). */
@@ -92,15 +108,17 @@ function captureCommands(page: Page): () => {
 /** Activates the first staged fixture copy and lands the project document. */
 async function activateProject(page: Page): Promise<void> {
   await page.goto('/__astroix/app/');
-  await expect(page.getByTestId('session-label')).toHaveText('idle');
+  await expect(page.getByTestId('session-label')).toHaveText('idle', { timeout: LOAD_BUDGET_MS });
   await activateButton(page, 0).click();
-  await page.waitForURL(PROJECT_APP_URL);
+  await page.waitForURL(PROJECT_APP_URL, { timeout: BOOT_BUDGET_MS });
 }
 
 /** Opens the entry and waits for the pane's ready state. */
 async function openEntry(page: Page, entryId: string): Promise<void> {
   await entryRow(page, entryId).click();
-  await expect(pane(page)).toHaveAttribute('data-form-status', 'ready', { timeout: 60_000 });
+  await expect(pane(page)).toHaveAttribute('data-form-status', 'ready', {
+    timeout: SETTLE_BUDGET_MS,
+  });
 }
 
 /** The file's current bytes — the staged copy's truth. */
@@ -178,9 +196,9 @@ test('form writes land byte-exact through the grant — TWICE from one pane — 
   // through the frame locator
   const canvasTitle = page.frameLocator('[data-testid="canvas-frame"]').locator('h1.blog-title');
   await expect(page.getByTestId('canvas-url')).toHaveText(/\/blog\/hello-builder$/, {
-    timeout: 30_000,
+    timeout: LOAD_BUDGET_MS,
   });
-  await expect(canvasTitle).toHaveText('Hello builder', { timeout: 30_000 });
+  await expect(canvasTitle).toHaveText('Hello builder', { timeout: LOAD_BUDGET_MS });
 
   // the untouched draft has nothing to write: the gesture is honestly
   // disabled until an edit makes the intent ready
@@ -189,7 +207,9 @@ test('form writes land byte-exact through the grant — TWICE from one pane — 
   routesBefore.count = commands().inspects('routes');
 
   await titleInput(page).fill('Hello builder (edited)');
-  await expect(page.getByTestId('intent-state')).toHaveAttribute('data-intent-state', 'ready');
+  await expect(page.getByTestId('intent-state')).toHaveAttribute('data-intent-state', 'ready', {
+    timeout: LOAD_BUDGET_MS,
+  });
   await expect(writeButton(page)).toBeEnabled();
   await writeButton(page).click();
 
@@ -197,8 +217,12 @@ test('form writes land byte-exact through the grant — TWICE from one pane — 
   // truth — the intermediate refresh-required window can close inside
   // one poll tick when the dev server converges fast, so the terminal
   // quiet state is the assertion that carries the flow
-  await expect(writeState(page)).toHaveAttribute('data-write-state', /pending|refresh-required/);
-  await expect(writeState(page)).toHaveAttribute('data-write-state', 'idle', { timeout: 60_000 });
+  await expect(writeState(page)).toHaveAttribute('data-write-state', /pending|refresh-required/, {
+    timeout: LOAD_BUDGET_MS,
+  });
+  await expect(writeState(page)).toHaveAttribute('data-write-state', 'idle', {
+    timeout: WRITE_SETTLE_MS,
+  });
 
   // BYTE-EXACT: the staged file's bytes are the pure oracle's bytes
   const after = await entryBytes();
@@ -206,11 +230,15 @@ test('form writes land byte-exact through the grant — TWICE from one pane — 
 
   // the pane reopened on the served truth: the written title, nothing to write
   await expect(titleInput(page)).toHaveValue('Hello builder (edited)');
-  await expect(page.getByTestId('entry-revision')).not.toHaveText(/revision: none/);
-  await expect(page.getByTestId('intent-state')).toHaveAttribute('data-intent-state', 'none');
+  await expect(page.getByTestId('entry-revision')).not.toHaveText(/revision: none/, {
+    timeout: LOAD_BUDGET_MS,
+  });
+  await expect(page.getByTestId('intent-state')).toHaveAttribute('data-intent-state', 'none', {
+    timeout: LOAD_BUDGET_MS,
+  });
 
   // the canvas followed through the project's own HMR
-  await expect(canvasTitle).toHaveText('Hello builder (edited)', { timeout: 30_000 });
+  await expect(canvasTitle).toHaveText('Hello builder (edited)', { timeout: LOAD_BUDGET_MS });
 
   // the routes family refetched after the commit (the loop's invalidation)
   expect(commands().inspects('routes')).toBeGreaterThan(routesBefore.count);
@@ -222,17 +250,25 @@ test('form writes land byte-exact through the grant — TWICE from one pane — 
   // inspection's grant at the new revision authorizes the dispatch
   const afterFirst = after;
   await titleInput(page).fill('Hello builder (twice)');
-  await expect(page.getByTestId('intent-state')).toHaveAttribute('data-intent-state', 'ready');
+  await expect(page.getByTestId('intent-state')).toHaveAttribute('data-intent-state', 'ready', {
+    timeout: LOAD_BUDGET_MS,
+  });
   await expect(writeButton(page)).toBeEnabled();
   await writeButton(page).click();
-  await expect(writeState(page)).toHaveAttribute('data-write-state', /pending|refresh-required/);
-  await expect(writeState(page)).toHaveAttribute('data-write-state', 'idle', { timeout: 60_000 });
+  await expect(writeState(page)).toHaveAttribute('data-write-state', /pending|refresh-required/, {
+    timeout: LOAD_BUDGET_MS,
+  });
+  await expect(writeState(page)).toHaveAttribute('data-write-state', 'idle', {
+    timeout: WRITE_SETTLE_MS,
+  });
 
   // BYTE-EXACT twice over: the oracle over the FIRST write's bytes
   const afterTwice = await entryBytes();
   expect(afterTwice).toBe(expectedTitleWrite(afterFirst, 'Hello builder (twice)'));
   await expect(titleInput(page)).toHaveValue('Hello builder (twice)');
-  await expect(page.getByTestId('intent-state')).toHaveAttribute('data-intent-state', 'none');
+  await expect(page.getByTestId('intent-state')).toHaveAttribute('data-intent-state', 'none', {
+    timeout: LOAD_BUDGET_MS,
+  });
 
   // the wire law: the two writes each carried a grant, never a path
   const writes = commands().writes;
@@ -253,15 +289,24 @@ test('a raw write lands through the same grant-bound loop', async ({ page }) => 
   const before = await entryBytes();
 
   // into raw mode: the whole draft as YAML, edited there, written there
+  // (the mode expect is the convergence guard for the one-shot
+  // inputValue read that follows it — the textarea's value renders
+  // with the mode, never assumed)
   await pane(page).locator('[data-astroix-form-mode-button="raw"]').click();
-  await expect(pane(page)).toHaveAttribute('data-form-mode', 'raw');
+  await expect(pane(page)).toHaveAttribute('data-form-mode', 'raw', {
+    timeout: LOAD_BUDGET_MS,
+  });
   const text = await rawText(page).inputValue();
   await rawText(page).fill(
     text.replace('title: Hello builder (twice)', 'title: Raw-written title'),
   );
-  await expect(page.getByTestId('intent-state')).toHaveAttribute('data-intent-state', 'ready');
+  await expect(page.getByTestId('intent-state')).toHaveAttribute('data-intent-state', 'ready', {
+    timeout: LOAD_BUDGET_MS,
+  });
   await writeButton(page).click();
-  await expect(writeState(page)).toHaveAttribute('data-write-state', 'idle', { timeout: 30_000 });
+  await expect(writeState(page)).toHaveAttribute('data-write-state', 'idle', {
+    timeout: WRITE_SETTLE_MS,
+  });
 
   // BYTE-EXACT: the oracle over the same raw baseline, in the draft's
   // own diff space (the served projection of the current raw — the
@@ -327,22 +372,29 @@ test('a stale response cannot overwrite the committed server result across a ses
   });
 
   await titleInput(page).fill('Delayed write title');
-  await expect(page.getByTestId('intent-state')).toHaveAttribute('data-intent-state', 'ready');
+  await expect(page.getByTestId('intent-state')).toHaveAttribute('data-intent-state', 'ready', {
+    timeout: LOAD_BUDGET_MS,
+  });
   await writeButton(page).click();
-  await expect(writeState(page)).toHaveAttribute('data-write-state', /pending|refresh-required/);
+  await expect(writeState(page)).toHaveAttribute('data-write-state', /pending|refresh-required/, {
+    timeout: LOAD_BUDGET_MS,
+  });
 
   // the write crossed and SETTLED server-side before any transition:
-  // the staged file's bytes are the committed result
+  // the staged file's bytes are the committed result (the executor's
+  // fork+commit is the write-settle shape — the #250 budget)
   await expect
-    .poll(async () => (await entryBytes()).includes('Delayed write title'), { timeout: 30_000 })
+    .poll(async () => (await entryBytes()).includes('Delayed write title'), {
+      timeout: WRITE_SETTLE_MS,
+    })
     .toBe(true);
 
   // deactivate while the response is still held: the transition sees
   // an already-settled write (nothing to drain), the document is reset
   // and replaced — the stale response cannot deliver anything anywhere
   await page.getByTestId('deactivate').click();
-  await page.waitForURL(/launcher\.localhost:\d+\/__astroix\/app\//);
-  await expect(page.getByTestId('session-label')).toHaveText('idle');
+  await page.waitForURL(/launcher\.localhost:\d+\/__astroix\/app\//, { timeout: BOOT_BUDGET_MS });
+  await expect(page.getByTestId('session-label')).toHaveText('idle', { timeout: LOAD_BUDGET_MS });
 
   // the still-held handler must not outlive the test as an error: the
   // lingering fulfill belongs to a dead request and is ignored here
@@ -353,7 +405,9 @@ test('a stale response cannot overwrite the committed server result across a ses
   // the NEW generation's server truth IS the committed result — the
   // drained write's bytes, the written title, a live revision
   await expect(titleInput(page)).toHaveValue('Delayed write title');
-  await expect(page.getByTestId('entry-revision')).not.toHaveText(/revision: none/);
+  await expect(page.getByTestId('entry-revision')).not.toHaveText(/revision: none/, {
+    timeout: LOAD_BUDGET_MS,
+  });
   await expect(writeState(page)).toHaveAttribute('data-write-state', 'idle');
   expect(await entryBytes()).toBe(expectedTitleWrite(before, 'Delayed write title'));
   expect(commands().writes).toHaveLength(1);

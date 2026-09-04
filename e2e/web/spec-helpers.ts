@@ -41,6 +41,19 @@ export const LOAD_BUDGET_MS = 30_000;
 export const BOOT_BUDGET_MS = 120_000;
 
 /**
+ * The batteries' settle budget (#396, folding #395's recorded rider):
+ * the young managed dev server converging under CI load — the frame's
+ * post-connect self-reload settle (activateSettled's navigation poll,
+ * previously the unnamed `LOAD_BUDGET_MS * 2`), and the content
+ * battery's settles over the freshly-booted plane: the first
+ * inspection's fresh runner and the canvas's first route compile
+ * (write settles carry their own #250 budget below). Sized between
+ * the landing and plane-boot budgets; single-homed here so a future
+ * resize is one line, not another fleet-wide literal diff.
+ */
+export const SETTLE_BUDGET_MS = 60_000;
+
+/**
  * The write batteries' settle budget (#250): the first accepted edit
  * forks the real write-executor child, and the settle spans the fork,
  * the executor's commit, and the post-commit refresh convergence.
@@ -93,7 +106,7 @@ export async function activateSettled(page: Page): Promise<void> {
     timeout: LOAD_BUDGET_MS,
   });
   await expect
-    .poll(() => frameNavigations.length, { timeout: LOAD_BUDGET_MS * 2 })
+    .poll(() => frameNavigations.length, { timeout: SETTLE_BUDGET_MS })
     .toBeGreaterThanOrEqual(2);
   frameNavigations.length = 0;
   await page.waitForTimeout(1500);

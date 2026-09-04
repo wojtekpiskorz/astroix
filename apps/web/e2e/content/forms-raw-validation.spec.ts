@@ -1,5 +1,12 @@
 import { expect, type Page, type Request, test } from '@playwright/test';
-import { activateButton, PROJECT_APP_URL, restoreIdle } from '../../../../e2e/web/spec-helpers.ts';
+import {
+  activateButton,
+  BOOT_BUDGET_MS,
+  LOAD_BUDGET_MS,
+  PROJECT_APP_URL,
+  restoreIdle,
+  SETTLE_BUDGET_MS,
+} from '../../../../e2e/web/spec-helpers.ts';
 
 /**
  * The Content vertical's forms-raw-validation product E2E (#252, J2):
@@ -22,6 +29,13 @@ import { activateButton, PROJECT_APP_URL, restoreIdle } from '../../../../e2e/we
  *
  * SERIAL like the lane's other batteries: one control plane, one
  * supervisor-global active session.
+ *
+ * Every landing/transition wait is load-shaped (#396, the #392 pass
+ * extended to this battery): the shared activation prefix carries the
+ * 30s landing and 120s plane-boot budgets, the pane's first inspection
+ * the 60s settle budget, and the render/wire-shaped expects (the
+ * no-entry landing, the widget counts, the revision, the intent
+ * states) the 30s landing budget. The asserted values never change.
  */
 
 /** The entry-form pane's root, at a given derived state. */
@@ -70,9 +84,9 @@ function captureCommands(page: Page): () => { inspects: number; writes: string[]
 /** Activates the first staged fixture copy and lands the project document. */
 async function activateProject(page: Page): Promise<void> {
   await page.goto('/__astroix/app/');
-  await expect(page.getByTestId('session-label')).toHaveText('idle');
+  await expect(page.getByTestId('session-label')).toHaveText('idle', { timeout: LOAD_BUDGET_MS });
   await activateButton(page, 0).click();
-  await page.waitForURL(PROJECT_APP_URL);
+  await page.waitForURL(PROJECT_APP_URL, { timeout: BOOT_BUDGET_MS });
 }
 
 test.describe.configure({ mode: 'serial' });
@@ -84,36 +98,56 @@ test('the pane builds form state from the live schema and inspected values', asy
 
   // no entry open: the honest empty state, then the first content
   // inspection boots a fresh runner over the managed dev server
-  await expect(pane(page)).toHaveAttribute('data-form-status', 'no-entry');
+  await expect(pane(page)).toHaveAttribute('data-form-status', 'no-entry', {
+    timeout: LOAD_BUDGET_MS,
+  });
   await entryRow(page, 'hello-builder').click();
-  await expect(pane(page)).toHaveAttribute('data-form-status', 'ready', { timeout: 60_000 });
+  await expect(pane(page)).toHaveAttribute('data-form-status', 'ready', {
+    timeout: SETTLE_BUDGET_MS,
+  });
   await expect(pane(page)).toHaveAttribute('data-form-mode', 'form');
 
   // the frozen blog walk over the live inspection: every widget kind
   // renders from the inspected values (the projection)
   await expect(titleInput(page)).toHaveValue('Hello builder');
-  await expect(pane(page).locator('[data-astroix-form-field="tone"]')).toHaveCount(1);
-  await expect(pane(page).locator('[data-astroix-form-field="priority"] input')).toHaveCount(1);
-  await expect(pane(page).locator('[data-astroix-form-field="featured"]')).toHaveCount(1);
-  await expect(pane(page).locator('[data-astroix-form-field="tags.0"]')).toHaveCount(1);
+  await expect(pane(page).locator('[data-astroix-form-field="tone"]')).toHaveCount(1, {
+    timeout: LOAD_BUDGET_MS,
+  });
+  await expect(pane(page).locator('[data-astroix-form-field="priority"] input')).toHaveCount(1, {
+    timeout: LOAD_BUDGET_MS,
+  });
+  await expect(pane(page).locator('[data-astroix-form-field="featured"]')).toHaveCount(1, {
+    timeout: LOAD_BUDGET_MS,
+  });
+  await expect(pane(page).locator('[data-astroix-form-field="tags.0"]')).toHaveCount(1, {
+    timeout: LOAD_BUDGET_MS,
+  });
   // the unsupported shapes ride the raw-field convention (date, aside)
   await expect(
     pane(page).locator('[data-astroix-raw-field="date"][data-astroix-raw-reason="date"]'),
-  ).toHaveCount(1);
+  ).toHaveCount(1, { timeout: LOAD_BUDGET_MS });
   await expect(
     pane(page).locator('[data-astroix-raw-field="aside"][data-astroix-raw-reason="union"]'),
-  ).toHaveCount(1);
+  ).toHaveCount(1, { timeout: LOAD_BUDGET_MS });
   // the inspected revision carries into the header (a live SHA-256)
-  await expect(page.getByTestId('entry-revision')).toHaveText(/^revision: [0-9a-f]{12}…$/);
+  await expect(page.getByTestId('entry-revision')).toHaveText(/^revision: [0-9a-f]{12}…$/, {
+    timeout: LOAD_BUDGET_MS,
+  });
 
   // the untouched draft has nothing to write
-  await expect(page.getByTestId('intent-state')).toHaveAttribute('data-intent-state', 'none');
+  await expect(page.getByTestId('intent-state')).toHaveAttribute('data-intent-state', 'none', {
+    timeout: LOAD_BUDGET_MS,
+  });
 
   // the gallery entry renders its image metadata read-only (the
   // contract-backed image widget over the projection)
   await entryRow(page, 'showcase').click();
-  await expect(pane(page).locator('[data-astroix-image-field="meta"]')).toHaveCount(1);
-  await expect(pane(page).locator('[data-astroix-image-field="meta"]')).toContainText('pixel');
+  await expect(pane(page).locator('[data-astroix-image-field="meta"]')).toHaveCount(1, {
+    timeout: LOAD_BUDGET_MS,
+  });
+  await expect(pane(page).locator('[data-astroix-image-field="meta"]')).toContainText('pixel', {
+    timeout: LOAD_BUDGET_MS,
+  });
 
   // the wire law: everything the pane dispatched was an inspection
   const report = commands();
@@ -130,11 +164,15 @@ test('form and raw switch preserves everything, and validation reports without w
   const commands = captureCommands(page);
   await activateProject(page);
   await entryRow(page, 'hello-builder').click();
-  await expect(pane(page)).toHaveAttribute('data-form-status', 'ready', { timeout: 60_000 });
+  await expect(pane(page)).toHaveAttribute('data-form-status', 'ready', {
+    timeout: SETTLE_BUDGET_MS,
+  });
 
   // a form edit, then into raw: the text is the CURRENT values
   await titleInput(page).fill('Form edit');
-  await expect(page.getByTestId('intent-state')).toHaveAttribute('data-intent-state', 'ready');
+  await expect(page.getByTestId('intent-state')).toHaveAttribute('data-intent-state', 'ready', {
+    timeout: LOAD_BUDGET_MS,
+  });
   await pane(page).locator('[data-astroix-form-mode-button="raw"]').click();
   await expect(pane(page)).toHaveAttribute('data-form-mode', 'raw');
   await expect(rawText(page)).toHaveValue(/title: Form edit/);
@@ -153,7 +191,9 @@ test('form and raw switch preserves everything, and validation reports without w
   );
 
   // the validated intent is READY and carries the inspected baseline
-  await expect(page.getByTestId('intent-state')).toHaveAttribute('data-intent-state', 'ready');
+  await expect(page.getByTestId('intent-state')).toHaveAttribute('data-intent-state', 'ready', {
+    timeout: LOAD_BUDGET_MS,
+  });
   await expect(page.getByTestId('edit-intent')).toContainText('"revision"');
 
   // a parse break: the diagnostic reports, the draft keeps its values,
@@ -161,11 +201,15 @@ test('form and raw switch preserves everything, and validation reports without w
   await pane(page).locator('[data-astroix-form-mode-button="raw"]').click();
   await rawText(page).fill('title: "unterminated');
   await expect(pane(page).locator('[data-issue-kind="parse"]')).toHaveCount(1);
-  await expect(page.getByTestId('intent-state')).toHaveAttribute('data-intent-state', 'invalid');
+  await expect(page.getByTestId('intent-state')).toHaveAttribute('data-intent-state', 'invalid', {
+    timeout: LOAD_BUDGET_MS,
+  });
   // recovery: a complete document (the required title and date present)
   await rawText(page).fill('title: fixed\ndate: 2026-08-26T00:00:00.000Z');
   await expect(pane(page).locator('[data-issue-kind="parse"]')).toHaveCount(0);
-  await expect(page.getByTestId('intent-state')).toHaveAttribute('data-intent-state', 'ready');
+  await expect(page.getByTestId('intent-state')).toHaveAttribute('data-intent-state', 'ready', {
+    timeout: LOAD_BUDGET_MS,
+  });
 
   const report = commands();
   expect(report.writes).toEqual([]);
@@ -180,27 +224,39 @@ test('drafts reset on entry change and on a new session — never on the server'
   const commands = captureCommands(page);
   await activateProject(page);
   await entryRow(page, 'hello-builder').click();
-  await expect(pane(page)).toHaveAttribute('data-form-status', 'ready', { timeout: 60_000 });
+  await expect(pane(page)).toHaveAttribute('data-form-status', 'ready', {
+    timeout: SETTLE_BUDGET_MS,
+  });
 
   // edit the draft, then change the ENTRY: the edit dies with the selection
   await titleInput(page).fill('DOOMED EDIT');
-  await expect(page.getByTestId('intent-state')).toHaveAttribute('data-intent-state', 'ready');
+  await expect(page.getByTestId('intent-state')).toHaveAttribute('data-intent-state', 'ready', {
+    timeout: LOAD_BUDGET_MS,
+  });
   await entryRow(page, '2024/post').click();
   await expect(titleInput(page)).toHaveValue('Nested post');
-  await expect(page.getByTestId('intent-state')).toHaveAttribute('data-intent-state', 'none');
+  await expect(page.getByTestId('intent-state')).toHaveAttribute('data-intent-state', 'none', {
+    timeout: LOAD_BUDGET_MS,
+  });
   // back to the first entry: the inspected truth, never the dead draft
   await entryRow(page, 'hello-builder').click();
   await expect(titleInput(page)).toHaveValue('Hello builder');
-  await expect(page.getByTestId('intent-state')).toHaveAttribute('data-intent-state', 'none');
+  await expect(page.getByTestId('intent-state')).toHaveAttribute('data-intent-state', 'none', {
+    timeout: LOAD_BUDGET_MS,
+  });
 
   // a NEW SESSION (deactivate + activate = a fresh generation): the new
   // document's pane opens on the inspected truth, inheriting nothing
   await restoreIdle(page);
   await activateProject(page);
   await entryRow(page, 'hello-builder').click();
-  await expect(pane(page)).toHaveAttribute('data-form-status', 'ready', { timeout: 60_000 });
+  await expect(pane(page)).toHaveAttribute('data-form-status', 'ready', {
+    timeout: SETTLE_BUDGET_MS,
+  });
   await expect(titleInput(page)).toHaveValue('Hello builder');
-  await expect(page.getByTestId('intent-state')).toHaveAttribute('data-intent-state', 'none');
+  await expect(page.getByTestId('intent-state')).toHaveAttribute('data-intent-state', 'none', {
+    timeout: LOAD_BUDGET_MS,
+  });
 
   // the whole battery wrote nothing: every exchange was an inspection
   const report = commands();
