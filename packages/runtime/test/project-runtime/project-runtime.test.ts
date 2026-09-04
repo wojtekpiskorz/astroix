@@ -156,6 +156,18 @@ async function rejectionOf(promise: Promise<unknown>): Promise<unknown> {
   );
 }
 
+/** One refused-origin assertion, single-homed (advisory r1): boot, fail, launch-failed, no facts. */
+async function expectRefusedOrigin(what: string, launchError: unknown): Promise<void> {
+  const control = controllableLaunch();
+  const runtime = createProjectRuntime({ launchPlane: control.launchPlane });
+  const run = runtime.start({ projectRoot: HOSTILE_ROOT, devServerPort: HOSTILE_PORT });
+
+  control.failWith(launchError);
+  const error = await bootErrorOf(run.ready);
+  expect(error.code, what).toBe('launch-failed');
+  expect(error.certification, what).toBeUndefined();
+}
+
 describe('start hands back the handle immediately', () => {
   it('returns the five-member run synchronously, before anything settles, and passes the identity through', async () => {
     const control = controllableLaunch();
@@ -471,20 +483,7 @@ describe('the certification boot code — the ADR-0005 origin admitted shape-gat
     ];
 
     for (const origin of hostileOrigins) {
-      const control = controllableLaunch();
-      const runtime = createProjectRuntime({ launchPlane: control.launchPlane });
-      const run = runtime.start({ projectRoot: HOSTILE_ROOT, devServerPort: HOSTILE_PORT });
-
-      control.failWith(origin.error);
-      const error = await bootErrorOf(run.ready);
-      expect(error.code, origin.what).toBe('launch-failed');
-      expect(
-        error.certification,
-        `${origin.what} must not carry certification facts`,
-      ).toBeUndefined();
-      expect(error.message).toBe(
-        'the project plane could not be launched for the requested project',
-      );
+      await expectRefusedOrigin(origin.what, origin.error);
     }
   });
 
@@ -663,20 +662,7 @@ describe('the certification boot code — the ADR-0005 origin admitted shape-gat
     ];
 
     for (const drift of shapeDrifts) {
-      const control = controllableLaunch();
-      const runtime = createProjectRuntime({ launchPlane: control.launchPlane });
-      const run = runtime.start({ projectRoot: HOSTILE_ROOT, devServerPort: HOSTILE_PORT });
-
-      control.failWith(uncertifiedOrigin(drift.details));
-      const error = await bootErrorOf(run.ready);
-      expect(error.code, drift.what).toBe('launch-failed');
-      expect(
-        error.certification,
-        `${drift.what} must not carry certification facts`,
-      ).toBeUndefined();
-      expect(error.message, drift.what).toBe(
-        'the project plane could not be launched for the requested project',
-      );
+      await expectRefusedOrigin(drift.what, uncertifiedOrigin(drift.details));
     }
   });
 
