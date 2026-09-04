@@ -10,6 +10,7 @@ import {
   describePackageVerification,
   verifyPackagedApp,
 } from '../../apps/desktop/src/forge/package-verification.ts';
+import { rawExchange } from '../../apps/web/src/e2e-wire.ts';
 import {
   PACKAGED_ELECTRON_PIN,
   PACKAGED_FORGE_PIN,
@@ -17,13 +18,16 @@ import {
 } from '../../packages/runtime/src/internal/packaged-assets.ts';
 import {
   activateApp,
+  clickMenuItem,
   DESKTOP_EVENT_KINDS,
   type DesktopEvent,
   delay,
   enumerateApplicationMenu,
+  establishedSockets,
   extractPackagedApp,
   listeningSockets,
   makeStagingRoot,
+  originPortOf,
   PACKAGE_ZIP,
   PackagedAppRun,
   processesReferencing,
@@ -35,6 +39,7 @@ import {
   snapshotManagedProject,
   tmpTopLevel,
   uiScriptingAvailable,
+  windowNamesOfProcess,
 } from './early-package-kit.ts';
 
 /**
@@ -57,15 +62,22 @@ import {
  * or temporary roots left behind, and the product's public log
  * vocabulary carrying no paths, PIDs, ports, or internal digests.
  *
- * The honest boundary this lane RECORDS (the migration policy: report,
- * never hide): the packaged host does not yet compose the control-plane
- * activation (origin listener, launcher document, canvas, HMR proxy,
- * document authority, Service Worker bypass) — the child answers the
- * settled `unavailable-composition` refusal and no activation surface
- * exists in the product UI. The activation/canvas/HMR/SW legs of #248
- * are therefore BLOCKED on that missing seam (its owning issue carries
- * the finding); the boundary leg below pins today's surface honestly so
- * the composition lane that lands it flips this spec at the exact spot.
+ * The composition legs (#362, H7 — the seam this spec's H6 boundary leg
+ * was waiting for): the packaged child composes the production control
+ * plane over its kernel-leased registry, the native menu carries the
+ * per-project activation entries, and a REAL activation drives the full
+ * hosting loop — the authoritative window (fresh editing partition, CDP
+ * bypass before navigation, H4 document authority injected) replaces its
+ * top level onto the granted project origin, the launcher and project
+ * origins serve through the one loopback listener, the project's natural
+ * routes stream through the proxy byte-identical (zero injection), the
+ * Vite HMR WebSocket lives through the raw-upgrade tunnel, and the quit
+ * transition reaps the whole plane (the CloseReport convergence — zero
+ * strays, zero sockets). The SW-bypass and authority ENFORCEMENT truths
+ * stay in their real-Electron lanes (`e2e/desktop/service-worker-bypass`
+ * and `document-authority-injection` — the composed product path is what
+ * this lane proves: those guards are the only load-bearing path to the
+ * project origin).
  *
  * Self-skips without a local package (the #339 pattern): `npm test`
  * stays deterministic and network-free.
@@ -77,11 +89,10 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = join(HERE, '..', '..');
 const FIXTURE = join(REPO, 'e2e', 'fixture');
 
-/** The product menu items per product menu — H1's closed action vocabulary; no activation entry exists today. */
-const EXPECTED_PRODUCT_MENUS: Readonly<Record<string, readonly string[]>> = {
+/** The static product menus — the Session menu's items are session/registry-dependent (the activation entries). */
+const EXPECTED_STATIC_MENUS: Readonly<Record<string, readonly string[]>> = {
   Astroix: ['About Astroix', 'Quit Astroix'],
   File: ['Add Existing Project…'],
-  Session: ['Deactivate Project'],
 };
 /**
  * The OS-owned Apple menu (its contents are dynamic — update badges,
@@ -97,6 +108,8 @@ let run: PackagedAppRun;
 let managedBefore: Map<string, string>;
 let tmpBefore: Set<string>;
 let menuRows: string[] = [];
+/** The registration leg's sanitized summary — the activation entry's label and the project origin's hostname. */
+let registeredSummary: { projectKey: string; displayName: string } | null = null;
 /**
  * The registration leg's outcome — the skip-cascade truth the boundary
  * leg consumes: `'pending'` before the leg ran, `'completed'` when the
@@ -225,6 +238,10 @@ describe.skipIf(!PACKAGE_ZIP)('the exact packaged host — the early packaged sm
     expect(typeof summary.projectKey).toBe('string');
     expect((summary.projectKey as string).length).toBeGreaterThan(0);
     expect(summary.availability).toBe('available');
+    registeredSummary = {
+      projectKey: summary.projectKey as string,
+      displayName: summary.displayName as string,
+    };
     expect(JSON.stringify(registered)).not.toContain(staging);
     console.log(
       `early-package-evidence: registered through the native picker — projectKey=${String(summary.projectKey)} availability=${String(summary.availability)}`,
@@ -248,14 +265,16 @@ describe.skipIf(!PACKAGE_ZIP)('the exact packaged host — the early packaged sm
     for (const row of menuRows) console.log(`early-package-evidence: menu :: ${row}`);
   }, 180_000);
 
-  it('records the honest boundary: no activation surface exists — the composition seam is the blocked leg', async (context) => {
-    // #248's activation/canvas/HMR/SW legs are BLOCKED on the missing
-    // desktop composition (the child answers the settled
-    // `unavailable-composition`; no origin, launcher, canvas, or editing
-    // target is packaged). This leg pins today's product surface so the
-    // composition lane flips it exactly here: the application menu is
-    // H1's closed set — a registration entry, no activation entry — and
-    // no session ever existed in this run.
+  it('activates through the native menu — the composition serves, the authoritative window loads, the hosting loop is real (#362)', async (context) => {
+    // The composition lane's flip (#362, H7): the boundary leg that
+    // pinned "no activation surface" is retired — the menu carries the
+    // per-project activation entry, a real click drives the settled
+    // transition inside the packaged child (the SAME composition the
+    // web host proves), and the hosting loop is observable end to end:
+    // the launcher and project origins serve, the project's natural
+    // routes stream through the proxy with zero injection, the reserved
+    // API's admission is enforced, and the Vite HMR WebSocket lives
+    // through the raw-upgrade tunnel.
     //
     // The menu enumeration comes from the registration leg's UI drive:
     // when System Events scripting is unavailable THAT leg skipped (with
@@ -263,16 +282,21 @@ describe.skipIf(!PACKAGE_ZIP)('the exact packaged host — the early packaged sm
     // with it — never a false failure inferred from empty rows.
     if (registrationOutcome === 'ui-scripting-unavailable') {
       console.log(
-        'early-package-evidence: boundary leg SKIPPED — the menu surface cannot be enumerated without System Events UI scripting (the registration leg already skipped for the same reason)',
+        'early-package-evidence: activation leg SKIPPED — the native menu cannot be driven without System Events UI scripting (the registration leg already skipped for the same reason)',
       );
       context.skip();
       return;
     }
     expect(registrationOutcome, 'the registration leg completed').toBe('completed');
+    expect(registeredSummary, 'the registered summary was captured').not.toBeNull();
+    const { projectKey, displayName } = registeredSummary as {
+      projectKey: string;
+      displayName: string;
+    };
     // Parse the enumerated rows into sections: `menu:` headers and their
-    // `item:` rows. The PRODUCT menus are exactly H1's closed set — a
-    // registration entry, NO activation entry — and the only other menu
-    // is the OS-owned Apple menu.
+    // `item:` rows. The static product menus are exactly H1's set; the
+    // Session menu carries the composition's per-project activation
+    // entry beside the deactivate item.
     const sections = new Map<string, string[]>();
     let current: string | undefined;
     for (const row of menuRows) {
@@ -284,32 +308,106 @@ describe.skipIf(!PACKAGE_ZIP)('the exact packaged host — the early packaged sm
       }
     }
     const productMenuNames = [...sections.keys()].filter((name) => name !== OS_MENU);
-    expect(new Set(productMenuNames), 'the product menus are exactly the H1 sections').toEqual(
-      new Set(Object.keys(EXPECTED_PRODUCT_MENUS)),
+    expect(new Set(productMenuNames), 'the product menus are the H1 sections').toEqual(
+      new Set([...Object.keys(EXPECTED_STATIC_MENUS), 'Session']),
     );
     for (const [menu, items] of sections) {
-      if (menu === OS_MENU) continue; // OS chrome, dynamic rows — never pinned
-      expect(items, `the ${menu} menu items`).toEqual(EXPECTED_PRODUCT_MENUS[menu]);
+      if (menu === OS_MENU || menu === 'Session') continue; // OS chrome dynamic; Session is registry-dependent
+      expect(items, `the ${menu} menu items`).toEqual(EXPECTED_STATIC_MENUS[menu]);
     }
-    const allProductItems = [...sections.values()].flat();
-    expect(
-      // word-bounded: "Deactivate Project" is H1's settled action; an
-      // "Activate …" entry is the composition's surface, absent today
-      allProductItems.some((item) => /\bactivate\b/i.test(item)),
-      'no activation menu entry exists today',
-    ).toBe(false);
-    // No session state was ever reported: the closed H1 event flow never
-    // left the no-session world (the desktop composition owns changing
-    // this — its owning issue carries the finding).
-    expect(run.events.some((event) => event.kind === 'registered')).toBe(true);
-    expect(
-      run.events.filter((event) => event.kind.startsWith('session')),
-      'no session lifecycle exists in the packaged host yet',
-    ).toEqual([]);
+    expect(sections.get('Session'), 'the Session menu carries the activation entry').toEqual([
+      `Activate ${displayName}`,
+      'Deactivate Project',
+    ]);
+
+    // — the real activation drive: the native menu's entry —
+    await clickMenuItem('Session', `Activate ${displayName}`);
+    const active = await run.waitForEvent('session-active', 'the committed activation', 150_000);
     console.log(
-      'early-package-evidence: BLOCKED LEG RECORDED — activation, canvas, HMR-through-proxy, and Service-Worker-bypass observations require the desktop control-plane composition (not packaged at #248); see the owning issue',
+      `early-package-evidence: activation committed through the native menu — session generation ${String((active.sessionRef as { generation: number } | undefined)?.generation ?? '?')}`,
     );
-  }, 60_000);
+    // The authoritative window opened beside the launcher (the
+    // bypass-guarded editing target — the only load-bearing path to the
+    // project origin).
+    const windowNames = await windowNamesOfProcess();
+    console.log(`early-package-evidence: windows — ${JSON.stringify(windowNames)}`);
+    expect(windowNames.length).toBeGreaterThanOrEqual(2);
+
+    // — the process tree: the managed plane spawned under the child —
+    await delay(1500);
+    const tree = await processesReferencing(staging);
+    for (const row of tree) {
+      console.log(`early-package-evidence: process ${row.pid} ppid ${row.ppid} :: ${row.command}`);
+    }
+    const childRow = tree.find((row) => row.command.includes('control-plane/child.js'));
+    expect(childRow, 'the bundled-Node control-plane child exists').toBeDefined();
+    const plane = tree.filter((row) => row.pid !== childRow?.pid && row.ppid === childRow?.pid);
+    expect(
+      plane.length,
+      'the managed plane (the plane worker and the managed astro dev server) spawned under the child',
+    ).toBeGreaterThanOrEqual(2);
+
+    // — the origins serve through the one loopback listener —
+    const port = await originPortOf(childRow?.pid ?? '');
+    expect(port, 'the composition listener holds a loopback port').toBeGreaterThan(0);
+    console.log(
+      `early-package-evidence: the composition serves (origin port observed through the child's listener)`,
+    );
+    const get = (host: string, target: string): Promise<{ status: number; body: string }> =>
+      rawExchange(
+        port,
+        `GET ${target} HTTP/1.1\r\nHost: ${host}\r\nConnection: close\r\n\r\n`,
+        15_000,
+      );
+    const launcher = await get(`launcher.localhost:${port}`, '/__astroix/app/');
+    expect(launcher.status, 'the launcher origin serves the launcher document').toBe(200);
+    expect(launcher.body).toContain('Astroix');
+    const projectHost = `${projectKey}.localhost:${port}`;
+    const app = await get(projectHost, '/__astroix/app/');
+    expect(app.status, 'the project origin serves the app shell document').toBe(200);
+    expect(app.body).toContain('astroix-client'); // the document's bootstrap meta
+    // The natural route streams through the REAL proxy: the project's
+    // own dev-server bytes, zero injection (nothing of Astroix rides
+    // the project's document).
+    const natural = await get(projectHost, '/');
+    expect(natural.status, 'the natural root routes through the proxy to the dev server').toBe(200);
+    expect(natural.body, 'the natural document carries no Astroix namespace').not.toContain(
+      '__astroix',
+    );
+    // The reserved API's admission is enforced in the packaged child: a
+    // mutation without the host capability is unauthorized — the
+    // authority surface this package can honestly observe from outside.
+    const unauthorized = await rawExchange(
+      port,
+      [
+        'POST /__astroix/api/v1 HTTP/1.1',
+        `Host: ${projectHost}`,
+        'Content-Type: application/json',
+        'Content-Length: 2',
+        'Connection: close',
+        '',
+        '{}',
+      ].join('\r\n'),
+      15_000,
+    );
+    expect(unauthorized.status, 'the reserved API refuses an unauthenticated mutation').toBe(403);
+    expect(unauthorized.body).toContain('unauthorized');
+
+    // — the HMR tunnel: the canvas's Vite client holds an established
+    // connection through the raw-upgrade proxy (the window count and
+    // the established socket together are the packaged HMR evidence;
+    // the behavioral law is the web lane's and the SW lane's) —
+    const established = await establishedSockets(tree.map((row) => row.pid));
+    const onListener = established.filter((line) => line.includes(`:${port}`));
+    for (const line of onListener) console.log(`early-package-evidence: established :: ${line}`);
+    expect(
+      onListener.length,
+      "an established connection rides the composition listener (the canvas's Vite client through the upgrade tunnel)",
+    ).toBeGreaterThanOrEqual(1);
+    console.log(
+      'early-package-evidence: ACTIVATION LEG GREEN — menu entry, committed transition, managed plane, launcher + project origins, proxied natural route (zero injection), enforced admission, live HMR tunnel',
+    );
+  }, 300_000);
 
   it('quits normally: the transition settles, the exact children reap, nothing remains, zero injection', async () => {
     await quitNormally(run);
@@ -343,10 +441,18 @@ describe.skipIf(!PACKAGE_ZIP)('the exact packaged host — the early packaged sm
     }
     // 4. The temporary root is clean: nothing new at the top level of
     //    the system temp directory beyond what existed before launch
-    //    (our staging is removed before the comparison).
+    //    (our staging is removed before the comparison). The ONE
+    //    permitted shape: the managed dev stack's own node-gyp devdir
+    //    scratch (a `.<hash>-<n>.node-gyp` directory Astro's compiler
+    //    binding materializes at dev-server start — the project's own
+    //    toolchain artifact, the same one every web-lane dev server
+    //    leaves; the managed-snapshot exclusion list's rationale, now
+    //    on the temp surface the activation opened).
     await removeStaging(staging);
     const tmpAfter = await tmpTopLevel();
-    const leftovers = [...tmpAfter].filter((entry) => !tmpBefore.has(entry));
+    const leftovers = [...tmpAfter].filter(
+      (entry) => !tmpBefore.has(entry) && !/^\.[0-9a-f]+-\d+\.node-gyp$/.test(entry),
+    );
     expect(leftovers, `temporary-root leftovers: ${JSON.stringify(leftovers)}`).toEqual([]);
     // 5. The canonical fixture stayed plain throughout (only the staged
     //    copy was ever registered).

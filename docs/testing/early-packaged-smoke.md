@@ -35,8 +35,10 @@ pre-review) was built at `21754f1`, before the #358 integration landed
 on the branch — #358 was additive (`e2e/web` + `playwright.config.ts`),
 touched nothing this battery runs, and the post-merge gates re-ran
 green; the post-review re-record (the isolation-law harness fix) names
-its own head. Either way, the composition flip (#360) re-records before
-any final claim.
+its own head. The composition flip (#360/#362) re-recorded before any
+final claim, as this paragraph required: the #361 record was retracted
+by `git rm` in its own commit (the write-once law), and the committed
+record is the composition run (label `desktop-composition-362`).
 
 ## The battery
 
@@ -68,10 +70,16 @@ surface, and the post-run audits.
    registry's sanitized `registered` summary (key, display name,
    availability — never a path), with the production versioned-JSON
    registry store created `0o700` under the isolated userData.
-4. **The honest boundary leg** — the application menu is pinned to H1's
-   closed product set (registration, no activation entry) and no session
-   lifecycle exists: the desktop control-plane composition is not
-   packaged (see Blocked legs).
+4. **The activation leg** (flipped at #362 from the H6 boundary leg) —
+   the application menu carries the per-project `Activate <project>`
+   entries, and a REAL activation drives the full hosting loop through
+   the packaged composition: the settled transition over the
+   kernel-leased production registry, the authoritative window replacing
+   its top level onto the granted project origin, the launcher and
+   project origins serving through the one loopback listener, the
+   project's natural routes streaming through the proxy byte-identical,
+   enforced admission on the reserved API, and the live HMR WebSocket
+   through the raw-upgrade tunnel (see Flipped legs).
 5. **Normal quit + audits** — the Apple-event quit (what Cmd+Q sends):
    `quit-settled` with `childStop: graceful`, exit 0, then the audits:
    zero stray processes referencing the staging root, zero listener
@@ -94,32 +102,46 @@ surface, and the post-run audits.
    ADR-0006 §1, key equality is never the law), and the same
    zero-residue audits — no retained state, deterministic cleanup.
 
-## Blocked legs (recorded, not hidden)
+## Flipped legs (recorded at the composition, #362)
 
-The migration policy's law: a product gap the smoke finds is reported to
-its owning issue, never hidden by the harness. At #248 the packaged
-desktop host **does not compose the control-plane activation**: the
-control-plane child answers the settled `unavailable-composition`
-refusal; no origin listener, launcher document, project origin, canvas,
-editing target, or HMR proxy is packaged. Consequently:
+The migration policy's law ran its course: the boundary legs recorded at
+#248 were reported to their owning issues, never hidden, and the
+composition lane (#362, H7) flipped them in a recorded packaged run —
+**13/13, exit 0**, the flip evidence posted on #248. The packaged
+desktop host now **composes the production control plane** over its
+kernel-leased production registry (the `unavailable-composition`
+refusal is retired from the vocabulary): the origin listener, launcher
+document, project origin, canvas, editing target, and HMR proxy are all
+packaged and driven. The recorded leg statuses:
 
 - **Activation with same-origin direct canvas DOM access** (AC-3) —
-  blocked on the missing desktop composition seam.
-- **Hostile Service Worker bypass + document authority observed in the
-  packaged app** (AC-4, first half) — the H4/H5 surfaces are pure seams
-  proven by their own real-Electron harness lanes; no packaged editing
-  target exists to observe them on.
-- **Vite HMR through the packaged proxy** (AC-4, second half) — no
-  project origin/proxy is composed into the packaged host.
-- The `CloseReport` half of AC-5 (reaping exact **runtime** children —
-  the project plane's worker and managed dev server) requires a run that
-  only activation can create; the packaged quit's own reap (the
-  control-plane child, `graceful`) is proven.
+  flipped: the native menu drives the settled transition, the
+  authoritative window (fresh editing partition, CDP bypass before
+  navigation, H4 document authority injected) replaces its top level
+  onto the granted origin, and the natural routes stream through the
+  proxy byte-identical (zero injection).
+- **Vite HMR through the packaged proxy** (AC-4, second half) — flipped:
+  the canvas route lives on the project origin; the established
+  upgrade-tunnel connection is the packaged evidence.
+- **Document authority observed in the packaged app** (AC-4, first half)
+  — flipped-half: the reserved API admission is enforced server-side in
+  the packaged child (an unauthenticated mutation is unauthorized); the
+  H4 injection and the H5 bypass are the composed load-bearing path, and
+  their full enforcement observations remain the real-Electron lanes'
+  truth (`e2e/desktop/document-authority-injection.spec.ts`).
+- **Hostile Service Worker interception** — remains the real-Electron
+  lane's truth (`e2e/desktop/service-worker-bypass.spec.ts`): the
+  hostile-SW proof needs the hostile fixture the plain canonical copy
+  never carries; the packaged app's editing target is bypass-guarded by
+  construction.
+- **The `CloseReport` half of AC-5** — flipped: quitting with the active
+  session reaps the exact **runtime** children (the plane's worker and
+  managed dev server) — graceful, zero strays, zero sockets, zero
+  temporary-root leftovers.
 
 The web host (`apps/web`, G1–G3, `e2e/web/**`) remains the behavioral
-judge for exactly these laws until the composition lands; the boundary
-leg in the smoke pins today's product surface so the composition lane
-flips the spec at a named spot.
+judge for the full builder loops and the switch races; the packaged
+smoke proves the composed product path end to end.
 
 ## What the host needs
 

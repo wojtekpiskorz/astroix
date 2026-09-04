@@ -131,6 +131,10 @@ export const DESKTOP_EVENT_KINDS: ReadonlySet<string> = new Set([
   'registration-refused',
   'selection-canceled',
   'menu-action-rejected',
+  // #362, H7 — the composition's session lifecycle surface.
+  'session-active',
+  'session-idle',
+  'activation-refused',
   'quit-settled',
 ]);
 
@@ -336,6 +340,73 @@ end tell`,
     `early-package: the native picker registration did not complete (${String(lastError)}); ` +
       `product log:\n${run.productLogLines.join('\n')}`,
   );
+}
+
+/** Clicks one application-menu item through System Events (the real native surface, like the picker drive). */
+export async function clickMenuItem(menu: string, item: string): Promise<void> {
+  if (/["\\\n]/.test(item)) {
+    throw new Error(`early-package: a menu item must be AppleScript-safe (${item})`);
+  }
+  await activateApp();
+  await osascript(
+    `tell application "System Events"
+  tell process "Astroix"
+    click menu item "${item}" of menu "${menu}" of menu bar item "${menu}" of menu bar 1
+  end tell
+end tell`,
+    30_000,
+  );
+}
+
+/** The window names of the launched app process (System Events) — the authoritative-target evidence. */
+export async function windowNamesOfProcess(): Promise<string[]> {
+  const script = `
+tell application "System Events"
+  tell process "Astroix"
+    set output to ""
+    repeat with w in windows
+      set output to output & (name of w) & linefeed
+    end repeat
+    return output
+  end tell
+end tell`;
+  const text = await osascript(script, 30_000);
+  return text
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+}
+
+/**
+ * The composition's origin port — the listener one pid (the
+ * control-plane child) holds on loopback right now. `0` when none is
+ * observable: the caller refuses to guess.
+ */
+export async function originPortOf(pid: string): Promise<number> {
+  const sockets = await listeningSockets([pid]);
+  for (const socket of sockets) {
+    const match = /127\.0\.0\.1:(\d+) \(LISTEN\)/.exec(socket);
+    if (match !== null) return Number.parseInt(match[1] ?? '0', 10);
+  }
+  return 0;
+}
+
+/** The TCP connections the given PIDs hold right now (the HMR tunnel's evidence; `lsof` exits 1 on none). */
+export async function establishedSockets(pids: readonly string[]): Promise<string[]> {
+  if (pids.length === 0) return [];
+  try {
+    const { stdout } = await execFileAsync(
+      'lsof',
+      ['-nP', '-a', '-iTCP', '-sTCP:ESTABLISHED', '-p', pids.join(',')],
+      { timeout: 30_000 },
+    );
+    return stdout
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0);
+  } catch {
+    return [];
+  }
 }
 
 /** The normal quit: the Apple event Cmd+Q sends — the product's own quit transition. */

@@ -16,8 +16,16 @@ import {
   createHostCapabilityGrants,
   type HostCapabilityGrants,
 } from '@wojciechpiskorz/astroix-runtime/api/http';
+import {
+  createDocumentAuthority,
+  type DocumentAuthority,
+} from '@wojciechpiskorz/astroix-runtime/client-authority';
 import type { GrantTable } from '@wojciechpiskorz/astroix-runtime/edit-authority/grants';
-import type { OriginLease, OriginListener } from '@wojciechpiskorz/astroix-runtime/origin';
+import {
+  type OriginLease,
+  OriginLeaseOccupiedError,
+  type OriginListener,
+} from '@wojciechpiskorz/astroix-runtime/origin';
 import type { ProjectRun } from '@wojciechpiskorz/astroix-runtime/project-runtime';
 import type { ProjectRegistry } from '@wojciechpiskorz/astroix-runtime/registry';
 import {
@@ -42,7 +50,17 @@ import {
 import { createSseHub } from '@wojciechpiskorz/astroix-runtime/sse';
 import { describe, expect, it } from 'vitest';
 import { createCandidateStore, pairKey } from './candidates.ts';
-import { createExecutor, type SeatStore, type SessionSeat } from './executor.ts';
+import {
+  electronHostAdoption,
+  type HostDocumentIdentity,
+  type HostMainFrameHandshake,
+} from './control-plane.ts';
+import {
+  createExecutor,
+  type ExecutorInputs,
+  type SeatStore,
+  type SessionSeat,
+} from './executor.ts';
 
 /**
  * The stranded-adoption convergence legs (#333, the ruling's direction
@@ -62,6 +80,14 @@ import { createExecutor, type SeatStore, type SessionSeat } from './executor.ts'
  * instead of dead-locking on the stale active entry (a fresh committed,
  * adopted session — the stranded lease retired strictly before the
  * successor's grant).
+ *
+ * The #362 leg widens the injected-failure set by ONE member, through
+ * the REAL Electron adoption seam (`electronHostAdoption` — the
+ * composition's own wiring, never a re-derivation): a host handshake
+ * that cannot report the current document throws AFTER the seam's
+ * pre-granted lease and BEFORE `adoptSession` records anything of its
+ * own — the trail's grant-time record is the only inventory the
+ * aftermath gets.
  */
 
 /** Two valid, distinct project keys (26 lowercase-base32 characters, the protocol's shape). */
@@ -160,6 +186,12 @@ function fakeListener(journal: Journal): OriginListener {
       readonly projectKey: ProjectKey;
       readonly upstream: { readonly host: string; readonly port: number };
     }): OriginLease => {
+      // The real listener's one-active-lease law (F1's host router):
+      // a second grant while one is live throws `lease-occupied` — the
+      // exact blast radius an unretired lease carries into every later
+      // activation, pinned here so the legs observe it as the real
+      // listener would.
+      if (listener.activeLease !== null) throw new OriginLeaseOccupiedError();
       journal.push(`lease:grant:${input.projectKey[0]}`);
       const lease: OriginLease = {
         projectKey: input.projectKey,
@@ -168,6 +200,7 @@ function fakeListener(journal: Journal): OriginListener {
         revoked: false,
         revoke: async () => {
           journal.push(`lease:revoke:${input.projectKey[0]}`);
+          if (listener.activeLease === lease) listener.activeLease = null;
           return { projectKey: input.projectKey, destroyedSockets: 0, outcome: 'complete' };
         },
       };
@@ -230,9 +263,14 @@ interface Harness {
  * `createGrantTable` refuses it, which is the real `adoptSession` throw
  * these legs induce AFTER the bindings and the lease were granted. The
  * `refuseGrant` option swaps in the refused-grant coordinator stand-in
- * (F6's `failed` result after the real revocation pass).
+ * (F6's `failed` result after the real revocation pass). The
+ * `hostHandshake` option (#362) wires the REAL Electron adoption seam
+ * over the harness inputs — the same call `createControlPlaneComposition`
+ * makes, never a re-derivation of its ordering.
  */
-async function bootHarness(options: { readonly refuseGrant?: boolean } = {}): Promise<Harness> {
+async function bootHarness(
+  options: { readonly refuseGrant?: boolean; readonly hostHandshake?: HostMainFrameHandshake } = {},
+): Promise<Harness> {
   const scratch = await mkdtemp(join(tmpdir(), 'astroix-stranded-adoption-'));
   const rootA = join(scratch, 'project-a');
   await mkdir(rootA);
@@ -242,6 +280,13 @@ async function bootHarness(options: { readonly refuseGrant?: boolean } = {}): Pr
   const reportedFailures: SessionFailure[] = [];
   const httpBindings = createClientBindings();
   const sessionClients = createSessionClients();
+  // The composition's document authority (#246, H4): the adoption's
+  // one-mint both-truths discipline — the same surface the shared
+  // composition composes over these very tables.
+  const authority: DocumentAuthority = createDocumentAuthority({
+    httpBindings,
+    clients: sessionClients,
+  });
   const grants = createHostCapabilityGrants();
   const hub = createSseHub();
   const grantTables = new Map<string, GrantTable>();
@@ -319,7 +364,7 @@ async function bootHarness(options: { readonly refuseGrant?: boolean } = {}): Pr
     handleIncompleteReap: realCompletion.handleIncompleteReap,
   };
 
-  const executor = createExecutor({
+  const inputs: ExecutorInputs = {
     registry: fakeRegistry([
       { projectKey: PROJECT_A, canonicalRoot: rootA },
       { projectKey: PROJECT_B, canonicalRoot: rootB },
@@ -327,6 +372,7 @@ async function bootHarness(options: { readonly refuseGrant?: boolean } = {}): Pr
     supervisor,
     coordinator,
     completion,
+    authority,
     seatStore,
     listener: fakeListener(journal),
     sessionClients,
@@ -339,7 +385,15 @@ async function bootHarness(options: { readonly refuseGrant?: boolean } = {}): Pr
     },
     hub,
     candidates,
-  });
+  };
+  const executor = createExecutor(
+    options.hostHandshake === undefined
+      ? inputs
+      : {
+          ...inputs,
+          host: electronHostAdoption(options.hostHandshake, inputs, seatStore),
+        },
+  );
 
   return {
     supervisor,
@@ -566,6 +620,72 @@ describe('the stranded-adoption convergence (#333, direction (a))', () => {
       // and the generation reservation is freed.
       expect(h.runs[1]?.stopCalls()).toBe(1);
       expect(h.supervisor.snapshot().attempt).toBeUndefined();
+    } finally {
+      await h.close();
+    }
+  });
+
+  it('retires the PRE-GRANTED lease when the handshake dies before the adoption — the trail records at grant time (#362)', async () => {
+    // The Electron host's seam grants the origin lease BEFORE the
+    // phase-1 ask (the origin must serve before the host can load
+    // anything from it) — a host that cannot report the current
+    // document throws between the grant and `adoptSession`, where
+    // nothing but the trail's grant-time record can carry the lease
+    // into the aftermath's ordered pass. An unrecorded lease would
+    // answer `neverGrantedRoutes`, retire nothing, and the router's
+    // one-active-lease law (enforced by the harness listener, as the
+    // real one enforces it) would then refuse every later activation
+    // for the rest of the boot.
+    let asks = 0;
+    const identity = (navigationId: number): HostDocumentIdentity => ({
+      webContentsId: 7,
+      navigationId,
+    });
+    const h = await bootHarness({
+      hostHandshake: {
+        currentDocument: async () => {
+          asks += 1;
+          return asks === 1 ? null : identity(1);
+        },
+        replaceTopLevel: async () => identity(2),
+      },
+    });
+    try {
+      // The first ask cannot report a document: the grant is live, the
+      // adoption dies before any of its own records, and the F7
+      // aftermath converges over the trail alone.
+      const first = activationOf(await h.execute(activate(PROJECT_A, 'req-1')));
+      expect(first.target.session.generation).toBe(1);
+      expect(h.supervisor.snapshot().active).toBeUndefined();
+      expect(h.seatStore.active()).toBeNull();
+      // THE pin: the pre-granted lease was retired strictly after its
+      // grant, before the failed-no-active report — the trail drove the
+      // ordered pass, never the never-granted escape.
+      expect(h.journal).toContain('lease:grant:a');
+      expect(h.journal.indexOf('lease:revoke:a')).toBeGreaterThan(
+        h.journal.indexOf('lease:grant:a'),
+      );
+      expect(h.journal.indexOf('report:failed-no-active')).toBeGreaterThan(
+        h.journal.indexOf('lease:revoke:a'),
+      );
+      expect(h.reportedFailures).toHaveLength(1);
+
+      // The consequence: the next activation converges. With the lease
+      // escaped (the defect), the one-lease law refuses the second
+      // grant inside the handshake itself — and every grant after it,
+      // until app quit.
+      const second = activationOf(await h.execute(activate(PROJECT_A, 'req-2')));
+      expect(second.target.session.generation).toBe(2);
+      expect(h.supervisor.snapshot().active?.ref.generation).toBe(2);
+      const seat = h.seatStore.active();
+      expect(seat?.projectKey).toBe(PROJECT_A);
+      // The full Electron adoption held: the seat's document is the
+      // OBSERVED post-replacement one (the rebind), never the phase-1
+      // bind the replacement invalidated.
+      expect(seat?.document).toEqual({ webContentsId: 7, navigationId: 2 });
+      expect(h.journal.lastIndexOf('lease:grant:a')).toBeGreaterThan(
+        h.journal.indexOf('lease:revoke:a'),
+      );
     } finally {
       await h.close();
     }

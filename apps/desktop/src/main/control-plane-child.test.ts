@@ -16,19 +16,24 @@ import {
 
 // @vitest-environment node — forks real control-plane children over real private IPC channels; no DOM.
 /**
- * The control-plane child's process lane (#243 focused tests): the REAL
- * desktop child entry — capability → kernel registry-writer lease →
- * production registry → the private service loop — forked as raw node
- * with the dev register (the #230/#240 idiom), driven from this test
- * process playing Electron main. The native-grant validation runs the
- * real registry; transitions answer the honest H1 refusal; closing the
- * channel fences and exits the child (D3's contract, observed through
- * the exit event).
+ * The control-plane child's process lane (#243 focused tests; #362 H7's
+ * composition flip): the REAL desktop child entry — capability → kernel
+ * registry-writer lease → the SHARED control-plane composition (the real
+ * origin listener with its launcher/project virtual hosts, the reserved
+ * API and SSE surfaces, the staged-activation supervisor) over the
+ * production registry — forked as raw node with the dev register (the
+ * #230/#240 idiom), driven from this test process playing Electron main.
+ * The native-grant validation runs the real registry; the booted report
+ * carries the composition's origin port; delegated transitions answer
+ * the settled vocabulary through the REAL executor (an unknown project
+ * is the executor's not-found path — `transition-failed`, never the
+ * retired H1 refusal); closing the channel fences and exits the child
+ * (D3's contract, observed through the exit event).
  *
- * One SHARED child serves the four request-behavior tests (the TS
- * transform makes each fork expensive — the root run stays kind to the
- * sibling process lanes' timings); the two destructive exits (disconnect
- * fence, no-capability boot protocol) take their own forks.
+ * One SHARED child serves the request-behavior tests (the TS transform
+ * makes each fork expensive — the root run stays kind to the sibling
+ * process lanes' timings); the two destructive exits (disconnect fence,
+ * no-capability boot protocol) take their own forks.
  */
 
 const CHILD = fileURLToPath(new URL('./control-plane-child.ts', import.meta.url));
@@ -128,6 +133,10 @@ async function freshConfig(): Promise<Record<string, unknown>> {
   return {
     privateStateDirectory: join(root, 'private-state'),
     registryDirectory: join(root, 'registry'),
+    // The client documents directory the composition's document surface
+    // serves — an empty temp tree here: nothing in this lane fetches a
+    // document, and the surface fails closed (never searches) on a miss.
+    clientDist: join(root, 'client-dist'),
     declareCurrentRuntimePin: true,
   };
 }
@@ -167,13 +176,17 @@ describe('the control-plane child (process lane)', () => {
   );
 
   it(
-    'answers the settled refusal for delegated transitions (the H1 composition boundary)',
+    'answers delegated transitions through the real composition — the retired refusal is gone (#362)',
     async () => {
-      shared.child.send(activateRequest(3, 'someprojectkey'));
+      // An unknown project key drives the SAME executor the browser
+      // command set drives: its not-found path answers the settled
+      // transition-failed vocabulary — never the retired
+      // unavailable-composition, and never a spawned plane.
+      shared.child.send(activateRequest(3, 'zzzzzzzzzzzzzzzzzzzzzzzzzz'));
       const reply = await shared.nextReport<{ outcome: TransitionOutcome }>(
         (report) => (report as { requestId?: number }).requestId === 3,
       );
-      expect(reply.outcome).toEqual({ kind: 'refused', reason: 'unavailable-composition' });
+      expect(reply.outcome).toEqual({ kind: 'refused', reason: 'transition-failed' });
       // the wire shape the child produced must be exactly what the main
       // side's parser lifts — a builder round-trip, not a type check
       expect(parseDesktopChildReport(transitionResultReport(3, reply.outcome))).toMatchObject({
@@ -202,7 +215,7 @@ describe('the control-plane child (process lane)', () => {
     async () => {
       const run = spawnChild(await freshConfig());
       await run.booted;
-      expect(parseDesktopChildReport(bootedReport())).toMatchObject({ kind: 'booted' });
+      expect(parseDesktopChildReport(bootedReport(4426))).toMatchObject({ kind: 'booted' });
       const exited = exitOf(run.child);
       run.child.disconnect();
       const outcome = await exited;

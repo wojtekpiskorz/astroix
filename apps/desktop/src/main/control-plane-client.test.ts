@@ -1,7 +1,12 @@
 import type { SessionRef } from '@wojciechpiskorz/astroix-protocol';
 import { BootCapability } from '@wojciechpiskorz/astroix-runtime/private-boot';
 import { describe, expect, it } from 'vitest';
-import { registerResultReport, transitionResultReport } from './child-protocol.ts';
+import {
+  bootedReport,
+  parseDesktopChildReport,
+  registerResultReport,
+  transitionResultReport,
+} from './child-protocol.ts';
 import {
   type ControlPlaneClient,
   type ControlPlaneLossReason,
@@ -82,9 +87,11 @@ function connect(child: FakeChild, bootDeadlineMs: number = BOOT_DEADLINE): Conn
     handle: child,
     bootDeadlineMs,
     host: {
-      onBooted: () => boots.push(1),
+      onBooted: (port) => boots.push(port),
       onLost: (reason) => losses.push(reason),
       onSessionState: (ref) => sessionState.push(ref),
+      onHostObservationAsk: () => {},
+      onDocumentCapability: () => {},
     },
   });
   return { client, child, losses, boots, sessionState };
@@ -168,15 +175,20 @@ describe('connectControlPlaneChild — correlation', () => {
       requestId: 1,
       outcome: { kind: 'refused', reason: 'not-a-reason' },
     });
-    child.reply(transitionResultReport(1, { kind: 'refused', reason: 'unavailable-composition' }));
-    await expect(pending).resolves.toEqual({ kind: 'refused', reason: 'unavailable-composition' });
+    child.reply(transitionResultReport(1, { kind: 'refused', reason: 'transition-failed' }));
+    await expect(pending).resolves.toEqual({ kind: 'refused', reason: 'transition-failed' });
   });
 
-  it('surfaces booted and session-state reports', async () => {
+  it('surfaces booted (with the composition port) and session-state reports', async () => {
     const { client, child, boots, sessionState } = connect(new FakeChild());
-    child.reply({ astroix: 'astroix.desktop-private-channel', kind: 'booted' });
-    await expect(client.booted).resolves.toBe(true);
-    expect(boots).toHaveLength(1);
+    child.reply(bootedReport(4426));
+    await expect(client.booted).resolves.toBe(4426);
+    expect(boots).toEqual([4426]);
+    // A booted report without a port is drifted — the boot never settles
+    // on it (the deadline policy owns the surface).
+    expect(
+      parseDesktopChildReport({ astroix: 'astroix.desktop-private-channel', kind: 'booted' }),
+    ).toBeNull();
     child.reply({
       astroix: 'astroix.desktop-private-channel',
       kind: 'session-state',

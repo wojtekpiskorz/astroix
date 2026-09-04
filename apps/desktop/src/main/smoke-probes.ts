@@ -185,9 +185,13 @@ async function webviewProbe(wc: WebContentsLike): Promise<Finding> {
 
 /** A top-level navigation off the neutral document must be prevented — the URL must not change. */
 async function navigationProbe(window: BrowserWindow): Promise<Finding> {
+  // #362: the window's document is the composition's launcher origin
+  // once booted (the neutral document only before it) — the probe's law
+  // is the STAY, whichever approved document the window stands on.
+  const before = window.webContents.getURL();
   await window.webContents.executeJavaScript(`window.location.href = 'https://astroix.invalid/'`);
   await delay(500);
-  const stayed = window.webContents.getURL() === 'about:blank';
+  const stayed = window.webContents.getURL() === before;
   return { probe: 'navigation', denied: stayed, detail: { url: window.webContents.getURL() } };
 }
 

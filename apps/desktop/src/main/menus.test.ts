@@ -1,26 +1,38 @@
-import type { SessionRef } from '@wojciechpiskorz/astroix-protocol';
+import type { ProjectKey, SessionRef } from '@wojciechpiskorz/astroix-protocol';
 import { describe, expect, it } from 'vitest';
+import type { GrantedProjectSummary } from './child-protocol.ts';
 import { buildApplicationMenu, dispatchMenuAction, type NativeMenuActions } from './menus.ts';
 
 /**
- * The menu currency law's focused units (#243; ADR-0006 §5): the capture
- * freezes the `SessionRef` visible at menu creation; the click executes
- * later against whatever session is current — an exact epoch+generation
- * match executes, everything else rejects without executing.
+ * The menu currency law's focused units (#243; ADR-0006 §5; #362 H7's
+ * activation entries): the capture freezes the `SessionRef` visible at
+ * menu creation; the click executes later against whatever session is
+ * current — an exact epoch+generation match executes, everything else
+ * rejects without executing. The activation items are the composition's
+ * native surface (#362): one per registered project, enabled only while
+ * idle, carrying their project keys at build time.
  */
 
 const REF_A: SessionRef = { runtimeEpoch: 'epoch-1', generation: 3 };
 const REF_B: SessionRef = { runtimeEpoch: 'epoch-1', generation: 4 };
 const REF_RESTARTED: SessionRef = { runtimeEpoch: 'epoch-2', generation: 1 };
+const PROJECT_KEY: ProjectKey = 'aaaaaaaaaaaaaaaaaaaaaaaaaa';
+const REGISTERED: GrantedProjectSummary[] = [
+  { projectKey: PROJECT_KEY, displayName: 'managed-project', availability: 'available' },
+];
 
 /** Records every action the dispatcher drives — the fake host actions. */
 class RecordingActions implements NativeMenuActions {
   readonly addExisting: number[] = [];
+  readonly activations: ProjectKey[] = [];
   readonly deactivations: SessionRef[] = [];
   readonly quits: number[] = [];
   readonly rejections: string[] = [];
   addExistingProject(): void {
     this.addExisting.push(1);
+  }
+  activate(projectKey: ProjectKey): void {
+    this.activations.push(projectKey);
   }
   deactivate(sessionRef: SessionRef): void {
     this.deactivations.push(sessionRef);
@@ -58,6 +70,27 @@ describe('buildApplicationMenu', () => {
     const appItems = menu.sections.find((section) => section.label === 'Astroix')?.items ?? [];
     expect(fileItems.some((item) => item.actionId === 'add-existing-project')).toBe(true);
     expect(appItems.some((item) => item.actionId === 'quit')).toBe(true);
+  });
+
+  it('carries one activation entry per registered project — enabled while idle, disabled under a session (#362)', () => {
+    const idle = buildApplicationMenu(null, REGISTERED);
+    const idleSession = idle.sections.find((section) => section.label === 'Session')?.items ?? [];
+    const activate = idleSession.find((item) => item.actionId === 'activate');
+    expect(activate?.label).toBe('Activate managed-project');
+    expect(activate?.enabled).toBe(true);
+    expect(activate?.projectKey).toBe(PROJECT_KEY);
+    // Under an active session the activation entries stand disabled — an
+    // activation is an idle-state transition; switches go through
+    // deactivate first.
+    const active = buildApplicationMenu(REF_A, REGISTERED);
+    const activeSession =
+      active.sections.find((section) => section.label === 'Session')?.items ?? [];
+    expect(activeSession.find((item) => item.actionId === 'activate')?.enabled).toBe(false);
+    // No registered projects: no activation surface at all — the menu
+    // never carries a dead entry.
+    const empty = buildApplicationMenu(null, []);
+    const emptySession = empty.sections.find((section) => section.label === 'Session')?.items ?? [];
+    expect(emptySession.some((item) => item.actionId === 'activate')).toBe(false);
   });
 });
 
@@ -109,5 +142,22 @@ describe('dispatchMenuAction', () => {
     const menu = buildApplicationMenu(null);
     dispatchMenuAction(menu, 'deactivate', null, actions);
     expect(actions.rejections).toEqual(['no-active-session']);
+  });
+
+  it("activates the clicked item's project through the host action (#362)", () => {
+    const actions = new RecordingActions();
+    const menu = buildApplicationMenu(null, REGISTERED);
+    dispatchMenuAction(menu, 'activate', null, actions, PROJECT_KEY);
+    expect(actions.activations).toEqual([PROJECT_KEY]);
+    expect(actions.deactivations).toEqual([]);
+    expect(actions.rejections).toEqual([]);
+  });
+
+  it('drops an activate click that carries no target — the dispatch never guesses', () => {
+    const actions = new RecordingActions();
+    const menu = buildApplicationMenu(null, REGISTERED);
+    dispatchMenuAction(menu, 'activate', null, actions);
+    expect(actions.activations).toEqual([]);
+    expect(actions.rejections).toEqual([]);
   });
 });

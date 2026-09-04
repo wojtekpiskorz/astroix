@@ -1,12 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import {
   activateRequest,
+  authorityObservationRequest,
+  authorityObservationResultReport,
   bootedReport,
   deactivateRequest,
+  documentCapabilityReport,
+  hostObservationResultRequest,
+  observeDocumentRequest,
   parseDesktopChildReport,
   parseDesktopChildRequest,
   registerResultReport,
   registerRootRequest,
+  replaceTopLevelRequest,
+  sessionStateReport,
   transitionResultReport,
 } from './child-protocol.ts';
 
@@ -96,7 +103,27 @@ describe('parseDesktopChildRequest', () => {
 
 describe('parseDesktopChildReport', () => {
   it('lifts the booted and session-state reports', () => {
-    expect(parseDesktopChildReport(bootedReport())).toMatchObject({ kind: 'booted' });
+    expect(parseDesktopChildReport(bootedReport(4426))).toMatchObject({
+      kind: 'booted',
+      port: 4426,
+    });
+    // The booted port is closed vocabulary: zero, non-integers, and
+    // out-of-range values are drifted, never parsed.
+    expect(
+      parseDesktopChildReport({
+        astroix: 'astroix.desktop-private-channel',
+        kind: 'booted',
+        port: 0,
+      }),
+    ).toBeNull();
+    expect(
+      parseDesktopChildReport({
+        astroix: 'astroix.desktop-private-channel',
+        kind: 'booted',
+        port: 65536,
+      }),
+    ).toBeNull();
+    expect(parseDesktopChildReport(bootedReport(1))).toMatchObject({ kind: 'booted', port: 1 });
     expect(
       parseDesktopChildReport({
         astroix: 'astroix.desktop-private-channel',
@@ -141,6 +168,94 @@ describe('parseDesktopChildReport', () => {
         transitionResultReport(9, { kind: 'completed', sessionRef: SESSION_REF }),
       ),
     ).toMatchObject({ kind: 'transition-result' });
+  });
+
+  it('lifts the H7 composition vocabulary — the handshake asks, the observation replies, the capability feed', () => {
+    // The adoption handshake: the child asks (reports), main replies (requests).
+    expect(parseDesktopChildReport(observeDocumentRequest(11))).toMatchObject({
+      kind: 'observe-document',
+      requestId: 11,
+    });
+    expect(
+      parseDesktopChildReport(
+        replaceTopLevelRequest({
+          requestId: 12,
+          sessionRef: SESSION_REF,
+          projectKey: 'key123',
+          origin: 'http://key123.localhost:4426',
+        }),
+      ),
+    ).toMatchObject({ kind: 'replace-top-level', requestId: 12 });
+    expect(
+      parseDesktopChildReport(
+        replaceTopLevelRequest({
+          requestId: 12,
+          sessionRef: SESSION_REF,
+          projectKey: 'key123',
+          origin: 'file:///etc',
+        }),
+      ),
+    ).toBeNull(); // the origin vocabulary is loopback http, never a file target
+    expect(
+      parseDesktopChildRequest(
+        hostObservationResultRequest(11, true, { webContentsId: 3, navigationId: 2 }),
+      ),
+    ).toMatchObject({
+      kind: 'host-observation-result',
+      requestId: 11,
+      observed: true,
+      document: { webContentsId: 3, navigationId: 2 },
+    });
+    expect(parseDesktopChildRequest(hostObservationResultRequest(12, false, null))).toMatchObject({
+      kind: 'host-observation-result',
+      requestId: 12,
+      observed: false,
+    });
+    expect(
+      parseDesktopChildRequest({
+        astroix: 'astroix.desktop-private-channel',
+        kind: 'host-observation-result',
+        requestId: 13,
+        observed: true,
+        document: null,
+      }),
+    ).toBeNull(); // an observed reply without a document is drift, never a guess
+    expect(() => hostObservationResultRequest(13, true, null)).toThrow(); // the builder never launders the defect
+    // The authority observations: main forwards, the child acknowledges.
+    expect(
+      parseDesktopChildRequest(
+        authorityObservationRequest(14, { kind: 'revoked', capability: 'cap-1' }),
+      ),
+    ).toMatchObject({ kind: 'authority-observation', requestId: 14 });
+    expect(
+      parseDesktopChildRequest(
+        authorityObservationRequest(14, {
+          kind: 'document-navigated',
+          webContentsId: 3,
+          navigationId: 0,
+        }),
+      ),
+    ).toBeNull(); // the navigation counter is monotonic from 1
+    expect(parseDesktopChildReport(authorityObservationResultReport(14))).toMatchObject({
+      kind: 'authority-observation-result',
+      requestId: 14,
+    });
+    // The capability feed: the live value, and the clear.
+    expect(parseDesktopChildReport(documentCapabilityReport(3, 'cap-1'))).toMatchObject({
+      kind: 'document-capability',
+      webContentsId: 3,
+      capability: 'cap-1',
+    });
+    expect(parseDesktopChildReport(documentCapabilityReport(3, null))).toMatchObject({
+      kind: 'document-capability',
+      capability: null,
+    });
+    expect(parseDesktopChildReport(documentCapabilityReport(0, 'cap-1'))).toBeNull();
+    // The session-state report builder round-trips.
+    expect(parseDesktopChildReport(sessionStateReport(SESSION_REF))).toMatchObject({
+      kind: 'session-state',
+      sessionRef: SESSION_REF,
+    });
   });
 
   it('drops drifted reports — unknown fields on closed codes fail closed', () => {
