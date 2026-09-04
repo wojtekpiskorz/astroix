@@ -10,6 +10,7 @@ import type {
   InspectionRequest,
   ProjectKey,
   RequestEnvelope,
+  ResourceGrant,
   ResponseEnvelope,
   SessionRef,
   SessionSnapshot,
@@ -65,8 +66,12 @@ import { stagedFixtureCopy } from '../../../../apps/web/src/stage-e2e.ts';
  * - `harness.openEvents()` / `harness.openHmr()` — live SSE and HMR
  *   probes with settled `closed` promises (the stale-stream laws).
  * - `harness.openDelayedMutation()` — a mutation whose body completes
- *   only when the caller finishes it (precommit work delayed across
- *   the transition boundary — the fault tier's primitive).
+ *   only when the caller finishes it (precommit work held at the
+ *   transition boundary — the fault tier's primitive).
+ * - `harness.stylesWriteFact(document)` — the served sheet's write fact
+ *   (grant + raw) captured while a generation is live (K2 #255's
+ *   member: the CSS vertical's wire-evidence capture, single-homed
+ *   here so the held-body and stale-replay legs never fork it).
  * - `harness.tree()` / `harness.subtreePids()` — the wrong-project and
  *   process-convergence oracles (bytes and real pids, never internals).
  *
@@ -142,6 +147,13 @@ export interface DelayedMutation {
   destroy(): void;
 }
 
+/** One served sheet's write fact — the CSS vertical's grant plus its raw bytes, captured live. */
+export interface StylesWriteFact {
+  readonly file: string;
+  readonly grant: ResourceGrant;
+  readonly raw: string;
+}
+
 /** The booted harness — the K-family's stable surface. */
 export interface SwitchHarness {
   readonly port: number;
@@ -169,6 +181,12 @@ export interface SwitchHarness {
   inspect(request: InspectionRequest, document: SwitchDocument): Promise<WireResponse>;
   /** One admitted apply-edit (a mutation) — the write lane's wire shape. */
   applyEdit(plan: WritePlan, document: SwitchDocument): Promise<WireResponse>;
+  /**
+   * The served sheet's write fact for the project's staged CSS file —
+   * the styles inspection's own grant enrichment, captured while the
+   * document's generation is live (K2 #255's member addition).
+   */
+  stylesWriteFact(document: SwitchDocument): Promise<StylesWriteFact>;
   /** Opens the live session events stream on the project host (the editor binding's stream). */
   openEvents(document: SwitchDocument): Promise<LiveProbe>;
   /** Opens the live raw vite-hmr tunnel through the origin lease to the real dev server. */
@@ -286,6 +304,7 @@ export async function createSwitchHarness(): Promise<SwitchHarness> {
         credentialsOf(document),
         true,
       ),
+    stylesWriteFact: async (document) => await stylesWriteFactOf(port, document, nextRequestId),
     openEvents: async (document) => await openEvents(port, document),
     openHmr: async (document) => await openHmr(port, document),
     fetchProxied: async (document, path) => await fetchProxied(port, document, path),
@@ -488,10 +507,10 @@ function postHead(
 }
 
 /**
- * One admitted POST with the exact evidence the admission spine demands
- * for the command's shape. The envelope rides VERBATIM — its requestId
- * reaches the wire (internal callers mint through the harness counter;
- * battery replays keep their probe ids).
+ * One POST `/__astroix/api/v1` with the exact evidence the command's
+ * shape demands. The envelope rides VERBATIM — its requestId reaches
+ * the wire (internal callers mint through the harness counter; battery
+ * replays keep their probe ids).
  */
 async function postEnvelope(
   port: number,
@@ -502,6 +521,48 @@ async function postEnvelope(
   const body = JSON.stringify(envelope);
   const head = postHead(hostOf(credentials, port), credentials, body, mutation, false);
   return await rawExchange(port, `${head}${body}`, ACTIVATION_BUDGET_MS);
+}
+
+/**
+ * The served sheet's write fact for the project's staged CSS file —
+ * the styles inspection's own grant enrichment, read off an admitted
+ * exchange (K2 #255's member: the CSS vertical's wire-evidence
+ * capture, one spelling for every K leg that needs it).
+ */
+async function stylesWriteFactOf(
+  port: number,
+  document: SwitchDocument,
+  nextRequestId: () => string,
+): Promise<StylesWriteFact> {
+  const response = await postEnvelope(
+    port,
+    {
+      protocolVersion: 1,
+      requestId: nextRequestId(),
+      session: document.session,
+      command: { kind: 'inspect', request: { kind: 'styles', route: '/' } },
+    },
+    credentialsOf(document),
+    false,
+  );
+  const payload = JSON.parse(response.body) as {
+    result?: {
+      result?: {
+        payload?: {
+          writeFacts?: { file: string; grant: ResourceGrant; raw: string }[];
+        };
+      };
+    };
+  };
+  const fact = payload.result?.result?.payload?.writeFacts?.find(
+    (entry) => entry.file === document.project.cssPath,
+  );
+  if (response.status !== 200 || fact === undefined) {
+    throw new Error(
+      `the styles inspection carried no write fact for the staged sheet (${response.status})`,
+    );
+  }
+  return fact;
 }
 
 // ——— the live probes ———

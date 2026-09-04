@@ -53,7 +53,6 @@ export {
 } from '../state/app-store';
 export {
   type HeldGrant,
-  type PendingMutation,
   type UndoRecord,
   useEditSessionStore,
 } from '../state/edit-session-store';

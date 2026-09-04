@@ -94,7 +94,6 @@ describe('composeShellReset', () => {
     const edit = useEditSessionStore.getState();
     edit.holdGrant(FIRST, { token: 'grant' });
     edit.pushUndo(FIRST, { token: 'undo' });
-    edit.trackPendingMutation(FIRST, { key: 'm' });
     expect(shellStoreSnapshot().grants).toBe(1);
 
     const navigations: string[] = [];
@@ -111,13 +110,12 @@ describe('composeShellReset', () => {
     expect(eventsClosed).toBe(1); // 2. old SSE closed
     expect(sessionQueryCount(queryClient)).toBe(0); // 3. old-generation queries removed
     expect(shellStoreSnapshot()).toEqual({
-      // 4. the six store fields cleared
+      // 4. the store fields cleared
       selection: false,
       canvas: false,
       activeEntry: false,
       grants: 0,
       undo: 0,
-      pendingMutations: 0,
     });
     expect(gate.isCurrent()).toBe(false); // the state belt closed with the stores
     expect(navigations).toEqual(['http://launcher.localhost:4426/__astroix/app/']); // 5. navigate LAST
@@ -260,7 +258,6 @@ describe('the feature-store wing (#372 — the registration registry)', () => {
       activeEntry: false,
       grants: 0,
       undo: 0,
-      pendingMutations: 0,
     });
     expect(useDiscoveryStore.getState().collapsedFolders.size).toBe(0);
     const navigation = useContentNavigationStore.getState();
@@ -279,5 +276,75 @@ describe('the feature-store wing (#372 — the registration registry)', () => {
     const css = useCssInspectionStore.getState();
     expect(css.openRowKey).toBeNull();
     expect(css.served).toBeNull();
+  });
+
+  it('returning to the first project starts its NEW generation at zero — no revival, no B residue (#255)', () => {
+    // The A-B-A walk on one document (the same-document switch shape —
+    // the across-document faces ride the browser battery): A1 lives
+    // with rich state, resets; B lives with rich state, resets; A
+    // RETURNS at a third generation and starts at zero — nothing of
+    // dead A1 (same project, dead pair) and nothing of B survives.
+    const AGAIN = { runtimeEpoch: FIRST.runtimeEpoch, generation: 3 };
+    const liveAt = (ref: typeof FIRST): void => {
+      clearShellStores();
+      bindShellSession(ref);
+      useAppStore.getState().setSelection(ref, aSelection());
+      useAppStore.getState().setActiveEntry(ref, { entryId: 'hello-builder' });
+      useEditSessionStore.getState().holdGrant(ref, { token: `grant-${ref.generation}` });
+      useEditSessionStore.getState().pushUndo(ref, { token: `undo-${ref.generation}` });
+      useCssInspectionStore.getState().openRow('rule-1');
+      useContentNavigationStore.getState().setActiveEntry({
+        collection: 'blog',
+        entryId: 'hello-builder',
+      });
+    };
+    const reset = (): void => {
+      composeShellReset({
+        fetchAbort: new AbortController(),
+        events: { close: () => {} },
+        queryClient: createShellQueryClient(),
+        gate: createSessionGate(FIRST),
+        navigate: () => {},
+        url: 'http://launcher.localhost:4426/__astroix/app/',
+      }).run();
+    };
+
+    liveAt(FIRST); // A1
+    reset();
+    liveAt(NEXT); // B
+    reset();
+    liveAt(AGAIN); // A2 — the returning generation
+
+    // A2's own state is live (the belt admits the CURRENT pair)…
+    expect(shellStoreSnapshot()).toEqual({
+      selection: true,
+      canvas: false,
+      activeEntry: true,
+      grants: 1,
+      undo: 1,
+    });
+    // …and one more reset lands A2's zero — the same ordered clearing
+    // holds for the returning generation as for the first switch.
+    reset();
+    expect(shellStoreSnapshot()).toEqual({
+      selection: false,
+      canvas: false,
+      activeEntry: false,
+      grants: 0,
+      undo: 0,
+    });
+    expect(useContentNavigationStore.getState().activeEntry).toBeNull();
+    expect(useCssInspectionStore.getState().openRowKey).toBeNull();
+
+    // Dead-pair writes from BOTH retired generations are dropped: A1's
+    // (same project, dead pair — the revival shape) and B's.
+    bindShellSession(AGAIN);
+    useAppStore.getState().setSelection(FIRST, aSelection());
+    useAppStore.getState().setSelection(NEXT, aSelection());
+    useEditSessionStore.getState().holdGrant(FIRST, { token: 'revived' });
+    useEditSessionStore.getState().pushUndo(NEXT, { token: 'b-undo' });
+    expect(shellStoreSnapshot().selection).toBe(false);
+    expect(shellStoreSnapshot().grants).toBe(0);
+    expect(shellStoreSnapshot().undo).toBe(0);
   });
 });
