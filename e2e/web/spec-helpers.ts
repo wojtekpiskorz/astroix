@@ -41,6 +41,22 @@ export const LOAD_BUDGET_MS = 30_000;
 export const BOOT_BUDGET_MS = 120_000;
 
 /**
+ * The batteries' settle budget (#396, folding #395's recorded rider):
+ * the young managed dev server converging under CI load — the frame's
+ * post-connect self-reload settle (activateSettled's navigation poll,
+ * previously the unnamed `LOAD_BUDGET_MS * 2`), and the content
+ * battery's settles over the freshly-booted plane: the first
+ * inspection's fresh runner and the canvas's first route compile
+ * (write settles carry their own #250 budget below). Sized between
+ * the landing and plane-boot budgets; single-homed here so a future
+ * resize is one line, not another fleet-wide literal diff.
+ */
+export const SETTLE_BUDGET_MS = 60_000;
+
+/** The canvas select's toPass retry ceiling — three load-budget windows for the interactive retry loop (named: the last multiplier in the file). */
+export const CANVAS_SELECT_RETRY_MS = LOAD_BUDGET_MS * 3;
+
+/**
  * The write batteries' settle budget (#250): the first accepted edit
  * forks the real write-executor child, and the settle spans the fork,
  * the executor's commit, and the post-commit refresh convergence.
@@ -53,6 +69,16 @@ export const STAGED_CSS_FILE = join(stagedCopyRoot('project-a'), 'src', 'pages',
 /** The staged sheet's current bytes — the write batteries' disk truth. */
 export async function cssBytes(): Promise<string> {
   return await readFile(STAGED_CSS_FILE, 'utf8');
+}
+
+/** Activates the first staged fixture copy and lands the project document (the content batteries' shared opening). */
+export async function activateProject(page: Page): Promise<void> {
+  await page.goto('/__astroix/app/');
+  await expect(page.getByTestId('session-label')).toHaveText('idle', {
+    timeout: LOAD_BUDGET_MS,
+  });
+  await activateButton(page, 0).click();
+  await page.waitForURL(PROJECT_APP_URL, { timeout: BOOT_BUDGET_MS });
 }
 
 /**
@@ -93,7 +119,7 @@ export async function activateSettled(page: Page): Promise<void> {
     timeout: LOAD_BUDGET_MS,
   });
   await expect
-    .poll(() => frameNavigations.length, { timeout: LOAD_BUDGET_MS * 2 })
+    .poll(() => frameNavigations.length, { timeout: SETTLE_BUDGET_MS })
     .toBeGreaterThanOrEqual(2);
   frameNavigations.length = 0;
   await page.waitForTimeout(1500);
@@ -113,7 +139,7 @@ export async function canvasSelect(page: Page, selector: string): Promise<void> 
   await expect(async () => {
     await page.frameLocator(CANVAS_FRAME).locator(selector).click();
     await expect(page.getByTestId('selection-tag')).not.toHaveText('none', { timeout: 2_000 });
-  }).toPass({ timeout: LOAD_BUDGET_MS * 3 });
+  }).toPass({ timeout: CANVAS_SELECT_RETRY_MS });
 }
 
 /**

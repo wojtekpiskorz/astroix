@@ -1,6 +1,5 @@
 import { writeFile } from 'node:fs/promises';
 import { expect, type Page, type Request, type Response, test } from '@playwright/test';
-import { spliceText } from '../../packages/core/src/splice-writer.ts';
 import {
   activateSettled,
   BOOT_BUDGET_MS,

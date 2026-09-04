@@ -42,6 +42,7 @@ import {
   createSessionCompletion,
   type SessionCompletion,
 } from '@wojciechpiskorz/astroix-runtime/session-supervisor/completion';
+import { createEditFence } from '@wojciechpiskorz/astroix-runtime/session-supervisor/fence';
 import { FIRST_COMMIT_REVOCATION } from '@wojciechpiskorz/astroix-runtime/session-supervisor/revocation';
 import {
   createSessionSupervisor,
@@ -61,6 +62,7 @@ import {
   type ExecutorInputs,
   type SeatStore,
   type SessionSeat,
+  stopOwnedRuns,
 } from './executor.ts';
 
 /**
@@ -897,5 +899,97 @@ describe('the styles inspection route selection (#370)', () => {
     } finally {
       await h.close();
     }
+  });
+});
+
+describe("the composition teardown's owned-run stop (#365 addendum, #391)", () => {
+  /**
+   * The gated run: stop() records the call and settles only when the
+   * leg opens the gate — the await itself is the thing under proof,
+   * never merely the invocation.
+   */
+  function gatedRun(): {
+    readonly run: ProjectRun;
+    readonly stopCalls: () => number;
+    readonly open: () => void;
+  } {
+    let stopCalls = 0;
+    let open: () => void = () => {};
+    const stopped = new Promise<void>((resolve) => {
+      open = resolve;
+    });
+    const report = stopped.then(() => completeCloseReport());
+    const run: ProjectRun = {
+      ready: Promise.resolve(),
+      inspect: () => Promise.reject(new Error('inspection is not this lane\u2019s subject')),
+      subscribe: () => () => {},
+      stop: () => {
+        stopCalls += 1;
+        return report;
+      },
+      closed: report,
+    };
+    return { run, stopCalls: () => stopCalls, open };
+  }
+
+  it('awaits every owned run at close — the unseated candidate included, the shared seat exactly once', async () => {
+    const seated = gatedRun();
+    const candidate = gatedRun();
+    const candidates = createCandidateStore();
+    const seat: SessionSeat = {
+      ref: { runtimeEpoch: 'epoch-owned-runs', generation: 1 },
+      projectKey: PROJECT_A,
+      run: seated.run,
+      devServerPort: 4310,
+      lease: null as unknown as OriginLease,
+      fence: createEditFence(),
+      editorCapability: 'editor-capability-fixture',
+      document: { webContentsId: 1, navigationId: 1 },
+      clientCapability: 'client-capability-fixture',
+    };
+    // The seated run is ALSO a remembered candidate (adoption leaves
+    // its entry), and one unseated staged candidate exists beside it —
+    // the close-time shape the old close() orphaned
+    candidates.remember(seat.run, 4310, seat.ref);
+    candidates.remember(candidate.run, 4311, { runtimeEpoch: 'epoch-owned-runs', generation: 2 });
+
+    let settled = false;
+    const closing = stopOwnedRuns(seat, candidates).then(() => {
+      settled = true;
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    // Both DISTINCT runs were stopped — the unseated candidate\'s close
+    // is driven, and the shared seat exactly once (the dedupe) — while
+    // neither stop has settled yet: the awaits are real, never
+    // fire-and-forget
+    expect(seated.stopCalls()).toBe(1);
+    expect(candidate.stopCalls()).toBe(1);
+    expect(settled).toBe(false);
+
+    candidate.open();
+    await new Promise((resolve) => setImmediate(resolve));
+    // The candidate\'s close alone does not settle the pass — the
+    // seated run\'s stop is still awaited
+    expect(settled).toBe(false);
+
+    seated.open();
+    await closing;
+    expect(settled).toBe(true);
+  });
+
+  it('stops an unseated candidate with no active seat at all — the close covers runs the seat store never held', async () => {
+    const lone = gatedRun();
+    const candidates = createCandidateStore();
+    candidates.remember(lone.run, 4310, { runtimeEpoch: 'epoch-owned-runs', generation: 3 });
+    let settled = false;
+    const closing = stopOwnedRuns(null, candidates).then(() => {
+      settled = true;
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(lone.stopCalls()).toBe(1);
+    expect(settled).toBe(false);
+    lone.open();
+    await closing;
+    expect(settled).toBe(true);
   });
 });

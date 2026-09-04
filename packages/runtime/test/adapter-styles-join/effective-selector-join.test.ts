@@ -16,8 +16,9 @@ import { readProjectCssSources } from '../../astro-project-adapter/styles/join/p
  * with byte-parity against the frozen css-index corpora (the same
  * reference the E1 certification proved over real installs, #225), and
  * every correspondence disagreement — block presence, rule count, rule
- * order, selector identity, transformed-CSS shape — fails closed as a
- * `seam-rejected` AdapterError in the adapter's `{seam, seamClass,
+ * order, selector identity, transformed-CSS shape, and source-walk
+ * correspondence (the #302 hollow-payload cross-check) — fails closed
+ * as a `seam-rejected` AdapterError in the adapter's `{seam, seamClass,
  * expected, observed}` idiom with structural observed descriptions.
  */
 
@@ -28,6 +29,8 @@ const CORPUS_DIR = join(REPO_ROOT, 'e2e', 'behavior-contracts', 'inspection');
 const SEAM_BLOCK = 'styles join block correspondence (static scoped block ↔ compiled module)';
 const SEAM_RULES = 'styles join rule correspondence (count, order, selector identity)';
 const SEAM_SHAPE = 'styles join compiled CSS rule shape';
+const SEAM_WALK =
+  'styles join source-walk correspondence (compiled scoped modules ↔ walked static sources)';
 
 interface CorpusRecord {
   readonly selector: string;
@@ -208,10 +211,15 @@ describe('joinEffectiveSelectors (block, rule, ordering, identity)', () => {
   it('does not correlate a module whose id embeds a block file mid-segment', () => {
     // The static file's text appears inside xsrc/pages/index.astro — a
     // mid-segment embedding does not start a path segment, so the module
-    // stays uncorrelated and the block joins null instead of correlating
-    // a module it does not name.
+    // stays uncorrelated and that block joins null instead of correlating
+    // a module it does not name. The companion module for real.astro
+    // correlates, keeping this the partially-unknown shape (some modules
+    // correlate) rather than the zero-correlation world the #302
+    // cross-check rejects — the boundary under test is the discipline,
+    // not the hollow rejection.
     const staticRecords = buildCssIndex([
       { file: 'src/pages/index.astro', contents: '<style>.a { color: red; }</style>' },
+      { file: 'src/pages/real.astro', contents: '<style>.r { color: green; }</style>' },
     ]);
     const joined = joinEffectiveSelectors(staticRecords, [
       {
@@ -219,8 +227,15 @@ describe('joinEffectiveSelectors (block, rule, ordering, identity)', () => {
         url: '/src/pages/xsrc/pages/index.astro?astro&type=style&index=0&lang.css',
         compiledCss: '.x[data-astro-cid-x] { color: gray; }',
       },
+      {
+        id: '/proj/src/pages/real.astro?astro&type=style&index=0&lang.css',
+        url: '/src/pages/real.astro?astro&type=style&index=0&lang.css',
+        compiledCss: '.r[data-astro-cid-r] { color: green; }',
+      },
     ]);
-    expect(joined[0]?.effectiveSelector).toBeNull();
+    const bySelector = new Map(joined.map((record) => [record.selector, record.effectiveSelector]));
+    expect(bySelector.get('.a')).toBeNull();
+    expect(bySelector.get('.r')).toBe('.r[data-astro-cid-r]');
   });
 
   it('reduces compound, descendant, and whitespace-padded compiled selectors to their source form', () => {
@@ -348,6 +363,54 @@ describe('joinEffectiveSelectors (fail-closed negatives)', () => {
       observed: 'compiled CSS that does not parse as a stylesheet',
     });
     expect(error.cause).toBeInstanceOf(Error);
+  });
+
+  it('rejects compiled scoped modules over a static index that walked other files (the hollow cross-check, #302)', () => {
+    // The custom-srcDir quiet arm: the dev-css set yields a compiled
+    // scoped module for a file the src/-rooted walk never read (the
+    // styles live under the custom dir while src/ holds other files).
+    // Before #302 this joined as an all-null payload over the walked
+    // files and minted a revision silently; the cross-check rejects —
+    // the walk and the compiler observed different source trees.
+    const staticRecords = buildCssIndex([
+      { file: 'src/pages/index.astro', contents: '<style>.a { color: red; }</style>' },
+    ]);
+    const error = expectSeamRejection(
+      () =>
+        joinEffectiveSelectors(staticRecords, [
+          {
+            id: '/abs/proj/lib/pages/index.astro?astro&type=style&index=0&lang.css',
+            url: '/lib/pages/index.astro?astro&type=style&index=0&lang.css',
+            compiledCss: '.lib-title[data-astro-cid-lib] { color: #1e293b; }',
+          },
+        ]),
+      SEAM_WALK,
+    );
+    expect(error.details).toMatchObject({
+      expected: 'a static scoped block for at least one file the compiled scoped modules name',
+      observed:
+        'compiled scoped modules correlating with no static scoped block (the source walk and the compiler observed different source trees)',
+    });
+  });
+
+  it('rejects compiled scoped modules over an empty static index (the ruling empty arm, #302)', () => {
+    // src/ exists but is style-free while the route's styles live under
+    // the custom dir: the static index is empty, the dev-css set is not
+    // — an empty-or-partial payload must never be minted as a revision.
+    expectSeamRejection(
+      () =>
+        joinEffectiveSelectors(
+          [],
+          [
+            {
+              id: '/abs/proj/lib/pages/index.astro?astro&type=style&index=0&lang.css',
+              url: '/lib/pages/index.astro?astro&type=style&index=0&lang.css',
+              compiledCss: '.lib-title[data-astro-cid-lib] { color: #1e293b; }',
+            },
+          ],
+        ),
+      SEAM_WALK,
+    );
   });
 });
 

@@ -26,16 +26,20 @@ import { type AdapterError, seamRejection } from '../../adapter-error';
  * structural observed descriptions — never values, never content dumps):
  * a missing compiled module for the active route's own scoped block, a
  * loaded file with an absent block module, a rule-count disagreement, a
- * selector that does not reduce to its source form, and compiled CSS
- * that does not parse are all compatibility events, never a partially
- * joined payload. The shapes this join accepts are the ones the E1
- * certification suite proved byte-equal against the frozen inspection
- * corpora (`e2e/behavior-contracts/inspection/css-index.*.json`, #225).
+ * selector that does not reduce to its source form, compiled CSS that
+ * does not parse, and — the hollow-payload cross-check (#302) — compiled
+ * scoped modules that correlate with no walked static block are all
+ * compatibility events, never a partially joined payload. The shapes
+ * this join accepts are the ones the E1 certification suite proved
+ * byte-equal against the frozen inspection corpora
+ * (`e2e/behavior-contracts/inspection/css-index.*.json`, #225).
  */
 
 const SEAM_JOIN_BLOCK = 'styles join block correspondence (static scoped block ↔ compiled module)';
 const SEAM_JOIN_RULES = 'styles join rule correspondence (count, order, selector identity)';
 const SEAM_JOIN_RULE_SHAPE = 'styles join compiled CSS rule shape';
+const SEAM_JOIN_WALK_CORRESPONDENCE =
+  'styles join source-walk correspondence (compiled scoped modules ↔ walked static sources)';
 
 /**
  * The query token that marks a compiled scoped `<style>` block in a
@@ -110,6 +114,15 @@ interface ScopedBlock {
  * whose blocks have no compiled modules at all are simply not loaded on
  * the route — their scoped records join null (contract shape); a file
  * with SOME compiled modules must have them all.
+ *
+ * The hollow-payload cross-check (#302): a route whose dev-css set
+ * yields compiled scoped modules that correlate with NO static scoped
+ * block — the walk read a source tree the compiler did not, the
+ * custom-`srcDir` shape while the walk stays `src/`-rooted — rejects
+ * instead of minting a revision for an empty-or-partial all-null
+ * payload. Zero correlation is the reject condition; a partially
+ * unknown dev-css set (some modules correlate) stays the null-join
+ * shape above.
  */
 export function joinEffectiveSelectors(
   staticRecords: readonly CssRuleRecord[],
@@ -123,6 +136,12 @@ export function joinEffectiveSelectors(
   }));
   const blocks = groupScopedBlocks(payload);
   const modulesByBlock = indexStyleBlockModules(compiledModules, blocks);
+  if (compiledModules.length > 0 && modulesByBlock.size === 0) {
+    throw walkCorrespondenceRejection(
+      'a static scoped block for at least one file the compiled scoped modules name',
+      'compiled scoped modules correlating with no static scoped block (the source walk and the compiler observed different source trees)',
+    );
+  }
   const filesOnRoute = new Set(
     [...modulesByBlock.keys()].map((key) => key.slice(0, key.lastIndexOf('\0'))),
   );
@@ -315,6 +334,10 @@ function blockRejection(expected: string, observed: string): AdapterError {
 
 function rulesRejection(expected: string, observed: string): AdapterError {
   return stylesJoinRejected(SEAM_JOIN_RULES, expected, observed);
+}
+
+function walkCorrespondenceRejection(expected: string, observed: string): AdapterError {
+  return stylesJoinRejected(SEAM_JOIN_WALK_CORRESPONDENCE, expected, observed);
 }
 
 /**
