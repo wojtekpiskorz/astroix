@@ -29,10 +29,13 @@ const WEB_SPEC_DIR = join('e2e', 'web');
 // zero-injection snapshots.
 // `styles-inspection.spec.ts` joined at #370: the wire-carried styles
 // route selection's battery over the live host.
+// `css-inspection.spec.ts` joined at #249 (I1): the CSS vertical's
+// read-only inspection battery over the live host.
 const EXPECTED_WEB_SPECS = [
   'activation.spec.ts',
   'app-shell.spec.ts',
   'canvas.spec.ts',
+  'css-inspection.spec.ts',
   'launcher.spec.ts',
   'styles-inspection.spec.ts',
   'zero-injection.spec.ts',
