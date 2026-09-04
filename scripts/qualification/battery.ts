@@ -29,10 +29,22 @@ import { PACKAGED_NODE_PIN } from '../../packages/runtime/src/internal/packaged-
  * bundled Node binary — the declared build-manifest pin, the executed
  * `--version`, and the executed ABI must all agree with the pin table.
  * A self-consistently rebuilt manifest cannot fake this: the binary
- * speaks for itself.
+ * speaks for itself, under a minimal non-inherited environment so no
+ * ambient `NODE_OPTIONS` preload can speak for it.
  */
 
 const execFileAsync = promisify(execFile);
+
+/**
+ * The ABI (`process.versions.modules`) the pinned bundled Node reports:
+ * Node 24's modules ABI is 137, and the pin table's Node is
+ * v24.20.0 (`PACKAGED_NODE_PIN`, ADR-0008) — the executed ABI is
+ * COMPARED, not merely recorded, so ABI drift between two builds of
+ * the same version string fails closed (review round 1 on #373). A
+ * Node-pin change requalifies the artifact (ADR-0008) and moves this
+ * constant in the same PR.
+ */
+export const EXPECTED_BUNDLED_NODE_ABI = '137';
 
 /** The verdict of the bundled-Node identity facet. */
 export interface NodeIdentityOutcome {
@@ -126,7 +138,7 @@ export async function verifyBundledNodeIdentity(appPath: string): Promise<NodeId
     const { stdout } = await execFileAsync(
       join(appPath, BUNDLED_NODE_RELATIVE),
       ['-p', 'JSON.stringify({ version: process.version, abi: process.versions.modules })'],
-      { timeout: 60_000 },
+      { timeout: 60_000, env: identityExecEnv() },
     );
     const reported = JSON.parse(stdout.trim()) as { version?: unknown; abi?: unknown };
     executedVersion = typeof reported.version === 'string' ? reported.version : null;
@@ -144,7 +156,9 @@ export async function verifyBundledNodeIdentity(appPath: string): Promise<NodeId
     };
   }
   const ok =
-    executedVersion === declaredPin && declaredPin === PACKAGED_NODE_PIN && executedAbi !== null;
+    executedVersion === declaredPin &&
+    declaredPin === PACKAGED_NODE_PIN &&
+    executedAbi === EXPECTED_BUNDLED_NODE_ABI;
   return {
     ok,
     declaredPin,
@@ -152,4 +166,23 @@ export async function verifyBundledNodeIdentity(appPath: string): Promise<NodeId
     executedAbi,
     failure: ok ? null : 'identity-mismatch',
   };
+}
+
+/**
+ * Keys the bundled-Node identity exec may carry from the harness host —
+ * everything else is dropped, never inherited (the #231
+ * `minimalChildEnv` species): an ambient `NODE_OPTIONS=--require=…`
+ * preload must never coach the executed-binary proof — this facet's
+ * whole point is defeating self-consistent forgeries, so the binary
+ * speaks for itself or the identity fails (review round 1 on #373).
+ */
+const IDENTITY_EXEC_KEYS = ['PATH', 'TMPDIR'] as const;
+
+function identityExecEnv(): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {};
+  for (const key of IDENTITY_EXEC_KEYS) {
+    const value = process.env[key];
+    if (typeof value === 'string' && value.length > 0) env[key] = value;
+  }
+  return env;
 }

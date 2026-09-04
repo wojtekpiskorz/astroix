@@ -89,12 +89,20 @@ export const EVIDENCE_FILES = [
   'run.log',
 ] as const;
 
+/**
+ * Raised for evidence-directory misuse (a non-empty supplied directory):
+ * a usage error, the CLI's exit-2 class (review round 1 on #373 — it
+ * must surface as the documented usage exit, never an unhandled
+ * rejection).
+ */
+export class EvidenceDirRefusedError extends Error {}
+
 /** Prepares the evidence directory: absent or empty, then created. Rejects anything else. */
 export async function prepareEvidenceDir(dir: string): Promise<void> {
   if (existsSync(dir)) {
     const entries = await readdir(dir);
     if (entries.length > 0) {
-      throw new Error(
+      throw new EvidenceDirRefusedError(
         `qualification: the evidence directory ${dir} is not empty — a recorded run is never silently discarded (pass a fresh directory)`,
       );
     }

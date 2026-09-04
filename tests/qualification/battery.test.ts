@@ -14,8 +14,9 @@ import { verifyBundledNodeIdentity } from '../../scripts/qualification/battery.t
 
 /**
  * The qualification battery's own facets (#258, L1 focused tests):
- * the bundled-Node identity law over synthetic resource trees, and —
- * through the SAME packaged-asset adapter the app boots with — the
+ * the bundled-Node identity law over synthetic resource trees —
+ * version, ABI, and the NODE_OPTIONS-coaching negative — and, through
+ * the SAME packaged-asset adapter the app boots with, the
  * symlink-substitution, extra-file, and wrong-runtime artifact
  * rejections. These legs are pure filesystem work (no codesign), so
  * they run everywhere the harness's tests do; the battery's composed
@@ -119,6 +120,56 @@ describe('the bundled-Node identity law (#258)', () => {
     expect(outcome.executedVersion).toBe(PACKAGED_NODE_PIN);
     expect(outcome.executedAbi).toBe('137');
     expect(outcome.failure).toBeNull();
+  });
+
+  it('rejects ABI drift — a binary reporting the pinned version but a foreign ABI fails closed', async () => {
+    // the executed version and the declared pin agree perfectly; only
+    // the ABI is wrong — the identity is the version AND the ABI, never
+    // the version alone (review round 1 on #373)
+    const appPath = join(scratch, 'Astroix.app');
+    await stubResources(appPath, PACKAGED_NODE_PIN);
+    const resourcesRoot = join(appPath, 'Contents', 'Resources');
+    await rm(join(resourcesRoot, 'node'), { recursive: true, force: true });
+    await stubNode(resourcesRoot, PACKAGED_NODE_PIN, '999');
+    const outcome = await verifyBundledNodeIdentity(appPath);
+    expect(outcome.ok).toBe(false);
+    expect(outcome.failure).toBe('identity-mismatch');
+    expect(outcome.executedAbi).toBe('999');
+    expect(outcome.executedVersion).toBe(PACKAGED_NODE_PIN);
+  });
+
+  it('cannot be coached by an ambient NODE_OPTIONS preload — the binary speaks for itself', async () => {
+    // a REAL node binary (symlinked over the bundled slot — a thin
+    // launcher must resolve its own dylibs) with an ambient NODE_OPTIONS
+    // preload that would spoof process.version to the pin: the identity
+    // exec strips the environment, so the proof reads the binary's TRUE
+    // version (this harness node's, ≠ the pin) and fails closed — never
+    // the spoofed value (review round 1 on #373)
+    const appPath = join(scratch, 'Astroix.app');
+    await stubResources(appPath, PACKAGED_NODE_PIN);
+    const resourcesRoot = join(appPath, 'Contents', 'Resources');
+    await rm(join(resourcesRoot, 'node'), { recursive: true, force: true });
+    await mkdir(join(resourcesRoot, 'node', 'bin'), { recursive: true });
+    await symlink(process.execPath, join(resourcesRoot, 'node', 'bin', 'node'));
+    const preload = join(scratch, 'spoof.js');
+    await writeFile(
+      preload,
+      `Object.defineProperty(process, 'version', { value: ${JSON.stringify(PACKAGED_NODE_PIN)} });\n`,
+    );
+    const previous = process.env.NODE_OPTIONS;
+    process.env.NODE_OPTIONS = `--require ${JSON.stringify(preload)}`;
+    try {
+      const outcome = await verifyBundledNodeIdentity(appPath);
+      expect(outcome.ok).toBe(false);
+      expect(outcome.failure).toBe('identity-mismatch');
+      // the TRUE version of the binary under test (this node), not the
+      // spoof target — prove the preload never rode along
+      expect(outcome.executedVersion).toBe(process.version);
+      expect(outcome.executedVersion).not.toBe(PACKAGED_NODE_PIN);
+    } finally {
+      if (previous === undefined) delete process.env.NODE_OPTIONS;
+      else process.env.NODE_OPTIONS = previous;
+    }
   });
 
   it('rejects a wrong runtime — a self-consistent manifest cannot fake the executed identity', async () => {

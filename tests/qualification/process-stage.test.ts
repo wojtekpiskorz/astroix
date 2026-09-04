@@ -1,4 +1,4 @@
-import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -91,6 +91,66 @@ describe('the qualification process stage over stub executables (#258)', () => {
     expect(verdicts.record.argv).toContain(
       `--user-data-dir=${join(stub.stagingRoot, 'user-data')}`,
     );
+  }, 30_000);
+
+  it('launches under a minimal allowlisted env — the harness environment never reaches the app', async () => {
+    // the stub dumps its own environment to a file; the harness host
+    // carries hostile ambient vars during the launch — none of them may
+    // appear in the app's environment (the #231 whitelisted-env law;
+    // review round 1 on #373)
+    const dump = join(staging, 'launched-env.txt');
+    const stub = await stubApp(
+      'env-probe',
+      `#!/bin/sh\nenv > "${dump}"\ntrap "exit 0" TERM\nwhile :; do sleep 0.2; done\n`,
+    );
+    const previous = {
+      NODE_OPTIONS: process.env.NODE_OPTIONS,
+      ASTROIX_QUALIFICATION_ARTIFACT: process.env.ASTROIX_QUALIFICATION_ARTIFACT,
+    };
+    process.env.NODE_OPTIONS = '--max-old-space-size=2048';
+    process.env.ASTROIX_QUALIFICATION_ARTIFACT = '/tmp/decoy.zip';
+    try {
+      const verdicts = await launchTerminateAndAudit(input(stub));
+      expect(verdicts.launchOk).toBe(true);
+      const launched = await readFile(dump, 'utf8');
+      const launchedEnv = new Map(
+        launched
+          .split('\n')
+          .filter((line) => line.includes('='))
+          .map((line) => {
+            const at = line.indexOf('=');
+            return [line.slice(0, at), line.slice(at + 1)] as const;
+          }),
+      );
+      // the isolation law's own vars are present…
+      expect(launchedEnv.get('HOME')).toBe(join(stub.stagingRoot, 'home'));
+      expect(launchedEnv.get('ASTROIX_DESKTOP_USER_DATA')).toBe(
+        join(stub.stagingRoot, 'user-data'),
+      );
+      // …and NOTHING of the harness host's environment rides along
+      expect(launchedEnv.has('NODE_OPTIONS')).toBe(false);
+      expect(launchedEnv.has('ASTROIX_QUALIFICATION_ARTIFACT')).toBe(false);
+      expect(launchedEnv.has('ELECTRON_ENABLE_LOGGING')).toBe(true); // the one fixed var
+      const inherited = verdicts.record.env.inheritedKeys;
+      for (const key of launchedEnv.keys()) {
+        const known =
+          key === 'HOME' ||
+          key === 'ASTROIX_DESKTOP_USER_DATA' ||
+          key === 'ELECTRON_ENABLE_LOGGING' ||
+          // the stub's own shell sets these as it starts — shell state,
+          // never harness inheritance
+          key === 'PWD' ||
+          key === 'SHLVL' ||
+          key === '_' ||
+          inherited.includes(key);
+        expect(known, `unexpected env key in the launched app: ${key}`).toBe(true);
+      }
+    } finally {
+      for (const [key, value] of Object.entries(previous)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
   }, 30_000);
 
   it('a launch failure fails closed: an app that exits during settle never reaches termination', async () => {

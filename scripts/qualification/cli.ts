@@ -1,4 +1,5 @@
 import { describeArgumentRejection, parseQualificationArguments, USAGE } from './args.ts';
+import { EvidenceDirRefusedError } from './evidence.ts';
 import { runQualification } from './qualify.ts';
 
 /**
@@ -42,6 +43,18 @@ const result = await runQualification({
   onLog: (line) => {
     console.log(line);
   },
+}).catch((error: unknown) => {
+  // a refused evidence directory is USAGE misuse (exit 2), and no
+  // harness throw may surface as an unhandled rejection (review round 1
+  // on #373)
+  if (error instanceof EvidenceDirRefusedError) {
+    console.error(error.message);
+    process.exit(2);
+  }
+  console.error(
+    `qualification: harness error — ${error instanceof Error ? error.message : String(error)}`,
+  );
+  process.exit(1);
 });
 for (const failure of result.failures) {
   console.error(`qualification: FAILURE — ${failure}`);

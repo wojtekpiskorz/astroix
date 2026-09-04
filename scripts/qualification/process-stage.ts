@@ -14,12 +14,18 @@ import { promisify } from 'node:util';
  * the #361 smoke-harness laws): the isolated temp HOME plus the
  * product's user-data override and the browser-level `--user-data-dir`
  * switch (every process of the tree, first to last, isolated from the
- * real account home), the dev-only environment declarations REMOVED so
- * only the packaged resolution can decide the boot, the process-tree
- * observation over `pgrep -f` + `ps`, the listening-socket evidence,
- * the Apple-event quit (the event Cmd+Q sends — the app's own quit
- * surface, the one H6 proved reaps the whole plane), and the
- * line-buffered, tail-bounded stdout/stderr capture.
+ * real account home), the process-tree observation over `pgrep -f` +
+ * `ps`, the listening-socket evidence, the Apple-event quit (the event
+ * Cmd+Q sends — the app's own quit surface, the one H6 proved reaps
+ * the whole plane), and the line-buffered, tail-bounded stdout/stderr
+ * capture.
+ *
+ * The launch environment is the #231 whitelisted-env law
+ * (`minimalChildEnv`'s species): a MINIMAL ALLOWLIST is inherited from
+ * the harness host and nothing else — a dev machine's `NODE_OPTIONS`,
+ * `ELECTRON_*`, and secrets can never flow into the app under
+ * qualification (review round 1 on #373: the full-env spread let the
+ * harness's own environment coach the artifact it was judging).
  *
  * The stage is artifact-shaped, not feature-shaped: it knows where a
  * packaged app keeps its executable and how a macOS app is asked to
@@ -30,12 +36,12 @@ const execFileAsync = promisify(execFile);
 
 /** The product's packaged user-data override (the H1/#361 isolation law, translated). */
 export const USER_DATA_ENV_VAR = 'ASTROIX_DESKTOP_USER_DATA';
-/** Dev-only environment declarations a packaged run must never see (the H6 launch law, translated). */
-export const DEV_ENV_VARS_REMOVED: readonly string[] = Object.freeze([
-  'ASTROIX_DESKTOP_NODE',
-  'ASTROIX_DESKTOP_SMOKE',
-  'ASTROIX_DESKTOP_DEV_CURRENT_PIN',
-]);
+/**
+ * Keys the launch environment may carry from the harness host —
+ * everything else is dropped, never inherited (the #231
+ * `minimalChildEnv` species; review round 1 on #373).
+ */
+const LAUNCH_ENV_KEYS = ['PATH', 'TMPDIR', 'LANG'] as const;
 
 /** One observed process row (the H6 audit shape). */
 export interface ProcessRow {
@@ -69,7 +75,8 @@ export interface ProcessStageRecord {
     readonly home: string;
     readonly userData: string;
     readonly userDataEnvVar: string;
-    readonly removedEnvVars: readonly string[];
+    /** The allowlist keys inherited from the harness host — the whole launch env policy. */
+    readonly inheritedKeys: readonly string[];
   };
   readonly pid: number | null;
   readonly spawnError: string | null;
@@ -139,11 +146,15 @@ export async function launchTerminateAndAudit(
   const userData = join(input.stagingRoot, 'user-data');
   await mkdir(home, { recursive: true });
   await mkdir(userData, { recursive: true });
-  const env: NodeJS.ProcessEnv = { ...process.env };
-  for (const name of DEV_ENV_VARS_REMOVED) delete env[name];
-  env.HOME = home;
-  env[USER_DATA_ENV_VAR] = userData;
-  env.ELECTRON_ENABLE_LOGGING = '0';
+  const env: NodeJS.ProcessEnv = {
+    HOME: home,
+    [USER_DATA_ENV_VAR]: userData,
+    ELECTRON_ENABLE_LOGGING: '0',
+  };
+  for (const key of LAUNCH_ENV_KEYS) {
+    const value = process.env[key];
+    if (typeof value === 'string' && value.length > 0) env[key] = value;
+  }
   const executable = join(input.appPath, 'Contents', 'MacOS', input.executableName);
   const argv = [`--user-data-dir=${userData}`];
 
@@ -284,7 +295,7 @@ export async function launchTerminateAndAudit(
       home,
       userData,
       userDataEnvVar: USER_DATA_ENV_VAR,
-      removedEnvVars: DEV_ENV_VARS_REMOVED,
+      inheritedKeys: LAUNCH_ENV_KEYS,
     },
     pid: child?.pid ?? null,
     spawnError,

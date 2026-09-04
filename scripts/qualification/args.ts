@@ -7,10 +7,13 @@
  * output tree. The harness qualifies SUPPLIED candidate bytes; whoever
  * supplies them states them, on the command line, in full.
  *
- * This module is pure by construction: it reads `process.argv`'s slice
- * the caller passes and nothing else — no `process.env` access exists
- * anywhere in the harness (the argument tests prove planted decoy
- * environment variables cannot select a candidate).
+ * This module is pure by construction: it reads the argv slice the
+ * caller passes and nothing else — the environment never selects or
+ * overrides a candidate (the argument tests prove planted decoy
+ * environment variables cannot). The environments the harness COMPOSES
+ * elsewhere (the launch env, the bundled-Node identity exec) are
+ * minimal explicit allowlists, never inherited from this process
+ * (see `process-stage.ts` and `battery.ts`).
  */
 
 /** The three exclusively-explicit required parameters (#258 AC-1). */

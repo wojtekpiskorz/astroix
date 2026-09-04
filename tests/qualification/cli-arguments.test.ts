@@ -17,7 +17,7 @@ const REPO = join(HERE, '..', '..');
 const CLI = join(REPO, 'scripts', 'qualification', 'cli.ts');
 const NODE_FLAGS = [
   '--experimental-transform-types',
-  `--import`,
+  '--import',
   './apps/desktop/raw-node-register.mjs',
 ];
 
@@ -111,4 +111,26 @@ describe('the qualification CLI rejects implicit and env-derived candidates (#25
     expect(run.code).toBe(2);
     expect(run.stderr).toContain('unknown flag --label');
   }, 60_000);
+
+  // The evidence-directory refusal is environment misuse: the documented
+  // exit-2 usage class, never an unhandled rejection (review round 1 on
+  // #373). Darwin-only — the CLI's platform guard (also exit 2) fires
+  // first everywhere else, and the stderr message is the distinguisher.
+  it.skipIf(process.platform !== 'darwin')(
+    'exits 2, not with an unhandled rejection, when the evidence directory is non-empty',
+    async () => {
+      const { mkdtemp, writeFile } = await import('node:fs/promises');
+      const { tmpdir } = await import('node:os');
+      const evidenceDir = await mkdtemp(join(tmpdir(), 'astroix-qual-cli-refusal-'));
+      await writeFile(join(evidenceDir, 'stale.txt'), 'x');
+      const run = await runCli(
+        ['--artifact', '/tmp/a.zip', '--expected-sha256', VALID_SHA, '--evidence', evidenceDir],
+        {},
+      );
+      expect(run.code).toBe(2);
+      expect(run.stderr).toContain('is not empty');
+      expect(run.stderr).not.toContain('at async'); // no unhandled-rejection stack
+    },
+    60_000,
+  );
 });
