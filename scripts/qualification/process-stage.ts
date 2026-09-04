@@ -138,6 +138,22 @@ export interface ProcessStageInput {
 
 const TAIL_LINES = 50;
 
+/** One observed exit — code and signal, each unknown until settled. */
+type ExitFacts = { readonly code: number | null; readonly signal: string | null };
+
+/**
+ * The mutable launch state every phase reads: the async `error` event
+ * can latch `spawnError` at any moment up to process exit, and the tail
+ * buffers keep filling while the child lives — one shared object, never
+ * a snapshot.
+ */
+interface LaunchState {
+  child: ChildProcess | null;
+  spawnError: string | null;
+  readonly stdoutTail: string[];
+  readonly stderrTail: string[];
+}
+
 /** Runs the whole process law: launch, settle, terminate, audit. Bounded everywhere. */
 export async function launchTerminateAndAudit(
   input: ProcessStageInput,
@@ -146,149 +162,47 @@ export async function launchTerminateAndAudit(
   const userData = join(input.stagingRoot, 'user-data');
   await mkdir(home, { recursive: true });
   await mkdir(userData, { recursive: true });
-  const env: NodeJS.ProcessEnv = {
-    HOME: home,
-    [USER_DATA_ENV_VAR]: userData,
-    ELECTRON_ENABLE_LOGGING: '0',
-  };
-  for (const key of LAUNCH_ENV_KEYS) {
-    const value = process.env[key];
-    if (typeof value === 'string' && value.length > 0) env[key] = value;
-  }
+  const env = buildLaunchEnv(home, userData);
   const executable = join(input.appPath, 'Contents', 'MacOS', input.executableName);
   const argv = [`--user-data-dir=${userData}`];
 
-  const stdoutTail: string[] = [];
-  const stderrTail: string[] = [];
-  const steps: TerminationStep[] = [];
-  let spawnError: string | null = null;
-  let child: ChildProcess | null = null;
-  try {
-    child = spawn(executable, argv, {
-      cwd: input.stagingRoot,
-      env,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    child.stdout?.on('data', (chunk: Buffer) => pushTail(stdoutTail, chunk));
-    child.stderr?.on('data', (chunk: Buffer) => pushTail(stderrTail, chunk));
-    child.stdin?.on?.('error', () => {});
-    // a missing or non-executable binary surfaces HERE (the async error
-    // event), not as a spawn throw — capture it or it becomes an
-    // unhandled exception that leaves no record
-    child.on('error', (error: Error) => {
-      if (spawnError === null) spawnError = error.message;
-    });
-  } catch (error) {
-    spawnError = error instanceof Error ? error.message : String(error);
-  }
-
-  const settled = (): { code: number | null; signal: string | null } | null =>
-    child !== null && (child.exitCode !== null || child.signalCode !== null)
-      ? { code: child.exitCode, signal: child.signalCode }
+  const state = spawnApp(executable, argv, input.stagingRoot, env);
+  const settled = (): ExitFacts | null =>
+    state.child !== null && (state.child.exitCode !== null || state.child.signalCode !== null)
+      ? { code: state.child.exitCode, signal: state.child.signalCode }
       : null;
-  const awaitExit = (
-    boundMs: number,
-  ): Promise<{ code: number | null; signal: string | null } | null> =>
+  const awaitExit = (boundMs: number): Promise<ExitFacts | null> =>
     new Promise((resolve) => {
       if (settled() !== null) {
         resolve(settled());
         return;
       }
       const timer = setTimeout(() => {
-        child?.removeListener('exit', onExit);
+        state.child?.removeListener('exit', onExit);
         resolve(null);
       }, boundMs);
       const onExit = (code: number | null, signal: string | null) => {
         clearTimeout(timer);
         resolve({ code, signal });
       };
-      child?.once('exit', onExit);
+      state.child?.once('exit', onExit);
     });
 
   // ——— launch + settle ———
-  let earlyExit: { code: number | null; signal: string | null } | null = null;
-  if (spawnError === null) {
-    const deadline = Date.now() + input.settleMs;
-    while (Date.now() < deadline) {
-      await delay(500);
-      const exit = settled();
-      if (spawnError !== null || exit !== null) {
-        earlyExit = exit ?? { code: null, signal: null };
-        break;
-      }
-    }
-  } else {
-    earlyExit = { code: null, signal: null };
-  }
+  const earlyExit = await observeSettle(state, input.settleMs, settled);
   const treeAtSettle =
-    spawnError === null && earlyExit === null ? await processesReferencing(input.stagingRoot) : [];
+    state.spawnError === null && earlyExit === null
+      ? await processesReferencing(input.stagingRoot)
+      : [];
   const socketsAtSettle =
     treeAtSettle.length > 0 ? await listeningSockets(treeAtSettle.map((row) => row.pid)) : [];
 
   // ——— termination ———
-  let outcome: TerminationOutcome;
-  let exitFacts: { code: number | null; signal: string | null } | null = settled();
-  if (spawnError !== null) {
-    outcome = 'spawn-error';
-  } else if (earlyExit !== null) {
-    outcome = 'launch-failed';
-    exitFacts = settled();
-  } else if (exitFacts !== null) {
-    // exited by itself between settle and the quit attempt: clean only at code 0
-    outcome = 'exited-before-termination';
-  } else if (input.quitMode === 'apple-event') {
-    // One knob governs the whole quit path: the event DELIVERY and the
-    // exit WAIT are each bounded by quitTimeoutMs (a per-phase bound,
-    // never a second silent constant beside it — review round 2 on #373)
-    const sent = await appleEventQuit(input.bundleId, input.quitTimeoutMs);
-    steps.push({
-      step: 'apple-event-quit',
-      detail: sent.ok ? 'quit event delivered' : `quit surface unavailable (${sent.error})`,
-    });
-    exitFacts = await awaitExit(input.quitTimeoutMs);
-    if (exitFacts !== null && sent.ok) {
-      outcome = 'exited-on-own-quit-surface';
-    } else {
-      // the quit surface failed or was ignored: clean up with signals, and fail
-      await escalateSignals(child, input, steps, awaitExit);
-      exitFacts = settled();
-      outcome = sent.ok ? 'termination-forced' : 'quit-surface-unavailable';
-    }
-  } else {
-    const escalation = await escalateSignals(child, input, steps, awaitExit);
-    exitFacts = settled();
-    // a SIGKILLed process still "settles" — the escalation's own report,
-    // not the settled flag, says whether the graceful signal sufficed
-    outcome = escalation.usedKill ? 'termination-forced' : 'exited-after-signal';
-  }
+  const steps: TerminationStep[] = [];
+  const termination = await terminateApp(input, state, earlyExit, steps, settled, awaitExit);
 
   // ——— the residual audit ———
-  const residualPollMs = input.residualPollMs ?? 15_000;
-  let polls = 0;
-  let residuals = await processesReferencing(input.stagingRoot);
-  const deadline = Date.now() + residualPollMs;
-  while (residuals.length > 0 && Date.now() < deadline) {
-    polls += 1;
-    await delay(500);
-    residuals = await processesReferencing(input.stagingRoot);
-  }
-  const harnessKilled: string[] = [];
-  let postKillResiduals: ProcessRow[] = [];
-  if (residuals.length > 0) {
-    // The artifact left owned processes behind — the run has already
-    // failed; the harness still cleans the machine (best-effort) and
-    // records what it had to kill.
-    for (const row of residuals) {
-      try {
-        process.kill(Number(row.pid), 'SIGKILL');
-        harnessKilled.push(row.pid);
-      } catch {
-        // already gone, or not ours to signal — the post-kill pass reports
-      }
-    }
-    await delay(1000);
-    postKillResiduals = [...(await processesReferencing(input.stagingRoot))];
-  }
+  const residualAudit = await auditResiduals(input.stagingRoot, input.residualPollMs ?? 15_000);
 
   const record: ProcessStageRecord = {
     executable,
@@ -300,11 +214,11 @@ export async function launchTerminateAndAudit(
       userDataEnvVar: USER_DATA_ENV_VAR,
       inheritedKeys: LAUNCH_ENV_KEYS,
     },
-    pid: child?.pid ?? null,
-    spawnError,
+    pid: state.child?.pid ?? null,
+    spawnError: state.spawnError,
     settle: {
       settleMs: input.settleMs,
-      aliveAtSettle: spawnError === null && earlyExit === null,
+      aliveAtSettle: state.spawnError === null && earlyExit === null,
       earlyExit,
     },
     treeAtSettle,
@@ -312,24 +226,207 @@ export async function launchTerminateAndAudit(
     termination: {
       mode: input.quitMode,
       steps,
-      outcome,
-      exitCode: exitFacts?.code ?? null,
-      signal: exitFacts?.signal ?? null,
+      outcome: termination.outcome,
+      exitCode: termination.exitFacts?.code ?? null,
+      signal: termination.exitFacts?.signal ?? null,
     },
-    residualAudit: { pollMs: residualPollMs, polls, residuals, harnessKilled, postKillResiduals },
-    stdoutTail,
-    stderrTail,
+    residualAudit,
+    stdoutTail: state.stdoutTail,
+    stderrTail: state.stderrTail,
   };
-  const terminationOk =
+  return {
+    launchOk: state.spawnError === null && earlyExit === null,
+    terminationOk: termination.ok,
+    residualOk: residualAudit.residuals.length === 0,
+    record,
+  };
+}
+
+/**
+ * The launch environment: the isolation vars plus the #231 allowlist —
+ * a MINIMAL allowlist inherited from the harness host and nothing else
+ * (see the module law above).
+ */
+function buildLaunchEnv(home: string, userData: string): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {
+    HOME: home,
+    [USER_DATA_ENV_VAR]: userData,
+    ELECTRON_ENABLE_LOGGING: '0',
+  };
+  for (const key of LAUNCH_ENV_KEYS) {
+    const value = process.env[key];
+    if (typeof value === 'string' && value.length > 0) env[key] = value;
+  }
+  return env;
+}
+
+/** Spawns the packaged executable, wiring the tail capture and the async error latch. */
+function spawnApp(
+  executable: string,
+  argv: readonly string[],
+  cwd: string,
+  env: NodeJS.ProcessEnv,
+): LaunchState {
+  const state: LaunchState = { child: null, spawnError: null, stdoutTail: [], stderrTail: [] };
+  try {
+    const child: ChildProcess = spawn(executable, argv, {
+      cwd,
+      env,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    state.child = child;
+    child.stdout?.on('data', (chunk: Buffer) => pushTail(state.stdoutTail, chunk));
+    child.stderr?.on('data', (chunk: Buffer) => pushTail(state.stderrTail, chunk));
+    child.stdin?.on?.('error', () => {});
+    // a missing or non-executable binary surfaces HERE (the async error
+    // event), not as a spawn throw — capture it or it becomes an
+    // unhandled exception that leaves no record
+    child.on('error', (error: Error) => {
+      if (state.spawnError === null) state.spawnError = error.message;
+    });
+  } catch (error) {
+    state.spawnError = error instanceof Error ? error.message : String(error);
+  }
+  return state;
+}
+
+/**
+ * The settle observation: the app must stay alive through the whole
+ * settle window. Returns the early exit when it didn't, null when it
+ * held — the fact the launch verdict turns on.
+ */
+async function observeSettle(
+  state: LaunchState,
+  settleMs: number,
+  settled: () => ExitFacts | null,
+): Promise<ExitFacts | null> {
+  if (state.spawnError !== null) {
+    return { code: null, signal: null };
+  }
+  const deadline = Date.now() + settleMs;
+  while (Date.now() < deadline) {
+    await delay(500);
+    const exit = settled();
+    if (state.spawnError !== null || exit !== null) {
+      return exit ?? { code: null, signal: null };
+    }
+  }
+  return null;
+}
+
+/** The termination phase's conclusion: the outcome, the exit facts, and the per-law verdict. */
+interface TerminationResult {
+  readonly outcome: TerminationOutcome;
+  readonly exitFacts: ExitFacts | null;
+  readonly ok: boolean;
+}
+
+/**
+ * The termination phase: spawn errors and early exits conclude without
+ * a quit attempt; a live app is asked to quit through its own quit
+ * surface (the Apple event) with the signal escalation behind it, or —
+ * in signal-only mode — escalated straight away.
+ */
+async function terminateApp(
+  input: ProcessStageInput,
+  state: LaunchState,
+  earlyExit: ExitFacts | null,
+  steps: TerminationStep[],
+  settled: () => ExitFacts | null,
+  awaitExit: (boundMs: number) => Promise<ExitFacts | null>,
+): Promise<TerminationResult> {
+  let outcome: TerminationOutcome;
+  let exitFacts: ExitFacts | null = settled();
+  if (state.spawnError !== null) {
+    outcome = 'spawn-error';
+  } else if (earlyExit !== null) {
+    outcome = 'launch-failed';
+    exitFacts = settled();
+  } else if (exitFacts !== null) {
+    // exited by itself between settle and the quit attempt: clean only at code 0
+    outcome = 'exited-before-termination';
+  } else if (input.quitMode === 'apple-event') {
+    const quit = await quitThroughAppleEvent(input, state.child, steps, settled, awaitExit);
+    outcome = quit.outcome;
+    exitFacts = quit.exitFacts;
+  } else {
+    const escalation = await escalateSignals(state.child, input, steps, awaitExit);
+    exitFacts = settled();
+    // a SIGKILLed process still "settles" — the escalation's own report,
+    // not the settled flag, says whether the graceful signal sufficed
+    outcome = escalation.usedKill ? 'termination-forced' : 'exited-after-signal';
+  }
+  const ok =
     outcome === 'exited-on-own-quit-surface' ||
     (outcome === 'exited-before-termination' && exitFacts?.code === 0) ||
     (input.quitMode === 'signal-only' && outcome === 'exited-after-signal');
+  return { outcome, exitFacts, ok };
+}
+
+/**
+ * The Apple-event quit path. One knob governs the whole path: the event
+ * DELIVERY and the exit WAIT are each bounded by quitTimeoutMs (a
+ * per-phase bound, never a second silent constant beside it — review
+ * round 2 on #373). A failed or ignored quit surface falls through to
+ * the signal escalation and fails the law.
+ */
+async function quitThroughAppleEvent(
+  input: ProcessStageInput,
+  child: ChildProcess | null,
+  steps: TerminationStep[],
+  settled: () => ExitFacts | null,
+  awaitExit: (boundMs: number) => Promise<ExitFacts | null>,
+): Promise<{ outcome: TerminationOutcome; exitFacts: ExitFacts | null }> {
+  const sent = await appleEventQuit(input.bundleId, input.quitTimeoutMs);
+  steps.push({
+    step: 'apple-event-quit',
+    detail: sent.ok ? 'quit event delivered' : `quit surface unavailable (${sent.error})`,
+  });
+  const exitFacts = await awaitExit(input.quitTimeoutMs);
+  if (exitFacts !== null && sent.ok) {
+    return { outcome: 'exited-on-own-quit-surface', exitFacts };
+  }
+  // the quit surface failed or was ignored: clean up with signals, and fail
+  await escalateSignals(child, input, steps, awaitExit);
   return {
-    launchOk: spawnError === null && earlyExit === null,
-    terminationOk,
-    residualOk: residuals.length === 0,
-    record,
+    outcome: sent.ok ? 'termination-forced' : 'quit-surface-unavailable',
+    exitFacts: settled(),
   };
+}
+
+/**
+ * The residual audit: poll (bounded) until every owned process is gone;
+ * whatever survives is named, best-effort killed by the harness, and
+ * re-checked — the run has already failed, the machine still gets
+ * cleaned.
+ */
+async function auditResiduals(
+  stagingRoot: string,
+  residualPollMs: number,
+): Promise<ProcessStageRecord['residualAudit']> {
+  let polls = 0;
+  let residuals = await processesReferencing(stagingRoot);
+  const deadline = Date.now() + residualPollMs;
+  while (residuals.length > 0 && Date.now() < deadline) {
+    polls += 1;
+    await delay(500);
+    residuals = await processesReferencing(stagingRoot);
+  }
+  const harnessKilled: string[] = [];
+  let postKillResiduals: ProcessRow[] = [];
+  if (residuals.length > 0) {
+    for (const row of residuals) {
+      try {
+        process.kill(Number(row.pid), 'SIGKILL');
+        harnessKilled.push(row.pid);
+      } catch {
+        // already gone, or not ours to signal — the post-kill pass reports
+      }
+    }
+    await delay(1000);
+    postKillResiduals = [...(await processesReferencing(stagingRoot))];
+  }
+  return { pollMs: residualPollMs, polls, residuals, harnessKilled, postKillResiduals };
 }
 
 /** The graceful-then-forced signal escalation (SIGTERM, bounded; then SIGKILL the owned tree). */
@@ -337,7 +434,7 @@ async function escalateSignals(
   child: ChildProcess | null,
   input: ProcessStageInput,
   steps: TerminationStep[],
-  awaitExit: (boundMs: number) => Promise<{ code: number | null; signal: string | null } | null>,
+  awaitExit: (boundMs: number) => Promise<ExitFacts | null>,
 ): Promise<{ usedKill: boolean }> {
   child?.kill('SIGTERM');
   steps.push({ step: 'SIGTERM', detail: 'sent to the launched process' });

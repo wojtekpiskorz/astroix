@@ -67,30 +67,9 @@ env-derived candidate selection is rejected by construction).`;
 export function parseQualificationArguments(
   argv: readonly string[],
 ): QualificationArguments | ArgumentRejection {
-  const flags = new Map<string, string>();
-  let index = 0;
-  while (index < argv.length) {
-    const token = argv[index];
-    index += 1;
-    if (token === undefined) break;
-    if (!token.startsWith('--')) {
-      return { code: 'positional-argument', value: token };
-    }
-    const known =
-      (REQUIRED_FLAGS as readonly string[]).includes(token) ||
-      (OPTIONAL_NUMBER_FLAGS as readonly string[]).includes(token);
-    if (!known) {
-      return { code: 'unknown-flag', flag: token };
-    }
-    if (flags.has(token)) {
-      return { code: 'duplicate', flag: token };
-    }
-    const value = argv[index];
-    index += 1;
-    if (value === undefined || value.startsWith('--')) {
-      return { code: 'value-absent', flag: token };
-    }
-    flags.set(token, value);
+  const flags = collectFlags(argv);
+  if ('code' in flags) {
+    return flags;
   }
   for (const flag of REQUIRED_FLAGS) {
     if (!flags.has(flag)) {
@@ -128,6 +107,41 @@ export function parseQualificationArguments(
     settleMs: settleMs as number,
     quitTimeoutMs: quitTimeoutMs as number,
   };
+}
+
+/**
+ * Scans one argv slice into flag/value pairs, strict and in scan order:
+ * positional leftovers, unknown flags, duplicates, and valueless flags
+ * reject the moment they are met. Only the flag grammar lives here —
+ * presence, checksum, and duration validation stay with the parser.
+ */
+function collectFlags(argv: readonly string[]): Map<string, string> | ArgumentRejection {
+  const flags = new Map<string, string>();
+  let index = 0;
+  while (index < argv.length) {
+    const token = argv[index];
+    index += 1;
+    if (token === undefined) break;
+    if (!token.startsWith('--')) {
+      return { code: 'positional-argument', value: token };
+    }
+    const known =
+      (REQUIRED_FLAGS as readonly string[]).includes(token) ||
+      (OPTIONAL_NUMBER_FLAGS as readonly string[]).includes(token);
+    if (!known) {
+      return { code: 'unknown-flag', flag: token };
+    }
+    if (flags.has(token)) {
+      return { code: 'duplicate', flag: token };
+    }
+    const value = argv[index];
+    index += 1;
+    if (value === undefined || value.startsWith('--')) {
+      return { code: 'value-absent', flag: token };
+    }
+    flags.set(token, value);
+  }
+  return flags;
 }
 
 /** One rejection as the CLI prints it. */
