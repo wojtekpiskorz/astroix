@@ -19,9 +19,12 @@ import { stageWebLane, WEB_LANE_PORT } from './apps/web/src/stage-e2e.ts';
 
 // ——— the shared nonzero-discovery guard (#240's AC: a project "cannot
 // pass with zero tests") ———
-// Every E2E project names its expected spec set here; deleting a spec,
-// emptying one, or breaking its discovery fails EVERY playwright run at
-// config load — the plain-build project alone can never green the lane.
+// The web and content projects name their expected spec sets here — a
+// spec missing, emptied, or landed unlisted fails EVERY playwright run
+// at config load — the plain-build project alone can never green the
+// lane. plain-build carries no enumeration (its nonzero guard is its
+// spec's own); the project-switch family riding chromium-content is
+// pending #427.
 // One idiom for every project since #408 folded #374's rider: the web
 // project's dir scan and the content project's onetime single-file
 // check were two hand-rolled shapes, and they drifted — the second and
@@ -44,10 +47,14 @@ function assertNonVacuousDiscovery(options: {
       (readFileSync(join(specDir, name), 'utf8').match(/^\s*test\(/gm) ?? []).length <
       MINIMUM_TESTS_PER_SPEC,
   );
-  if (specFiles.length === 0 || missing.length > 0 || emptied.length > 0) {
+  // `unexpected` is the derived ceiling over the enumeration's floor —
+  // the vitest sibling's principle: no hand-maintained list to forget.
+  const unexpected = specFiles.filter((name) => !expectedSpecs.includes(name));
+  if (missing.length > 0 || emptied.length > 0 || unexpected.length > 0) {
     throw new Error(
       `playwright config: the ${project} E2E project's discovery is vacuous (missing: ${missing.join(', ') || 'none'}; ` +
-        `specs with no tests: ${emptied.join(', ') || 'none'}) — ${rationale}`,
+        `specs with no tests: ${emptied.join(', ') || 'none'}; ` +
+        `unexpected: ${unexpected.join(', ') || 'none'}) — ${rationale}`,
     );
   }
 }
