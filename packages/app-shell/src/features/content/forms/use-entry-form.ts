@@ -65,6 +65,8 @@ export interface EntryFormView {
   readonly intentState: IntentState;
   readonly intent: ContentEditIntent | null;
   readonly baselineRevision: string | null;
+  /** The LIVE inspection's revision for the entry — the write lane's freshness signal (J3). */
+  readonly liveRevision: string | null;
   readonly body: string | null;
   setMode(mode: FormDraftMode): void;
   reportFormValues(values: unknown): void;
@@ -98,6 +100,7 @@ const NO_ENTRY_VIEW: EntryFormView = {
   intentState: 'none',
   intent: null,
   baselineRevision: null,
+  liveRevision: null,
   body: null,
   setMode: () => {},
   reportFormValues: () => {},
@@ -150,6 +153,7 @@ function draftView(
     intentState: derivation === null ? 'none' : intentStateOf(derivation),
     intent: derivation === null ? null : toEditIntent(derivation),
     baselineRevision: baseline?.revision ?? null,
+    liveRevision: truth.revision,
     body: baseline?.body ?? truth.body,
     ...actions,
   };
@@ -181,6 +185,7 @@ function truthView(
     documentIssues: validation.issues.filter((issue) => issue.path === ''),
     inspectedIssues: truth.inspectedIssues,
     baselineRevision: truth.revision,
+    liveRevision: truth.revision,
     body: truth.body,
     ...actions,
   };

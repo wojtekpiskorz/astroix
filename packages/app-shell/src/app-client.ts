@@ -1,6 +1,7 @@
 import {
   API_V1_PREFIX,
   type Command,
+  type EditResult,
   type ErrorEnvelope,
   EVENTS_PATH,
   errorEnvelopeSchema,
@@ -16,6 +17,7 @@ import {
   type SessionRef,
   type SessionSnapshot,
   sseEventEnvelopeSchema,
+  type WritePlan,
 } from '@wojciechpiskorz/astroix-protocol';
 import {
   createSessionClient,
@@ -283,6 +285,23 @@ export function createAppClient(options: AppClientOptions): AppClient {
     return envelope.result.result;
   }
 
+  /**
+   * The session-scoped `apply-edit` dispatch behind
+   * `SessionClient.applyEdit` (J3, #253): the wire plan — grant echo,
+   * operation, payload — travels verbatim under the mutation marker the
+   * request path already sets for this kind. The grant is opaque here by
+   * construction: this client never reads it, only carries it.
+   */
+  async function applyEdit(
+    ref: SessionRef,
+    plan: WritePlan,
+    signal?: AbortSignal,
+  ): Promise<EditResult> {
+    const envelope = await request({ kind: 'apply-edit', plan }, ref, signal);
+    if (envelope.result.kind !== 'edit') throw AppClientError.transport();
+    return envelope.result.result;
+  }
+
   /** Opens one events stream — the shared SSE engine for both scopes. */
   function openStream(
     url: string,
@@ -456,6 +475,7 @@ export function createAppClient(options: AppClientOptions): AppClient {
     forSession: (ref) =>
       createSessionClient(ref, {
         inspect,
+        applyEdit,
         openSessionEvents: (sessionRef, handlers, streamOptions) => {
           const url = `${eventsUrl}?runtimeEpoch=${encodeURIComponent(sessionRef.runtimeEpoch)}&generation=${sessionRef.generation}`;
           return openStream(

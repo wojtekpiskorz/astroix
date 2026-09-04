@@ -340,3 +340,106 @@ const EMPTY_QUERY: ContentDiscoveryQuery = {
 function diagnosticQuery(message: string): ContentDiscoveryQuery {
   return { ...EMPTY_QUERY, status: 'diagnostic', diagnosticMessage: message };
 }
+
+// --- The write loop's server-data slice (#253, J3) ---
+
+/**
+ * The write facts one entry carries (J3, #253): the server-issued opaque
+ * grant for the entry's file at its inspected revision, plus the file's
+ * raw text — the byte-exact serializer's anchor. Both arrive through the
+ * SAME content-inspection payload every reader binds (the control
+ * plane's write composition enriches the editor's content inspection
+ * from its own discovery — ADR-0006 §6 "the server issues grants from
+ * its own Content discovery"); neither is client-selected, and the raw
+ * text is served truth, never a path the client may aim elsewhere.
+ *
+ * `grant` is bound structurally and carried verbatim for the echo: the
+ * server re-validates the whole table at execution (D4's authorize +
+ * echo equality), so a drifted echo is a refused write, never authority.
+ */
+export interface EntryWriteFacts {
+  /** The opaque grant claim — token, kind, operations, display path, revision contract. */
+  readonly grant: {
+    readonly token: string;
+    readonly kind: string;
+    readonly operations: readonly string[];
+    readonly displayPath: string;
+    readonly baseline:
+      | { readonly type: 'sha256'; readonly sha256: string }
+      | { readonly type: 'expected-absent' };
+  };
+  /** The entry file's raw text as inspected — the serializer's byte anchor. */
+  readonly raw: string;
+  /** The SHA-256 the grant binds (existing text); null on expected-absent creation. */
+  readonly baselineSha256: string | null;
+}
+
+/**
+ * Binds one entry's write facts off the enriched content payload —
+ * `null` when the entry carries no grant or raw text (an inspection the
+ * write composition could not enrich: a read-only truth, never a
+ * heuristic grant). The grant object is rebuilt field-for-field in the
+ * wire contract's own shape so the echoed plan is the issued claim.
+ */
+export function bindEntryWriteFacts(entry: unknown): EntryWriteFacts | null {
+  const record = asRecord(entry);
+  if (record === null) return null;
+  const grantRecord = asRecord(record.grant);
+  if (grantRecord === null) return null;
+  if (typeof record.raw !== 'string') return null;
+  const token = nonEmptyString(grantRecord.token);
+  const kind = nonEmptyString(grantRecord.kind);
+  const displayPath = nonEmptyString(grantRecord.displayPath);
+  if (token === null || kind === null || displayPath === null) return null;
+  if (!Array.isArray(grantRecord.operations)) return null;
+  const operations: string[] = [];
+  for (const operation of grantRecord.operations) {
+    if (typeof operation !== 'string') return null;
+    operations.push(operation);
+  }
+  if (operations.length === 0) return null;
+  const baselineRecord = asRecord(grantRecord.baseline);
+  let baseline: EntryWriteFacts['grant']['baseline'];
+  let baselineSha256: string | null;
+  if (baselineRecord?.type === 'sha256') {
+    const sha256 = nonEmptyString(baselineRecord.sha256);
+    if (sha256 === null) return null;
+    baseline = { type: 'sha256', sha256 };
+    baselineSha256 = sha256;
+  } else if (baselineRecord?.type === 'expected-absent') {
+    baseline = { type: 'expected-absent' };
+    baselineSha256 = null;
+  } else {
+    return null;
+  }
+  return {
+    grant: { token, kind, operations, displayPath, baseline },
+    raw: record.raw,
+    baselineSha256,
+  };
+}
+
+/**
+ * The active entry's write facts under the shared content inspection —
+ * the write loop's one server-data source (the same generation-scoped
+ * query the discovery and form slices ride; no second fetch, and the
+ * SSE invalidation bridge refreshes it after every commit).
+ */
+export function useEntryWriteFacts(
+  collection: string | null,
+  entryId: string | null,
+): EntryWriteFacts | null {
+  const content = useContentInspection();
+  if (collection === null || entryId === null || content.data === undefined) return null;
+  const record = asRecord(content.data.payload);
+  if (record === null || !Array.isArray(record.collections)) return null;
+  const collectionRecord = record.collections.find(
+    (candidate): candidate is Record<string, unknown> => asRecord(candidate)?.name === collection,
+  );
+  if (collectionRecord === undefined || !Array.isArray(collectionRecord.entries)) return null;
+  const entry = collectionRecord.entries.find(
+    (candidate): candidate is Record<string, unknown> => asRecord(candidate)?.id === entryId,
+  );
+  if (entry === undefined) return null;
+  return bindEntryWriteFacts(entry);
+}
