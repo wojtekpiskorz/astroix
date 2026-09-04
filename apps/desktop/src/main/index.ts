@@ -60,6 +60,15 @@ function failClosedBoot(diagnostic: string): void {
 }
 
 async function main(): Promise<void> {
+  // The user-data override lands BEFORE the verification gate: the asset
+  // verification's hashing takes real time, and Chromium spawns the early
+  // GPU/network helpers meanwhile — an override landing later would leave
+  // those helpers on the default (real-home) directory while the renderer
+  // gets the override (#363; nothing in the verification reads userData —
+  // it reads resourcesPath and env only).
+  if (process.env.ASTROIX_DESKTOP_USER_DATA !== undefined) {
+    app.setPath('userData', process.env.ASTROIX_DESKTOP_USER_DATA);
+  }
   // The one resolution decision of the boot (#244, H2): packaged assets
   // (verified, no fallback) or the declared dev executable — before any
   // window, directory, or child exists.
@@ -73,9 +82,6 @@ async function main(): Promise<void> {
   if ('code' in runtimeAssets) {
     failClosedBoot(runtimeAssetsBootDiagnostic(runtimeAssets));
     return;
-  }
-  if (process.env.ASTROIX_DESKTOP_USER_DATA !== undefined) {
-    app.setPath('userData', process.env.ASTROIX_DESKTOP_USER_DATA);
   }
   await app.whenReady();
 
