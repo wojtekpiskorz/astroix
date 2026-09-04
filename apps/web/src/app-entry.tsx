@@ -3,6 +3,7 @@ import {
   AppShell,
   ContentDiscovery,
   ContentEntryForm,
+  CssSidebar,
   ShellProvider,
 } from '@wojciechpiskorz/astroix-app-shell/shell';
 import { createRoot } from 'react-dom/client';
@@ -20,9 +21,10 @@ import { CanvasRouteSlot } from './canvas-route.tsx';
  * the natural-route same-origin canvas (#242, G3's composition), the
  * sidebar slot carries the Content vertical's discovery panel (J1,
  * #251 — its entry clicks navigate the canvas through the navigation
- * slice), and the editor-dock slot carries the entry-form pane (J2,
- * #252 — the active entry's schema-backed form state, raw truth, and
- * validated edit intent, produced and never written). Deactivation
+ * slice) with the CSS vertical's read-only inspection panel (I1, #249)
+ * beneath it, and the editor-dock slot carries the entry-form pane
+ * (J2, #252 — the active entry's schema-backed form state, raw truth,
+ * and validated edit intent, produced and never written). Deactivation
  * runs the one ordered reset — state removal BEFORE the top-level
  * replacement — inside the shell.
  */
@@ -40,7 +42,12 @@ createRoot(mount).render(
   <ShellProvider client={client} sessionRef={bootstrap.session} role="authoritative">
     <AppShell
       slots={{
-        sidebar: <ContentDiscovery />,
+        sidebar: (
+          <>
+            <ContentDiscovery />
+            <CssSidebar />
+          </>
+        ),
         editorDock: <ContentEntryForm />,
         canvas: <CanvasRouteSlot />,
       }}

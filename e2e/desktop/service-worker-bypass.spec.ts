@@ -1,11 +1,10 @@
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { createServer as createTcpServer, type Socket, type Server as TcpServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createServer as createViteServer, type ViteDevServer } from 'vite';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { buildHarnessMain, type HarnessEvent, HarnessRun, REPO } from './harness-kit.ts';
+import { buildHarnessMain, freePort, type HarnessEvent, HarnessRun, REPO } from './harness-kit.ts';
 
 /**
  * The service-worker bypass real-Electron lane (#247, H5 focused
@@ -111,24 +110,6 @@ async function startHostileOrigin(): Promise<{
   const address = server.httpServer?.address();
   if (address === null || typeof address !== 'object') throw new Error('no origin address');
   return { origin: `http://127.0.0.1:${address.port}`, recorder, server };
-}
-
-/** One OS-assigned loopback port (strictPort makes a lost race fail loudly, never silently). */
-async function freePort(): Promise<number> {
-  const probe: TcpServer = createTcpServer();
-  await new Promise<void>((resolve, reject) => {
-    probe.once('error', reject);
-    probe.listen(0, '127.0.0.1', () => resolve());
-  });
-  const address = probe.address();
-  if (address === null || typeof address !== 'object') throw new Error('no probe address');
-  const sockets: Socket[] = [];
-  probe.on('connection', (socket) => {
-    sockets.push(socket);
-  });
-  await new Promise<void>((resolve) => probe.close(() => resolve()));
-  for (const socket of sockets) socket.destroy();
-  return address.port;
 }
 
 /**

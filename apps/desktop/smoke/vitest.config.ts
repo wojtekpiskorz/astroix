@@ -13,12 +13,17 @@ import { defineConfig } from 'vitest/config';
  * extracted package (`npm run package`'s ZIP) and self-skips without a
  * local build — like H2's packaged-spawn lane, the run stays out of
  * `npm test` (real GUI binary, real codesign, ADR-0008 local-only).
+ * The CSS inspection lane (#249, I1) joins the same way: the real
+ * Electron window over the shared control-plane composition in a real
+ * stock-Node child, driving the real product flow (launcher button →
+ * project document → canvas selection → the read-only CSS panel).
  */
 export default defineConfig({
   test: {
     environment: 'node',
     include: [
       'apps/desktop/smoke/desktop-smoke.test.ts',
+      'e2e/desktop/css-inspection*.spec.ts',
       'e2e/desktop/document-authority*.spec.ts',
       'e2e/desktop/service-worker-bypass*.spec.ts',
       'e2e/desktop/early-package*.spec.ts',
