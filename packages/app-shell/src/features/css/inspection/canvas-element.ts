@@ -8,12 +8,13 @@ import { rematchSelection } from '../../../state/selection.ts';
  * matching seam is `matchedSelectors`/`rematchSelection` plus the
  * selection identity (the shell barrel's own export law). This module
  * is the CSS feature's entire reach into that surface: it resolves the
- * LIVE canvas document through the canvas frame's stable mount
- * (`iframe[data-testid="canvas-frame"]`, the same testid the canvas
- * battery pins — the frame's public shape, never its internals) and
- * re-finds the selected element through the disclosed `rematchSelection`
- * law, so `Element.matches` runs in the canvas document's own realm
- * exactly as the canvas's own selection pass does.
+ * LIVE canvas document through the canvas mount's PRODUCT attribute
+ * (`[data-astroix-canvas]` — the container — plus its iframe; the #374
+ * ruling: features locate the canvas through the product attribute,
+ * never a test id) and re-finds the selected element through the
+ * disclosed `rematchSelection` law, so `Element.matches` runs in the
+ * canvas document's own realm exactly as the canvas's own selection
+ * pass does.
  *
  * Fail-closed throughout: a cross-origin or missing frame, a destroyed
  * document, or a descriptor the rebuilt DOM no longer carries answers
@@ -21,8 +22,8 @@ import { rematchSelection } from '../../../state/selection.ts';
  * canvas" state, never a crash and never a synthesized element.
  */
 
-/** The canvas frame's stable mount selector — G3's landed surface shape. */
-export const CANVAS_FRAME_SELECTOR = 'iframe[data-testid="canvas-frame"]';
+/** The canvas mount's product-attribute selector — the #374 ruling's form: the container plus its iframe, never a test id. */
+export const CANVAS_FRAME_SELECTOR = '[data-astroix-canvas] iframe';
 
 /**
  * The live canvas document, when the frame is in THIS document and
@@ -55,9 +56,14 @@ export function selectedCanvasElement(descriptor: SelectionDescriptor): Element 
  * Subscribes to the canvas document's own mutations — the CSS slice's
  * re-derivation trigger for DOM changes the styles payload does not
  * carry (an HMR rebuild that removes or reshapes the selected element).
- * The frame's own loads are observed too: every load is a new document,
- * so the observer follows the live one. The listener fires debounced
- * (HMR bursts settle before one pass), and the returned unsubscribe
+ * The frame's own loads are observed too: every load is a NEW document,
+ * so besides re-attaching the observer, the listener FIRES at every
+ * load epoch — the canvas module's own law (it re-resolves the
+ * selection immediately on every epoch): a surviving selection
+ * re-derives against the new document at once, never rows matched
+ * against the detached previous document until the new one happens to
+ * mutate. The listener fires debounced for mutations (HMR bursts settle
+ * before one pass), immediately for loads, and the returned unsubscribe
  * stops everything it started.
  */
 export function subscribeCanvasMutations(listener: () => void): () => void {
@@ -86,10 +92,21 @@ export function subscribeCanvasMutations(listener: () => void): () => void {
     observer = new MutationObserver(schedule);
     observer.observe(doc.documentElement, { childList: true, subtree: true });
   };
+  // The load-epoch pass: follow the new document AND re-derive now — a
+  // pending mutation debounce is superseded (its listener call would
+  // only re-derive again against the same new document).
+  const onFrameLoad = (): void => {
+    attach();
+    if (timer !== null) {
+      clearTimeout(timer);
+      timer = null;
+    }
+    listener();
+  };
   attach();
-  frame.addEventListener('load', attach);
+  frame.addEventListener('load', onFrameLoad);
   return () => {
-    frame.removeEventListener('load', attach);
+    frame.removeEventListener('load', onFrameLoad);
     stop();
   };
 }

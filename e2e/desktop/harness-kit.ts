@@ -1,4 +1,5 @@
 import { type ChildProcess, spawn } from 'node:child_process';
+import { createServer as createTcpServer, type Socket, type Server as TcpServer } from 'node:net';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build } from 'vite';
@@ -32,6 +33,24 @@ export const REPO = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
 /** The workspace's pinned Electron binary (ADR-0008: exactly 44.1.0). */
 export const ELECTRON = join(REPO, 'node_modules', '.bin', 'electron');
+
+/** One OS-assigned loopback port (strictPort makes a lost race fail loudly, never silently). */
+export async function freePort(): Promise<number> {
+  const probe: TcpServer = createTcpServer();
+  await new Promise<void>((resolve, reject) => {
+    probe.once('error', reject);
+    probe.listen(0, '127.0.0.1', () => resolve());
+  });
+  const address = probe.address();
+  if (address === null || typeof address !== 'object') throw new Error('no probe address');
+  const sockets: Socket[] = [];
+  probe.on('connection', (socket) => {
+    sockets.push(socket);
+  });
+  await new Promise<void>((resolve) => probe.close(() => resolve()));
+  for (const socket of sockets) socket.destroy();
+  return address.port;
+}
 
 /** One protocol event off a harness main: a `kind` plus open fields. */
 export interface HarnessEvent {

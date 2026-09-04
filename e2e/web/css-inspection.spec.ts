@@ -82,6 +82,9 @@ async function activateSettled(page: Page): Promise<void> {
   page.removeListener('framenavigated', onNavigated);
 }
 
+/** The canvas frame locator — the product-attribute form (#374 ruling), never a test id. */
+const CANVAS_FRAME = '[data-astroix-canvas] iframe';
+
 /**
  * Clicks one canvas element until the selection lands — bounded
  * retry over a possibly-reloading document (a mid-navigation click is
@@ -89,7 +92,7 @@ async function activateSettled(page: Page): Promise<void> {
  */
 async function canvasSelect(page: Page, selector: string): Promise<void> {
   await expect(async () => {
-    await page.frameLocator('[data-testid="canvas-frame"]').locator(selector).click();
+    await page.frameLocator(CANVAS_FRAME).locator(selector).click();
     await expect(page.getByTestId('selection-tag')).not.toHaveText('none', { timeout: 2_000 });
   }).toPass({ timeout: 90_000 });
 }
@@ -289,6 +292,35 @@ test('a DOM rebuild that drops the selected element clears the list — the miss
   await restoreIdle(page);
 });
 
+test('a canvas navigation with a SURVIVING selection re-derives at the load epoch — never rows against the detached document', async ({
+  page,
+}) => {
+  test.setTimeout(300_000);
+  await activateSettled(page);
+  await canvasSelect(page, '.hero-title');
+  await expect(page.locator('[data-testid="css-rule"]')).toHaveCount(4);
+
+  // The canvas's own address control navigates a natural route; the
+  // SELECTION SURVIVES (it is a descriptor, the new document stays on
+  // the project origin) — and the blog document carries no .hero-title,
+  // so the honest truth at the load epoch is missing-element. The load
+  // ALONE must re-derive: the new document may never mutate again, and
+  // rows matched against the DETACHED previous document's element must
+  // never render while waiting for one.
+  await page.getByTestId('canvas-address').fill('/blog/hello-builder');
+  await page.getByTestId('canvas-navigate').click();
+  await expect(page.getByTestId('canvas-url')).toContainText('/blog/hello-builder');
+  await expect(page.getByTestId('selection-tag')).toHaveText('h1');
+  await expect
+    .poll(async () => await panelState(page), { timeout: 120_000 })
+    .toBe('missing-element');
+  await expect(page.getByTestId('css-rule-list')).toHaveCount(0);
+  await expect(page.getByTestId('css-rules-state')).toContainText('no longer in the canvas');
+
+  // Restore the idle state for the next leg.
+  await restoreIdle(page);
+});
+
 test('a generation reset clears the selection — the fresh session serves fresh rows only', async ({
   page,
 }) => {
@@ -306,7 +338,7 @@ test('a generation reset clears the selection — the fresh session serves fresh
   const freshGeneration = await page.getByTestId('session-generation').textContent();
   expect(Number(freshGeneration)).toBeGreaterThan(Number(generation));
   await expect.poll(async () => await panelState(page), { timeout: 30_000 }).toBe('no-selection');
-  await page.frameLocator('[data-testid="canvas-frame"]').locator('.hero-title').click();
+  await page.frameLocator(CANVAS_FRAME).locator('.hero-title').click();
   const rows = await readyRows(page);
   await expect(rows).toHaveCount(4);
 

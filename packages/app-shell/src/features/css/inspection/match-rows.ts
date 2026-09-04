@@ -26,9 +26,9 @@ export interface MatchedStyleRow {
   readonly key: string;
 }
 
-/** The row identity — one rule's source place; duplicates (same place twice) keep their order. */
-export function styleRowKey(record: BoundStyleRecord, occurrence: number): string {
-  return `${record.file}#${record.range.start}-${record.range.end}#${occurrence}`;
+/** The row identity — one rule's source place plus its duplicate occurrence. */
+function styleRowKey(base: string, occurrence: number): string {
+  return `${base}#${occurrence}`;
 }
 
 /**
@@ -50,7 +50,7 @@ export function matchedStyleRows(
     return {
       record: match.record,
       winner: match.winner,
-      key: styleRowKey(match.record, occurrence),
+      key: styleRowKey(base, occurrence),
     };
   });
 }

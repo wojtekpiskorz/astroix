@@ -170,9 +170,18 @@ export async function settleStylesInspection(
   }
 }
 
-/** The one sanitized message a terminal refusal or settle timeout surfaces. */
+/**
+ * The one sanitized message a terminal refusal or settle timeout
+ * surfaces. The session-moved truth is matched by the error NAME — the
+ * J1 `api.ts` idiom, never a typed import of the error class — and it
+ * IS reachable here: `useSessionQuery` wraps the whole settle loop in
+ * the stale-response belt, whose pre/post-fetch gate checks reject
+ * with `StaleSessionResultError` (the settle loop itself classifies
+ * wire rejections internally, so only the belt's own rejection carries
+ * that name).
+ */
 function diagnosticOf(error: unknown): string {
-  if (error instanceof Error && error.message === 'the session moved before the response arrived') {
+  if (error instanceof Error && error.name === 'StaleSessionResultError') {
     return 'the session moved before the response arrived';
   }
   const code = protocolErrorCode(error) ?? refusalCodeOf(error);

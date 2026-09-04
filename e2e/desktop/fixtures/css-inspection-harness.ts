@@ -243,7 +243,7 @@ async function main(): Promise<void> {
         const selected = await pollWebContents(
           win.webContents,
           `(() => {
-            const frame = document.querySelector('iframe[data-testid="canvas-frame"]');
+            const frame = document.querySelector('[data-astroix-canvas] iframe');
             const doc = frame && frame.contentDocument;
             const element = doc && doc.querySelector(${selector});
             if (element === null || element === undefined) return { tag: null, want: null };

@@ -1,6 +1,8 @@
 import type { SessionRef } from '@wojciechpiskorz/astroix-protocol';
+import type { ReactNode } from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createAppClient } from '../../app-client.ts';
+import { useShell } from '../../app-shell/shell-context.ts';
 import { ShellProvider } from '../../app-shell/shell-provider.tsx';
 import { byTestId, click, type Mounted, mount, waitFor } from '../../app-shell/test-mount.tsx';
 import { inspectionFixture } from '../../presentation/fixtures.ts';
@@ -31,6 +33,7 @@ const corpus = inspectionFixture('css-index.attribute.json');
 const realFetch = globalThis.fetch;
 let wire: CssWire = scriptCssWire();
 let mounted: Mounted | null = null;
+let canvasHost: HTMLElement | null = null;
 let canvasFrame: HTMLIFrameElement | null = null;
 
 afterEach(() => {
@@ -40,20 +43,35 @@ afterEach(() => {
   clearShellStores();
   useCssInspectionStore.setState({ served: null, openRowKey: null });
   wire = scriptCssWire();
-  canvasFrame?.remove();
+  canvasHost?.remove();
+  canvasHost = null;
   canvasFrame = null;
 });
 
-/** Creates the live canvas frame with the fixture's hero markup, as G3's canvas would host it. */
-function stageCanvasDocument(): void {
-  canvasFrame = document.createElement('iframe');
-  canvasFrame.setAttribute('data-testid', 'canvas-frame');
-  document.body.appendChild(canvasFrame);
-  const doc = canvasFrame.contentDocument;
+/** The provider's session gate, captured by the probe below — the session-moved leg moves it directly. */
+let gateProbe: { move(ref: SessionRef | null): void } | null = null;
+
+/** Captures the provider's gate — the belt's session-moved rejection is driven through it, never around the provider. */
+function GateProbe(): ReactNode {
+  gateProbe = useShell().gate;
+  return null;
+}
+
+/** Creates the live canvas mount in its product shape: the `[data-astroix-canvas]` container plus its iframe (#374 ruling). */
+function stageCanvasDocument(): HTMLIFrameElement {
+  const host = document.createElement('div');
+  host.setAttribute('data-astroix-canvas', '');
+  const frame = document.createElement('iframe');
+  host.appendChild(frame);
+  document.body.appendChild(host);
+  canvasHost = host;
+  canvasFrame = frame;
+  const doc = frame.contentDocument;
   if (doc === null) throw new Error('the test canvas frame has no document');
   doc.body.innerHTML =
     '<section class="hero"><h1 class="hero-title" data-astro-cid-lcdefpme>Astroix fixture</h1>' +
     '<p class="hero-lead">lead</p></section>';
+  return frame;
 }
 
 /** The panel's state word (the StatePanel rows) or the ready/diagnostic surfaces' presence. */
@@ -69,7 +87,7 @@ function panelState(container: HTMLElement): string {
 /** Mounts the panel inside the real provider over the scripted wire, with the canvas staged and the selection landed. */
 function mountPanel(options: { readonly withSelection?: boolean } = {}): HTMLElement {
   globalThis.fetch = wire.fetch;
-  stageCanvasDocument();
+  const frame = stageCanvasDocument();
   const client = createAppClient({ clientCapability: CAPABILITY, origin: ORIGIN });
   useAppStore.getState().bindSession(SESSION);
   useAppStore.getState().setCanvasState(SESSION, {
@@ -77,12 +95,13 @@ function mountPanel(options: { readonly withSelection?: boolean } = {}): HTMLEle
     origin: 'project',
   });
   if (options.withSelection !== false) {
-    const element = canvasFrame?.contentDocument?.querySelector('.hero-title');
+    const element = frame.contentDocument?.querySelector('.hero-title');
     if (element === undefined || element === null) throw new Error('the canvas staged no element');
     useAppStore.getState().setSelection(SESSION, selectionDescriptorOf(element));
   }
   mounted = mount(
     <ShellProvider client={client} sessionRef={SESSION}>
+      <GateProbe />
       <CssSidebar />
     </ShellProvider>,
   );
@@ -250,6 +269,23 @@ describe('the CSS panel states', () => {
     await waitFor(() => panelState(container) === 'diagnostic');
     expect(byTestId(container, 'css-rules-diagnostic').textContent).toContain(
       'inspection refused: stale-session',
+    );
+  });
+
+  it('surfaces the session-moved diagnostic when the stale-response belt rejects the settled pass — matched by error name, never prose', async () => {
+    const container = mountPanel();
+    // The belt's rejection is REACHABLE here: `useSessionQuery` wraps the
+    // whole settle loop in `gatedSessionFetch`, so a gate that moved
+    // past while an exchange was open rejects post-fetch with
+    // StaleSessionResultError — the panel's diagnostic matches that
+    // error NAME (the J1 idiom), and the settle loop itself never
+    // surfaces the prose.
+    if (gateProbe === null) throw new Error('the gate probe did not capture the provider gate');
+    gateProbe.move(null);
+    wire.resolveStyles(corpusPayload());
+    await waitFor(() => panelState(container) === 'diagnostic');
+    expect(byTestId(container, 'css-rules-diagnostic').textContent).toContain(
+      'the session moved before the response arrived',
     );
   });
 

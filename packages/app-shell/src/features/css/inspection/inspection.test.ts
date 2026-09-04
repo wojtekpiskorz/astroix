@@ -2,17 +2,20 @@ import { describe, expect, it } from 'vitest';
 import type { IndexPayloadRecord } from '../../../../../core/src/matcher.ts';
 import { inspectionFixture } from '../../../presentation/fixtures.ts';
 import { bindStylesInspection, isSanitizedProjectFile } from './bind-styles.ts';
+import { subscribeCanvasMutations } from './canvas-element.ts';
 import { isStaleStylesPayload } from './freshness.ts';
 import { matchedStyleRows } from './match-rows.ts';
 
 /**
  * The CSS feature's inspection seams (#249's focused units): the
  * fail-closed payload binding (the sanitized-file law above all), the
- * stale-revision decision, and the match-row ordering — pinned against
- * the FROZEN css-index corpora (both scoped-style strategies: the
+ * stale-revision decision, the match-row ordering — pinned against the
+ * FROZEN css-index corpora (both scoped-style strategies: the
  * `attribute` corpus's `[data-astro-cid-*]` forms and the `where`
  * corpus's `:where(.astro-*)` forms — the frozen standard the live
- `attribute`-strategy host serves the same shapes of).
+ * `attribute`-strategy host serves the same shapes of) — and the canvas
+ * mutation subscription's load-epoch law (the re-derivation trigger the
+ * panel's navigation-with-surviving-selection truth rides).
  */
 
 const attributeCorpus = inspectionFixture('css-index.attribute.json');
@@ -179,5 +182,50 @@ describe('the match-row ordering', () => {
     const element = heroTitleElement('data-astro-cid-lcdefpme');
     const rows = matchedStyleRows([unloaded], element);
     expect(rows).toHaveLength(0);
+  });
+});
+
+describe('the canvas mutation subscription', () => {
+  /** Stages the canvas mount in its product shape — the `[data-astroix-canvas]` container plus its iframe (the #374 ruling's form). */
+  function stageCanvasMount(): { host: HTMLElement; frame: HTMLIFrameElement } {
+    const host = document.createElement('div');
+    host.setAttribute('data-astroix-canvas', '');
+    const frame = document.createElement('iframe');
+    host.appendChild(frame);
+    document.body.appendChild(host);
+    return { host, frame };
+  }
+
+  it('fires the listener at every frame load — a document replacement re-derives without waiting for a mutation', () => {
+    const { host, frame } = stageCanvasMount();
+    let fired = 0;
+    const unsubscribe = subscribeCanvasMutations(() => {
+      fired += 1;
+    });
+    try {
+      // The load epoch alone — no mutation anywhere — must re-derive:
+      // after a document replacement the new document may never mutate,
+      // and the panel must never keep rows matched against the detached
+      // previous document until it happens to.
+      frame.dispatchEvent(new Event('load'));
+      expect(fired).toBe(1);
+      frame.dispatchEvent(new Event('load'));
+      expect(fired).toBe(2);
+    } finally {
+      unsubscribe();
+      host.remove();
+    }
+  });
+
+  it('stops everything at the unsubscribe — a stopped subscription never fires again, loads included', () => {
+    const { host, frame } = stageCanvasMount();
+    let fired = 0;
+    const unsubscribe = subscribeCanvasMutations(() => {
+      fired += 1;
+    });
+    unsubscribe();
+    frame.dispatchEvent(new Event('load'));
+    expect(fired).toBe(0);
+    host.remove();
   });
 });

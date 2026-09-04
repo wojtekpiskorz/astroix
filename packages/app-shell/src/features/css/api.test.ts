@@ -119,11 +119,23 @@ describe('the settle loop', () => {
   });
 });
 
-/** The state vocabulary is closed — a compile-time pin against accidental widening. */
-const STATES: readonly StylesInspectionStatus[] = [
+/**
+ * The state vocabulary is closed — a REAL compile-time pin, never a
+ * literal asserted against itself: `tsc --noEmit` covers this file, so
+ * the pin fails when the union WIDENS (a state missing from STATES) or
+ * NARROWS (a literal no longer in the union).
+ */
+const STATES = [
   'loading',
   'ready',
   'unresolved-route',
   'diagnostic',
-];
-expect(STATES).toHaveLength(4);
+] as const satisfies readonly StylesInspectionStatus[];
+
+/** The compile-time proof helper — assignable only when the probe is exactly `true`. */
+type Expect<T extends true> = T;
+/** Structural identity — `true` only when both sides are the same union. */
+type IsExactUnion<X, Y> =
+  (<T>() => T extends X ? 1 : 2) extends <T>() => T extends Y ? 1 : 2 ? true : false;
+// The pin's proof is its own compilability — the alias is intentionally never read.
+type _StatesClosedPin = Expect<IsExactUnion<(typeof STATES)[number], StylesInspectionStatus>>;

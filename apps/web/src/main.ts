@@ -1,7 +1,6 @@
-import { mkdir, rm } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { build } from 'vite';
+import { buildClientDocuments } from './client-build.ts';
 import { createWebControlPlane } from './control-plane.ts';
 
 /**
@@ -13,13 +12,13 @@ import { createWebControlPlane } from './control-plane.ts';
  * (parameter properties); the packaged runtime's rebased entry needs
  * neither (ADR-0008).
  *
- * Builds the client documents (vite —
- * the workspace's own toolchain at the workspace's own version, used
- * ONLY as this host's document bundler, never inside a managed
- * project), boot the production control-plane composition over the
- * explicitly injected isolated test registry, print the readiness line
- * the test host polls on, and terminate cleanly on SIGTERM/SIGINT —
- * the honest ordered shutdown, never a killed child.
+ * Builds the client documents through the ONE client-build config
+ * (`client-build.ts` — shared with the lanes that serve the same
+ * documents from their own compositions), boot the production
+ * control-plane composition over the explicitly injected isolated test
+ * registry, print the readiness line the test host polls on, and
+ * terminate cleanly on SIGTERM/SIGINT — the honest ordered shutdown,
+ * never a killed child.
  *
  * Environment (the whole configuration surface — no flags, no files):
  * - `ASTROIX_WEB_PORT` — the loopback port to bind (default: OS-assigned).
@@ -32,7 +31,6 @@ import { createWebControlPlane } from './control-plane.ts';
  */
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const CLIENT_ROOT = join(HERE, '..', 'client');
 const CLIENT_DIST = join(HERE, '..', 'dist-client');
 
 async function main(): Promise<void> {
@@ -47,24 +45,7 @@ async function main(): Promise<void> {
     .split(':')
     .filter((root) => root.length > 0);
 
-  await rm(CLIENT_DIST, { recursive: true, force: true });
-  await mkdir(CLIENT_DIST, { recursive: true });
-  await build({
-    root: CLIENT_ROOT,
-    base: '/__astroix/app/',
-    build: {
-      outDir: CLIENT_DIST,
-      emptyOutDir: false,
-      rollupOptions: {
-        input: {
-          launcher: join(CLIENT_ROOT, 'launcher.html'),
-          project: join(CLIENT_ROOT, 'project.html'),
-        },
-      },
-    },
-    logLevel: 'silent',
-    configFile: false,
-  });
+  await buildClientDocuments(CLIENT_DIST);
 
   const plane = await createWebControlPlane({
     registryDirectory,

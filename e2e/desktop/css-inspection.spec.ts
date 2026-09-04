@@ -1,10 +1,10 @@
-import { cp, mkdir, mkdtemp, rm, symlink } from 'node:fs/promises';
-import { createServer } from 'node:http';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { basename, join } from 'node:path';
-import { build } from 'vite';
+import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { buildHarnessMain, HarnessRun, REPO } from './harness-kit.ts';
+import { buildClientDocuments } from '../../apps/web/src/client-build.ts';
+import { stagedFixtureCopy } from '../../apps/web/src/stage-e2e.ts';
+import { buildHarnessMain, freePort, HarnessRun, REPO } from './harness-kit.ts';
 
 /**
  * The CSS inspection real-Electron lane (#249, I1 focused tests): the
@@ -18,9 +18,10 @@ import { buildHarnessMain, HarnessRun, REPO } from './harness-kit.ts';
  * SOURCE in a real stock-Node child (the web host's own boot argv — a
  * bundle would break the composition's import.meta.url worker
  * resolution) over an isolated test registry with a staged fixture copy
- * (the lane's own staging — sources copied, installation symlinked
- * back, the web lane's discipline), never the kernel-backed production
- * registry and never the canonical fixture.
+ * (the web lane's own `stagedFixtureCopy` — sources copied,
+ * installation symlinked back, the shared discipline) and the web
+ * host's own client-build config (`buildClientDocuments`), never the
+ * kernel-backed production registry and never the canonical fixture.
  *
  * What only this lane can prove: the CSS vertical's panel and the
  * canvas selection behave identically inside the real Electron
@@ -33,61 +34,10 @@ import { buildHarnessMain, HarnessRun, REPO } from './harness-kit.ts';
  * test:desktop`'s config like the other real-Electron lanes.
  */
 
-const FIXTURE = join(REPO, 'e2e', 'fixture');
 const PLANE_ENTRY = join(REPO, 'e2e', 'desktop', 'fixtures', 'css-inspection-plane.ts');
 const HARNESS_ENTRY = join(REPO, 'e2e', 'desktop', 'fixtures', 'css-inspection-harness.ts');
 const REGISTER_MODULE = join(REPO, 'apps', 'web', 'raw-node-register.mjs');
 const REPORT_PREFIX = 'astroix-css-harness: ';
-
-/** One free loopback port — the composition's listener binds it. */
-async function freePort(): Promise<number> {
-  return await new Promise((resolve, reject) => {
-    const server = createServer();
-    server.once('error', reject);
-    server.listen(0, '127.0.0.1', () => {
-      const address = server.address();
-      const port = typeof address === 'object' && address !== null ? address.port : 0;
-      server.close(() => resolve(port));
-    });
-  });
-}
-
-/** Stages the fixture copy: sources copied, installation symlinked back (the web lane's discipline). */
-async function stagedFixtureCopy(scratchRoot: string): Promise<string> {
-  const copy = join(scratchRoot, 'fixture-copy');
-  await mkdir(copy, { recursive: true });
-  await cp(FIXTURE, copy, {
-    recursive: true,
-    filter: (source) => {
-      const entry = basename(source);
-      return (
-        entry !== 'node_modules' && entry !== 'dist' && entry !== '.astro' && !entry.startsWith('.')
-      );
-    },
-  });
-  await symlink(join(FIXTURE, 'node_modules'), join(copy, 'node_modules'), 'dir');
-  return copy;
-}
-
-/** Builds the client documents the composition's document surface serves (the web host's own build). */
-async function buildClientDist(outDir: string): Promise<void> {
-  await build({
-    root: join(REPO, 'apps', 'web', 'client'),
-    configFile: false,
-    base: '/__astroix/app/',
-    logLevel: 'silent',
-    build: {
-      outDir,
-      emptyOutDir: true,
-      rollupOptions: {
-        input: {
-          launcher: join(REPO, 'apps', 'web', 'client', 'launcher.html'),
-          project: join(REPO, 'apps', 'web', 'client', 'project.html'),
-        },
-      },
-    },
-  });
-}
 
 interface PanelReport {
   readonly kind: 'panel';
@@ -111,9 +61,9 @@ let scratchRoot: string;
 
 beforeAll(async () => {
   scratchRoot = await mkdtemp(join(tmpdir(), 'astroix-css-electron-'));
-  const fixtureCopy = await stagedFixtureCopy(scratchRoot);
+  const fixtureCopy = await stagedFixtureCopy(scratchRoot, 'fixture-copy');
   const clientDist = join(scratchRoot, 'client-dist');
-  await buildClientDist(clientDist);
+  await buildClientDocuments(clientDist);
   const harnessBundle = await buildHarnessMain(HARNESS_ENTRY, join(scratchRoot, 'harness-build'));
   const port = await freePort();
   run = new HarnessRun({
