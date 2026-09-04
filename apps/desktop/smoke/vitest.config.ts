@@ -16,7 +16,11 @@ import { defineConfig } from 'vitest/config';
  * The CSS inspection lane (#249, I1) joins the same way: the real
  * Electron window over the shared control-plane composition in a real
  * stock-Node child, driving the real product flow (launcher button →
- * project document → canvas selection → the read-only CSS panel).
+ * project document → canvas selection → the read-only CSS panel). The
+ * CSS auto-write lane (#250, I2) joins the same way: the real edit
+ * gesture through the real rule editor, the real grant-bound
+ * write-executor child, and the canvas's own computed style as the
+ * HMR reflection.
  */
 export default defineConfig({
   test: {
@@ -24,6 +28,7 @@ export default defineConfig({
     include: [
       'apps/desktop/smoke/desktop-smoke.test.ts',
       'e2e/desktop/css-inspection*.spec.ts',
+      'e2e/desktop/css-write*.spec.ts',
       'e2e/desktop/document-authority*.spec.ts',
       'e2e/desktop/service-worker-bypass*.spec.ts',
       'e2e/desktop/early-package*.spec.ts',

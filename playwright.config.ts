@@ -31,11 +31,17 @@ const WEB_SPEC_DIR = join('e2e', 'web');
 // route selection's battery over the live host.
 // `css-inspection.spec.ts` joined at #249 (I1): the CSS vertical's
 // read-only inspection battery over the live host.
+// `css-write.spec.ts` + `css-write-switch.spec.ts` joined at #250 (I2):
+// the CSS vertical's grant-bound auto-write battery (byte-exact
+// splices, HMR reflection, conflict, undo, renewed grants, tampered
+// replays) and its pending-write-during-switch battery.
 const EXPECTED_WEB_SPECS = [
   'activation.spec.ts',
   'app-shell.spec.ts',
   'canvas.spec.ts',
   'css-inspection.spec.ts',
+  'css-write-switch.spec.ts',
+  'css-write.spec.ts',
   'launcher.spec.ts',
   'styles-inspection.spec.ts',
   'zero-injection.spec.ts',

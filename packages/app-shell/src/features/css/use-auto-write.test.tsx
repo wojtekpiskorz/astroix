@@ -505,6 +505,23 @@ describe('the CSS auto-write loop — the frozen world', () => {
     await waitFor(() => writeState(container) === 'quiet');
   });
 
+  it('a pending pause dies with its document — the unmounted editor never dispatches', async () => {
+    const container = mountPanel();
+    const served = servedPayload();
+    await landReady(container, served);
+    await openEditor(container);
+    const input = declInput(container, 'font-size');
+    typeInto(input, '3.5rem');
+    expect(writeState(container)).toBe('scheduled');
+    // the document's death: the unmount clears the scheduler before the
+    // settled pause can fire — no apply-edit ever crosses (the
+    // pending-debounce-during-a-switch law, deterministic at this tier)
+    mounted?.unmount();
+    mounted = null;
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    expect(wire.edits.length).toBe(0);
+  });
+
   it('the scoped selector rename dispatches the frozen scoped-splice species', async () => {
     const container = mountPanel();
     const served = servedPayload();
