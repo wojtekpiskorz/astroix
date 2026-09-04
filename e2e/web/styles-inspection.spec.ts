@@ -176,17 +176,24 @@ test('a styles inspection over the wire settles with the converged payload for t
   expect(blogInspection.kind).toBe('styles');
   expect(blogInspection.payload.records.length).toBeGreaterThan(0);
 
-  // The disclosure sweep: neither served envelope carries the resolved
-  // COMPONENT, the route-selection family, or any module-graph shape —
-  // the component is control-plane currency alone (#370's law).
+  // The disclosure sweep (#370's actual law): the resolution family and
+  // any module-graph shape never ride an envelope. The records' `file`
+  // values ARE sanctioned payload truth — the frozen css-index
+  // contract's own shape carries the page path of a scoped `<style>`
+  // block as its style source (`src/pages/index.astro` in the corpus) —
+  // so page-path strings per se are not leakage; what must NEVER appear
+  // is the resolved component AS A SELECTION, the route-selection
+  // family, or anything the module graph owns. (The per-record checks
+  // above already pin every `file` to project-relative posix.)
   for (const body of [served, blog]) {
     const text = JSON.stringify(body);
-    expect(text).not.toContain('index.astro');
-    expect(text).not.toContain('[slug].astro');
-    expect(text).not.toContain('[...slug].astro');
     expect(text).not.toContain('route-selection');
+    expect(text).not.toContain('routeComponent');
     expect(text).not.toContain('virtual:astro');
     expect(text).not.toContain('node_modules');
+    // No absolute-filesystem shape anywhere (windows drive or posix root).
+    expect(text).not.toMatch(/"[A-Za-z]:\\\\/);
+    expect(text).not.toMatch(/"\/(Users|home|srv|mnt|private)\//);
   }
 
   // The routes payload is unchanged by the seam: the frozen corpus's

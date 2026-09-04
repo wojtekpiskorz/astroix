@@ -320,6 +320,9 @@ it('certifies the route-selection resolution against Astro’s own patterns over
       '/blog/2025/release-notes',
       '/blog',
       '/blog/hello-builder/',
+      // The catch-all serves arbitrary depth — a fifth segment is still
+      // its to match (the oracle's `(.*?)` tail).
+      '/blog/hello-builder/extra/deep/tail',
     ];
     for (const route of resolvable) {
       const resolved = await resolver.resolve({ route });
@@ -334,7 +337,7 @@ it('certifies the route-selection resolution against Astro’s own patterns over
 
     // Well-formed pathnames no route serves resolve to NOTHING — and the
     // oracle agrees (no live pattern tests true).
-    const unresolvable = ['/no/such/route', '/blog/hello-builder/extra/deep/tail'];
+    const unresolvable = ['/no/such/route'];
     for (const route of unresolvable) {
       expect(
         oraclePass.result.some((data) => data.pattern.test(route)),
