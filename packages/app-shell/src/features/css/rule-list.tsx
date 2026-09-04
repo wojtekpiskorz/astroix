@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import type { BoundStyleRecord } from './inspection/bind-styles.ts';
 import type { MatchedStyleRow } from './inspection/match-rows.ts';
 
 /**
@@ -80,30 +81,7 @@ function RuleRow({
           : 'rounded border border-slate-800 px-2 py-1'
       }
     >
-      <div className="flex flex-wrap items-baseline gap-x-2">
-        {row.winner && (
-          <span role="img" aria-label="cascade winner" title="cascade winner">
-            ★
-          </span>
-        )}
-        <code className="text-xs text-sky-300">{record.selector}</code>
-        {record.effectiveSelector !== null && (
-          <code
-            data-testid="css-rule-effective"
-            className="rounded bg-slate-800 px-1 font-mono text-[10px] text-slate-400"
-          >
-            {record.effectiveSelector}
-          </code>
-        )}
-        {record.media !== null && (
-          <span
-            data-testid="css-rule-media"
-            className="rounded bg-slate-800 px-1 text-[10px] text-slate-400"
-          >
-            @media {record.media}
-          </span>
-        )}
-      </div>
+      <RowHeader record={record} winner={row.winner} />
       <div className="text-[11px] text-slate-500">
         {record.file}:{record.line}
       </div>
@@ -147,5 +125,41 @@ function RuleRow({
         </dl>
       )}
     </li>
+  );
+}
+
+/** The row's header line — the selector with its compiled form and media condition. */
+function RowHeader({
+  record,
+  winner,
+}: {
+  readonly record: BoundStyleRecord;
+  readonly winner: boolean;
+}): ReactNode {
+  return (
+    <div className="flex flex-wrap items-baseline gap-x-2">
+      {winner && (
+        <span role="img" aria-label="cascade winner" title="cascade winner">
+          ★
+        </span>
+      )}
+      <code className="text-xs text-sky-300">{record.selector}</code>
+      {record.effectiveSelector !== null && (
+        <code
+          data-testid="css-rule-effective"
+          className="rounded bg-slate-800 px-1 font-mono text-[10px] text-slate-400"
+        >
+          {record.effectiveSelector}
+        </code>
+      )}
+      {record.media !== null && (
+        <span
+          data-testid="css-rule-media"
+          className="rounded bg-slate-800 px-1 text-[10px] text-slate-400"
+        >
+          @media {record.media}
+        </span>
+      )}
+    </div>
   );
 }
