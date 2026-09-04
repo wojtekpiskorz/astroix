@@ -37,8 +37,6 @@ export interface EntryTruth {
   readonly revision: string | null;
   /** The project's own schema validation of the entry's raw truth, as inspected; null when none ran. */
   readonly inspectedIssues: readonly ValidationIssueRecord[] | null;
-  /** The collection's revision — the schema+config semantics signal (over-invalidation by construction). */
-  readonly collectionRevision: string;
 }
 
 /** The bind outcome: the truth, or the honest non-truth state. */
@@ -252,21 +250,19 @@ function findNamedRecord(
 
 /** Binds the target collection's outer truth: revision, schema, entries array. */
 function bindCollectionSlice(collection: Record<string, unknown>): {
-  revision: string;
   declared: boolean;
   fields: FormFieldNode[];
   entries: readonly unknown[];
 } | null {
-  const revision = nonEmptyString(collection.revision);
+  // The collection revision is BOUND (a drifted or absent revision is
+  // payload drift) but stops surfacing on the truth: no consumer reads
+  // it in J2 — J3's write lane will carry it when it consumes the
+  // schema-movement signal.
+  if (nonEmptyString(collection.revision) === null) return null;
   const schema = bindSchema(collection.schema);
-  if (revision === null || schema === null) return null;
+  if (schema === null) return null;
   if (!Array.isArray(collection.entries)) return null;
-  return {
-    revision,
-    declared: schema.declared,
-    fields: schema.fields,
-    entries: collection.entries,
-  };
+  return { declared: schema.declared, fields: schema.fields, entries: collection.entries };
 }
 
 /**
@@ -302,7 +298,6 @@ export function bindEntryTruth(
       body: entry.body,
       revision: entry.revision,
       inspectedIssues: entry.issues,
-      collectionRevision: slice.revision,
     },
   };
 }

@@ -236,7 +236,7 @@ export function bindRoutesInspection(payload: unknown): readonly RouteInfo[] | n
 }
 
 /** The one sanitized message a refused exchange or a drifted payload surfaces. */
-function diagnosticMessageOf(error: unknown): string {
+export function diagnosticMessageOf(error: unknown): string {
   if (error instanceof Error && error.name === 'StaleSessionResultError') {
     return 'the session moved before the response arrived';
   }
@@ -247,15 +247,26 @@ function diagnosticMessageOf(error: unknown): string {
 }
 
 /**
+ * The E4 content inspection under its generation-scoped key — the
+ * feature's ONE content-family subscription, shared by every panel that
+ * binds the payload (discovery's listing, J2's entry truth): the
+ * house-checklist home for server-derived queries is the owning
+ * feature's `api.ts`, and one fetch serves all consumers through it
+ * (the SSE invalidation bridge refetches exactly this key).
+ */
+export function useContentInspection() {
+  const { session } = useShell();
+  return useSessionQuery(['content'], (signal) => session.inspect({ kind: 'content' }, signal));
+}
+
+/**
  * The discovery queries — both inspection families under their
  * generation-scoped keys, derived into the panel's state vocabulary.
  * Read-only: no mutation command exists on this surface.
  */
 export function useContentDiscovery(): ContentDiscoveryQuery {
+  const content = useContentInspection();
   const { session } = useShell();
-  const content = useSessionQuery(['content'], (signal) =>
-    session.inspect({ kind: 'content' }, signal),
-  );
   const routes = useSessionQuery(['routes'], (signal) =>
     session.inspect({ kind: 'routes' }, signal),
   );

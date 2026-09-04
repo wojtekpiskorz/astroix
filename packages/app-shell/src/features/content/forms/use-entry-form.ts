@@ -1,8 +1,8 @@
 import { useEffect } from 'react';
 import type { FormFieldNode } from '../../../../../core/src/form-tree.ts';
 import { useShell } from '../../../app-shell/shell-context.ts';
-import { useSessionQuery } from '../../../app-shell/use-session-query.ts';
 import type { ActiveEntryView } from '../../../presentation/types.ts';
+import { diagnosticMessageOf, useContentInspection } from '../api.ts';
 import { useContentNavigationStore } from '../navigation/navigation-store.ts';
 import { toRawText } from '../raw/raw-text.ts';
 import { partitionValues } from '../raw/value-partition.ts';
@@ -15,16 +15,21 @@ import {
   toEditIntent,
 } from './edit-intent.ts';
 import { bindEntryTruth, type EntryTruth } from './entry-truth.ts';
-import { type DraftBinding, type FormDraftMode, useFormDraftStore } from './form-draft-store.ts';
+import {
+  type DraftBinding,
+  type FormDraftMode,
+  sameDraftBinding,
+  useFormDraftStore,
+} from './form-draft-store.ts';
 
 /**
- * The form slice's composition hook (#252, J2): one subscription (the
- * E4 content inspection under the shell's generation-scoped query
- * discipline — the SAME key the discovery query rides, so one fetch
- * serves both and the SSE invalidation bridge refetches both), one
- * bind (the active entry's truth, fail-closed), one draft lifecycle
- * (open on entry, reset on binding change), and the pure derivations
- * (partition, validation, intent) the pane renders.
+ * The form slice's composition hook (#252, J2): one subscription — the
+ * feature api's SHARED content-inspection query (`useContentInspection`,
+ * the same generation-scoped key the discovery panel rides: one fetch
+ * serves both, the SSE invalidation bridge refetches both) — one bind
+ * (the active entry's truth, fail-closed), one draft lifecycle (open on
+ * entry, reset on binding change), and the pure derivations (partition,
+ * validation, intent) the pane renders.
  *
  * Read-only by charter: the only exchange this hook ever dispatches is
  * the `inspect` — J2 produces validated edit intent as feature state;
@@ -33,17 +38,6 @@ import { type DraftBinding, type FormDraftMode, useFormDraftStore } from './form
 
 /** The pane's structured state vocabulary — the AC's own surfaces. */
 export type EntryFormStatus = 'no-entry' | 'loading' | 'absent' | 'drift' | 'ready';
-
-/** One sanitized diagnostic message for the refused/drifted states. */
-function diagnosticMessageOf(error: unknown): string {
-  if (error instanceof Error && error.name === 'StaleSessionResultError') {
-    return 'the session moved before the response arrived';
-  }
-  const envelope = (error as { envelope?: { error?: { code?: string } } } | undefined)?.envelope;
-  if (typeof envelope?.error?.code === 'string')
-    return `inspection refused: ${envelope.error.code}`;
-  return 'inspection could not be completed';
-}
 
 /** The pane's view model — everything the component renders, nothing it owns. */
 export interface EntryFormView {
@@ -143,7 +137,10 @@ function draftView(
     mountId: draft.mountId,
     fields: truth.fields,
     values,
-    knownValues: partitionValues(truth.fields, values).known,
+    // The store's own known half — partitioned against the walk frozen
+    // at open (every store partition runs against that walk); the LIVE
+    // walk's partition is the pre-open view's alone.
+    knownValues: draft.knownValues,
     unknownPart: draft.unknownPart,
     rawText: draft.rawText ?? toRawText(values),
     inlineIssues: validation.inline,
@@ -199,9 +196,7 @@ export function useEntryForm(): EntryFormView {
   const activeEntry = useContentNavigationStore((state) => state.activeEntry);
   const draft = useFormDraftStore();
   const openDraft = useFormDraftStore((state) => state.open);
-  const content = useSessionQuery(['content'], (signal) =>
-    session.inspect({ kind: 'content' }, signal),
-  );
+  const content = useContentInspection();
 
   // The open effect: a bound truth for the ACTIVE entry opens the
   // draft — once per binding (the store's same-binding no-op covers
@@ -261,13 +256,13 @@ export function useEntryForm(): EntryFormView {
     reportUnknownPart: draft.reportUnknownPart,
     reportRawText: draft.reportRawText,
   };
-  const draftMatches =
-    draft.binding !== null &&
-    draft.binding.collection === bound.truth.collection &&
-    draft.binding.entryId === bound.truth.entryId &&
-    draft.binding.runtimeEpoch === session.ref.runtimeEpoch &&
-    draft.binding.generation === session.ref.generation;
-  if (!draftMatches || draft.baseline === null) {
+  const currentBinding: DraftBinding = {
+    runtimeEpoch: session.ref.runtimeEpoch,
+    generation: session.ref.generation,
+    collection: bound.truth.collection,
+    entryId: bound.truth.entryId,
+  };
+  if (!sameDraftBinding(draft.binding, currentBinding) || draft.baseline === null) {
     return truthView(bound.truth, activeEntry, actions);
   }
   return draftView(bound.truth, draft, actions);

@@ -150,7 +150,6 @@ function validateArrayValue(
   issues: DraftIssue[],
   inline: Record<string, string>,
   node: FormFieldNode,
-  values: unknown,
   value: unknown,
 ): void {
   if (node.kind !== 'array') return;
@@ -200,7 +199,7 @@ function validateNode(
   }
 
   validateLeafValue(issues, inline, node, value);
-  validateArrayValue(issues, inline, node, values, value);
+  validateArrayValue(issues, inline, node, value);
   validateGroupValue(issues, inline, node, values, value);
 }
 

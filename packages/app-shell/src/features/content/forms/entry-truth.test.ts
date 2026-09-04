@@ -70,7 +70,6 @@ describe('bindEntryTruth', () => {
       featured: false,
     });
     expect(bound.truth.revision).toBe(REVISION);
-    expect(bound.truth.collectionRevision).toBe(COLLECTION_REVISION);
     expect(bound.truth.schemaDeclared).toBe(true);
     expect(bound.truth.inspectedIssues).toEqual([]);
     expect(bound.truth.body).toBe('First fixture post — flat id.');

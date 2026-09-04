@@ -17,10 +17,9 @@
  * plus the selection identity, exported below.
  *
  * The Content vertical's discovery panel (J1, #251) is exported for
- * the hosts' sidebar slots, and its entry-form pane (J2, #252) for the
- * editor-dock slot the
- * hosts' sidebar slots — a feature consuming this shell (useShell +
- * the generation-scoped query discipline), never a part of it.
+ * the hosts' sidebar slot, and its entry-form pane (J2, #252) for the
+ * editor-dock slot — features consuming this shell (useShell + the
+ * generation-scoped query discipline), never a part of it.
  */
 
 export { ProjectCanvas, type ProjectCanvasProps } from '../canvas/project-canvas';
