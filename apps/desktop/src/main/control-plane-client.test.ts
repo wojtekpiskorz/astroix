@@ -3,7 +3,9 @@ import { BootCapability } from '@wojciechpiskorz/astroix-runtime/private-boot';
 import { describe, expect, it } from 'vitest';
 import {
   bootedReport,
+  listProjectsRequest,
   parseDesktopChildReport,
+  projectsResultReport,
   registerResultReport,
   transitionResultReport,
 } from './child-protocol.ts';
@@ -165,6 +167,25 @@ describe('connectControlPlaneChild — correlation', () => {
     });
   });
 
+  it('resolves the boot-time listing by its request id (#367)', async () => {
+    const { client, child } = connect(new FakeChild());
+    const pending = client.listRegisteredProjects();
+    expect(child.sent.at(-1)).toEqual(listProjectsRequest(1));
+    child.reply(projectsResultReport(1, { ok: false, code: 'control-plane-unavailable' }));
+    await expect(pending).resolves.toEqual({ ok: false, code: 'control-plane-unavailable' });
+    const second = client.listRegisteredProjects();
+    child.reply(
+      projectsResultReport(2, {
+        ok: true,
+        summaries: [{ projectKey: 'key1', displayName: 'site', availability: 'available' }],
+      }),
+    );
+    await expect(second).resolves.toEqual({
+      ok: true,
+      summaries: [{ projectKey: 'key1', displayName: 'site', availability: 'available' }],
+    });
+  });
+
   it('drops drifted channel messages without settling anything', async () => {
     const { client, child } = connect(new FakeChild());
     const pending = client.activate('key123');
@@ -203,12 +224,14 @@ describe('connectControlPlaneChild — the loss policy (fail closed, never resta
     const { client, child, losses } = connect(new FakeChild());
     const register = client.registerRoot('/a/root');
     const activate = client.activate('key123');
+    const listing = client.listRegisteredProjects();
     child.disconnect();
     await expect(register).resolves.toEqual({ ok: false, code: 'control-plane-unavailable' });
     await expect(activate).resolves.toEqual({
       kind: 'refused',
       reason: 'control-plane-unavailable',
     });
+    await expect(listing).resolves.toEqual({ ok: false, code: 'control-plane-unavailable' });
     await expect(client.deactivate(SESSION_REF)).resolves.toEqual({
       kind: 'refused',
       reason: 'control-plane-unavailable',

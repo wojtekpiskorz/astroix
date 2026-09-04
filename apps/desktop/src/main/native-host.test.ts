@@ -4,6 +4,7 @@ import {
   bootedReport,
   documentCapabilityReport,
   observeDocumentRequest,
+  projectsResultReport,
   registerResultReport,
   replaceTopLevelRequest,
   sessionStateReport,
@@ -701,5 +702,137 @@ describe('startNativeHost — the activation surface (#362)', () => {
     await settled;
     expect(seam.target.tornDown).toBe(1);
     expect(seam.child.disconnected).toBe(true);
+  });
+});
+
+describe('startNativeHost — the boot-time registry listing (#367)', () => {
+  /** The Session section's items of the last installed menu. */
+  function sessionMenuItems(seam: FakeHostSeam) {
+    return (
+      seam.installedMenus
+        .at(-1)
+        ?.declarations.sections.find((section) => section.label === 'Session')?.items ?? []
+    );
+  }
+
+  /** The activate rows of the last installed menu. */
+  function activateRows(seam: FakeHostSeam) {
+    return sessionMenuItems(seam).filter((item) => item.actionId === 'activate');
+  }
+
+  it('populates the activation menu from the persisted records once booted — the second launch can activate', async () => {
+    const seam = new FakeHostSeam();
+    const events = eventsLog();
+    await startNativeHost(seam, { observer: (event) => events.push(event) });
+    // Before the boot completes there is nothing to list — no ask leaves.
+    expect(seam.child.lastOf('list-projects')).toBeUndefined();
+    expect(activateRows(seam)).toHaveLength(0);
+    // The child reports its boot; main asks for the registry's persisted
+    // records over the same channel.
+    seam.child.reply(bootedReport(4426));
+    expect(seam.child.lastOf('list-projects')).toEqual({
+      astroix: 'astroix.desktop-private-channel',
+      kind: 'list-projects',
+      requestId: 1,
+    });
+    seam.child.reply(
+      projectsResultReport(1, {
+        ok: true,
+        summaries: [
+          {
+            projectKey: 'key111111111111111111111111',
+            displayName: 'site',
+            availability: 'available',
+          },
+          {
+            projectKey: 'key222222222222222222222222',
+            displayName: 'moved',
+            availability: 'unavailable',
+          },
+        ],
+      }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const rows = activateRows(seam);
+    expect(rows.map((row) => row.label)).toEqual(['Activate site', 'Activate moved']);
+    expect(rows.every((row) => row.enabled)).toBe(true); // no session — idle-state activation
+    // The listed keys are the activation targets the menu dispatch carries.
+    expect(rows.map((row) => row.projectKey)).toEqual([
+      'key111111111111111111111111',
+      'key222222222222222222222222',
+    ]);
+    // No filesystem root ever crossed the surfaced events.
+    expect(JSON.stringify(events)).not.toContain('/granted');
+  });
+
+  it('merges the listing with a local registration by project key — no duplicate, no drop', async () => {
+    const seam = new FakeHostSeam();
+    const host = await startNativeHost(seam, { observer: () => {} });
+    // A local registration lands first (the picker flow)…
+    seam.child.reply(bootedReport(4426));
+    seam.pickerChoice = { canceled: false, directory: '/granted/late-project' };
+    const pending = host?.addExistingProject();
+    await new Promise((resolve) => setTimeout(resolve, 0)); // the async picker resolves first
+    const registerMessage = seam.child.lastOf('register-root');
+    seam.child.reply(
+      registerResultReport(registerMessage?.requestId as number, {
+        ok: true,
+        summary: {
+          projectKey: 'key333333333333333333333333',
+          displayName: 'late-project',
+          availability: 'available',
+        },
+      }),
+    );
+    await pending;
+    expect(activateRows(seam)).toHaveLength(1);
+    // …then the (raced) listing arrives repeating that key and adding one.
+    const ask = seam.child.lastOf('list-projects');
+    seam.child.reply(
+      projectsResultReport(ask?.requestId as number, {
+        ok: true,
+        summaries: [
+          {
+            projectKey: 'key333333333333333333333333',
+            displayName: 'late-project',
+            availability: 'available',
+          },
+          {
+            projectKey: 'key444444444444444444444444',
+            displayName: 'persisted',
+            availability: 'available',
+          },
+        ],
+      }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(activateRows(seam).map((row) => row.projectKey)).toEqual([
+      'key333333333333333333333333',
+      'key444444444444444444444444',
+    ]);
+  });
+
+  it('leaves the menu untouched on a refused listing — Add Existing Project still answers', async () => {
+    const seam = new FakeHostSeam();
+    const events = eventsLog();
+    await startNativeHost(seam, { observer: (event) => events.push(event) });
+    seam.child.reply(bootedReport(4426));
+    const ask = seam.child.lastOf('list-projects');
+    seam.child.reply(
+      projectsResultReport(ask?.requestId as number, {
+        ok: false,
+        code: 'control-plane-unavailable',
+      }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(activateRows(seam)).toHaveLength(0);
+    // The registration entry point is unaffected.
+    expect(sessionMenuItems(seam).some((item) => item.actionId === undefined)).toBe(false);
+    expect(
+      seam.installedMenus
+        .at(-1)
+        ?.declarations.sections.find((section) => section.label === 'File')
+        ?.items.some((item) => item.actionId === 'add-existing-project'),
+    ).toBe(true);
   });
 });
