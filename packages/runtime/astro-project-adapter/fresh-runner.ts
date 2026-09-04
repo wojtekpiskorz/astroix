@@ -39,6 +39,9 @@ import { readRunnerContract, readSsrEnvironment } from './seam-readers';
  */
 
 /** The cleanup proof one pass produced — the fresh-runner property, as evidence. */
+/** Cleanup context for triage: the transport counts bracket the pass. The
+ * proof itself is identity-based (the own/foreign verdict in the rejection);
+ * these counts ride the evidence for the reader diagnosing a rejection. */
 export interface RunnerCleanupEvidence {
   readonly sendListenersBefore: number;
   readonly sendListenersAfterClose: number;
@@ -123,8 +126,7 @@ export async function withFreshRunner<T>(
   // The proof block — one synchronous continuation after close settles:
   // the after-roster, the registry release, and the residue verdicts all
   // observe one coherent transport state.
-  const afterListeners = hotTransportEmitter.listeners('send');
-  const afterRoster = new Set(afterListeners);
+  const afterRoster = new Set(hotTransportEmitter.listeners('send'));
   const sendListenersAfterClose = hotTransportEmitter.listenerCount('send');
   const closedAfterClose = runner.isClosed();
   // Release the pass's pinned listeners once they are observed gone; a
@@ -149,21 +151,13 @@ export async function withFreshRunner<T>(
       closeError,
       'the runner still reports open after close',
     );
-  } else if (verdict === 'own') {
+  } else if (verdict !== null) {
     cleanupError = residueError(
       'send-listeners',
       sendListenersBefore,
       sendListenersAfterClose,
       closeError,
-      'the runner pinned send listeners that outlived close',
-    );
-  } else if (verdict === 'foreign') {
-    cleanupError = residueError(
-      'send-listeners',
-      sendListenersBefore,
-      sendListenersAfterClose,
-      closeError,
-      'send listeners appeared on the hot transport that no fresh-runner pass owns',
+      RESIDUE_VERDICT_WHAT[verdict],
     );
   } else if (closeError !== undefined) {
     cleanupError = closeError;
@@ -193,6 +187,12 @@ export async function withFreshRunner<T>(
  * without belonging to any registered in-flight pass, `null` when the
  * transport is provably clean for this pass.
  */
+/** The residue verdicts' rejection messages — one home so the two branches cannot drift apart. */
+const RESIDUE_VERDICT_WHAT: Readonly<Record<'own' | 'foreign', string>> = {
+  own: 'the runner pinned send listeners that outlived close',
+  foreign: 'send listeners appeared on the hot transport that no fresh-runner pass owns',
+};
+
 function listenerResidue(input: {
   readonly before: ReadonlySet<unknown>;
   readonly pinned: readonly unknown[];
