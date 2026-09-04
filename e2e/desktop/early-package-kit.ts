@@ -173,11 +173,12 @@ export class PackagedAppRun extends HarnessRun {
       // The browser-level `--user-data-dir` switch — the isolation law's
       // harness half. Chromium resolves the browser's user-data-dir at
       // process start and hands it to EVERY helper; the product's env
-      // override (`app.setPath` in main) lands only after the pre-boot
-      // resource verification, so without the switch the early GPU and
-      // network helpers run against the REAL account home's Application
+      // override (`app.setPath` in main) WAS landing only after the
+      // pre-boot resource verification — without the switch the early GPU
+      // and network helpers ran against the REAL account home's Application
       // Support (observed in the first recorded run; the product half —
-      // setPath's late landing — is #363). The switch names the SAME
+      // setPath's late landing — was #363, hoisted above the verification).
+      // The switch names the SAME
       // temp root as the env override, so the app's own paths are
       // unchanged — every process of the tree, first to last, is isolated.
       argv: [`--user-data-dir=${roots.userData}`],
