@@ -239,7 +239,7 @@ for (const binding of NATIVE_BINDINGS) {
   await cp(binding.from, binding.to);
 }
 
-// ——— 2b. the client documents the child's origin listener serves (#362, H7) ——
+// ——— 2c. the client documents the child's origin listener serves (#362, H7) ——
 
 // The launcher and project app documents every renderer host serves
 // (the SAME web client build the web host boots from): the desktop

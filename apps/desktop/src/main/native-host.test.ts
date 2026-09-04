@@ -566,6 +566,33 @@ describe('startNativeHost — the activation surface (#362)', () => {
     return { seam, events, host };
   }
 
+  it('dedupes the Session menu when a registered root is re-added (existed answers the same projectKey)', async () => {
+    const { seam } = await bootedWithProject();
+    // Re-add the same granted directory: the registry answers the same
+    // projectKey summary (the `existed: true` shape) — the menu must not
+    // grow a duplicate Activate row (#367's cheap half).
+    seam.pickerChoice = { canceled: false, directory: '/granted/managed-project' };
+    seam.menuDispatch().onAction('add-existing-project', '');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const registerMessage = seam.child.lastOf('register-root');
+    seam.child.reply(
+      registerResultReport(registerMessage?.requestId as number, {
+        ok: true,
+        summary: {
+          projectKey: 'aaaaaaaaaaaaaaaaaaaaaaaaaa',
+          displayName: 'managed-project',
+          availability: 'available',
+        },
+      }),
+    );
+    const sessionItems =
+      seam.installedMenus
+        .at(-1)
+        ?.declarations.sections.find((section) => section.label === 'Session')?.items ?? [];
+    const activateRows = sessionItems.filter((item) => item.actionId === 'activate');
+    expect(activateRows).toHaveLength(1);
+  });
+
   it('shows the launcher origin once booted, and the activation entry appears with the registered project', async () => {
     const { seam } = await bootedWithProject();
     expect(seam.windows[0]?.loadedURLs).toContain('http://launcher.localhost:4426/__astroix/app/');
