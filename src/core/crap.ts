@@ -187,6 +187,13 @@ const COVERED_PREFIXES: readonly string[] = [
   // `packages/runtime/registry` since #221: deterministic real-filesystem
   // unit tests over temp directories.
   'packages/runtime/registry/',
+  // `packages/runtime/persistence` since #329: the single-homed fixed-file
+  // store discipline (temp+fsync+rename+dir-fsync, 0700/0600 enforcement,
+  // idempotent delete) the registry and tombstone stores both project —
+  // real-filesystem unit coverage through both consumers' temp-directory
+  // legs, same covered-tier decision as the registry seam it extracted
+  // from (#221).
+  'packages/runtime/persistence/',
   // `packages/runtime/{kernel-lease,private-boot}` since #222: the
   // boot-authority seams — deterministic unit tests over real temp SQLite
   // lease files and a real in-memory private-IPC channel, with the forked
@@ -220,11 +227,15 @@ const COVERED_PREFIXES: readonly string[] = [
   'packages/runtime/origin/',
   'packages/runtime/proxy/',
   // `packages/runtime/api` since #234 (F2): the HTTP API v1 pure seams —
-  // the dispatch core, the command permission matrix, the
-  // security-header evidence, the host-capability grants, the
-  // client-binding table, the authority strip, the bounded envelope
-  // validation, and the sanitized error responses — deterministic pure
-  // units; the reserved-handler socket composition is watchlisted below.
+  // the dispatch core, the shared admission spine (#321 — the
+  // reserved-path claim head, the rejected-target refusal mapping, the
+  // headers/Host/capability admission, and the reads transport law the
+  // command dispatch and the SSE admission both run), the command
+  // permission matrix, the security-header evidence, the
+  // host-capability grants, the client-binding table, the authority
+  // strip, the bounded envelope validation, and the sanitized error
+  // responses — deterministic pure units; the reserved-handler socket
+  // composition is watchlisted below.
   // #235 (F3) added the bounded pagination seams under the same tree
   // (api/pagination — the page math and the protocol-typed page
   // builders, deterministic pure units over the envelopeBytes idiom).
@@ -233,11 +244,12 @@ const COVERED_PREFIXES: readonly string[] = [
   'packages/runtime/api/pagination/',
   // `packages/runtime/sse` since #235 (F3): the SSE pure seams — the
   // admission core (route/Host/capability/Origin/Fetch-Metadata/binding/
-  // role/SessionRef laws over the same F2 spine, imported read-only),
-  // the stream hub (caps, delivery matrix, generation watermark,
-  // revocation scopes — deterministic units over recorder sinks), and
-  // the frame writer (cap enforcement at the transport); the events
-  // surface socket composition is watchlisted below.
+  // role/SessionRef laws over the shared admission spine #321, plus its
+  // own SSE-strict deltas), the stream hub (caps, delivery matrix,
+  // generation watermark, revocation scopes — deterministic units over
+  // recorder sinks), and the frame writer (cap enforcement at the
+  // transport); the events surface socket composition is watchlisted
+  // below.
   'packages/runtime/sse/',
   // `packages/runtime/astro-project-adapter` since #225: the pure seams —
   // pair gate, resolution, seam probes, runner accounting (#225), the

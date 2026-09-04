@@ -1,7 +1,6 @@
 import type { CssRuleRecord } from '@wojciechpiskorz/astroix-core';
 import postcss from 'postcss';
-import type { AdapterErrorDetails } from '../../adapter-error';
-import { AdapterError } from '../../adapter-error';
+import { type AdapterError, seamRejection } from '../../adapter-error';
 
 /**
  * The styles join's pure correspondence core (#226, ADR-0005 `styles`
@@ -279,7 +278,7 @@ function compiledRuleSelectors(css: string, block: ScopedBlock): string[] {
       SEAM_JOIN_RULE_SHAPE,
       `parseable CSS rules in the compiled module for block ${block.blockIndex} of ${block.file}`,
       'compiled CSS that does not parse as a stylesheet',
-      { cause },
+      cause,
     );
   }
   return selectors;
@@ -319,27 +318,19 @@ function rulesRejection(expected: string, observed: string): AdapterError {
 }
 
 /**
- * The join's rejection constructor — the adapter's seam idiom (#225):
- * `{seam, seamClass, expected, observed}` with structural descriptions,
- * never values. Shared by the join's modules so every rejection the
- * styles surface can throw carries the same closed shape.
+ * The join's rejection entry — the adapter's seam-rejection home
+ * (`seamRejection`, #311/#315) under the styles join's fixed
+ * `fail-closed private` seam class: one line of delegation, so the
+ * message template and the closed `{seam, seamClass, expected,
+ * observed}` details shape can never drift between the adapter's
+ * surfaces. Shared by the join's and convergence's modules so every
+ * rejection the styles surface throws is born at the one home.
  */
 export function stylesJoinRejected(
   seam: string,
   expected: string,
   observed: string,
-  extra?: { readonly cause?: unknown },
+  cause?: unknown,
 ): AdapterError {
-  const details: AdapterErrorDetails = {
-    seam,
-    seamClass: 'fail-closed private',
-    expected,
-    observed,
-  };
-  return new AdapterError(
-    'seam-rejected',
-    `AstroProjectAdapter seam rejection at ${seam}: expected ${expected}; observed ${observed}`,
-    details,
-    { cause: extra?.cause },
-  );
+  return seamRejection(seam, 'fail-closed private', expected, observed, cause);
 }

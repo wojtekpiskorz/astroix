@@ -1,5 +1,6 @@
 import {
   API_V1_PREFIX,
+  COMMAND_MUTATION,
   type Command,
   type ErrorEnvelope,
   EVENTS_PATH,
@@ -220,13 +221,11 @@ export function createAppClient(options: AppClientOptions): AppClient {
   async function request(command: Command, session?: SessionRef, signal?: AbortSignal) {
     const requestId = `req-${nextRequestId}`;
     nextRequestId += 1;
-    // The mutation-marker set mirrors the server's COMMAND_ROUTES truth
-    // (`activate`, `deactivate`, `apply-edit` — F2 #234): an unmarked
-    // mutation envelope is refused at admission, so this fork must never
-    // drift behind it. The single home is a protocol-side table and is
-    // fenced to #334 — this set matches the server until that lands.
-    const mutation =
-      command.kind === 'activate' || command.kind === 'deactivate' || command.kind === 'apply-edit';
+    // The mutation classification is the protocol's one table
+    // (`COMMAND_MUTATION`, #334) — the server's route matrix derives
+    // from the same table, so an unmarked mutation envelope cannot
+    // exist because this fork drifted behind it.
+    const mutation = COMMAND_MUTATION[command.kind];
     let response: Response;
     try {
       response = await fetch(endpoint, {

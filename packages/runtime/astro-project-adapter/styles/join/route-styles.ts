@@ -120,7 +120,7 @@ async function readRouteCssEntries(
           SEAM_JOIN_DEV_CSS_IMPORT,
           'the active route component dev-css virtual module to import',
           'a module import rejection for the active route component',
-          { cause },
+          cause,
         );
       }
     },
