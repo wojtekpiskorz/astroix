@@ -77,14 +77,21 @@ test('the canvas shares the project origin with direct contentDocument access at
   expect(parsed.pathname).not.toContain('__astroix');
   expect(parsed.search).toBe('');
 
-  // Direct same-origin DOM access into the live document — the fixture's own content.
-  const heroTitle = await page.evaluate(() => {
-    const frame = document.querySelector(
-      '[data-testid="canvas-frame"]',
-    ) as HTMLIFrameElement | null;
-    return frame?.contentDocument?.querySelector('.hero-title')?.textContent ?? null;
-  });
-  expect(heroTitle).toBe('Astroix fixture');
+  // Direct same-origin DOM access into the live document — the fixture's own
+  // content. Polled (#388): a one-shot read raced the iframe's first paint of
+  // the natural root; the poll keeps the same direct-contentDocument proof.
+  await expect
+    .poll(
+      async () =>
+        page.evaluate(() => {
+          const frame = document.querySelector(
+            '[data-testid="canvas-frame"]',
+          ) as HTMLIFrameElement | null;
+          return frame?.contentDocument?.querySelector('.hero-title')?.textContent ?? null;
+        }),
+      { timeout: 30_000 },
+    )
+    .toBe('Astroix fixture');
 
   // The shell surfaces the same observed URL.
   await expect(page.getByTestId('canvas-url')).toHaveText(`${origin}/`);
