@@ -18,6 +18,7 @@ import {
   mount,
   waitFor,
 } from '../../app-shell/test-mount.tsx';
+import { IDLE_WRITE, reduceWrite } from '../../editor/edit-drain/write-loop-state.ts';
 import { editFixture, inspectionFixture } from '../../presentation/fixtures.ts';
 import { typeInto } from '../../presentation/mount.tsx';
 import { createShellQueryClient } from '../../query/shell-query-client.ts';
@@ -28,7 +29,6 @@ import { ContentEntryForm } from './forms/content-entry-form.tsx';
 import { useFormDraftStore } from './forms/form-draft-store.ts';
 import { useContentNavigationStore } from './navigation/navigation-store.ts';
 import { buildEntryWritePlan } from './write/serialize-entry-write.ts';
-import { IDLE_WRITE, reduceWrite } from './write/write-state.ts';
 import { useContentWriteStore } from './write/write-store.ts';
 
 /**

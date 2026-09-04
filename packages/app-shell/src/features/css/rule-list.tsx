@@ -2,17 +2,19 @@ import type { ReactNode } from 'react';
 import type { MatchedStyleRow } from './inspection/match-rows.ts';
 
 /**
- * The CSS vertical's read-only rule list (#249, I1): the positioned
- * matched rows — source selectors, effective scoped selectors, media
- * conditions, sanitized project-relative locations, and the
- * deterministic match order with the cascade winner marked — in the
- * order the pure matcher produced (specificity desc, ties in payload
- * order). Prop-driven like the retained presentation widgets, but
- * feature-owned: the retained `presentation/rule-list.tsx` carries the
- * EDIT vertical's intent (its rows are buttons assembling an editor
- * target); this list is the READ slice — every control it has is a
- * disclosure (the read-only rule detail), and no edit affordance, no
- * client-selected path, and no write intent exists anywhere in it.
+ * The CSS vertical's read-only rule list (#249, I1; the edit
+ * affordance joined at #250, I2): the positioned matched rows — source
+ * selectors, effective scoped selectors, media conditions, sanitized
+ * project-relative locations, and the deterministic match order with
+ * the cascade winner marked — in the order the pure matcher produced
+ * (specificity desc, ties in payload order). Prop-driven like the
+ * retained presentation widgets, but feature-owned: the retained
+ * `presentation/rule-list.tsx` carries the EDIT vertical's intent (its
+ * rows are buttons assembling an editor target); this list is the READ
+ * slice — every control it has is a disclosure (the read-only rule
+ * detail) plus, when the host passes `onEdit`, the one edit gesture
+ * that opens the row's rule in the rule editor (the grant-bound
+ * auto-write loop's surface, never a path selection).
  */
 
 interface RuleListProps {
@@ -22,9 +24,11 @@ interface RuleListProps {
   readonly openKey: string | null;
   /** Opens one row's read-only detail (the disclosure intent). */
   readonly onOpenDetail: (key: string) => void;
+  /** Opens one row's rule in the editor (the edit gesture — absent in read-only hosts). */
+  readonly onEdit?: (row: MatchedStyleRow) => void;
 }
 
-export function RuleList({ rows, openKey, onOpenDetail }: RuleListProps): ReactNode {
+export function RuleList({ rows, openKey, onOpenDetail, onEdit }: RuleListProps): ReactNode {
   return (
     <section
       data-astroix-css-rules="list"
@@ -89,6 +93,16 @@ export function RuleList({ rows, openKey, onOpenDetail }: RuleListProps): ReactN
               >
                 {open ? 'hide detail' : 'detail'}
               </button>
+              {onEdit !== undefined && (
+                <button
+                  type="button"
+                  data-testid="css-rule-edit"
+                  onClick={() => onEdit(row)}
+                  className="text-[11px] text-slate-500 underline"
+                >
+                  edit
+                </button>
+              )}
               {open && (
                 <dl data-testid="css-rule-detail" className="mt-1 text-[11px] text-slate-400">
                   <div className="flex gap-1">

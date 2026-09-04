@@ -1,4 +1,5 @@
 import type { IndexPayloadRecord } from '../../../../../core/src/matcher.ts';
+import { bindCssWriteFacts, type CssWriteFact } from '../editing/write-facts.ts';
 
 /**
  * The styles inspection's fail-closed payload binding (#249, I1; the
@@ -19,6 +20,13 @@ import type { IndexPayloadRecord } from '../../../../../core/src/matcher.ts';
  * module-graph shapes, component paths as selections, and filesystem
  * absolutes never enter the bound shape at all — there is no field for
  * them.
+ *
+ * The write loop's discovery rides the same payload additively
+ * (#250, I2): the `writeFacts` enrichment (per file: the opaque css
+ * grant plus the raw text) binds through its own per-fact fail-closed
+ * discipline — a drifted fact drops that file's write truth alone,
+ * never the read payload, and an absent field is an honestly
+ * un-enriched inspection (read-only truth).
  */
 
 /** One bound record — the frozen css-index record shape (the presentation tier's own `RuleRecordView`). */
@@ -31,6 +39,8 @@ export interface BoundStylesPayload {
   /** The invalidation revision this payload converged at — valid until the source advances past it. */
   readonly invalidationRevision: number;
   readonly records: readonly BoundStyleRecord[];
+  /** The write loop's per-file facts (#250, I2) — empty when the inspection served un-enriched. */
+  readonly writeFacts: ReadonlyMap<string, CssWriteFact>;
 }
 
 /** The sanitized project-relative file law: posix, relative, no traversal, no drive, no backslash. */
@@ -150,5 +160,5 @@ export function bindStylesInspection(payload: unknown): BoundStylesPayload | nul
     if (bound === null) return null;
     records.push(bound);
   }
-  return { revision, invalidationRevision, records };
+  return { revision, invalidationRevision, records, writeFacts: bindCssWriteFacts(payload) };
 }
