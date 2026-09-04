@@ -1,5 +1,7 @@
+import { readFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { expect, type Page, type Request, test } from '@playwright/test';
 import { activateButton, PROJECT_APP_URL, restoreIdle } from '../../../../e2e/web/spec-helpers.ts';
 import { parseEntryDraft, serializeEntry } from '../../../../packages/core/src/entry-writer.ts';
@@ -106,14 +108,55 @@ async function entryBytes(): Promise<string> {
   return await readFile(ENTRY_FILE, 'utf8');
 }
 
+/** The inspected values the draft began from — the frozen collections fixture's own projection. */
+function inspectedHelloValues(): Record<string, unknown> {
+  const corpus = JSON.parse(
+    readFileSync(
+      join(
+        dirname(fileURLToPath(import.meta.url)),
+        '..',
+        '..',
+        '..',
+        '..',
+        'e2e',
+        'behavior-contracts',
+        'inspection',
+        'collections.json',
+      ),
+      'utf8',
+    ),
+  ) as { collections: { name: string; entries: { id: string; data: unknown }[] }[] };
+  const entry = corpus.collections
+    .find((collection) => collection.name === 'blog')
+    ?.entries.find((candidate) => candidate.id === 'hello-builder');
+  if (entry === undefined) throw new Error('the frozen collections corpus lost hello-builder');
+  return entry.data as Record<string, unknown>;
+}
+
+/** The served projection the current raw's draft began from — the corpus projection, its title moved to the raw's own. */
+function servedProjectionOf(raw: string): Record<string, unknown> {
+  const baseline = parseEntryDraft(raw);
+  if (baseline === null) throw new Error('the fixture baseline did not parse');
+  const title = (baseline.data as { title?: unknown }).title;
+  if (typeof title !== 'string') throw new Error('the fixture baseline lost its title');
+  return { ...inspectedHelloValues(), title };
+}
+
 /** The pure oracle's expected bytes for one title edit over the inspected raw baseline. */
 function expectedTitleWrite(raw: string, nextTitle: string): string {
   const baseline = parseEntryDraft(raw);
   if (baseline === null) throw new Error('the fixture baseline did not parse');
+  // The DIFF space is the draft's own: the served projection of the
+  // CURRENT raw — the corpus projection with its title moved to
+  // whatever the raw now carries (the serial battery's earlier
+  // writes), the title edited — untouched keys never reach the
+  // Document (the zod defaults the file never carries are
+  // equal-in-projection, never a write).
+  const served = servedProjectionOf(raw);
   return serializeEntry({
     raw,
-    baseline,
-    draft: { data: { ...(baseline.data as object), title: nextTitle }, body: baseline.body },
+    baseline: { data: served, body: baseline.body },
+    draft: { data: { ...served, title: nextTitle }, body: baseline.body },
     protectedPaths: [],
   });
 }
@@ -150,12 +193,12 @@ test('a form write lands byte-exact through the grant, refreshes the pane, and t
   await expect(writeButton(page)).toBeEnabled();
   await writeButton(page).click();
 
-  // pending → the refresh banner (committed) → the refreshed truth lands
+  // dispatched (pending observed), then the refresh lands the new
+  // truth — the intermediate refresh-required window can close inside
+  // one poll tick when the dev server converges fast, so the terminal
+  // quiet state is the assertion that carries the flow
   await expect(writeState(page)).toHaveAttribute('data-write-state', /pending|refresh-required/);
-  await expect(writeState(page)).toHaveAttribute('data-write-state', 'refresh-required', {
-    timeout: 30_000,
-  });
-  await expect(writeState(page)).toHaveAttribute('data-write-state', 'idle', { timeout: 30_000 });
+  await expect(writeState(page)).toHaveAttribute('data-write-state', 'idle', { timeout: 60_000 });
 
   // BYTE-EXACT: the staged file's bytes are the pure oracle's bytes
   const after = await entryBytes();
@@ -199,16 +242,21 @@ test('a raw write lands through the same grant-bound loop', async ({ page }) => 
   await writeButton(page).click();
   await expect(writeState(page)).toHaveAttribute('data-write-state', 'idle', { timeout: 30_000 });
 
-  // BYTE-EXACT: the oracle over the same raw baseline
+  // BYTE-EXACT: the oracle over the same raw baseline, in the draft's
+  // own diff space (the served projection of the current raw — the
+  // previous test's title carried — the raw edit applied)
   const after = await entryBytes();
   const baseline = parseEntryDraft(before);
   if (baseline === null) throw new Error('the fixture baseline did not parse');
-  const rawValues = baseline.data as Record<string, unknown>;
+  const served = servedProjectionOf(before);
   expect(after).toBe(
     serializeEntry({
       raw: before,
-      baseline,
-      draft: { data: { ...rawValues, title: 'Raw-written title' }, body: baseline.body },
+      baseline: { data: served, body: baseline.body },
+      draft: {
+        data: { ...served, title: 'Raw-written title' },
+        body: baseline.body,
+      },
       protectedPaths: [],
     }),
   );
@@ -229,13 +277,30 @@ test('a stale response cannot overwrite the committed server result across a ses
   await openEntry(page, 'hello-builder');
   const before = await entryBytes();
 
-  // delay EVERY apply-edit RESPONSE past the transition: the write
-  // crosses the wire, the drain settles it server-side, and the
-  // response never reaches the (now dead) document
+  // delay every apply-edit RESPONSE far past the transition: the
+  // REQUEST crosses immediately (`route.fetch` re-issues it while the
+  // session is live — the server accepts it, the executor commits the
+  // bytes, and the disk-poll below PROVES the settlement before the
+  // deactivation begins), and only the fulfilled response trails. It
+  // arrives after the document is replaced, and a fulfilled response
+  // into a dead request delivers nothing anywhere — fulfilling then
+  // throws "Route is already handled", which is exactly the leg's
+  // law observed, so it is swallowed. (Holding the REQUEST instead
+  // would starve the write: the old session retires before the plan
+  // crosses, the server refuses it as stale, and nothing commits —
+  // a different leg, not this one.)
   await page.route('**/__astroix/api/v1', async (route) => {
     const body = route.request().postDataJSON() as { command?: { kind?: string } } | null;
     if (body?.command?.kind === 'apply-edit') {
-      await page.waitForTimeout(2500);
+      const response = await route.fetch();
+      await page.waitForTimeout(10_000);
+      try {
+        await route.fulfill({ response });
+      } catch {
+        // the request died with the replaced document — the stale
+        // response could not deliver anything, which is the point
+      }
+      return;
     }
     await route.fallback();
   });
@@ -245,14 +310,22 @@ test('a stale response cannot overwrite the committed server result across a ses
   await writeButton(page).click();
   await expect(writeState(page)).toHaveAttribute('data-write-state', /pending|refresh-required/);
 
-  // deactivate while the response is still held: the transition drains
-  // the accepted write (the server commits it), the document is reset
+  // the write crossed and SETTLED server-side before any transition:
+  // the staged file's bytes are the committed result
+  await expect
+    .poll(async () => (await entryBytes()).includes('Delayed write title'), { timeout: 30_000 })
+    .toBe(true);
+
+  // deactivate while the response is still held: the transition sees
+  // an already-settled write (nothing to drain), the document is reset
   // and replaced — the stale response cannot deliver anything anywhere
   await page.getByTestId('deactivate').click();
   await page.waitForURL(/launcher\.localhost:\d+\/__astroix\/app\//);
   await expect(page.getByTestId('session-label')).toHaveText('idle');
 
-  await page.unroute('**/__astroix/api/v1');
+  // the still-held handler must not outlive the test as an error: the
+  // lingering fulfill belongs to a dead request and is ignored here
+  await page.unrouteAll({ behavior: 'ignoreErrors' });
   await activateProject(page);
   await openEntry(page, 'hello-builder');
 

@@ -7,6 +7,7 @@ import {
 } from '@wojciechpiskorz/astroix-protocol';
 import { act } from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
+import { parseEntryDraft } from '../../../../core/src/entry-writer.ts';
 import { createAppClient } from '../../app-client.ts';
 import { ShellProvider } from '../../app-shell/shell-provider.tsx';
 import {
@@ -312,6 +313,22 @@ function editTitle(container: HTMLElement, title: string): void {
   typeInto(input, title);
 }
 
+/** The title widget's current value — the pane's served-or-draft truth. */
+function titleValue(container: HTMLElement): string {
+  const input = pane(container).querySelector(
+    '[data-astroix-form-field="title"] input',
+  ) as HTMLInputElement | null;
+  if (input === null) throw new Error('no title input');
+  return input.value;
+}
+
+/** The inspected baseline's own values — the raw parse's JSON twin (the payload's data for these fixtures). */
+function baselineValuesOf(contents: string): unknown {
+  const parsed = parseEntryDraft(contents);
+  if (parsed === null) throw new Error('the contract baseline did not parse');
+  return parsed.data;
+}
+
 describe('the serializer against the frozen edit contracts (byte-exact)', () => {
   it('reproduces the frozen frontmatter-write bytes over the raw baseline', () => {
     const contract = editFixture('content-frontmatter-write.json');
@@ -326,13 +343,15 @@ describe('the serializer against the frozen edit contracts (byte-exact)', () => 
         },
         raw: contract.baseline.contents,
         baselineSha256: contract.baseline.hash,
+        // the landing-gate field, irrelevant to the serializer's bytes
+        servedValues: null,
       },
       intent: {
         collection: 'blog',
         entryId: '2024/post',
         revision: contract.baseline.hash,
         baseline: {
-          values: (contract.draft as { data: unknown }).data,
+          values: baselineValuesOf(contract.baseline.contents),
           body: contract.draft.body,
         },
         values: contract.draft.data,
@@ -365,13 +384,14 @@ describe('the serializer against the frozen edit contracts (byte-exact)', () => 
         },
         raw: contract.baseline.contents,
         baselineSha256: contract.baseline.hash,
+        servedValues: null,
       },
       intent: {
         collection: 'blog',
         entryId: 'hello-builder',
         revision: contract.baseline.hash,
         baseline: {
-          values: (contract.draft as { data: unknown }).data,
+          values: baselineValuesOf(contract.baseline.contents),
           body: contract.draft.body,
         },
         values: contract.draft.data,
@@ -398,6 +418,8 @@ describe('the serializer against the frozen edit contracts (byte-exact)', () => 
         },
         raw: '',
         baselineSha256: null,
+        // nothing is served for a file that does not exist yet
+        servedValues: null,
       },
       intent: {
         collection: 'blog',
@@ -429,6 +451,7 @@ describe('the serializer against the frozen edit contracts (byte-exact)', () => 
       },
       raw: RAW_HELLO,
       baselineSha256: REVISION,
+      servedValues: null,
     };
     const intent = {
       collection: 'blog',
@@ -561,6 +584,70 @@ describe('the mounted write loop', () => {
       '[data-astroix-form-field="title"] input',
     ) as HTMLInputElement;
     expect(input.value).toBe('Edited title');
+    await waitFor(
+      () => byTestId(container, 'intent-state').getAttribute('data-intent-state') === 'none',
+    );
+  });
+
+  it('holds a torn refresh (revision moved, projection stale) until the retry lands the converged truth', async () => {
+    const container = mountPane();
+    openEntry('blog', 'hello-builder');
+    await settleReady(
+      container,
+      contentPayload({ entryGrant: () => grantFixture(), entryRaw: () => RAW_HELLO }),
+    );
+    editTitle(container, 'Torn edit');
+    await waitFor(
+      () => byTestId(container, 'intent-state').getAttribute('data-intent-state') === 'ready',
+    );
+    click(byTestId(container, 'write-entry'));
+    await waitFor(() => writeState(container) === 'pending');
+    await actAsync(async () => {
+      wire.resolveEdit(1);
+    });
+    // The TORN pass: the entry's served revision moved (the server's
+    // revision is a fresh disk read, so it moves the instant the
+    // executor's atomic replacement lands) while the served projection
+    // did not (the content layer trails on its own watcher cadence) —
+    // a reopen here would paint the pre-write values under the
+    // post-write revision, and the pane would never self-correct.
+    await settleReady(
+      container,
+      contentPayload({
+        entryRevision: () => NEXT_REVISION,
+        entryGrant: () => grantFixture({ sha256: NEXT_REVISION }),
+        entryRaw: () => RAW_HELLO.replace('Hello builder', 'Torn edit'),
+      }),
+    );
+    await waitFor(() => writeState(container) === 'refresh-required');
+    // The pane did NOT reopen on the torn truth: the draft still renders
+    expect(titleValue(container)).toBe('Torn edit');
+    // The bounded retry refetches (one 250ms cadence) — its exchange
+    // resolves with the CONVERGED projection, and the landing follows
+    await actAsync(async () => {
+      await new Promise((resolve) => {
+        setTimeout(resolve, 400);
+      });
+    });
+    await actAsync(async () => {
+      wire.resolveInspect(
+        'content',
+        contentPayload({
+          entryRevision: () => NEXT_REVISION,
+          entryData: (_collection, id) =>
+            id === 'hello-builder'
+              ? {
+                  ...(collectionsFixture.collections[0]?.entries[2]?.data ?? {}),
+                  title: 'Torn edit',
+                }
+              : undefined,
+          entryGrant: () => grantFixture({ sha256: NEXT_REVISION }),
+          entryRaw: () => RAW_HELLO.replace('Hello builder', 'Torn edit'),
+        }),
+      );
+    });
+    await waitFor(() => writeState(container) === 'idle');
+    expect(titleValue(container)).toBe('Torn edit');
     await waitFor(
       () => byTestId(container, 'intent-state').getAttribute('data-intent-state') === 'none',
     );

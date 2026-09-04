@@ -69,11 +69,11 @@ export function buildEntryWritePlan(input: {
     if (!facts.grant.operations.includes('replace-contents')) {
       return { ok: false, code: 'operation-not-offered' };
     }
-    const baseline = parseEntryDraft(facts.raw);
+    const rawParse = parseEntryDraft(facts.raw);
     // An unparseable raw baseline (a hand-broken file under the draft)
     // refuses the write: serializeEntry would throw, and the honest
     // client answer is the refusal, never a blind overwrite.
-    if (baseline === null) return { ok: false, code: 'no-baseline' };
+    if (rawParse === null) return { ok: false, code: 'no-baseline' };
     return {
       ok: true,
       plan: {
@@ -81,7 +81,14 @@ export function buildEntryWritePlan(input: {
         grant: toWireGrant(facts),
         contents: serializeEntry({
           raw: facts.raw,
-          baseline,
+          // The DIFF runs in the draft's own truth-space — the inspected
+          // values the draft began from (the zod projection, J2's merge
+          // law) — so only the keys the draft actually changed reach the
+          // Document and every untouched node keeps its bytes (a zod
+          // default the file never carried is equal-in-projection, never
+          // a write). The BYTES anchor stays the raw file itself: the
+          // parse above only proves it parses.
+          baseline: { data: intent.baseline.values, body: rawParse.body },
           draft: { data: intent.values, body: intent.baseline.body ?? '' },
           protectedPaths: collectImagePaths(input.fields),
         }),

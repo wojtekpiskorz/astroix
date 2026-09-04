@@ -1,8 +1,9 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useShell } from '../../../app-shell/shell-context.ts';
 import { roleCan } from '../../../roles/capabilities.ts';
 import { useEditSessionStore } from '../../../state/edit-session-store.ts';
 import { useEntryWriteFacts } from '../api.ts';
+import { plainEquals } from '../forms/edit-intent.ts';
 import { useFormDraftStore } from '../forms/form-draft-store.ts';
 import type { EntryFormView } from '../forms/use-entry-form.ts';
 import { buildEntryWritePlan } from './serialize-entry-write.ts';
@@ -36,12 +37,14 @@ import { useContentWriteStore } from './write-store.ts';
  * grant held in the shell's edit-session store) or `rejected` (with the
  * revision-conflict SHA when the server handed one back) converges by
  * invalidating the generation-scoped content and routes keys — then
- * `refresh-required` until the refreshed payload's entry revision moves
- * past the written baseline, when the draft reopens on the served truth
- * and the loop goes quiet again. An UNCERTAIN settle (transport,
- * `internal-error`, abort, the stale-response belt) is
- * `irreversible-postcommit` — the write may or may not have landed —
- * and converges through the same refresh, never a guess.
+ * `refresh-required` until the refreshed payload's entry revision AND
+ * served projection have both moved past the written baseline (a
+ * revision-moved, projection-stale payload is a torn truth, never a
+ * reopen), when the draft reopens on the served truth and the loop
+ * goes quiet again. An UNCERTAIN settle (transport, `internal-error`,
+ * abort, the stale-response belt) is `irreversible-postcommit` — the
+ * write may or may not have landed — and converges through the same
+ * refresh, never a guess.
  */
 export function useEntryWrite(view: EntryFormView): EntryWriteControls {
   const { session, role, gate, queryClient } = useShell();
@@ -66,25 +69,107 @@ export function useEntryWrite(view: EntryFormView): EntryWriteControls {
   useEffect(() => {
     if (bindingRef.current !== bindingKey) {
       bindingRef.current = bindingKey;
+      // A reset kills the awaited landing too: one entry's post-commit
+      // refresh never lands another entry's pane.
+      awaitedRef.current = null;
       dispatchEvent({ type: 'reset' });
     }
   }, [bindingKey, dispatchEvent]);
 
-  // The refresh-landed convergence: after a settled mutation, the loop
-  // remembers the PRE-COMMIT baseline; the moment the live inspection's
-  // entry revision moves off it, revisioned server truth has arrived —
-  // the draft reopens on it (the form slice's open effect) whatever the
-  // machine's phase raced to, because the refresh's own completion can
-  // land before React renders the payload.
-  const awaitedBaselineRef = useRef<string | null>(null);
+  // The awaited landing: after a settled mutation, the loop remembers
+  // the PRE-COMMIT baseline — its revision AND its served projection
+  // (the values the draft began from). The landing fires only when
+  // revisioned server truth has ACTUALLY arrived, and that is two
+  // movements, not one: the entry's revision (a fresh disk read
+  // server-side, so it moves the instant the executor's atomic
+  // replacement lands) AND the served projection (the managed dev
+  // server's content layer, which converges on its own watcher
+  // cadence and can TRAIL the disk). A revision-moved,
+  // projection-stale payload is a TORN truth — reopening on it would
+  // paint the pre-write values under the post-write revision, and the
+  // pane would never self-correct (the reopen is once). So the loop
+  // holds until both moved, the retry below keeps refetching until
+  // they do, and the landing — draft cleared, the form slice's open
+  // effect reopening on the served truth whatever the machine's phase
+  // raced to — is the only reopen there is.
+  const awaitedRef = useRef<{ readonly revision: string; readonly values: unknown } | null>(null);
+  const [refreshAttempts, setRefreshAttempts] = useState(0);
+  const servedProjectionMoved = (() => {
+    const awaited = awaitedRef.current;
+    if (awaited === null || facts === null) return false;
+    return !plainEquals(facts.servedValues, awaited.values);
+  })();
   useEffect(() => {
-    const awaited = awaitedBaselineRef.current;
+    const awaited = awaitedRef.current;
     if (awaited === null || view.baselineRevision === null || view.liveRevision === null) return;
-    if (view.baselineRevision !== awaited || view.liveRevision === awaited) return;
-    awaitedBaselineRef.current = null;
+    if (view.baselineRevision !== awaited.revision) return;
+    if (view.liveRevision === awaited.revision) return;
+    if (!servedProjectionMoved) return;
+    awaitedRef.current = null;
+    setRefreshAttempts(0);
     clearDraft();
     dispatchEvent({ type: 'refresh-landed', seq: write.seq });
-  }, [write.seq, view.baselineRevision, view.liveRevision, clearDraft, dispatchEvent]);
+  }, [
+    write.seq,
+    view.baselineRevision,
+    view.liveRevision,
+    servedProjectionMoved,
+    clearDraft,
+    dispatchEvent,
+  ]);
+
+  // The bounded refresh retry: while the refresh is required and the
+  // awaited truth has not landed (either stream — revision or served
+  // projection — still on the written baseline), the loop refetches
+  // the content key on a short cadence. The attempt counter (declared
+  // with the landing's state above) is state so each tick re-arms the
+  // timer (the effect's other deps can all hold steady across a
+  // refetch that changed nothing), bounded at 40 attempts — never a
+  // spin — and the bound's give-up is honest: the loop goes quiet on
+  // the served truth as-is rather than hang on it.
+  useEffect(() => {
+    if (write.phase !== 'refresh-required') {
+      if (refreshAttempts !== 0) setRefreshAttempts(0);
+      return;
+    }
+    if (awaitedRef.current === null) return;
+    if (view.baselineRevision === null || view.liveRevision === null) return;
+    if (view.baselineRevision !== view.liveRevision && servedProjectionMoved) return;
+    if (refreshAttempts >= 40) {
+      // the honest give-up: the server never moved (or its projection
+      // never converged); the pane keeps the served truth and the loop
+      // goes quiet rather than hang on it
+      awaitedRef.current = null;
+      dispatchEvent({ type: 'refresh-landed', seq: write.seq });
+      return;
+    }
+    const timer = setTimeout(() => {
+      setRefreshAttempts((attempt) => attempt + 1);
+      // NEVER cancel the in-flight fetch: the server-side inspection
+      // does not observe the client's abort (a cancelled dispatch runs
+      // to completion server-side), so a cancel-and-redispatch cadence
+      // stacks concurrent fresh-runner passes over the one dev-server
+      // transport until the adapter's runner-cleanup residue proof
+      // trips. `cancelRefetch: false` dedupes against the in-flight
+      // refetch instead — one content inspection in flight at a time,
+      // every retry serialized behind it.
+      void queryClient.refetchQueries(
+        { queryKey: session.queryKey('content') },
+        { cancelRefetch: false },
+      );
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [
+    write.phase,
+    write.seq,
+    refreshAttempts,
+    view.baselineRevision,
+    view.liveRevision,
+    servedProjectionMoved,
+    queryClient,
+    session,
+    dispatchEvent,
+  ]);
 
   // The retry recovery: a rejection stands until the draft moves again —
   // the next edit is a new attempt, and the surface re-arms for it.
@@ -142,9 +227,16 @@ export function useEntryWrite(view: EntryFormView): EntryWriteControls {
     }
     const seq = nextSeq();
     dispatchEvent({ type: 'submitted', seq });
-    // The baseline this dispatch writes against — the refresh's landing
-    // is observed as the live revision moving off exactly it.
-    awaitedBaselineRef.current = view.baselineRevision;
+    // The baseline this dispatch writes against — its revision (the
+    // landing's freshness currency) and its served projection (the
+    // values the draft began from — the landing's torn-truth gate):
+    // the refresh's landing is observed as BOTH moving off it. The
+    // refusal above proved both non-null; the guard keeps that proof
+    // in the type.
+    awaitedRef.current =
+      view.baselineRevision !== null && view.intent !== null
+        ? { revision: view.baselineRevision, values: view.intent.baseline.values }
+        : null;
     try {
       const result = await session.applyEdit(serialized.plan);
       const settled = classifySettle(result);
@@ -165,8 +257,10 @@ export function useEntryWrite(view: EntryFormView): EntryWriteControls {
       } else {
         dispatchEvent({ type: 'uncertain', seq });
       }
+      await refreshAfterSettle(seq, 'uncertain');
+      return;
     }
-    await refreshAfterSettle(seq);
+    await refreshAfterSettle(seq, 'committed');
   }
 
   /**
@@ -175,20 +269,25 @@ export function useEntryWrite(view: EntryFormView): EntryWriteControls {
    * act boundary in tests, one paint in production — a microtask would
    * batch the two states into one render and hide the commit), then
    * the generation-scoped content and routes keys invalidate — the
-   * same discipline the SSE invalidation bridge drives. The loop holds
-   * `refresh-required` until the refetch has completed: its landing
-   * both reopens the draft on the new truth (when the revision moved)
-   * and quiets the loop — an uncertain write whose file did not move
-   * is answered by the same completion, never a hang.
+   * same discipline the SSE invalidation bridge drives.
+   *
+   * The two settle kinds land differently: an UNCERTAIN outcome is
+   * answered by the refresh's own completion (the payload as served is
+   * the truth, moved or not — the pane keeps the draft either way),
+   * while a COMMITTED write holds `refresh-required` until BOTH the
+   * live revision and the served projection have moved off the written
+   * baseline (the landing gate above) — the bounded retry keeps
+   * refetching while the dev server's content layer converges, so the
+   * pane never reopens on the pre-write truth.
    */
-  async function refreshAfterSettle(seq: number): Promise<void> {
+  async function refreshAfterSettle(seq: number, kind: 'committed' | 'uncertain'): Promise<void> {
     await new Promise<void>((resolve) => {
       setTimeout(resolve, 0);
     });
     dispatchEvent({ type: 'refresh-begun', seq });
     await queryClient.invalidateQueries({ queryKey: session.queryKey('content') });
     await queryClient.invalidateQueries({ queryKey: session.queryKey('routes') });
-    dispatchEvent({ type: 'refresh-landed', seq });
+    if (kind === 'uncertain') dispatchEvent({ type: 'refresh-landed', seq });
   }
 
   const blocking = refusal();

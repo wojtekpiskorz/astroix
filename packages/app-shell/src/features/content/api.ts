@@ -372,6 +372,17 @@ export interface EntryWriteFacts {
   readonly raw: string;
   /** The SHA-256 the grant binds (existing text); null on expected-absent creation. */
   readonly baselineSha256: string | null;
+  /**
+   * The entry's served projection — the same payload `data` the form
+   * slice's truth binds (the reopen truth), carried here because the
+   * write loop's post-commit landing gate reads it: the served
+   * revision (a fresh disk read server-side) can move BEFORE the
+   * content layer's projection converges (the managed dev server's
+   * own watcher cadence), so "revision moved" alone is a torn truth —
+   * the reopen waits until the projection itself has moved off the
+   * pre-write one.
+   */
+  readonly servedValues: unknown;
 }
 
 /**
@@ -387,6 +398,9 @@ export function bindEntryWriteFacts(entry: unknown): EntryWriteFacts | null {
   const grantRecord = asRecord(record.grant);
   if (grantRecord === null) return null;
   if (typeof record.raw !== 'string') return null;
+  // The served projection must be PRESENT (the runtime serializes every
+  // entry's `data`); its interior is a carried truth, never validated here.
+  if (!('data' in record)) return null;
   const token = nonEmptyString(grantRecord.token);
   const kind = nonEmptyString(grantRecord.kind);
   const displayPath = nonEmptyString(grantRecord.displayPath);
@@ -416,6 +430,7 @@ export function bindEntryWriteFacts(entry: unknown): EntryWriteFacts | null {
     grant: { token, kind, operations, displayPath, baseline },
     raw: record.raw,
     baselineSha256,
+    servedValues: record.data,
   };
 }
 
