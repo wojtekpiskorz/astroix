@@ -402,7 +402,7 @@ describe('the CSS auto-write loop — the frozen world', () => {
     expect(undoEdit.plan.grant.token).toBe('e'.repeat(48));
   });
 
-  it('coalesces the pause — two quick edits dispatch ONE write with the final value', async () => {
+  it('coalesces the pause — two quick edits dispatch ONE write, and the count settles back to quiet', async () => {
     const container = mountPanel();
     const served = servedPayload();
     await landReady(container, served);
@@ -410,12 +410,28 @@ describe('the CSS auto-write loop — the frozen world', () => {
     const input = declInput(container, 'font-size');
     typeInto(input, '3.5');
     typeInto(input, '3.5rem');
+    // still ONE pending pause — the second schedule replaced the first
+    expect(writeState(container)).toBe('scheduled');
     await waitFor(() => wire.edits.length === 1);
-    expect(writeState(container)).toMatch(/writing|quiet/);
     // no second dispatch ever crosses — the pause replaced, not stacked
     await actAsync(async () => {
       wire.resolveEdit(1);
     });
+    expect(wire.edits.length).toBe(1);
+    // the landing: answer the refresh with the post-write truth (both
+    // the revision and the served raw moved), then the badge — whose
+    // pending-pause count is DERIVED from the scheduler, so a replaced
+    // debounce cannot leak it — must settle back to quiet
+    const nextRaw = spliceText(cssSplice.baseline.contents, {
+      start: cssSplice.edit.range.start,
+      end: cssSplice.edit.range.end,
+      replacement: cssSplice.edit.replacement,
+    });
+    await waitFor(() => wire.openCount() > 0);
+    await actAsync(async () => {
+      wire.resolveStyles(servedPayload({ revision: 4, homeRaw: nextRaw }).payload, 4);
+    });
+    await waitFor(() => writeState(container) === 'quiet');
     expect(wire.edits.length).toBe(1);
   });
 

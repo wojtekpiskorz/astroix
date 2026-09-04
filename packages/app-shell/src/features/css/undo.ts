@@ -16,10 +16,12 @@ import { sameSessionPair } from '../../state/session-gate.ts';
  * A-to-B-to-A document never sees the old generation's undo), and the
  * explicit `clear` is the conflict-reload and revocation path's (the
  * entries' baselines died with the world they were computed against).
- * The transition commit needs no registration: the ordered reset
- * replaces the whole document (the J2/J3 #372-precedent self-gate),
- * and the shell's edit-session store holds the opaque accounting
- * (`pushUndo`) the reset's clearing list observably drops.
+ * The transition commit clears it through the #372 feature-store
+ * registration below (the sequencer's ordered clear-stores step — the
+ * shell's reset law knows no dies-with-document exemption), with the
+ * pair-bind belt remaining for the same-document window, and the
+ * shell's edit-session store holds the opaque accounting (`pushUndo`)
+ * the reset's clearing list observably drops.
  */
 
 /** One landed write's inverse — enough to restore the bytes and prove them. */
@@ -68,11 +70,6 @@ export const useCssUndoStore = create<CssUndoState>((set, get) => ({
   },
   clear: () => set({ session: null, entries: [] }),
 }));
-
-/** The stack's depth for the UI's enablement — `0` is the disabled truth. */
-export function undoDepth(): number {
-  return useCssUndoStore.getState().entries.length;
-}
 
 // The #372 registration: module scope, beside the store's creation —
 // the sequencer's clear-stores step clears this stack at every commit

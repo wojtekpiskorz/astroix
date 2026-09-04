@@ -13,9 +13,9 @@ import { useEditSessionStore } from '../../state/edit-session-store.ts';
 import { useCssAnchorStore } from './editing/anchors.ts';
 import { type RecordIdentity, recordIdentityOf, resolveRecord } from './editing/resolve-record.ts';
 import {
+  invertSplice,
   planDeclarationSplice,
   planSelectorSplice,
-  type SplicePlanRefusal,
   type SpliceWritePlan,
 } from './editing/splice-plan.ts';
 import { useCssWriteStore } from './editing/write-store.ts';
@@ -88,6 +88,22 @@ function waitForQuiet(boundMs: number): Promise<void> {
       resolve();
     });
   });
+}
+
+/**
+ * The landing gate's one predicate: the served payload moved off the
+ * pre-write truth in BOTH observations — the converged revision AND the
+ * written file's served raw. A revision-moved, raw-stale payload is
+ * torn, never a reopen.
+ */
+function landingServed(
+  payload: BoundStylesPayload,
+  awaited: { readonly file: string; readonly raw: string; readonly revision: number },
+): boolean {
+  const servedRaw = payload.writeFacts.get(awaited.file)?.raw;
+  return (
+    payload.revision !== awaited.revision && servedRaw !== undefined && servedRaw !== awaited.raw
+  );
 }
 
 /** The hook's controls — everything the editor surface renders, nothing it owns. */
@@ -167,12 +183,7 @@ export function useCssAutoWrite(payload: BoundStylesPayload | null): CssAutoWrit
   useEffect(() => {
     const awaited = awaitedRef.current;
     if (awaited === null || payload === null) return;
-    const servedRaw = payload.writeFacts.get(awaited.file)?.raw;
-    if (
-      payload.revision !== awaited.revision &&
-      servedRaw !== undefined &&
-      servedRaw !== awaited.raw
-    ) {
+    if (landingServed(payload, awaited)) {
       awaitedRef.current = null;
       setRefreshAttempts(0);
       dispatchEvent({ type: 'refresh-landed', seq: write.seq });
@@ -187,13 +198,7 @@ export function useCssAutoWrite(payload: BoundStylesPayload | null): CssAutoWrit
     }
     const awaited = awaitedRef.current;
     if (awaited === null || payload === null) return;
-    const servedRaw = payload.writeFacts.get(awaited.file)?.raw;
-    if (
-      payload.revision !== awaited.revision &&
-      servedRaw !== undefined &&
-      servedRaw !== awaited.raw
-    )
-      return;
+    if (landingServed(payload, awaited)) return;
     if (refreshAttempts >= REFRESH_ATTEMPTS) {
       // the honest give-up: quiet on the served truth as-is
       awaitedRef.current = null;
@@ -257,8 +262,15 @@ export function useCssAutoWrite(payload: BoundStylesPayload | null): CssAutoWrit
     }
     const settled = classifySettle(outcome);
     if (settled.kind === 'committed') {
-      const nextGrant = outcome instanceof Error ? null : (outcome.nextGrant ?? null);
-      await continueCommitted(file, plan, anchorRaw, nextGrant, undoEntry, seq, settled.revision);
+      await continueCommitted(
+        file,
+        plan,
+        anchorRaw,
+        settled.nextGrant,
+        undoEntry,
+        seq,
+        settled.revision,
+      );
       return;
     }
     if (settled.kind === 'conflict') {
@@ -334,11 +346,6 @@ export function useCssAutoWrite(payload: BoundStylesPayload | null): CssAutoWrit
     if (kind === 'uncertain') dispatchEvent({ type: 'refresh-landed', seq });
   }
 
-  /** One refusal code's plan-side mapping — a reload where the served truth must move. */
-  function planRefusalOf(code: SplicePlanRefusal): string {
-    return code;
-  }
-
   /** Runs one intent — the queued dispatch's body. */
   async function runIntent(intent: CssEditIntent): Promise<void> {
     const blocked = refusal();
@@ -365,8 +372,7 @@ export function useCssAutoWrite(payload: BoundStylesPayload | null): CssAutoWrit
             nextSelector: intent.nextSelector,
           });
     if (!planned.ok) {
-      const code = planRefusalOf(planned.code);
-      refuse(code);
+      refuse(planned.code);
       if (planned.code === 'source-drift' || planned.code === 'no-facts') reloadStyles();
       return;
     }
@@ -374,16 +380,27 @@ export function useCssAutoWrite(payload: BoundStylesPayload | null): CssAutoWrit
     const undoEntry: CssUndoEntry = {
       key: `${intent.file}#${plan.range.start}-${plan.range.end}`,
       file: intent.file,
-      range: { start: plan.range.start, end: plan.range.start + plan.replacement.length },
-      replacement: replaced,
-      replaced: plan.replacement,
+      // the inverse splice — the planner's own inversion law, composed
+      ...invertSplice({ range: plan.range, replacement: plan.replacement, replaced }),
     };
     await submitSplice(intent.file, plan, undoEntry);
   }
 
+  /**
+   * Re-derives the pending-pause count from the scheduler — its pending
+   * keys ARE the accounting (a replaced debounce for one key is still
+   * ONE pending pause), so the badge can never drift off a fire the
+   * scheduler coalesced away.
+   */
+  function syncScheduledCount(): void {
+    setScheduledCount(scheduler.pendingKeys().length);
+  }
+
   /** Fires one scheduled key — the queue serializes, the intent reads live. */
   function fireKey(key: string): void {
-    setScheduledCount((count) => Math.max(0, count - 1));
+    // the fired key is already gone from the scheduler's table — the
+    // derived count reads exactly the pauses that remain
+    syncScheduledCount();
     void queue.enqueue(async () => {
       await waitForQuiet(QUIET_BOUND_MS);
       if (useCssWriteStore.getState().write.phase !== 'idle') return refuse('busy');
@@ -397,13 +414,13 @@ export function useCssAutoWrite(payload: BoundStylesPayload | null): CssAutoWrit
   /** Schedules one intent — the settled pause, replacing any pending one for the key. */
   function schedule(key: string, intent: CssEditIntent): void {
     intentsRef.current.set(key, intent);
-    setScheduledCount((count) => count + 1);
     // A refused machine re-arms on the next edit — the new attempt's
     // reset (J3's retry-recovery law).
     if (useCssWriteStore.getState().write.phase === 'rejected') {
       dispatchEvent({ type: 'reset' });
     }
     scheduler.schedule(key, () => fireKey(key));
+    syncScheduledCount();
   }
 
   /** The declaration-value edit gesture — the persist-on-pause write. */

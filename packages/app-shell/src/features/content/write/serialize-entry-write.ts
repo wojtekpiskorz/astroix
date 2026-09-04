@@ -1,4 +1,4 @@
-import type { ResourceGrant, WritePlan } from '@wojciechpiskorz/astroix-protocol';
+import type { WritePlan } from '@wojciechpiskorz/astroix-protocol';
 import { parseEntryDraft, serializeEntry } from '../../../../../core/src/entry-writer.ts';
 import { collectImagePaths, type FormFieldNode } from '../../../../../core/src/form-tree.ts';
 import type { EntryWriteFacts } from '../api.ts';
@@ -78,7 +78,9 @@ export function buildEntryWritePlan(input: {
       ok: true,
       plan: {
         operation: 'replace-contents',
-        grant: toWireGrant(facts),
+        // the bound claim echoed VERBATIM — the wrong-kind guard above
+        // proved it is this feature's content grant
+        grant: facts.grant,
         contents: serializeEntry({
           raw: facts.raw,
           // The DIFF runs in the draft's own truth-space — the inspected
@@ -105,7 +107,8 @@ export function buildEntryWritePlan(input: {
     ok: true,
     plan: {
       operation: 'create-contents',
-      grant: toWireGrant(facts),
+      // the bound claim echoed VERBATIM (the same guard's content kind)
+      grant: facts.grant,
       contents: serializeEntry({
         raw: '',
         baseline: { data: {}, body: '' },
@@ -113,16 +116,5 @@ export function buildEntryWritePlan(input: {
         protectedPaths: collectImagePaths(input.fields),
       }),
     },
-  };
-}
-
-/** The wire grant — the bound facts echoed verbatim, in the contract's field order. */
-function toWireGrant(facts: EntryWriteFacts): ResourceGrant {
-  return {
-    token: facts.grant.token,
-    kind: 'content',
-    operations: [...facts.grant.operations] as ResourceGrant['operations'],
-    displayPath: facts.grant.displayPath,
-    baseline: facts.grant.baseline,
   };
 }

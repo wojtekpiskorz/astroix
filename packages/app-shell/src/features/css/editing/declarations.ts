@@ -48,17 +48,6 @@ export function selectorHeadBounds(ruleText: string): { start: number; end: numb
 }
 
 /**
- * Parses one rule text — the selector head plus the body's flat
- * declaration list, every bound RULE-relative (the head starts at 0 for
- * a well-formed record). The body closes at the FIRST closing brace —
- * a media-conditioned record's range over-covers its enclosing at-rule
- * (the corpus's own media records end with the at-rule's `}`), and the
- * rule's own body is what precedes the first close. `null` when the
- * body is not a flat list (a nested block, or a segment without a
- * property/value pair) — the honest read-only refusal, never a
- * heuristic splice.
- */
-/**
  * Binds one body segment into a declaration — `null` when the segment
  * is not a property/value pair (the honest refusal), `{ skip: true }`
  * for blank filler between semicolons. `hasSemicolon` carries whether
@@ -92,6 +81,17 @@ function bindSegment(
   };
 }
 
+/**
+ * Parses one rule text — the selector head plus the body's flat
+ * declaration list, every bound RULE-relative (the head starts at 0 for
+ * a well-formed record). The body closes at the FIRST closing brace —
+ * a media-conditioned record's range over-covers its enclosing at-rule
+ * (the corpus's own media records end with the at-rule's `}`), and the
+ * rule's own body is what precedes the first close. `null` when the
+ * body is not a flat list (a nested block, or a segment without a
+ * property/value pair) — the honest read-only refusal, never a
+ * heuristic splice.
+ */
 export function parseRule(ruleText: string): ParsedRule | null {
   const brace = ruleText.indexOf('{');
   const close = ruleText.indexOf('}');

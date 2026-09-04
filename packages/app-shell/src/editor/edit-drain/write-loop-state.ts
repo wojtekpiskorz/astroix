@@ -1,3 +1,4 @@
+import type { ResourceGrant } from '@wojciechpiskorz/astroix-protocol';
 import { AppClientError } from '../../app-client.ts';
 import { StaleSessionResultError } from '../../query/gated-session-fetch.ts';
 
@@ -162,7 +163,13 @@ export type SettleClassification =
   | {
       readonly kind: 'committed';
       readonly revision: number;
-      readonly nextGrantToken: string | null;
+      /**
+       * The follow-on grant VERBATIM — the whole claim, `null` when the
+       * server renewed none: a consumer that anchors its next edit on
+       * the renewal (the CSS loop's anchor grant) needs every field,
+       * not just the token it echoes into the session's accounting.
+       */
+      readonly nextGrant: ResourceGrant | null;
     }
   | { readonly kind: 'rejected'; readonly code: string }
   | { readonly kind: 'conflict'; readonly code: string; readonly currentSha256: string }
@@ -187,13 +194,13 @@ const REFUSAL_CODES = new Set([
  * response cannot prove it did not land; the refresh converges.
  */
 export function classifySettle(
-  outcome: { revision: number; nextGrant?: { token: string } } | Error,
+  outcome: { revision: number; nextGrant?: ResourceGrant } | Error,
 ): SettleClassification {
   if (!(outcome instanceof Error)) {
     return {
       kind: 'committed',
       revision: outcome.revision,
-      nextGrantToken: outcome.nextGrant?.token ?? null,
+      nextGrant: outcome.nextGrant ?? null,
     };
   }
   if (outcome instanceof StaleSessionResultError) {

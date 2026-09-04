@@ -1,4 +1,9 @@
 import type { ResourceGrant } from '@wojciechpiskorz/astroix-protocol';
+import {
+  asRecord,
+  bindGrantClaim,
+  nonEmptyString,
+} from '../../../editor/edit-drain/grant-claim.ts';
 
 /**
  * The CSS vertical's write facts (#250, I2 — J3's per-entry content
@@ -13,12 +18,17 @@ import type { ResourceGrant } from '@wojciechpiskorz/astroix-protocol';
  * un-enriched (an inspection the write composition could not prove —
  * read-only, never a heuristic grant).
  *
- * The wire law pinned here: the grant's kind is `css`, its operations
- * carry the splice species, and its display path is the UI-only
- * project-relative form — the browser never sees, submits, or selects
- * an absolute or project-relative AUTHORITY path; the grant token is
- * the only authority, and it is opaque.
+ * The wire law pinned here: the grant's kind is `css`, its splice
+ * species carries no creation contract (the sha256 baseline alone —
+ * `CSS_GRANT_RULES`, the shared seam binder's declared narrowing), and
+ * its display path is the UI-only project-relative form — the browser
+ * never sees, submits, or selects an absolute or project-relative
+ * AUTHORITY path; the grant token is the only authority, and it is
+ * opaque.
  */
+
+/** The feature's grant-claim narrowing — the css kind, the splice species' existing-text contract alone. */
+const CSS_GRANT_RULES = { kind: 'css', expectedAbsent: false } as const;
 
 /** One file's bound write facts — the grant plus the byte anchor. */
 export interface CssWriteFact {
@@ -30,44 +40,6 @@ export interface CssWriteFact {
   readonly raw: string;
 }
 
-/** Narrows one unknown to a plain record. */
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : null;
-}
-
-/** One nonempty string field. */
-function nonEmptyString(value: unknown): string | null {
-  return typeof value === 'string' && value.length > 0 ? value : null;
-}
-
-/** Binds the grant claim field-for-field — `null` on any drift (J3's `EntryWriteFacts` discipline). */
-function bindGrantClaim(grantRecord: Record<string, unknown>): ResourceGrant | null {
-  const token = nonEmptyString(grantRecord.token);
-  const kind = nonEmptyString(grantRecord.kind);
-  const displayPath = nonEmptyString(grantRecord.displayPath);
-  if (token === null || kind === null || displayPath === null) return null;
-  if (kind !== 'css') return null;
-  if (!Array.isArray(grantRecord.operations)) return null;
-  const operations: string[] = [];
-  for (const operation of grantRecord.operations) {
-    if (typeof operation !== 'string') return null;
-    operations.push(operation);
-  }
-  if (operations.length === 0) return null;
-  const baseline = asRecord(grantRecord.baseline);
-  if (baseline === null) return null;
-  if (baseline.type !== 'sha256') return null;
-  const sha256 = nonEmptyString(baseline.sha256);
-  if (sha256 === null || !/^[0-9a-f]{64}$/.test(sha256)) return null;
-  return {
-    token,
-    kind: 'css',
-    operations: operations as ResourceGrant['operations'],
-    displayPath,
-    baseline: { type: 'sha256', sha256 },
-  };
-}
-
 /** Binds one fact — every field structural, `null` on any drift. */
 function bindFact(value: unknown): CssWriteFact | null {
   const record = asRecord(value);
@@ -76,7 +48,7 @@ function bindFact(value: unknown): CssWriteFact | null {
   if (file === null) return null;
   const grantRecord = asRecord(record.grant);
   if (grantRecord === null) return null;
-  const grant = bindGrantClaim(grantRecord);
+  const grant = bindGrantClaim(grantRecord, CSS_GRANT_RULES);
   if (grant === null) return null;
   if (typeof record.raw !== 'string') return null;
   return { file, grant, raw: record.raw };

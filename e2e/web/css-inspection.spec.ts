@@ -3,10 +3,11 @@ import { join } from 'node:path';
 import { expect, type Page, test } from '@playwright/test';
 import { stagedCopyRoot } from '../../apps/web/src/stage-e2e.ts';
 import {
-  activateButton,
+  activateSettled,
   BOOT_BUDGET_MS,
+  CANVAS_FRAME,
+  canvasSelect,
   LOAD_BUDGET_MS,
-  PROJECT_APP_URL,
   restoreIdle,
 } from './spec-helpers.ts';
 
@@ -66,49 +67,10 @@ function stagedSheetPaths(): { cssPath: string; astroPath: string } {
 }
 
 /**
- * The batteries' shared activation prefix: land on the launcher,
- * activate, and WAIT FOR THE CANVAS TO SETTLE — the initial load plus
- * the young dev server's one post-connect self-reload (the canvas
- * battery's own HMR-leg discipline; a click racing that rebuild lands
- * on a document whose capture listener is between epochs and is lost).
- * Event-ordered: the two baseline navigations complete BEFORE the
- * settle clock starts, and the settle window proves no third navigation
- * is in flight.
+ * The battery's shared activation prefix and canvas selection live in
+ * `spec-helpers.ts` (the lane's established home for the batteries'
+ * carried duplication).
  */
-async function activateSettled(page: Page): Promise<void> {
-  const frameNavigations: string[] = [];
-  const onNavigated = (frame: import('@playwright/test').Frame): void => {
-    if (frame.parentFrame() !== null) frameNavigations.push(frame.url());
-  };
-  page.on('framenavigated', onNavigated);
-  await page.goto('/__astroix/app/');
-  await expect(page.getByTestId('session-label')).toHaveText('idle', { timeout: LOAD_BUDGET_MS });
-  await activateButton(page, 0).click();
-  await page.waitForURL(PROJECT_APP_URL, { timeout: BOOT_BUDGET_MS });
-  await expect(page.getByTestId('canvas-origin-state')).toHaveText('project', {
-    timeout: LOAD_BUDGET_MS,
-  });
-  await expect.poll(() => frameNavigations.length, { timeout: 60_000 }).toBeGreaterThanOrEqual(2);
-  frameNavigations.length = 0;
-  await page.waitForTimeout(1500);
-  expect(frameNavigations).toEqual([]);
-  page.removeListener('framenavigated', onNavigated);
-}
-
-/** The canvas frame locator — the product-attribute form (#374 ruling), never a test id. */
-const CANVAS_FRAME = '[data-astroix-canvas] iframe';
-
-/**
- * Clicks one canvas element until the selection lands — bounded
- * retry over a possibly-reloading document (a mid-navigation click is
- * retried, never assumed).
- */
-async function canvasSelect(page: Page, selector: string): Promise<void> {
-  await expect(async () => {
-    await page.frameLocator(CANVAS_FRAME).locator(selector).click();
-    await expect(page.getByTestId('selection-tag')).not.toHaveText('none', { timeout: 2_000 });
-  }).toPass({ timeout: 90_000 });
-}
 
 test.describe.configure({ mode: 'serial' });
 

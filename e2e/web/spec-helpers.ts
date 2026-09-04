@@ -1,11 +1,18 @@
-import { expect, type Page } from '@playwright/test';
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { expect, type Frame, type Page } from '@playwright/test';
+import { stagedCopyRoot } from '../../apps/web/src/stage-e2e.ts';
+import { spliceText } from '../../packages/core/src/splice-writer.ts';
 
 /**
  * The web lane's shared spec helpers (#242 review round 2: the
  * batteries' carried duplication — the activate button, the two
  * document-URL shapes, and the restore-idle tail — absorbed into one
- * small module per tier; this is the spec tier). Test-only, imported
- * by the lane's specs; no product code touches it.
+ * small module per tier; this is the spec tier). #250's write
+ * batteries and #249's inspection battery grew the same way: the
+ * settled-activation prefix, the canvas selection retry, the staged
+ * sheet's bytes, the write-settle budget, and the pure splice oracle.
+ * Test-only, imported by the lane's specs; no product code touches it.
  */
 
 /** The list item whose staged copy is at `position` (0 and 1 are the fixture copies; 2 is broken). */
@@ -34,6 +41,21 @@ export const LOAD_BUDGET_MS = 30_000;
 export const BOOT_BUDGET_MS = 120_000;
 
 /**
+ * The write batteries' settle budget (#250): the first accepted edit
+ * forks the real write-executor child, and the settle spans the fork,
+ * the executor's commit, and the post-commit refresh convergence.
+ */
+export const WRITE_SETTLE_MS = 90_000;
+
+/** The staged copy the write batteries edit (registered first — position 0). */
+export const STAGED_CSS_FILE = join(stagedCopyRoot('project-a'), 'src', 'pages', 'home.css');
+
+/** The staged sheet's current bytes — the write batteries' disk truth. */
+export async function cssBytes(): Promise<string> {
+  return await readFile(STAGED_CSS_FILE, 'utf8');
+}
+
+/**
  * The batteries' restore tail: deactivate, land on the launcher, pin the
  * idle state for whatever follows. Sized for a loaded CI runner (#392):
  * the deactivation's commit-side work (fence drain, revocation, launcher
@@ -44,5 +66,73 @@ export async function restoreIdle(page: Page): Promise<void> {
   await page.waitForURL(LAUNCHER_APP_URL, { timeout: BOOT_BUDGET_MS });
   await expect(page.getByTestId('session-label')).toHaveText('idle', {
     timeout: LOAD_BUDGET_MS,
+  });
+}
+
+/**
+ * The batteries' shared activation prefix: land on the launcher,
+ * activate, and WAIT FOR THE CANVAS TO SETTLE — the initial load plus
+ * the young dev server's one post-connect self-reload (the canvas
+ * battery's own HMR-leg discipline; a click racing that rebuild lands
+ * on a document whose capture listener is between epochs and is lost).
+ * Event-ordered: the two baseline navigations complete BEFORE the
+ * settle clock starts, and the settle window proves no third navigation
+ * is in flight.
+ */
+export async function activateSettled(page: Page): Promise<void> {
+  const frameNavigations: string[] = [];
+  const onNavigated = (frame: Frame): void => {
+    if (frame.parentFrame() !== null) frameNavigations.push(frame.url());
+  };
+  page.on('framenavigated', onNavigated);
+  await page.goto('/__astroix/app/');
+  await expect(page.getByTestId('session-label')).toHaveText('idle', { timeout: LOAD_BUDGET_MS });
+  await activateButton(page, 0).click();
+  await page.waitForURL(PROJECT_APP_URL, { timeout: BOOT_BUDGET_MS });
+  await expect(page.getByTestId('canvas-origin-state')).toHaveText('project', {
+    timeout: LOAD_BUDGET_MS,
+  });
+  await expect
+    .poll(() => frameNavigations.length, { timeout: LOAD_BUDGET_MS * 2 })
+    .toBeGreaterThanOrEqual(2);
+  frameNavigations.length = 0;
+  await page.waitForTimeout(1500);
+  expect(frameNavigations).toEqual([]);
+  page.removeListener('framenavigated', onNavigated);
+}
+
+/** The canvas frame locator — the product-attribute form (#374 ruling), never a test id. */
+export const CANVAS_FRAME = '[data-astroix-canvas] iframe';
+
+/**
+ * Clicks one canvas element until the selection lands — bounded retry
+ * over a possibly-reloading document (a mid-navigation click is
+ * retried, never assumed).
+ */
+export async function canvasSelect(page: Page, selector: string): Promise<void> {
+  await expect(async () => {
+    await page.frameLocator(CANVAS_FRAME).locator(selector).click();
+    await expect(page.getByTestId('selection-tag')).not.toHaveText('none', { timeout: 2_000 });
+  }).toPass({ timeout: LOAD_BUDGET_MS * 3 });
+}
+
+/**
+ * The frozen splice's own oracle — the first global font-size
+ * declaration spliced to its next value: the SAME pure core
+ * splice-writer the frozen edit contracts were derived through, so a
+ * drift from the corpus's behavior is a defect, not a diff.
+ */
+export function expectedFontSizeWrite(
+  before: string,
+  fromValue: string,
+  nextValue: string,
+): string {
+  const replaced = `font-size: ${fromValue};`;
+  const start = before.indexOf(replaced);
+  if (start === -1) throw new Error(`the staged sheet lost "${replaced}"`);
+  return spliceText(before, {
+    start,
+    end: start + replaced.length,
+    replacement: `font-size: ${nextValue};`,
   });
 }

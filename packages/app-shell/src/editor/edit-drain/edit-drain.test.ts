@@ -1,15 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AUTO_WRITE_DEBOUNCE_MS, createDebounceScheduler } from './debounce-scheduler.ts';
 import { createEditQueue } from './edit-queue.ts';
+import { bindGrantClaim } from './grant-claim.ts';
 import { IDLE_WRITE, reduceWrite } from './write-loop-state.ts';
 
 /**
  * The shared edit drain/fence seam's own units (ADR-0002 amendment 5,
  * born #250/I2): the debounce scheduler's persist-on-pause law, the
- * edit queue's one-in-flight ordering, and the write-loop machine's
- * stale-settle law — the mechanical truths both verticals' write loops
- * stand on. (The machine's full matrix is exercised through the
- * Content and CSS write-loop tests; these pin the seam's own pieces.)
+ * edit queue's one-in-flight ordering, the write-loop machine's
+ * stale-settle law, and the grant-claim binder's fail-closed law — the
+ * mechanical truths both verticals' write loops stand on. (The
+ * machine's full matrix is exercised through the Content and CSS
+ * write-loop tests; these pin the seam's own pieces.)
  */
 
 describe('the debounce scheduler — the persist-on-pause law', () => {
@@ -67,7 +69,6 @@ describe('the edit queue — the one-in-flight ordering', () => {
   it('serializes dispatches behind the live one', async () => {
     const queue = createEditQueue();
     const order: string[] = [];
-    const gate = { release: Promise.resolve() };
     let releaseFirst!: () => void;
     const firstHeld = new Promise<void>((resolve) => {
       releaseFirst = resolve;
@@ -85,7 +86,6 @@ describe('the edit queue — the one-in-flight ordering', () => {
     await Promise.all([first, second]);
     expect(order).toEqual(['first-begin', 'first-end', 'second-begin']);
     expect(queue.depth()).toBe(0);
-    void gate;
   });
 
   it('a rejected task settles its caller without poisoning the chain', async () => {
@@ -132,5 +132,55 @@ describe('the write-loop machine — the stale-settle law', () => {
     // from rejected, a forward submitted still refuses — reset first
     state = reduceWrite(state, { type: 'submitted', seq: 3 });
     expect(state.phase).toBe('rejected');
+  });
+});
+
+describe('the grant-claim binder — the fail-closed echo law', () => {
+  /** One well-formed css claim — the fixture every drift leg breaks. */
+  const cssClaim = (): Record<string, unknown> => ({
+    token: 'b'.repeat(48),
+    kind: 'css',
+    operations: ['replace-contents', 'splice'],
+    displayPath: 'src/pages/home.css',
+    baseline: { type: 'sha256', sha256: 'f'.repeat(64) },
+  });
+
+  const CSS_RULES = { kind: 'css' as const, expectedAbsent: false };
+  const CONTENT_RULES = { kind: null, expectedAbsent: true };
+
+  it('binds a well-formed claim field-for-field, honoring the feature\u2019s kind rule', () => {
+    const bound = bindGrantClaim(cssClaim(), CSS_RULES);
+    expect(bound).toEqual({
+      token: 'b'.repeat(48),
+      kind: 'css',
+      operations: ['replace-contents', 'splice'],
+      displayPath: 'src/pages/home.css',
+      baseline: { type: 'sha256', sha256: 'f'.repeat(64) },
+    });
+    // the content rules accept either protocol kind (the serializer's refusal)
+    expect(bindGrantClaim(cssClaim(), CONTENT_RULES)?.kind).toBe('css');
+  });
+
+  it('refuses a foreign kind, an enum-foreign operation, and an empty operations set', () => {
+    expect(bindGrantClaim({ ...cssClaim(), kind: 'content' }, CSS_RULES)).toBeNull();
+    expect(bindGrantClaim({ ...cssClaim(), kind: 'styles' }, CONTENT_RULES)).toBeNull();
+    expect(
+      bindGrantClaim({ ...cssClaim(), operations: ['splice', 'mutate'] }, CSS_RULES),
+    ).toBeNull();
+    expect(bindGrantClaim({ ...cssClaim(), operations: [] }, CSS_RULES)).toBeNull();
+  });
+
+  it('the sha256 baseline is the canonical 64-hex alone; expected-absent rides the rules', () => {
+    expect(
+      bindGrantClaim({ ...cssClaim(), baseline: { type: 'sha256', sha256: 'not-hex' } }, CSS_RULES),
+    ).toBeNull();
+    expect(
+      bindGrantClaim({ ...cssClaim(), baseline: { type: 'expected-absent' } }, CSS_RULES),
+    ).toBeNull();
+    // the content rules bind the creation contract
+    expect(
+      bindGrantClaim({ ...cssClaim(), baseline: { type: 'expected-absent' } }, CONTENT_RULES)
+        ?.baseline,
+    ).toEqual({ type: 'expected-absent' });
   });
 });

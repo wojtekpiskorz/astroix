@@ -1,3 +1,4 @@
+import type { ResourceGrant } from '@wojciechpiskorz/astroix-protocol';
 import {
   type CollectionsIndex,
   hasCandidateRoutes,
@@ -5,6 +6,7 @@ import {
 } from '../../../../core/src/route-resolver.ts';
 import { useShell } from '../../app-shell/shell-context.ts';
 import { useSessionQuery } from '../../app-shell/use-session-query.ts';
+import { asRecord, bindGrantClaim, nonEmptyString } from '../../editor/edit-drain/grant-claim.ts';
 import type { CollectionListingView } from '../../presentation/types.ts';
 
 /**
@@ -90,16 +92,6 @@ export interface ContentDiscoveryQuery {
   readonly diagnostics: readonly UnsupportedCollectionDiagnostic[];
   /** The diagnostic state's sanitized reason — `null` in every other state. */
   readonly diagnosticMessage: string | null;
-}
-
-/** Narrows one unknown to a plain record — the binders' entry step. */
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : null;
-}
-
-/** One nonempty string field — the shared primitive shape of names, ids, codes. */
-function nonEmptyString(value: unknown): string | null {
-  return typeof value === 'string' && value.length > 0 ? value : null;
 }
 
 /** Binds one collection record — the name plus its entry ids in served order. */
@@ -353,21 +345,16 @@ function diagnosticQuery(message: string): ContentDiscoveryQuery {
  * its own Content discovery"); neither is client-selected, and the raw
  * text is served truth, never a path the client may aim elsewhere.
  *
- * `grant` is bound structurally and carried verbatim for the echo: the
- * server re-validates the whole table at execution (D4's authorize +
- * echo equality), so a drifted echo is a refused write, never authority.
+ * `grant` is bound structurally (the shared seam binder under the
+ * content rules — either protocol kind, so the serializer's own
+ * wrong-kind refusal stays the feature's law) and carried verbatim for
+ * the echo: the server re-validates the whole table at execution (D4's
+ * authorize + echo equality), so a drifted echo is a refused write,
+ * never authority.
  */
 export interface EntryWriteFacts {
-  /** The opaque grant claim — token, kind, operations, display path, revision contract. */
-  readonly grant: {
-    readonly token: string;
-    readonly kind: string;
-    readonly operations: readonly string[];
-    readonly displayPath: string;
-    readonly baseline:
-      | { readonly type: 'sha256'; readonly sha256: string }
-      | { readonly type: 'expected-absent' };
-  };
+  /** The opaque grant claim — the protocol's own `ResourceGrant` shape, echoed verbatim. */
+  readonly grant: ResourceGrant;
   /** The entry file's raw text as inspected — the serializer's byte anchor. */
   readonly raw: string;
   /** The SHA-256 the grant binds (existing text); null on expected-absent creation. */
@@ -385,12 +372,14 @@ export interface EntryWriteFacts {
   readonly servedValues: unknown;
 }
 
+/** The feature's grant-claim rules — either protocol kind (the serializer refuses a foreign one), creation included. */
+const CONTENT_GRANT_RULES = { kind: null, expectedAbsent: true } as const;
+
 /**
  * Binds one entry's write facts off the enriched content payload —
  * `null` when the entry carries no grant or raw text (an inspection the
  * write composition could not enrich: a read-only truth, never a
- * heuristic grant). The grant object is rebuilt field-for-field in the
- * wire contract's own shape so the echoed plan is the issued claim.
+ * heuristic grant).
  */
 export function bindEntryWriteFacts(entry: unknown): EntryWriteFacts | null {
   const record = asRecord(entry);
@@ -401,7 +390,7 @@ export function bindEntryWriteFacts(entry: unknown): EntryWriteFacts | null {
   // The served projection must be PRESENT (the runtime serializes every
   // entry's `data`); its interior is a carried truth, never validated here.
   if (!('data' in record)) return null;
-  const grant = bindGrantClaim(grantRecord);
+  const grant = bindGrantClaim(grantRecord, CONTENT_GRANT_RULES);
   if (grant === null) return null;
   return {
     grant,
@@ -409,38 +398,6 @@ export function bindEntryWriteFacts(entry: unknown): EntryWriteFacts | null {
     baselineSha256: grant.baseline.type === 'sha256' ? grant.baseline.sha256 : null,
     servedValues: record.data,
   };
-}
-
-/** The bound grant claim — the wire shape the plan echoes verbatim. */
-type BoundGrantClaim = EntryWriteFacts['grant'];
-
-/**
- * Binds the issued grant claim field-for-field — `null` on any drift.
- * The revision contract's shape decides the companion baseline SHA the
- * write loop carries (null on expected-absent creation).
- */
-function bindGrantClaim(grantRecord: Record<string, unknown>): BoundGrantClaim | null {
-  const token = nonEmptyString(grantRecord.token);
-  const kind = nonEmptyString(grantRecord.kind);
-  const displayPath = nonEmptyString(grantRecord.displayPath);
-  if (token === null || kind === null || displayPath === null) return null;
-  if (!Array.isArray(grantRecord.operations)) return null;
-  const operations: string[] = [];
-  for (const operation of grantRecord.operations) {
-    if (typeof operation !== 'string') return null;
-    operations.push(operation);
-  }
-  if (operations.length === 0) return null;
-  const baselineRecord = asRecord(grantRecord.baseline);
-  if (baselineRecord?.type === 'sha256') {
-    const sha256 = nonEmptyString(baselineRecord.sha256);
-    if (sha256 === null) return null;
-    return { token, kind, operations, displayPath, baseline: { type: 'sha256', sha256 } };
-  }
-  if (baselineRecord?.type === 'expected-absent') {
-    return { token, kind, operations, displayPath, baseline: { type: 'expected-absent' } };
-  }
-  return null;
 }
 
 /**

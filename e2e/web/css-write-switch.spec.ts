@@ -1,15 +1,16 @@
-import { readFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { writeFile } from 'node:fs/promises';
 import { expect, type Page, type Request, test } from '@playwright/test';
-import { stagedCopyRoot } from '../../apps/web/src/stage-e2e.ts';
-import { spliceText } from '../../packages/core/src/splice-writer.ts';
 import {
-  activateButton,
+  activateSettled,
   BOOT_BUDGET_MS,
+  canvasSelect,
+  cssBytes,
+  expectedFontSizeWrite,
   LAUNCHER_APP_URL,
   LOAD_BUDGET_MS,
-  PROJECT_APP_URL,
   restoreIdle,
+  STAGED_CSS_FILE,
+  WRITE_SETTLE_MS,
 } from './spec-helpers.ts';
 
 /**
@@ -33,19 +34,6 @@ import {
  * supervisor-global active session — every leg restores the idle state.
  */
 
-const PROJECT_A = stagedCopyRoot('project-a');
-const CSS_FILE = join(PROJECT_A, 'src', 'pages', 'home.css');
-
-const CANVAS_FRAME = '[data-astroix-canvas] iframe';
-
-/** The write settle budget: the first accepted edit forks the real write-executor child. */
-const WRITE_SETTLE_MS = 90_000;
-
-/** The file's current bytes — the staged copy's truth. */
-async function cssBytes(): Promise<string> {
-  return await readFile(CSS_FILE, 'utf8');
-}
-
 /** Counts the apply-edit requests that crossed. */
 function captureWriteCount(page: Page): () => number {
   let count = 0;
@@ -58,38 +46,12 @@ function captureWriteCount(page: Page): () => number {
   return () => count;
 }
 
-/** The batteries' shared activation prefix (the inspection lane's own discipline). */
-async function activateSettled(page: Page): Promise<void> {
-  const frameNavigations: string[] = [];
-  const onNavigated = (frame: import('@playwright/test').Frame): void => {
-    if (frame.parentFrame() !== null) frameNavigations.push(frame.url());
-  };
-  page.on('framenavigated', onNavigated);
-  await page.goto('/__astroix/app/');
-  await expect(page.getByTestId('session-label')).toHaveText('idle', {
-    timeout: LOAD_BUDGET_MS,
-  });
-  await activateButton(page, 0).click();
-  await page.waitForURL(PROJECT_APP_URL, { timeout: BOOT_BUDGET_MS });
-  await expect(page.getByTestId('canvas-origin-state')).toHaveText('project', {
-    timeout: LOAD_BUDGET_MS,
-  });
-  await expect
-    .poll(() => frameNavigations.length, { timeout: LOAD_BUDGET_MS })
-    .toBeGreaterThanOrEqual(2);
-  frameNavigations.length = 0;
-  await page.waitForTimeout(1500);
-  expect(frameNavigations).toEqual([]);
-  page.removeListener('framenavigated', onNavigated);
-}
-
-/** Clicks one canvas element until the selection lands. */
-async function canvasSelect(page: Page, selector: string): Promise<void> {
-  await expect(async () => {
-    await page.frameLocator(CANVAS_FRAME).locator(selector).click();
-    await expect(page.getByTestId('selection-tag')).not.toHaveText('none', { timeout: 2_000 });
-  }).toPass({ timeout: LOAD_BUDGET_MS * 3 });
-}
+/**
+ * The batteries' shared activation prefix, the canvas selection, the
+ * staged sheet's bytes, the settle budget, and the font-size oracle all
+ * live in `spec-helpers.ts` (the lane's established home for the
+ * batteries' carried duplication).
+ */
 
 /** Opens the editor on the first GLOBAL row and returns the font-size input. */
 async function openGlobalEditor(page: Page, servedValue = '3rem') {
@@ -98,22 +60,10 @@ async function openGlobalEditor(page: Page, servedValue = '3rem') {
     timeout: LOAD_BUDGET_MS,
   });
   await page.locator('[data-testid="css-rule-edit"]').nth(1).click();
-  await expect(page.getByTestId('css-rule-editor')).toBeVisible({ timeout: LOAD_BUDGET_MS });
+  await expect(page.getByTestId('css-rule-editor')).toBeVisible({ timeout: BOOT_BUDGET_MS });
   const input = page.locator('[data-testid="css-decl-input"][data-css-prop="font-size"]');
   await expect(input).toHaveValue(servedValue, { timeout: LOAD_BUDGET_MS });
   return input;
-}
-
-/** The oracle's expected bytes: the first global font-size declaration spliced to the next value. */
-function expectedFontSizeWrite(before: string, fromValue: string, nextValue: string): string {
-  const replaced = `font-size: ${fromValue};`;
-  const start = before.indexOf(replaced);
-  if (start === -1) throw new Error(`the staged sheet lost "font-size: ${fromValue};"`);
-  return spliceText(before, {
-    start,
-    end: start + replaced.length,
-    replacement: `font-size: ${nextValue};`,
-  });
 }
 
 test.describe.configure({ mode: 'serial' });
@@ -161,8 +111,7 @@ test('an accepted CSS write drains through the normal switch — the new generat
   expect(writeCount()).toBe(1);
 
   // restore the fixture bytes for whatever follows the battery
-  const { writeFile } = await import('node:fs/promises');
-  await writeFile(CSS_FILE, before);
+  await writeFile(STAGED_CSS_FILE, before);
   await restoreIdle(page);
 });
 
@@ -229,7 +178,6 @@ test('an unresolved CSS write at the switch reports nothing false and grants no 
   expect(await cssBytes()).toBe(expectedFontSizeWrite(before, '3rem', '3.5rem'));
 
   // restore the fixture bytes for whatever follows the battery
-  const { writeFile } = await import('node:fs/promises');
-  await writeFile(CSS_FILE, before);
+  await writeFile(STAGED_CSS_FILE, before);
   await restoreIdle(page);
 });

@@ -137,17 +137,23 @@ export function planSelectorSplice(input: {
 /**
  * The inverse of one landed splice — the undo record's engine: the
  * replacement that restores the replaced bytes, over the range the
- * landed write left them at. Pure; the caller proves it against the
- * live raw before dispatching (the undo planner re-runs the same
- * slice-proof discipline).
+ * landed write left them at, carrying the landed replacement through
+ * as the byte-proof the undo dispatch re-checks against the live raw
+ * before dispatching (the undo planner re-runs the same slice-proof
+ * discipline). Pure.
  */
 export function invertSplice(splice: {
   readonly range: { readonly start: number; readonly end: number };
   readonly replacement: string;
   readonly replaced: string;
-}): { range: { start: number; end: number }; replacement: string } {
+}): {
+  range: { start: number; end: number };
+  replacement: string;
+  replaced: string;
+} {
   return {
     range: { start: splice.range.start, end: splice.range.start + splice.replacement.length },
     replacement: splice.replaced,
+    replaced: splice.replacement,
   };
 }

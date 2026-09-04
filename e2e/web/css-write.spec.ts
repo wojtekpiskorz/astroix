@@ -1,14 +1,17 @@
-import { readFile, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { writeFile } from 'node:fs/promises';
 import { expect, type Page, type Request, type Response, test } from '@playwright/test';
-import { stagedCopyRoot } from '../../apps/web/src/stage-e2e.ts';
 import { spliceText } from '../../packages/core/src/splice-writer.ts';
 import {
-  activateButton,
+  activateSettled,
   BOOT_BUDGET_MS,
+  CANVAS_FRAME,
+  canvasSelect,
+  cssBytes,
+  expectedFontSizeWrite,
   LOAD_BUDGET_MS,
-  PROJECT_APP_URL,
   restoreIdle,
+  STAGED_CSS_FILE,
+  WRITE_SETTLE_MS,
 } from './spec-helpers.ts';
 
 /**
@@ -32,22 +35,6 @@ import {
  * SERIAL like the lane's other batteries: one control plane, one
  * supervisor-global active session — every leg restores the idle state.
  */
-
-/** The staged copy the battery writes into (registered first — position 0). */
-const PROJECT_A = stagedCopyRoot('project-a');
-/** The sheet the battery edits. */
-const CSS_FILE = join(PROJECT_A, 'src', 'pages', 'home.css');
-
-/** The canvas frame locator — the product-attribute form (#374 ruling), never a test id. */
-const CANVAS_FRAME = '[data-astroix-canvas] iframe';
-
-/** The write settle budget: the first accepted edit forks the real write-executor child. */
-const WRITE_SETTLE_MS = 90_000;
-
-/** The file's current bytes — the staged copy's truth. */
-async function cssBytes(): Promise<string> {
-  return await readFile(CSS_FILE, 'utf8');
-}
 
 /** One captured api mutation. */
 interface CapturedWrite {
@@ -91,41 +78,11 @@ function captureWrites(page: Page): () => {
 }
 
 /**
- * The batteries' shared activation prefix (the inspection lane's own
- * discipline): land on the launcher, activate, WAIT FOR THE CANVAS to
- * settle past the young dev server's self-reload, then drive on.
+ * The batteries' shared activation prefix, the canvas selection, the
+ * staged sheet's bytes, the settle budget, and the font-size oracle all
+ * live in `spec-helpers.ts` (the lane's established home for the
+ * batteries' carried duplication).
  */
-async function activateSettled(page: Page): Promise<void> {
-  const frameNavigations: string[] = [];
-  const onNavigated = (frame: import('@playwright/test').Frame): void => {
-    if (frame.parentFrame() !== null) frameNavigations.push(frame.url());
-  };
-  page.on('framenavigated', onNavigated);
-  await page.goto('/__astroix/app/');
-  await expect(page.getByTestId('session-label')).toHaveText('idle', {
-    timeout: LOAD_BUDGET_MS,
-  });
-  await activateButton(page, 0).click();
-  await page.waitForURL(PROJECT_APP_URL, { timeout: BOOT_BUDGET_MS });
-  await expect(page.getByTestId('canvas-origin-state')).toHaveText('project', {
-    timeout: LOAD_BUDGET_MS,
-  });
-  await expect
-    .poll(() => frameNavigations.length, { timeout: LOAD_BUDGET_MS })
-    .toBeGreaterThanOrEqual(2);
-  frameNavigations.length = 0;
-  await page.waitForTimeout(1500);
-  expect(frameNavigations).toEqual([]);
-  page.removeListener('framenavigated', onNavigated);
-}
-
-/** Clicks one canvas element until the selection lands — bounded retry over a reloading document. */
-async function canvasSelect(page: Page, selector: string): Promise<void> {
-  await expect(async () => {
-    await page.frameLocator(CANVAS_FRAME).locator(selector).click();
-    await expect(page.getByTestId('selection-tag')).not.toHaveText('none', { timeout: 2_000 });
-  }).toPass({ timeout: LOAD_BUDGET_MS * 3 });
-}
 
 /** Waits for the panel's ready list. */
 async function readyRows(page: Page) {
@@ -169,11 +126,6 @@ function expectedDeclarationWrite(
     end: start + replaced.length,
     replacement: `${property}: ${nextValue};`,
   });
-}
-
-/** The frozen splice's own oracle — the css-splice fixture's exact bytes. */
-function expectedFontSizeWrite(before: string, fromValue: string, nextValue: string): string {
-  return expectedDeclarationWrite(before, 'font-size', fromValue, nextValue);
 }
 
 test.describe.configure({ mode: 'serial' });
@@ -285,7 +237,7 @@ test('auto-write lands the frozen splice bytes byte-exact, HMR reflects them, an
     expect(secondToken).toBeTruthy();
     expect(secondToken).not.toBe(firstToken);
   } finally {
-    await writeFile(CSS_FILE, pristine);
+    await writeFile(STAGED_CSS_FILE, pristine);
   }
 
   await restoreIdle(page);
@@ -318,6 +270,42 @@ test('undo restores the exact bytes through the same grant-bound loop', async ({
   await expect(page.getByTestId('css-undo')).toBeDisabled();
   // two mutations total: the write and its inverse
   expect(capture().writes.length).toBe(2);
+
+  await restoreIdle(page);
+});
+
+test('coalesced typing dispatches ONE write and the badge settles back to quiet', async ({
+  page,
+}) => {
+  test.setTimeout(360_000);
+  const capture = captureWrites(page);
+  await activateSettled(page);
+  await canvasSelect(page, '.hero-title');
+  const input = await openGlobalEditor(page);
+  const before = await cssBytes();
+
+  try {
+    // COALESCED INPUT: every keystroke inside the settled ~300 ms window
+    // schedules again (the pause extends; the key's pending schedule is
+    // REPLACED, never stacked), so the whole burst must cross the wire
+    // exactly once — and the badge, whose pending-pause count is DERIVED
+    // from the scheduler's pending keys, must settle back to quiet after
+    // the landing (a count that incremented per keystroke would read
+    // scheduled forever with no path back to zero).
+    await input.fill('');
+    await input.pressSequentially('3.5rem', { delay: 60 });
+
+    await expect
+      .poll(async () => await cssBytes(), { timeout: WRITE_SETTLE_MS })
+      .toBe(expectedFontSizeWrite(before, '3rem', '3.5rem'));
+    await expect(writeState(page)).toHaveAttribute('data-write-state', 'quiet', {
+      timeout: WRITE_SETTLE_MS,
+    });
+    // exactly ONE mutation crossed — the burst coalesced into one pause
+    expect(capture().writes.length).toBe(1);
+  } finally {
+    await writeFile(STAGED_CSS_FILE, before);
+  }
 
   await restoreIdle(page);
 });
@@ -356,7 +344,7 @@ test('an external interference conflicts: no bytes written, the stable conflict 
   // declaration's bytes change on disk under our stale grant
   const interference = before.replace('gap: 1rem;', 'gap: 1.5rem;');
   try {
-    await writeFile(CSS_FILE, interference);
+    await writeFile(STAGED_CSS_FILE, interference);
 
     await input.fill('3.5rem');
     await expect
@@ -385,7 +373,7 @@ test('an external interference conflicts: no bytes written, the stable conflict 
     // undo cleared: the stack's baselines died with the conflicted world
     await expect(page.getByTestId('css-undo')).toBeDisabled();
   } finally {
-    await writeFile(CSS_FILE, before);
+    await writeFile(STAGED_CSS_FILE, before);
   }
 
   await restoreIdle(page);

@@ -254,8 +254,8 @@ export function useEntryWrite(view: EntryFormView): EntryWriteControls {
   ): 'committed' | 'uncertain' {
     if (settled.kind === 'committed') {
       dispatchEvent({ type: 'committed', seq, revision: settled.revision });
-      if (settled.nextGrantToken !== null) {
-        holdGrant(session.ref, { token: settled.nextGrantToken });
+      if (settled.nextGrant !== null) {
+        holdGrant(session.ref, { token: settled.nextGrant.token });
       }
       return 'committed';
     }

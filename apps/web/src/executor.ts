@@ -656,6 +656,27 @@ async function inspect(
 }
 
 /**
+ * The write enrichments' shared admission: the session's grant table
+ * plus the project's canonical root — `null` when either truth is
+ * absent (the caller's un-enriched pass-through, never a heuristic
+ * grant). The root is the composition's own registry lookup over the
+ * ACTIVE session's project — never browser-supplied, never a coerced
+ * miss.
+ */
+function enrichmentAuthority(
+  seat: SessionSeat,
+  inputs: ExecutorInputs,
+): { readonly table: GrantTable; readonly root: string } | null {
+  const table = inputs.grantTables.get(pairKey(seat.ref));
+  if (table === undefined) return null;
+  const root = inputs.registry
+    .snapshot()
+    .records.find((entry) => entry.projectKey === seat.projectKey)?.canonicalRoot;
+  if (root === undefined) return null;
+  return { table, root };
+}
+
+/**
  * Enriches one content-inspection payload with the write facts (#253):
  * per file-backed entry whose bytes still hash to the inspected
  * revision, the D4 grant issued from THOSE facts (the project's own
@@ -670,13 +691,10 @@ async function enrichContentPayload(
   inputs: ExecutorInputs,
   payload: unknown,
 ): Promise<unknown> {
-  const table = inputs.grantTables.get(pairKey(seat.ref));
+  const authority = enrichmentAuthority(seat, inputs);
   const record = payload as { collections?: unknown };
-  if (table === undefined || !Array.isArray(record?.collections)) return payload;
-  const root = inputs.registry
-    .snapshot()
-    .records.find((entry) => entry.projectKey === seat.projectKey)?.canonicalRoot;
-  if (root === undefined) return payload;
+  if (authority === null || !Array.isArray(record?.collections)) return payload;
+  const { table, root } = authority;
   const collections = await Promise.all(
     record.collections.map(async (collection: unknown) => {
       const named = collection as { entries?: unknown };
@@ -739,30 +757,34 @@ function sha256Of(bytes: Buffer): string {
  * UN-enriched (read-only truth), never a grant over bytes the records
  * were not indexed over. Issuance supersedes the session's previous
  * grant for the same target (the table's own law), so the freshest
- * inspection a document binds always carries the live grant.
+ * inspection a document binds always carries the live grant — and
+ * issuance order across files is NOT load-bearing (each target
+ * supersedes only its own previous grant), so the per-file
+ * enrichments parallelize exactly like the content family's, with
+ * `Promise.all` keeping the served `writeFacts` order deterministic.
  */
 async function enrichStylesPayload(
   seat: SessionSeat,
   inputs: ExecutorInputs,
   payload: unknown,
 ): Promise<unknown> {
-  const table = inputs.grantTables.get(pairKey(seat.ref));
+  const authority = enrichmentAuthority(seat, inputs);
   const record = payload as { records?: unknown };
-  if (table === undefined || !Array.isArray(record?.records)) return payload;
-  const root = inputs.registry
-    .snapshot()
-    .records.find((entry) => entry.projectKey === seat.projectKey)?.canonicalRoot;
-  if (root === undefined) return payload;
+  if (authority === null || !Array.isArray(record?.records)) return payload;
+  const { table, root } = authority;
+  // The bound array keeps the guard's narrowing inside the parallel map —
+  // a property narrowing never survives into a closure on its own.
+  const records: readonly unknown[] = record.records;
   const files = new Set<string>();
-  for (const entry of record.records) {
+  for (const entry of records) {
     const file = (entry as { file?: unknown })?.file;
     if (typeof file === 'string' && file.length > 0) files.add(file);
   }
-  const writeFacts: unknown[] = [];
-  for (const file of files) {
-    const fact = await enrichStylesFile(seat, root, table, file, record.records);
-    if (fact !== null) writeFacts.push(fact);
-  }
+  const writeFacts = (
+    await Promise.all(
+      [...files].map(async (file) => await enrichStylesFile(seat, root, table, file, records)),
+    )
+  ).filter((fact) => fact !== null);
   if (writeFacts.length === 0) return payload;
   return { ...(payload as object), writeFacts };
 }

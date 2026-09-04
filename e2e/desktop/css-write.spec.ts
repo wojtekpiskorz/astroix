@@ -108,12 +108,6 @@ async function readStatus(state: string): Promise<StatusReport['status']> {
 }
 
 /**
- * Polls the canvas's computed style until it moves off `was` — the
- * hot-update propagation (watcher → HMR frame → CSS apply) runs on the
- * canvas document's own clock, and the probes stay gentle so they
- * never starve it.
- */
-/**
  * Waits for the canvas document's OWN stylesheet to carry the written
  * bytes through vite's hot update — and proves it was HOT (the marker
  * set in the document's window survives; a reload would destroy it).
