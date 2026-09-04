@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { expect, type Frame, type Page } from '@playwright/test';
+import { expect, type Frame, type Page, type Route } from '@playwright/test';
 import { stagedCopyRoot } from '../../apps/web/src/stage-e2e.ts';
 import { spliceText } from '../../packages/core/src/splice-writer.ts';
 
@@ -12,7 +12,11 @@ import { spliceText } from '../../packages/core/src/splice-writer.ts';
  * batteries and #249's inspection battery grew the same way: the
  * settled-activation prefix, the canvas selection retry, the staged
  * sheet's bytes, the write-settle budget, and the pure splice oracle.
- * Test-only, imported by the lane's specs; no product code touches it.
+ * #423's review homed the #393 freeze/abort ordering-proof pair here
+ * as well — the K2 harness had copied the app-shell battery's locals
+ * line-for-line, and the discipline has a recorded history of needing
+ * revision under load. Test-only, imported by the lane's specs; no
+ * product code touches it.
  */
 
 /** The list item whose staged copy is at `position` (0 and 1 are the fixture copies; 2 is broken). */
@@ -164,5 +168,77 @@ export function expectedDeclarationWrite(
     start,
     end: start + replaced.length,
     replacement: `${property}: ${nextValue};`,
+  });
+}
+
+/**
+ * The complete four-step reset trace the marker carries once the
+ * sequencer finished (#393 capture) — the ordering proofs' shared
+ * assertion constant. Inside `page.evaluate` callbacks the literal
+ * stays INLINE (evaluate callbacks close over nothing); every
+ * node-side assertion reads this one spelling.
+ */
+export const COMPLETE_RESET_TRACE = 'reset=abort-fetches,close-sse,remove-queries,clear-stores';
+
+/** The frozen capture's read half — empty until the complete reset trace was observed. */
+export interface ResetFreeze {
+  read(): Promise<string>;
+}
+
+/**
+ * The #393 frozen capture — ONE spelling for every ordering proof (the
+ * app-shell battery's leg and the K-family's; #423 review: the K2
+ * harness's copy of the battery's local was line-for-line): a page-side
+ * MutationObserver freezing the FIRST marker text that carries the
+ * complete reset trace — exactly the post-`clear-stores` truth,
+ * whatever renders the dying document attempts afterwards. Still-mounted
+ * observers can re-subscribe session queries in the async window
+ * between the reset's synchronous completion (the direct DOM write —
+ * React state cannot commit synchronously ahead of `location.replace`)
+ * and the replacement's document teardown, re-minting session-scoped
+ * cache entries the dying document's marker then counts (observed on
+ * loaded runners); that transient is out of the sequencer's
+ * jurisdiction, and the frozen snapshot is the honest capture
+ * discipline around it — the previous one-shot read raced that window
+ * (#392).
+ */
+export async function freezeResetState(page: Page): Promise<ResetFreeze> {
+  await page.evaluate(() => {
+    new MutationObserver(() => {
+      const holder = window as unknown as { __astroixResetFreeze?: string };
+      if (holder.__astroixResetFreeze !== undefined) return;
+      const text = document.querySelector('[data-testid="shell-state"]')?.textContent;
+      // literal, not a module const: page.evaluate callbacks close over nothing
+      if (text?.includes('reset=abort-fetches,close-sse,remove-queries,clear-stores')) {
+        holder.__astroixResetFreeze = text;
+      }
+    }).observe(document.body, { childList: true, subtree: true, characterData: true });
+  });
+  return {
+    read: async () =>
+      await page.evaluate(
+        () => (window as unknown as { __astroixResetFreeze?: string }).__astroixResetFreeze ?? '',
+      ),
+  };
+}
+
+/**
+ * Aborts the next launcher-document navigation so the OLD document
+ * SURVIVES with the replacement already attempted — the ordering
+ * proof's interception half: the navigation request demonstrably went
+ * out (the abort saw it), and the still-alive document's state is
+ * readable afterwards, directly. (Intercept-and-continue with an
+ * in-handler `page.evaluate` deadlocks: the renderer suspends during
+ * the pending provisional navigation.)
+ */
+export async function abortNextLauncherNavigation(page: Page): Promise<void> {
+  let observed = false;
+  await page.route(/launcher\.localhost/, async (route: Route) => {
+    if (!observed && route.request().resourceType() === 'document') {
+      observed = true;
+      await route.abort('aborted');
+      return;
+    }
+    await route.continue().catch(() => {});
   });
 }

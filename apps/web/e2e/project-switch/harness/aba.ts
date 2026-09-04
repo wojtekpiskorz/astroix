@@ -1,12 +1,15 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { expect, type Page, type Route } from '@playwright/test';
+import { expect, type Page } from '@playwright/test';
 import {
+  abortNextLauncherNavigation,
   activateButton,
   activateSettled,
   BOOT_BUDGET_MS,
+  freezeResetState,
   LOAD_BUDGET_MS,
   PROJECT_APP_URL,
+  type ResetFreeze,
   restoreIdle,
 } from '../../../../../e2e/web/spec-helpers.ts';
 import { rawExchange } from '../../../src/e2e-wire.ts';
@@ -43,11 +46,14 @@ import { stagedCopyRoot } from '../../../src/stage-e2e.ts';
  * - `abaFreezeResetState(page)` — the #393 frozen capture of the first
  *   complete-reset marker text (K2 #255's member: the ordering proof's
  *   capture discipline, immune to the dying document's re-render
- *   transient).
+ *   transient) — the shared `e2e/web/spec-helpers.ts` spelling under
+ *   the K-family name (#423 review: the pair is single-homed there,
+ *   one spelling for every ordering proof).
  * - `abaAbortNextLauncherNavigation(page)` — the one-shot launcher
  *   navigation abort that keeps the old document alive past its
  *   replacement attempt (K2 #255's member: the ordering proof's
- *   interception half).
+ *   interception half) — the shared `spec-helpers.ts` spelling under
+ *   the K-family name.
  */
 
 /** One captured document authority set — what a live tab holds. */
@@ -238,59 +244,24 @@ export async function abaShellState(page: Page): Promise<AbaShellState> {
   return parseShellStateLine(text ?? '');
 }
 
-/** The frozen capture's read half — empty until the complete reset trace was observed. */
-export interface AbaResetFreeze {
-  read(): Promise<string>;
-}
+/**
+ * The #393 frozen capture of the first complete-reset marker text
+ * (K2 #255's member: the ordering proof's capture discipline, immune
+ * to the dying document's re-render transient) — the SHARED spelling
+ * homed in `e2e/web/spec-helpers.ts` (#423 review: this harness's
+ * former local copy was line-for-line the app-shell battery's),
+ * consumed under the K-family name. The discipline's rationale and
+ * history (#392's race, #393's capture shape) live at the home.
+ */
+export const abaFreezeResetState = freezeResetState;
+
+/** The frozen capture's read half — the shared home's type under the K-family name. */
+export type AbaResetFreeze = ResetFreeze;
 
 /**
- * The #393 frozen capture, promoted to the K-family surface: a
- * page-side MutationObserver freezing the FIRST marker text that
- * carries the complete reset trace — exactly the post-`clear-stores`
- * truth, whatever renders the dying document attempts afterwards
- * (still-mounted observers can re-subscribe session queries in the
- * async window before the replacement tears the document down; that
- * transient is out of the sequencer's jurisdiction, and the frozen
- * snapshot is the honest capture discipline around it).
+ * The one-shot launcher navigation abort that keeps the old document
+ * alive past its replacement attempt (K2 #255's member: the ordering
+ * proof's interception half) — the shared `e2e/web/spec-helpers.ts`
+ * spelling under the K-family name.
  */
-export async function abaFreezeResetState(page: Page): Promise<AbaResetFreeze> {
-  await page.evaluate(() => {
-    new MutationObserver(() => {
-      const holder = window as unknown as { __astroixAbaFrozenReset?: string };
-      if (holder.__astroixAbaFrozenReset !== undefined) return;
-      const text = document.querySelector('[data-testid="shell-state"]')?.textContent;
-      // literal, not a module const: page.evaluate callbacks close over nothing
-      if (text?.includes('reset=abort-fetches,close-sse,remove-queries,clear-stores')) {
-        holder.__astroixAbaFrozenReset = text;
-      }
-    }).observe(document.body, { childList: true, subtree: true, characterData: true });
-  });
-  return {
-    read: async () =>
-      await page.evaluate(
-        () =>
-          (window as unknown as { __astroixAbaFrozenReset?: string }).__astroixAbaFrozenReset ?? '',
-      ),
-  };
-}
-
-/**
- * Aborts the next launcher-document navigation so the OLD document
- * SURVIVES with the replacement already attempted — the ordering
- * proof's interception half: the navigation request demonstrably went
- * out (the abort saw it), and the still-alive document's state is
- * readable afterwards, directly. (Intercept-and-continue with an
- * in-handler `page.evaluate` deadlocks: the renderer suspends during
- * the pending provisional navigation.)
- */
-export async function abaAbortNextLauncherNavigation(page: Page): Promise<void> {
-  let observed = false;
-  await page.route(/launcher\.localhost/, async (route: Route) => {
-    if (!observed && route.request().resourceType() === 'document') {
-      observed = true;
-      await route.abort('aborted');
-      return;
-    }
-    await route.continue().catch(() => {});
-  });
-}
+export const abaAbortNextLauncherNavigation = abortNextLauncherNavigation;

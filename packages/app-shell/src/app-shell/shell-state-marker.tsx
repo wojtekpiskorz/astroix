@@ -10,7 +10,7 @@ import type { ShellResetStep } from './shell-reset.ts';
 
 /**
  * The shell's honest state surface (#241, G2): one line — `shell-state`
- * — reporting the reset-clearable session state (query cache, the six
+ * — reporting the reset-clearable session state (query cache, the five
  * store fields) plus the reset trace. It exists so the transition-commit
  * contract is observable: the reset writes it SYNCHRONOUSLY as each
  * clearing step completes, before the navigation step runs — the E2E

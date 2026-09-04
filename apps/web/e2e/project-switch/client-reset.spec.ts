@@ -3,9 +3,11 @@ import { join } from 'node:path';
 import { expect, type Locator, type Page, test } from '@playwright/test';
 import {
   BOOT_BUDGET_MS,
+  COMPLETE_RESET_TRACE,
   canvasSelect,
   LOAD_BUDGET_MS,
   PROJECT_APP_URL,
+  SETTLE_BUDGET_MS,
   WRITE_SETTLE_MS,
 } from '../../../../e2e/web/spec-helpers.ts';
 import { stagedCopyRoot } from '../../src/stage-e2e.ts';
@@ -48,7 +50,7 @@ const WRITTEN = 'project-a' as const;
 const UNTOUCHED = 'project-b' as const;
 
 /** Opens the CSS editor on the first GLOBAL row and returns the font-size input, waited to the served value. */
-async function openGlobalEditor(page: Page, servedValue = '3rem'): Promise<Locator> {
+async function openGlobalEditor(page: Page, servedValue: string): Promise<Locator> {
   await expect(page.getByTestId('css-rule-list')).toBeVisible({ timeout: BOOT_BUDGET_MS });
   await expect(page.locator('[data-testid="css-rule"]')).toHaveCount(4, {
     timeout: LOAD_BUDGET_MS,
@@ -68,7 +70,9 @@ function pane(page: Page): Locator {
 /** Opens the blog entry and waits for the pane's ready state. */
 async function openEntry(page: Page, entryId: string): Promise<void> {
   await page.locator(`[data-astroix-entry="${entryId}"]`).click();
-  await expect(pane(page)).toHaveAttribute('data-form-status', 'ready', { timeout: 60_000 });
+  await expect(pane(page)).toHaveAttribute('data-form-status', 'ready', {
+    timeout: SETTLE_BUDGET_MS,
+  });
 }
 
 /** The title widget's input inside the form. */
@@ -222,10 +226,9 @@ test('the returning generation starts at zero — B and A2 carry nothing of A1, 
   const freeze = await abaFreezeResetState(switchTab);
   await abaAbortNextLauncherNavigation(switchTab);
   await switchTab.getByTestId('deactivate').click();
-  await expect(switchTab.getByTestId('shell-state')).toContainText(
-    'reset=abort-fetches,close-sse,remove-queries,clear-stores',
-    { timeout: LOAD_BUDGET_MS },
-  );
+  await expect(switchTab.getByTestId('shell-state')).toContainText(COMPLETE_RESET_TRACE, {
+    timeout: LOAD_BUDGET_MS,
+  });
   // The captured snapshot is frozen at capture (the #393 discipline),
   // so the read after this truthiness poll is exact.
   await expect.poll(async () => await freeze.read(), { timeout: LOAD_BUDGET_MS }).toBeTruthy();
