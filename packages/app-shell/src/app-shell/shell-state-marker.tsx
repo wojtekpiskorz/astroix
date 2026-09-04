@@ -10,7 +10,7 @@ import type { ShellResetStep } from './shell-reset.ts';
 
 /**
  * The shell's honest state surface (#241, G2): one line — `shell-state`
- * — reporting the reset-clearable session state (query cache, the seven
+ * — reporting the reset-clearable session state (query cache, the six
  * store fields) plus the reset trace. It exists so the transition-commit
  * contract is observable: the reset writes it SYNCHRONOUSLY as each
  * clearing step completes, before the navigation step runs — the E2E
@@ -58,7 +58,6 @@ export interface ShellStateMarkerState {
   readonly activeEntry: boolean;
   readonly grants: number;
   readonly undo: number;
-  readonly debounces: number;
   readonly pendingMutations: number;
   /** `none`, or the ordered trace of completed clearing steps. */
   readonly reset: string;
@@ -70,7 +69,7 @@ export function formatShellState(state: ShellStateMarkerState): string {
   return (
     `queries=${state.queries} selection=${flag(state.selection)} canvas=${flag(state.canvas)} ` +
     `entry=${flag(state.activeEntry)} grants=${state.grants} undo=${state.undo} ` +
-    `debounces=${state.debounces} pending=${state.pendingMutations} reset=${state.reset}`
+    `pending=${state.pendingMutations} reset=${state.reset}`
   );
 }
 
@@ -101,7 +100,6 @@ export function ShellStateMarker(): ReactNode {
   const activeEntry = useAppStore((s) => s.activeEntry !== null);
   const grants = useEditSessionStore((s) => s.grants.length);
   const undo = useEditSessionStore((s) => s.undo.length);
-  const debounces = useEditSessionStore((s) => s.debounces.length);
   const pendingMutations = useEditSessionStore((s) => s.pendingMutations.length);
   const trace = useResetTraceStore((s) => s.steps.join(',') || 'none');
   const [, setCacheTick] = useState(0);
@@ -118,7 +116,6 @@ export function ShellStateMarker(): ReactNode {
     activeEntry,
     grants,
     undo,
-    debounces,
     pendingMutations,
     reset: trace,
   });

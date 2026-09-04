@@ -1,12 +1,19 @@
-import { AppClientError } from '../../../app-client.ts';
-import { StaleSessionResultError } from '../../../query/gated-session-fetch.ts';
+import type { ResourceGrant } from '@wojciechpiskorz/astroix-protocol';
+import { AppClientError } from '../../app-client.ts';
+import { StaleSessionResultError } from '../../query/gated-session-fetch.ts';
 
 /**
- * The Content write loop's state machine (#253, J3): the AC's five
+ * The shared edit drain/fence seam's write-loop machine (ADR-0002
+ * amendment 5, born at its second consumer #250/I2; generalized
+ * verbatim from the Content vertical's landed loop #253/J3 — the
+ * mechanical half, domain-deaf by construction): the AppClient's five
  * reported states — `pending`, `committed`, `rejected`,
  * `irreversible-postcommit`, `refresh-required` — as one pure reducer
  * over dispatch-sequenced events, plus the sanitized classification of
- * everything a mutation can settle with.
+ * everything a mutation can settle with. Every feature write loop
+ * (Content's serializer, CSS's splice planner) dispatches through this
+ * machine; what stays feature-local is the plan's own serialization
+ * and the landing's freshness predicates.
  *
  * The two laws this machine holds:
  *
@@ -156,7 +163,13 @@ export type SettleClassification =
   | {
       readonly kind: 'committed';
       readonly revision: number;
-      readonly nextGrantToken: string | null;
+      /**
+       * The follow-on grant VERBATIM — the whole claim, `null` when the
+       * server renewed none: a consumer that anchors its next edit on
+       * the renewal (the CSS loop's anchor grant) needs every field,
+       * not just the token it echoes into the session's accounting.
+       */
+      readonly nextGrant: ResourceGrant | null;
     }
   | { readonly kind: 'rejected'; readonly code: string }
   | { readonly kind: 'conflict'; readonly code: string; readonly currentSha256: string }
@@ -181,13 +194,13 @@ const REFUSAL_CODES = new Set([
  * response cannot prove it did not land; the refresh converges.
  */
 export function classifySettle(
-  outcome: { revision: number; nextGrant?: { token: string } } | Error,
+  outcome: { revision: number; nextGrant?: ResourceGrant } | Error,
 ): SettleClassification {
   if (!(outcome instanceof Error)) {
     return {
       kind: 'committed',
       revision: outcome.revision,
-      nextGrantToken: outcome.nextGrant?.token ?? null,
+      nextGrant: outcome.nextGrant ?? null,
     };
   }
   if (outcome instanceof StaleSessionResultError) {

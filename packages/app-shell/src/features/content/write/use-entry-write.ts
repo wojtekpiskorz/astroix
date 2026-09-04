@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useShell } from '../../../app-shell/shell-context.ts';
+import { classifySettle, type WritePhase } from '../../../editor/edit-drain/write-loop-state.ts';
 import { roleCan } from '../../../roles/capabilities.ts';
 import { useEditSessionStore } from '../../../state/edit-session-store.ts';
 import { useEntryWriteFacts } from '../api.ts';
@@ -7,7 +8,6 @@ import { plainEquals } from '../forms/edit-intent.ts';
 import { useFormDraftStore } from '../forms/form-draft-store.ts';
 import type { EntryFormView } from '../forms/use-entry-form.ts';
 import { buildEntryWritePlan } from './serialize-entry-write.ts';
-import { classifySettle, type WritePhase } from './write-state.ts';
 import { useContentWriteStore } from './write-store.ts';
 
 /**
@@ -254,8 +254,8 @@ export function useEntryWrite(view: EntryFormView): EntryWriteControls {
   ): 'committed' | 'uncertain' {
     if (settled.kind === 'committed') {
       dispatchEvent({ type: 'committed', seq, revision: settled.revision });
-      if (settled.nextGrantToken !== null) {
-        holdGrant(session.ref, { token: settled.nextGrantToken });
+      if (settled.nextGrant !== null) {
+        holdGrant(session.ref, { token: settled.nextGrant.token });
       }
       return 'committed';
     }

@@ -2,32 +2,42 @@ import { type ReactNode, useLayoutEffect, useState } from 'react';
 import { useAppStore } from '../../state/app-store.ts';
 import type { SelectionDescriptor } from '../../state/selection.ts';
 import { observedRouteOf, useStylesInspection } from './api.ts';
+import { type RecordIdentity, recordIdentityOf, resolveRecord } from './editing/resolve-record.ts';
+import type { BoundStylesPayload } from './inspection/bind-styles.ts';
 import { selectedCanvasElement, subscribeCanvasMutations } from './inspection/canvas-element.ts';
-import { matchedStyleRows } from './inspection/match-rows.ts';
+import { type MatchedStyleRow, matchedStyleRows } from './inspection/match-rows.ts';
+import { CssRuleEditor } from './rule-editor.tsx';
 import { RuleList } from './rule-list.tsx';
 import { useCssInspectionStore } from './store.ts';
+import { type CssAutoWriteControls, useCssAutoWrite } from './use-auto-write.ts';
 
 /**
- * The CSS vertical's sidebar panel (#249, I1): the read-only styles
- * slice, mounted by the host through the shell's sidebar slot beside
- * the Content vertical's discovery panel. It consumes the shell's
- * session-bound surfaces only — the ONE AppClient through `useShell()`
- * (inside `api.ts`), the app store's live selection and observed
- * canvas state, and the disclosed canvas re-match seam — and renders
- * the joined source/effective truth for whatever element is selected
- * on whatever route the canvas observes.
+ * The CSS vertical's sidebar panel (#249, I1; the editing surface
+ * joined at #250, I2): the styles slice for the OBSERVED route and
+ * live selection, mounted by the host through the shell's sidebar slot
+ * beside the Content vertical's discovery panel. It consumes the
+ * shell's session-bound surfaces only — the ONE AppClient through
+ * `useShell()` (inside `api.ts` and the auto-write loop), the app
+ * store's live selection and observed canvas state, and the disclosed
+ * canvas re-match seam — and renders the joined source/effective truth
+ * for whatever element is selected on whatever route the canvas
+ * observes.
  *
- * The selection lifecycle the AC names lands here as pure derivation:
- * the rows re-derive from (records × live element), so a style
- * invalidation's SSE-driven refetch re-matches them, the ordered reset
- * clears the store's selection (the panel falls to no-selection), an
- * off-origin canvas navigation clears it the same way, and a canvas
- * DOM change that no longer carries the element clears the list (the
+ * The selection lifecycle lands here as pure derivation: the rows
+ * re-derive from (records × live element), so a style invalidation's
+ * SSE-driven refetch re-matches them, the ordered reset clears the
+ * store's selection (the panel falls to no-selection), an off-origin
+ * canvas navigation clears it the same way, and a canvas DOM change
+ * that no longer carries the element clears the list (the
  * missing-element state) — the mutation subscription re-derives on the
  * live document's own changes.
  *
- * Read-only by construction: no edit control, no client-selected path,
- * and no write command exists anywhere under this feature.
+ * The editing surface (#250): one row's edit gesture opens its rule in
+ * the rule editor, addressed by SEMANTIC identity (file + selector +
+ * media + range hint) so the write's own refresh — the served records
+ * re-ranged by the landed splice — re-resolves the SAME rule instead
+ * of losing it. The editor's every change schedules the grant-bound
+ * auto-write loop; no path is ever selected or submitted.
  */
 
 /** The panel's shared state surface — one root, one honest state word. */
@@ -81,19 +91,8 @@ export function CssSidebar(): ReactNode {
   );
 }
 
-/** The rules surface for one live selection on one observed route — mounts the styles query. */
-function CssRulesPanel({
-  descriptor,
-  route,
-}: {
-  readonly descriptor: SelectionDescriptor;
-  readonly route: string;
-}): ReactNode {
-  const inspection = useStylesInspection(route);
-  const openRowKey = useCssInspectionStore((state) => state.openRowKey);
-  const openRow = useCssInspectionStore((state) => state.openRow);
-  const closeRow = useCssInspectionStore((state) => state.closeRow);
-
+/** The live element for one descriptor — the disclosed re-match seam plus its mutation subscription. */
+function useSelectedElement(descriptor: SelectionDescriptor): Element | null {
   // The live element through the disclosed re-match seam, held with the
   // descriptor it was found for (a descriptor change never renders the
   // previous element's rows). The canvas document's own mutations — an
@@ -113,7 +112,28 @@ function CssRulesPanel({
     find();
     return subscribeCanvasMutations(find);
   }, [descriptor]);
-  const element = found !== null && found.descriptor === descriptor ? found.element : null;
+  return found !== null && found.descriptor === descriptor ? found.element : null;
+}
+
+/** The rules surface for one live selection on one observed route — mounts the styles query. */
+function CssRulesPanel({
+  descriptor,
+  route,
+}: {
+  readonly descriptor: SelectionDescriptor;
+  readonly route: string;
+}): ReactNode {
+  const inspection = useStylesInspection(route);
+  const openRowKey = useCssInspectionStore((state) => state.openRowKey);
+  const openRow = useCssInspectionStore((state) => state.openRow);
+  const closeRow = useCssInspectionStore((state) => state.closeRow);
+  // The auto-write loop the editor schedules through — mounted for the
+  // whole panel so the loop's machine survives the editor's own
+  // re-resolution across the write's refresh.
+  const controls = useCssAutoWrite(inspection.payload);
+  const payload = inspection.payload;
+
+  const element = useSelectedElement(descriptor);
 
   if (element === null) {
     return (
@@ -147,13 +167,60 @@ function CssRulesPanel({
     return <StatePanel state="empty">no matching rules for this element</StatePanel>;
   }
   return (
-    <RuleList
+    <RulesSurface
       rows={rows}
-      openKey={openRowKey}
-      onOpenDetail={(key) => {
+      payload={payload}
+      controls={controls}
+      openRowKey={openRowKey}
+      onToggleDetail={(key) => {
         if (openRowKey === key) closeRow();
         else openRow(key);
       }}
     />
+  );
+}
+
+/** The ready surface — the list plus the open editor, re-resolving the editing target across refreshes. */
+function RulesSurface({
+  rows,
+  payload,
+  controls,
+  openRowKey,
+  onToggleDetail,
+}: {
+  readonly rows: readonly MatchedStyleRow[];
+  readonly payload: BoundStylesPayload | null;
+  readonly controls: CssAutoWriteControls;
+  readonly openRowKey: string | null;
+  onToggleDetail(key: string): void;
+}): ReactNode {
+  const [editing, setEditing] = useState<RecordIdentity | null>(null);
+  const editingRecord =
+    editing !== null && payload !== null ? resolveRecord(payload.records, editing) : null;
+  const editingRaw = editing !== null ? (payload?.writeFacts.get(editing.file)?.raw ?? null) : null;
+  return (
+    <>
+      <RuleList
+        rows={rows}
+        openKey={openRowKey}
+        onOpenDetail={onToggleDetail}
+        onEdit={
+          payload !== null && payload.writeFacts.size > 0
+            ? (row) => {
+                setEditing(recordIdentityOf(row.record));
+              }
+            : undefined
+        }
+      />
+      {editing !== null && editingRecord !== null && editingRaw !== null && (
+        <CssRuleEditor
+          key={`${editingRecord.file}#${editingRecord.range.start}`}
+          record={editingRecord}
+          raw={editingRaw}
+          controls={controls}
+          onClose={() => setEditing(null)}
+        />
+      )}
+    </>
   );
 }

@@ -1,4 +1,5 @@
 import type { FormFieldNode, ValidationIssueRecord } from '../../../../../core/src/form-tree.ts';
+import { asRecord, nonEmptyString } from '../../../editor/edit-drain/grant-claim.ts';
 
 /**
  * The forms slice's E4 binding (#252, J2): the typed, structural bind
@@ -46,16 +47,6 @@ export type EntryTruthOutcome =
   | { readonly outcome: 'absent' }
   /** The payload interior drifted — a compatibility event, never a heuristic parse. */
   | { readonly outcome: 'drift' };
-
-/** Narrows one unknown to a plain record. */
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : null;
-}
-
-/** One nonempty string, or null. */
-function nonEmptyString(value: unknown): string | null {
-  return typeof value === 'string' && value.length > 0 ? value : null;
-}
 
 /** The walked node's shared base fields, as the binders thread them. */
 interface NodeBaseFields {

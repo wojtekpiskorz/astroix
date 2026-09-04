@@ -9,7 +9,7 @@ import { aSelection } from './test-fixtures.ts';
  * The shell stores' focused lane (#241): the reset-clearable fields,
  * their session binding, and the second belt — a write carrying a
  * moved-past pair (or any write after the reset unbound the store)
- * never lands. The seven fields of the AC's clearing list are populated
+ * never lands. The six fields of the AC's clearing list are populated
  * and asserted cleared.
  */
 
@@ -50,26 +50,16 @@ describe('the app store', () => {
 });
 
 describe('the edit session store', () => {
-  it('holds grants, undo, debounces, and pending mutations under the bound pair', () => {
+  it('holds grants, undo, and pending mutations under the bound pair', () => {
     useEditSessionStore.getState().bindSession(FIRST);
     const edit = useEditSessionStore.getState();
     edit.holdGrant(FIRST, { token: 'grant-opaque-1' });
     edit.pushUndo(FIRST, { token: 'undo-opaque-1' });
-    edit.scheduleDebounce(FIRST, { key: 'css-rule-1', dueAtMs: 300 });
     edit.trackPendingMutation(FIRST, { key: 'entry-2' });
     const snapshot = shellStoreSnapshot();
     expect(snapshot.grants).toBe(1);
     expect(snapshot.undo).toBe(1);
-    expect(snapshot.debounces).toBe(1);
     expect(snapshot.pendingMutations).toBe(1);
-  });
-
-  it('replaces a same-key debounce scheduling', () => {
-    useEditSessionStore.getState().bindSession(FIRST);
-    const edit = useEditSessionStore.getState();
-    edit.scheduleDebounce(FIRST, { key: 'css-rule-1', dueAtMs: 300 });
-    edit.scheduleDebounce(FIRST, { key: 'css-rule-1', dueAtMs: 900 });
-    expect(useEditSessionStore.getState().debounces).toEqual([{ key: 'css-rule-1', dueAtMs: 900 }]);
   });
 
   it('drops stale-pair writes on every setter', () => {
@@ -77,7 +67,6 @@ describe('the edit session store', () => {
     const edit = useEditSessionStore.getState();
     edit.holdGrant(NEXT, { token: 'grant' });
     edit.pushUndo(NEXT, { token: 'undo' });
-    edit.scheduleDebounce(NEXT, { key: 'k', dueAtMs: 1 });
     edit.trackPendingMutation(NEXT, { key: 'm' });
     expect(shellStoreSnapshot()).toEqual({
       selection: false,
@@ -85,14 +74,13 @@ describe('the edit session store', () => {
       activeEntry: false,
       grants: 0,
       undo: 0,
-      debounces: 0,
       pendingMutations: 0,
     });
   });
 });
 
 describe('the shell-stores aggregate', () => {
-  it('populates every reset-clearable field, then clears all seven at once', () => {
+  it('populates every reset-clearable field, then clears all six at once', () => {
     bindShellSession(FIRST);
     const app = useAppStore.getState();
     app.setSelection(FIRST, aSelection());
@@ -101,7 +89,6 @@ describe('the shell-stores aggregate', () => {
     const edit = useEditSessionStore.getState();
     edit.holdGrant(FIRST, { token: 'grant-opaque-1' });
     edit.pushUndo(FIRST, { token: 'undo-opaque-1' });
-    edit.scheduleDebounce(FIRST, { key: 'css-rule-1', dueAtMs: 300 });
     edit.trackPendingMutation(FIRST, { key: 'entry-1' });
     expect(shellStoreSnapshot()).toEqual({
       selection: true,
@@ -109,7 +96,6 @@ describe('the shell-stores aggregate', () => {
       activeEntry: true,
       grants: 1,
       undo: 1,
-      debounces: 1,
       pendingMutations: 1,
     });
 
@@ -120,7 +106,6 @@ describe('the shell-stores aggregate', () => {
       activeEntry: false,
       grants: 0,
       undo: 0,
-      debounces: 0,
       pendingMutations: 0,
     });
   });

@@ -106,7 +106,11 @@ import { neverSpawnedRun } from './never-spawned.ts';
  * `routeComponent`. The component is this plane's own currency — the
  * resolution result never enters a response envelope (the no-
  * disclosure law), and the desktop composition (H7's shared executor)
- * inherits the family identically.
+ * inherits the family identically. The family's payload is also the
+ * CSS write loop's discovery vehicle (#250, I2): each named file is
+ * enriched with the server-issued opaque css grant (D4 `issue` over
+ * the bytes this composition read) plus the file's raw text — the
+ * splice planner's byte anchor, the content family's own discipline.
  */
 
 /** One committed session's composition record — everything a transition binds (ADR-0006 §4 step 5). */
@@ -637,7 +641,9 @@ async function inspect(
     const payload =
       request.kind === 'content' && result.kind === 'content'
         ? await enrichContentPayload(seat, inputs, result.payload)
-        : result.payload;
+        : request.kind === 'styles' && result.kind === 'styles'
+          ? await enrichStylesPayload(seat, inputs, result.payload)
+          : result.payload;
     return {
       protocolVersion: 1,
       requestId: envelope.requestId,
@@ -647,6 +653,27 @@ async function inspect(
   } catch {
     return notComposed();
   }
+}
+
+/**
+ * The write enrichments' shared admission: the session's grant table
+ * plus the project's canonical root — `null` when either truth is
+ * absent (the caller's un-enriched pass-through, never a heuristic
+ * grant). The root is the composition's own registry lookup over the
+ * ACTIVE session's project — never browser-supplied, never a coerced
+ * miss.
+ */
+function enrichmentAuthority(
+  seat: SessionSeat,
+  inputs: ExecutorInputs,
+): { readonly table: GrantTable; readonly root: string } | null {
+  const table = inputs.grantTables.get(pairKey(seat.ref));
+  if (table === undefined) return null;
+  const root = inputs.registry
+    .snapshot()
+    .records.find((entry) => entry.projectKey === seat.projectKey)?.canonicalRoot;
+  if (root === undefined) return null;
+  return { table, root };
 }
 
 /**
@@ -664,13 +691,10 @@ async function enrichContentPayload(
   inputs: ExecutorInputs,
   payload: unknown,
 ): Promise<unknown> {
-  const table = inputs.grantTables.get(pairKey(seat.ref));
+  const authority = enrichmentAuthority(seat, inputs);
   const record = payload as { collections?: unknown };
-  if (table === undefined || !Array.isArray(record?.collections)) return payload;
-  const root = inputs.registry
-    .snapshot()
-    .records.find((entry) => entry.projectKey === seat.projectKey)?.canonicalRoot;
-  if (root === undefined) return payload;
+  if (authority === null || !Array.isArray(record?.collections)) return payload;
+  const { table, root } = authority;
   const collections = await Promise.all(
     record.collections.map(async (collection: unknown) => {
       const named = collection as { entries?: unknown };
@@ -718,6 +742,92 @@ async function enrichEntry(
 /** SHA-256 hex over bytes — the freshness proof's own oracle. */
 function sha256Of(bytes: Buffer): string {
   return createHash('sha256').update(bytes).digest('hex');
+}
+
+/**
+ * Enriches one styles-inspection payload with the write facts (#250,
+ * I2 — the CSS vertical's discovery vehicle, J3's content discipline
+ * applied to the styles family): per file the converged records name,
+ * the D4 css grant issued over the bytes this enrichment READ (the
+ * project's own served path and its exact current digest — never a
+ * client-selected resource) plus the file's raw text (the splice
+ * planner's byte anchor). Additive by construction (the payload a
+ * pre-write client binds keeps parsing without it); best-effort per
+ * file — a file whose records do not fit the read bytes serves
+ * UN-enriched (read-only truth), never a grant over bytes the records
+ * were not indexed over. Issuance supersedes the session's previous
+ * grant for the same target (the table's own law), so the freshest
+ * inspection a document binds always carries the live grant — and
+ * issuance order across files is NOT load-bearing (each target
+ * supersedes only its own previous grant), so the per-file
+ * enrichments parallelize exactly like the content family's, with
+ * `Promise.all` keeping the served `writeFacts` order deterministic.
+ */
+async function enrichStylesPayload(
+  seat: SessionSeat,
+  inputs: ExecutorInputs,
+  payload: unknown,
+): Promise<unknown> {
+  const authority = enrichmentAuthority(seat, inputs);
+  const record = payload as { records?: unknown };
+  if (authority === null || !Array.isArray(record?.records)) return payload;
+  const { table, root } = authority;
+  // The bound array keeps the guard's narrowing inside the parallel map —
+  // a property narrowing never survives into a closure on its own.
+  const records: readonly unknown[] = record.records;
+  const files = new Set<string>();
+  for (const entry of records) {
+    const file = (entry as { file?: unknown })?.file;
+    if (typeof file === 'string' && file.length > 0) files.add(file);
+  }
+  const writeFacts = (
+    await Promise.all([...files].map((file) => enrichStylesFile(seat, root, table, file, records)))
+  ).filter((fact) => fact !== null);
+  if (writeFacts.length === 0) return payload;
+  return { ...(payload as object), writeFacts };
+}
+
+/**
+ * One file's write fact — `null` when the facts cannot be proven: the
+ * file unreadable, or any record of it carrying a range beyond the
+ * bytes actually read (the indexed truth and the disk drifted apart —
+ * the read-only answer, never a grant over incoherent anchors).
+ */
+async function enrichStylesFile(
+  seat: SessionSeat,
+  root: string,
+  table: GrantTable,
+  file: string,
+  records: readonly unknown[],
+): Promise<unknown> {
+  let bytes: Buffer;
+  try {
+    bytes = await readFile(join(root, file));
+  } catch {
+    return null;
+  }
+  const raw = bytes.toString('utf8');
+  // The coherence gate: every record of this file must fit the bytes
+  // the grant would bind — the ranges are string indices over exactly
+  // these contents, and one that does not fit is proof the indexed
+  // truth is not this disk's.
+  const fits = records.every((entry) => {
+    const candidate = entry as { file?: unknown; range?: { end?: unknown } };
+    if (candidate?.file !== file) return true;
+    return typeof candidate.range?.end === 'number' && candidate.range.end <= raw.length;
+  });
+  if (!fits) return null;
+  const granted = await table.issue(
+    {
+      discovery: 'existing-text',
+      kind: 'css',
+      path: file,
+      revision: sha256Of(bytes),
+    },
+    seat.ref,
+  );
+  if (!granted.ok) return null;
+  return { file, grant: granted.grant, raw };
 }
 
 /**
@@ -771,11 +881,14 @@ async function applyEdit(
   if (outcome === null) return notComposed();
   if (outcome.type === 'committed') {
     // The follow-on grant binds the LANDED bytes' revision (ADR-0006
-    // §6), minted through the same table that authorized the write.
+    // §6), minted through the same table that authorized the write —
+    // and the KIND the write's grant carried (#250): a css splice
+    // renews css authority, a content replacement renews content, so
+    // the continued edit never needs a wrong-kind grant.
     const next = await table.issue(
       {
         discovery: 'existing-text',
-        kind: 'content',
+        kind: wire.grant.kind,
         path: wire.grant.displayPath,
         revision: outcome.revision,
       },

@@ -90,13 +90,28 @@ describe('the stale-revision decision', () => {
   it('rejects only a strictly lower revision on the same route', () => {
     const served = { route: '/', revision: 5 };
     expect(
-      isStaleStylesPayload(served, '/', { revision: 4, invalidationRevision: 1, records: [] }),
+      isStaleStylesPayload(served, '/', {
+        revision: 4,
+        invalidationRevision: 1,
+        records: [],
+        writeFacts: new Map(),
+      }),
     ).toBe(true);
     expect(
-      isStaleStylesPayload(served, '/', { revision: 5, invalidationRevision: 1, records: [] }),
+      isStaleStylesPayload(served, '/', {
+        revision: 5,
+        invalidationRevision: 1,
+        records: [],
+        writeFacts: new Map(),
+      }),
     ).toBe(false);
     expect(
-      isStaleStylesPayload(served, '/', { revision: 6, invalidationRevision: 1, records: [] }),
+      isStaleStylesPayload(served, '/', {
+        revision: 6,
+        invalidationRevision: 1,
+        records: [],
+        writeFacts: new Map(),
+      }),
     ).toBe(false);
     // a different route is its own resource — never compared
     expect(
@@ -104,10 +119,16 @@ describe('the stale-revision decision', () => {
         revision: 1,
         invalidationRevision: 0,
         records: [],
+        writeFacts: new Map(),
       }),
     ).toBe(false);
     expect(
-      isStaleStylesPayload(null, '/', { revision: 1, invalidationRevision: 0, records: [] }),
+      isStaleStylesPayload(null, '/', {
+        revision: 1,
+        invalidationRevision: 0,
+        records: [],
+        writeFacts: new Map(),
+      }),
     ).toBe(false);
   });
 });
