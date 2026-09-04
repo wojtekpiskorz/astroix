@@ -54,6 +54,20 @@ if (specFiles.length === 0 || missing.length > 0 || emptied.length > 0) {
   );
 }
 
+// The content vertical's battery (J1, #251) lives at the ticket's owned
+// path under apps/web — same guard idiom, so its project can never
+// pass with zero tests either.
+const CONTENT_SPEC = join('apps', 'web', 'e2e', 'content', 'discovery-navigation.spec.ts');
+const contentSpecTests = existsSync(CONTENT_SPEC)
+  ? (readFileSync(CONTENT_SPEC, 'utf8').match(/^\s*test\(/gm) ?? []).length
+  : 0;
+if (contentSpecTests < MINIMUM_TESTS_PER_SPEC) {
+  throw new Error(
+    "playwright config: the content E2E project's discovery is vacuous " +
+      `(${CONTENT_SPEC} carries ${contentSpecTests} tests) — the Content vertical lane must discover its expected tests (#251)`,
+  );
+}
+
 // The lane's test-owned staging runs at CONFIG LOAD (ahead of the
 // webServer spawn, order guaranteed): two staged fixture copies, one
 // broken root, the isolated registry, and the env file the host boots
@@ -91,6 +105,15 @@ export default defineConfig({
     {
       name: 'chromium',
       testMatch: 'web/**/*.spec.ts',
+      use: { ...devices['Desktop Chrome'] },
+    },
+    // The content vertical's battery (J1, #251) at the ticket's owned
+    // path — its own testDir under apps/web, the same booted webServer
+    // and control plane as the chromium project above.
+    {
+      name: 'chromium-content',
+      testDir: 'apps/web',
+      testMatch: 'e2e/**/*.spec.ts',
       use: { ...devices['Desktop Chrome'] },
     },
     {
