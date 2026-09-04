@@ -87,62 +87,68 @@ export function reduceWrite(state: WriteLoopState, event: WriteLoopEvent): Write
   // lifetime, so a post-reset dispatch can never collide with a
   // pre-reset one's stale settles).
   if (event.type === 'submitted') {
-    return state.phase === 'idle' && event.seq > state.seq
-      ? { phase: 'pending', seq: event.seq, revision: null, code: null, conflictSha256: null }
-      : state;
+    return state.phase === 'idle' && event.seq > state.seq ? pendingState(event.seq) : state;
   }
   // The stale-settle law: an event for a dispatch that is not the live
   // one never applies — including every event after a reset (seq 0 only
   // accepts a fresh `submitted`).
   if (event.seq !== state.seq) return state;
-  switch (event.type) {
-    case 'committed':
-      return state.phase === 'pending'
-        ? {
-            phase: 'committed',
-            seq: event.seq,
-            revision: event.revision,
-            code: null,
-            conflictSha256: null,
-          }
-        : state;
-    case 'uncertain':
-      return state.phase === 'pending'
-        ? {
-            phase: 'irreversible-postcommit',
-            seq: event.seq,
-            revision: null,
-            code: null,
-            conflictSha256: null,
-          }
-        : state;
-    case 'rejected':
-      return state.phase === 'pending'
-        ? {
-            phase: 'rejected',
-            seq: event.seq,
-            revision: null,
-            code: event.code,
-            conflictSha256: null,
-          }
-        : state;
-    case 'conflict':
-      return state.phase === 'pending'
-        ? {
-            phase: 'rejected',
-            seq: event.seq,
-            revision: null,
-            code: 'revision-conflict',
-            conflictSha256: event.currentSha256,
-          }
-        : state;
-    case 'refresh-begun':
-      return state.phase === 'committed' || state.phase === 'irreversible-postcommit'
-        ? { ...state, phase: 'refresh-required' }
-        : state;
-    case 'refresh-landed':
-      return state.phase === 'refresh-required' ? IDLE_WRITE : state;
+  // The four settlements are one lattice edge (pending → settled); the
+  // two refresh edges are their own legality windows.
+  if (event.type === 'refresh-begun') {
+    return state.phase === 'committed' || state.phase === 'irreversible-postcommit'
+      ? { ...state, phase: 'refresh-required' }
+      : state;
   }
+  if (event.type === 'refresh-landed') {
+    return state.phase === 'refresh-required' ? IDLE_WRITE : state;
+  }
+  return state.phase === 'pending' ? settledState(event) : state;
+}
+
+/** The pending state one fresh dispatch opens. */
+function pendingState(seq: number): WriteLoopState {
+  return { phase: 'pending', seq, revision: null, code: null, conflictSha256: null };
+}
+
+/** The settled state one terminal event closes a pending dispatch with. */
+function settledState(
+  event: Extract<WriteLoopEvent, { type: 'committed' | 'uncertain' | 'rejected' | 'conflict' }>,
+): WriteLoopState {
+  if (event.type === 'committed') {
+    return {
+      phase: 'committed',
+      seq: event.seq,
+      revision: event.revision,
+      code: null,
+      conflictSha256: null,
+    };
+  }
+  if (event.type === 'uncertain') {
+    return {
+      phase: 'irreversible-postcommit',
+      seq: event.seq,
+      revision: null,
+      code: null,
+      conflictSha256: null,
+    };
+  }
+  if (event.type === 'rejected') {
+    return {
+      phase: 'rejected',
+      seq: event.seq,
+      revision: null,
+      code: event.code,
+      conflictSha256: null,
+    };
+  }
+  return {
+    phase: 'rejected',
+    seq: event.seq,
+    revision: null,
+    code: 'revision-conflict',
+    conflictSha256: event.currentSha256,
+  };
 }
 
 /** How one mutation settled — the sanitized classification. */

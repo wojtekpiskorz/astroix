@@ -853,64 +853,71 @@ function nextEditRevision(inputs: ExecutorInputs, ref: SessionRef): number {
   return next;
 }
 
+/**
+ * The failure classes both rejection mappings fold onto: the constant
+ * grant/malformed/refusal answers, plus the two classes the caller
+ * decorates (the conflict gains the disk-truth SHA; the absent answer
+ * stands alone).
+ */
+type FailureClass = 'conflict' | 'absent';
+
+/** The planning-boundary failure table — one row per closed failure code. */
+const PLAN_FAILURES: Readonly<Record<string, PublicError | FailureClass>> = {
+  'unknown-grant': grantRejected('revoked'),
+  revoked: grantRejected('revoked'),
+  'cross-session': grantRejected('cross-session'),
+  'wrong-kind': grantRejected('kind-mismatch'),
+  'operation-not-allowed': grantRejected('operation-not-allowed'),
+  'hard-linked-target': grantRejected('hard-link'),
+  'outside-root': grantRejected('external-symlink'),
+  'parent-outside-root': grantRejected('external-symlink'),
+  'changed-baseline': 'conflict',
+  'target-exists': 'conflict',
+  'target-absent': 'absent',
+  'parent-absent': 'absent',
+  'not-a-file': 'absent',
+  'parent-not-directory': 'absent',
+  'target-moved': 'absent',
+  'invalid-plan': malformedPlan(),
+  'claim-mismatch': malformedPlan(),
+};
+
+/** The executor-rejection table — one row per closed rejection code. */
+const WRITE_REJECTIONS: Readonly<Record<string, PublicError | FailureClass>> = {
+  'cross-session': grantRejected('cross-session'),
+  'wrong-root': grantRejected('external-symlink'),
+  'operation-not-allowed': grantRejected('operation-not-allowed'),
+  'operation-target-mismatch': grantRejected('operation-not-allowed'),
+  'hard-linked-target': grantRejected('hard-link'),
+  'changed-baseline': 'conflict',
+  'target-exists': 'conflict',
+  'target-absent': 'absent',
+  'parent-absent': 'absent',
+  'not-a-file': 'absent',
+  'parent-not-directory': 'absent',
+  'target-moved': 'absent',
+};
+
+/** Reads one failure table row — the closed catch-all for unknown codes. */
+function tableAnswer(table: Readonly<Record<string, PublicError | FailureClass>>, code: string) {
+  return table[code] ?? notComposed();
+}
+
 /** Maps one planning-boundary failure onto the closed public vocabulary. */
 function planFailure(failure: { code: string }): PublicError {
-  switch (failure.code) {
-    case 'unknown-grant':
-    case 'revoked':
-      return grantRejected('revoked');
-    case 'cross-session':
-      return grantRejected('cross-session');
-    case 'wrong-kind':
-      return grantRejected('kind-mismatch');
-    case 'operation-not-allowed':
-      return grantRejected('operation-not-allowed');
-    case 'hard-linked-target':
-      return grantRejected('hard-link');
-    case 'outside-root':
-    case 'parent-outside-root':
-      return grantRejected('external-symlink');
-    case 'changed-baseline':
-    case 'target-exists':
-      return revisionConflict();
-    case 'target-absent':
-    case 'parent-absent':
-    case 'not-a-file':
-    case 'parent-not-directory':
-    case 'target-moved':
-      return notFoundResource();
-    case 'invalid-plan':
-    case 'claim-mismatch':
-      return malformedPlan();
-    default:
-      return notComposed();
-  }
+  const answer = tableAnswer(PLAN_FAILURES, failure.code);
+  return typeof answer === 'string' ? classFailure(answer) : answer;
 }
 
 /** Maps one executor rejection onto the closed public vocabulary. */
 function writeRejection(outcome: Extract<ExecutorOutcome, { type: 'rejected' }>): PublicError {
-  switch (outcome.code) {
-    case 'cross-session':
-      return grantRejected('cross-session');
-    case 'wrong-root':
-      return grantRejected('external-symlink');
-    case 'operation-not-allowed':
-    case 'operation-target-mismatch':
-      return grantRejected('operation-not-allowed');
-    case 'hard-linked-target':
-      return grantRejected('hard-link');
-    case 'changed-baseline':
-    case 'target-exists':
-      return revisionConflict();
-    case 'target-absent':
-    case 'parent-absent':
-    case 'not-a-file':
-    case 'parent-not-directory':
-    case 'target-moved':
-      return notFoundResource();
-    default:
-      return notComposed();
-  }
+  const answer = tableAnswer(WRITE_REJECTIONS, outcome.code);
+  return typeof answer === 'string' ? classFailure(answer) : answer;
+}
+
+/** The class-fold: the conflict and the absent refusal, never a branch per code. */
+function classFailure(failureClass: FailureClass): PublicError {
+  return failureClass === 'conflict' ? revisionConflict() : notFoundResource();
 }
 
 /**

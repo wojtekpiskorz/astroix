@@ -130,10 +130,13 @@ test('a form write lands byte-exact through the grant, refreshes the pane, and t
   await openEntry(page, 'hello-builder');
 
   // the canvas rides the entry's own route — the title it renders is
-  // the write's observable downstream (Vite HMR reloads it natively)
-  const canvas = page.locator('[data-astroix-canvas]');
-  await expect(canvas).toBeVisible();
-  const canvasTitle = canvas.locator('h1.blog-title');
+  // the write's observable downstream (Vite HMR reloads it natively);
+  // the canvas is the same-origin plain iframe (G3's law), reached
+  // through the frame locator
+  const canvasTitle = page.frameLocator('[data-testid="canvas-frame"]').locator('h1.blog-title');
+  await expect(page.getByTestId('canvas-url')).toHaveText(/\/blog\/hello-builder$/, {
+    timeout: 30_000,
+  });
   await expect(canvasTitle).toHaveText('Hello builder', { timeout: 30_000 });
 
   // the untouched draft has nothing to write: the gesture is honestly
