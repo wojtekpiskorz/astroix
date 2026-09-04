@@ -315,12 +315,12 @@ async function activate(
   }
   // A 200 activation envelope is NOT proof of a committed transition:
   // a failed attempt (ADR-0006 §4's `failed` label) also answers 200
-  // with the sanitized failure on its snapshot — and, today, the
-  // composition's deactivation never informs the supervisor's revoke
-  // seam (#331's landed clear is un-wired composition-side, #411), so a
-  // STALE crash failure can ride an otherwise-committed activation's
-  // envelope. The supervisor's own active truth is therefore the
-  // oracle: the exact project, ready, at a strictly newer generation.
+  // with the sanitized failure on its snapshot. The supervisor's own
+  // active truth is therefore the commit oracle; the ENVELOPE's own
+  // snapshot is asserted with it — the composition's switch discipline
+  // (#411's deactivation inform) keeps the envelope honest, so its
+  // result must carry the activation kind, the committed target, and a
+  // snapshot whose active pair is exactly that target, ready.
   const active = composition.supervisor.snapshot().active;
   if (
     active === undefined ||
@@ -333,8 +333,23 @@ async function activate(
         `(active: ${JSON.stringify(composition.supervisor.snapshot())})`,
     );
   }
+  const envelope = JSON.parse(response.body) as ResponseEnvelope;
+  const activation = envelope.result;
+  if (
+    activation.kind !== 'activation' ||
+    activation.target.session.runtimeEpoch !== active.ref.runtimeEpoch ||
+    activation.target.session.generation !== active.ref.generation ||
+    activation.snapshot.active?.ref.runtimeEpoch !== active.ref.runtimeEpoch ||
+    activation.snapshot.active?.ref.generation !== active.ref.generation ||
+    activation.snapshot.active?.state !== 'ready'
+  ) {
+    throw new Error(
+      `activation of project ${project.name} answered an envelope that does not carry the committed pair ` +
+        `(${JSON.stringify(activation)})`,
+    );
+  }
   const document = await documentOf(port, project, active.ref);
-  return { document, envelope: JSON.parse(response.body) as ResponseEnvelope };
+  return { document, envelope };
 }
 
 // ——— document surfaces ———

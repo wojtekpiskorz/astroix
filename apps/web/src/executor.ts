@@ -69,8 +69,12 @@ import { neverSpawnedRun } from './never-spawned.ts';
  * the landed F4/F5/F6/F7 surfaces — stage privately, drain the old
  * session's fence, mint the one-use receipt, consume it at the commit
  * linearization point, then grant the new origin lease strictly after
- * the coordinator revoked the old one; `inspect` dispatches the typed
- * families onto the active run. The transition's last step (§4 step 6)
+ * the coordinator revoked the old one; a settled deactivation also
+ * informs the supervisor's revoke seam (#331's law, wired #411) so the
+ * active entry clears cleanly — never the bogus crash the outgoing
+ * run's late close would otherwise record; `inspect` dispatches the
+ * typed families onto the active run. The transition's last step (§4
+ * step 6)
  * observes the ADOPTION as the completion: when it fails after the
  * commit linearized, the F7 aftermath owns the convergence (#333's
  * ruling) — the granted candidate's authority dies through F6's ordered
@@ -289,7 +293,23 @@ async function listProjects(
   return page.kind === 'refused' ? notComposed() : page.envelope;
 }
 
-/** The settled activation transition (ADR-0006 §4): stage, drain, receipt, commit, adopt. */
+/**
+ * The settled activation transition (ADR-0006 §4): stage, drain, receipt, commit, adopt.
+ *
+ * Two switch-discipline laws hold at the top (#411–#413):
+ * - Same-project re-activation is the idempotent no-op (#413): the
+ *   requested postcondition — this project active — already holds, so
+ *   the answer is the CURRENT session's activation envelope, never a
+ *   staged second plane for the same canonical root (two concurrent
+ *   `astro dev` children over one root crash both planes — the zombie
+ *   the defect recorded). A fresh generation onto the same root remains
+ *   the explicit deactivate-then-activate the launcher already drives;
+ *   no fresh-generation "reload" is composed, and none is pretended.
+ * - The candidate slate resets only for the ADMITTED attempt, after
+ *   `begin`'s refusal gate (#412): a refused concurrent activation
+ *   touches no bookkeeping, so the in-flight attempt's remembered run
+ *   survives and the winner's adoption is whole.
+ */
 async function activate(
   envelope: RequestEnvelope,
   inputs: ExecutorInputs,
@@ -300,7 +320,14 @@ async function activate(
     .snapshot()
     .records.find((entry) => entry.projectKey === projectKey);
   if (record === undefined) return notFoundProject();
-  inputs.candidates.clear();
+  // The idempotent no-op reads the SUPERVISOR's active truth (#413), not
+  // the seat: a pair that committed but is still mid-adoption is already
+  // the active session, and staging a same-root candidate beside it is
+  // exactly the two-plane crash the guard exists to refuse.
+  const activeNow = inputs.supervisor.snapshot().active;
+  if (activeNow !== undefined && activeNow.projectKey === projectKey) {
+    return activationResult(envelope.requestId, activeNow.ref, projectKey, inputs);
+  }
   // The port is picked BEFORE `begin` — the supervisor's `startCandidate`
   // seam consumes it synchronously inside `begin`. A refused begin
   // returns it: the queue always holds exactly the ports of admitted
@@ -313,6 +340,11 @@ async function activate(
     if (returned !== devPort) throw new Error('dispatch defect: port queue desync');
     return concurrentActivation();
   }
+  // The admitted attempt's slate reset (#412): every OTHER pair's
+  // bookkeeping dies here — a failed attempt's stragglers never
+  // accumulate — while the pair this attempt just reserved inside
+  // `begin` survives untouched.
+  inputs.candidates.clearExcept(begun.attempt.ref);
   let candidate: StagedCandidate;
   try {
     candidate = await begun.attempt.ready;
@@ -587,6 +619,16 @@ async function deactivate(
   const result = await inputs.coordinator.deactivate(prepared.receipt);
   inputs.seatStore.drop(seat.ref);
   if (result.kind !== 'deactivated') return notComposed();
+  // The deactivation-side inform (#411, wiring #331's law over #335's
+  // seam): the coordinator's transition settled — authority revoked,
+  // the outgoing stop initiated — so the supervisor's active entry
+  // empties NOW, without a failure, strictly before the stopped run's
+  // close can settle. Without it the entry survives until that late
+  // close, where the crash observer records a bogus `crash` failure and
+  // poisons every later activation envelope. A refusal (no active
+  // session — someone else's clear already won the race) is history,
+  // never an error: the linearization this informs already happened.
+  await inputs.supervisor.revoke('deactivation');
   return {
     protocolVersion: 1,
     requestId: envelope.requestId,
