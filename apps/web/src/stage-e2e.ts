@@ -155,8 +155,14 @@ export async function stageWebLane(): Promise<WebLaneStage> {
   };
 }
 
-/** Copies the tracked fixture's sources minus installation, output, and caches; links the installation back in. */
-async function stagedFixtureCopy(scratchRoot: string, name: string): Promise<string> {
+/**
+ * Copies the tracked fixture's sources minus installation, output, and
+ * caches; links the installation back in. Exported for the lanes that
+ * stage the same disposable-copy discipline outside this module's own
+ * staging (the real-Electron CSS lane's fixture copy — the second
+ * consumer; the discipline stays owned here, never re-encoded).
+ */
+export async function stagedFixtureCopy(scratchRoot: string, name: string): Promise<string> {
   const copy = join(scratchRoot, name);
   await mkdir(copy, { recursive: true });
   await cp(FIXTURE, copy, {

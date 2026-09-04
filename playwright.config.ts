@@ -29,10 +29,13 @@ const WEB_SPEC_DIR = join('e2e', 'web');
 // zero-injection snapshots.
 // `styles-inspection.spec.ts` joined at #370: the wire-carried styles
 // route selection's battery over the live host.
+// `css-inspection.spec.ts` joined at #249 (I1): the CSS vertical's
+// read-only inspection battery over the live host.
 const EXPECTED_WEB_SPECS = [
   'activation.spec.ts',
   'app-shell.spec.ts',
   'canvas.spec.ts',
+  'css-inspection.spec.ts',
   'launcher.spec.ts',
   'styles-inspection.spec.ts',
   'zero-injection.spec.ts',
@@ -56,7 +59,9 @@ if (specFiles.length === 0 || missing.length > 0 || emptied.length > 0) {
 
 // The content vertical's battery (J1, #251) lives at the ticket's owned
 // path under apps/web — same guard idiom, so its project can never
-// pass with zero tests either.
+// pass with zero tests either. When a SECOND content spec lands, fold
+// this single-file shape and the dir-scan shape above into one shared
+// vacuity-guard idiom (#374's rider): two hand-rolled shapes drift.
 const CONTENT_SPEC = join('apps', 'web', 'e2e', 'content', 'discovery-navigation.spec.ts');
 const contentSpecTests = existsSync(CONTENT_SPEC)
   ? (readFileSync(CONTENT_SPEC, 'utf8').match(/^\s*test\(/gm) ?? []).length
