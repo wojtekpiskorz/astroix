@@ -135,6 +135,17 @@ export default defineConfig({
       // mount row is the vacuity tripwire.
       'e2e/retirement-readiness/readiness.test.ts',
       'e2e/retirement-readiness/presentation-mount.test.tsx',
+      // The packaged-qualification harness units (#258, L1): the
+      // argument law (implicit/env-derived candidate selection
+      // rejected), the evidence completeness law, the process stage
+      // over stub executables (launch failure, timeout, incomplete
+      // cleanup), the bundled-Node identity over synthetic resource
+      // trees, and — where the macOS tools exist — the artifact-intake
+      // self-tests (valid, corrupt, truncated, extra-file, symlinked,
+      // hash-mismatched) plus the orchestration leg, all driving the
+      // real harness modules. The exact-H6-artifact qualification run
+      // is local-only (ADR-0008), like the packaging lane itself.
+      'tests/qualification/**/*.test.{ts,tsx}',
     ],
     coverage: {
       // The CRAP coverage term is honest only where per-function unit coverage
