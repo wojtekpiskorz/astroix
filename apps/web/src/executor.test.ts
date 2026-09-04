@@ -42,7 +42,10 @@ import {
   createSessionCompletion,
   type SessionCompletion,
 } from '@wojciechpiskorz/astroix-runtime/session-supervisor/completion';
-import { createEditFence } from '@wojciechpiskorz/astroix-runtime/session-supervisor/fence';
+import {
+  createEditFence,
+  DRAIN_DEADLINE_MS,
+} from '@wojciechpiskorz/astroix-runtime/session-supervisor/fence';
 import { FIRST_COMMIT_REVOCATION } from '@wojciechpiskorz/astroix-runtime/session-supervisor/revocation';
 import {
   createSessionSupervisor,
@@ -56,9 +59,11 @@ import {
   electronHostAdoption,
   type HostDocumentIdentity,
   type HostMainFrameHandshake,
+  stopOwnedWriteExecutors,
 } from './control-plane.ts';
 import {
   createExecutor,
+  EDIT_OUTCOME_DEADLINE_MS,
   type ExecutorInputs,
   type SeatStore,
   type SessionSeat,
@@ -991,5 +996,104 @@ describe("the composition teardown's owned-run stop (#365 addendum, #391)", () =
     lone.open();
     await closing;
     expect(settled).toBe(true);
+  });
+});
+
+describe("the composition teardown's write-executor stop bound (#410)", () => {
+  /**
+   * The unresponsive child: alive, never answering the stop control —
+   * no `closed` message, no exit — the shape that used to hang close()
+   * past every bound (the pre-#410 loop awaited `stop()` directly, and
+   * this promise never settles). `kill` records the force path the way
+   * the real handle's does (SIGKILL, the stop promise settling on the
+   * observed exit).
+   */
+  function hungHandle(): { readonly handle: WriteExecutorHandle; readonly kills: () => number } {
+    let kills = 0;
+    const handle: WriteExecutorHandle = {
+      ready: Promise.resolve(),
+      execute: () => new Promise(() => {}),
+      stop: () => new Promise(() => {}),
+      kill: async () => {
+        kills += 1;
+      },
+      exited: new Promise(() => {}),
+    };
+    return { handle, kills: () => kills };
+  }
+
+  /**
+   * The healthy child: its graceful stop settles the moment the leg
+   * opens the gate — the `closed`-message happy path.
+   */
+  function gatedHandle(): {
+    readonly handle: WriteExecutorHandle;
+    readonly kills: () => number;
+    readonly open: () => void;
+  } {
+    let kills = 0;
+    let open: () => void = () => {};
+    const stop = new Promise<void>((resolve) => {
+      open = resolve;
+    });
+    const handle: WriteExecutorHandle = {
+      ready: Promise.resolve(),
+      execute: () => new Promise(() => {}),
+      stop: () => stop,
+      kill: async () => {
+        kills += 1;
+      },
+      exited: new Promise(() => {}),
+    };
+    return { handle, kills: () => kills, open };
+  }
+
+  it('resolves at the bound on an unresponsive child — the timeout verdict, the lease released through the force path', async () => {
+    const hung = hungHandle();
+    const started = Date.now();
+    // An un-bounded stop wait (the reverted remedy) never settles on
+    // this handle — the leg times out red on that tree; on this tree
+    // the pass resolves at the injected bound.
+    const report = await stopOwnedWriteExecutors([hung.handle], 50);
+    expect(Date.now() - started).toBeLessThan(5000);
+    expect(report).toBe('timed-out');
+    // The hung child is disposed through the D5 force path — the
+    // observed exit the lease release rides — exactly once
+    expect(hung.kills()).toBe(1);
+  });
+
+  it('settles a graceful stop immediately, never waiting the bound — and no force path fires', async () => {
+    const healthy = gatedHandle();
+    const started = Date.now();
+    const stopping = stopOwnedWriteExecutors([healthy.handle], 2000);
+    await new Promise((resolve) => setImmediate(resolve));
+    healthy.open();
+    const report = await stopping;
+    // The happy paths (the closed message, the exit) are unchanged:
+    // the pass settles when the child answers, well inside the bound
+    expect(Date.now() - started).toBeLessThan(2000);
+    expect(report).toBe('stopped');
+    expect(healthy.kills()).toBe(0);
+  });
+
+  it('reports the worst verdict across the pass — the hung child alone is disposed, the settled one untouched', async () => {
+    const hung = hungHandle();
+    const healthy = gatedHandle();
+    const stopping = stopOwnedWriteExecutors([healthy.handle, hung.handle], 50);
+    await new Promise((resolve) => setImmediate(resolve));
+    healthy.open();
+    expect(await stopping).toBe('timed-out');
+    expect(hung.kills()).toBe(1);
+    expect(healthy.kills()).toBe(0);
+  });
+});
+
+describe('the edit-outcome deadline tie (#410)', () => {
+  it("the executor's edit-outcome deadline IS the fence's drain deadline — one constant through the public surface", () => {
+    // The pre-#410 tree restated the literal here; this pin fails that
+    // tree's shape at load (no export) and fails a future divergence at
+    // the assertion — a drain-deadline change the composition does not
+    // follow is a gate-red, never a silent early give-up.
+    expect(EDIT_OUTCOME_DEADLINE_MS).toBe(DRAIN_DEADLINE_MS);
   });
 });

@@ -42,6 +42,7 @@ import type {
 } from '@wojciechpiskorz/astroix-runtime/session-supervisor/completion';
 import {
   createEditFence,
+  DRAIN_DEADLINE_MS,
   type EditDrain,
   type EditFence,
 } from '@wojciechpiskorz/astroix-runtime/session-supervisor/fence';
@@ -190,11 +191,11 @@ export interface ExecutorInputs {
   readonly writeExecutors: Map<string, WriteExecutorHandle>;
   /**
    * The per-edit outcome await's bound (#391): the F5 fence's drain
-   * deadline law (ADR-0006 §4 step 2's "up to 5 seconds"), restated at
-   * the composition — the runtime's `DRAIN_DEADLINE_MS` is not exported
-   * through the fence's package surface, and the ADR is the shared
-   * authority both constants cite. Injectable so the focused legs bound
-   * it tightly; production never overrides it.
+   * deadline law (ADR-0006 §4 step 2's "up to 5 seconds"), consumed as
+   * the ONE runtime constant through the fence's package surface (#410)
+   * — the edit await can never give up before the fence's own law.
+   * Injectable so the focused legs bound it tightly; production never
+   * overrides it.
    */
   readonly editOutcomeDeadlineMs?: number;
   /**
@@ -1116,8 +1117,16 @@ async function disposeHungExecutor(
   await handle.kill().catch(() => {});
 }
 
-/** The outcome await's default bound — the F5 drain deadline's law, restated (see {@link ExecutorInputs.editOutcomeDeadlineMs}). */
-const EDIT_OUTCOME_DEADLINE_MS = 5000;
+/**
+ * The outcome await's default bound — the F5 fence's `DRAIN_DEADLINE_MS`
+ * itself, consumed through the fence's package surface (#410): one
+ * constant, one law, so a future drain-deadline change can never leave
+ * the composition's edit await silently diverged (the non-divergence pin
+ * lives in this module's focused legs). Exported for that pin alone —
+ * the use site is the composition's default, see
+ * {@link ExecutorInputs.editOutcomeDeadlineMs}.
+ */
+export const EDIT_OUTCOME_DEADLINE_MS = DRAIN_DEADLINE_MS;
 
 /**
  * The bounded outcome await (#391): races the fence's per-operation
