@@ -3,6 +3,7 @@ import {
   createWriteLoopStore,
   type WriteLoopStoreState,
 } from '../../../editor/edit-drain/write-loop-store.ts';
+import { registerFeatureStoreReset } from '../../../state/feature-store-registry.ts';
 
 /**
  * The CSS write loop's feature-local store instance (#250, I2): the
@@ -16,3 +17,8 @@ import {
 
 export const useCssWriteStore: UseBoundStore<StoreApi<WriteLoopStoreState>> =
   createWriteLoopStore();
+
+// The #372 registration: module scope, beside the store's creation —
+// the sequencer's clear-stores step quiets this machine at every
+// commit, the mint surviving by the factory's law.
+registerFeatureStoreReset('css:write', () => useCssWriteStore.getState().reset());

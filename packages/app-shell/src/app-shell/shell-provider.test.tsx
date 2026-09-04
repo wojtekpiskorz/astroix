@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { createAppClient } from '../app-client.ts';
+import { ContentDiscovery } from '../features/content/discovery/content-discovery.tsx';
+import { sessionQueryCount } from '../query/session-query-cache.ts';
+import { createShellQueryClient } from '../query/shell-query-client.ts';
 import { useAppStore } from '../state/app-store.ts';
 import { useEditSessionStore } from '../state/edit-session-store.ts';
 import { clearShellStores, shellStoreSnapshot } from '../state/shell-stores.ts';
@@ -142,6 +145,72 @@ describe('the commit-time reset', () => {
   it('does not deactivate from a diagnostic target — the control never mounts', () => {
     const shell = mountSession(G1, 'diagnostic');
     expect(shell.container.querySelector('[data-testid="deactivate"]')).toBeNull();
+  });
+
+  it('nothing re-mints dead-session cache keys in the reset window — the registry walk cannot resurrect the cache (#399 over #372)', async () => {
+    // The web host's exact failing shape (#399, CI run 33868484419): the
+    // shell with the Content vertical's discovery panel in the sidebar
+    // slot, its two session queries beside the shell's own — and an OWNED
+    // QueryClient so the cache is inspectable. The #372 registry walk
+    // resets the feature stores synchronously inside clear-stores; their
+    // fresh-identity resets notify the panel's zustand subscriptions, and
+    // React's post-reset sync flush re-renders the panel — whose
+    // `useSessionQuery` render re-builds its just-removed queries into
+    // the cache (`useBaseQuery` → `getOptimisticResult` →
+    // `QueryCache.build`), under the DYING session's pair. TanStack
+    // guarantees a mounted observer its entry, so the belt is the
+    // session-live render boundary over the query-holding surfaces: the
+    // dying document's post-reset re-renders never reach a query hook.
+    globalThis.fetch = script.fetch;
+    const queryClient = createShellQueryClient();
+    const client = createAppClient({ clientCapability: CAPABILITY, origin: ORIGIN });
+    mounted = mount(
+      <ShellProvider
+        client={client}
+        sessionRef={G1}
+        launcherUrl={LAUNCHER_URL}
+        queryClient={queryClient}
+        navigate={() => {}}
+      >
+        <AppShell slots={{ sidebar: <ContentDiscovery /> }} />
+      </ShellProvider>,
+    );
+    const shell = mounted;
+    script.resolveInspect(11);
+    script.resolveInspect(11);
+    script.resolveInspect(11);
+    await waitFor(
+      () => byTestId(shell.container, 'shell-state').textContent?.includes('queries=3') ?? false,
+    );
+    expect(sessionQueryCount(queryClient)).toBe(3);
+
+    click(byTestId(shell.container, 'deactivate'));
+    await waitFor(
+      () =>
+        byTestId(shell.container, 'shell-state').textContent?.includes(
+          'reset=abort-fetches,close-sse,remove-queries,clear-stores',
+        ) ?? false,
+    );
+    // PAST the reset's flush window — the re-mint (when the belt is
+    // missing) lands exactly here, one macrotask after the navigation:
+    // the dying panel's re-render re-adds its dead keys and the marker's
+    // own re-render then reports them (the #393 capture's `queries=2`).
+    await actAsync(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    const settled = byTestId(shell.container, 'shell-state').textContent ?? '';
+    expect(settled).toContain('queries=0');
+    expect(settled).toContain('reset=abort-fetches,close-sse,remove-queries,clear-stores');
+    // The belt's own truth: NO session-scoped entry exists in the cache
+    // the dying document leaves behind — not the shell's, not the dead
+    // pair's content/routes re-mints.
+    expect(sessionQueryCount(queryClient)).toBe(0);
+    // And the query-holding surfaces are gone with the session: the
+    // boundary unmounted the panel (its slot is empty) and the
+    // inspection probe; the header's public identity surface stays (it
+    // is not session-query state, #240).
+    expect(shell.container.querySelector('[data-astroix-content-discovery]')).toBeNull();
+    expect(shell.container.querySelector('[data-testid="inspect-revision"]')).toBeNull();
   });
 });
 

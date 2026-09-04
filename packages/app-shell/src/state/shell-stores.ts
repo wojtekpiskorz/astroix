@@ -8,7 +8,10 @@ import { useEditSessionStore } from './edit-session-store.ts';
  * the shell provider (session adoption) and the reset sequencer (the
  * `clear-stores` step) consume. Store-singleton state by doctrine
  * (ADR-0002: the app-level store is importable from anywhere), so the
- * aggregate is module-level functions, not instances.
+ * aggregate is module-level functions, not instances. The FEATURE
+ * stores are not here: they register with the feature-store reset
+ * registry (#372), which the sequencer's clear-stores action walks
+ * right after this aggregate's `clearShellStores`.
  */
 
 /** The reset-clearable session state's observable snapshot — the shell-state marker's source of truth. */

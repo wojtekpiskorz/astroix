@@ -27,6 +27,14 @@ export interface WriteLoopStoreState {
   nextSeq(): number;
   /** Applies one event to the machine (the reducer's sequence guard decides). */
   dispatch(event: WriteLoopEvent): void;
+  /**
+   * The commit-time reset's clear (#372's registration law): the
+   * machine through its own unconditional `reset` event — it goes
+   * quiet ("session teardown" is that event's documented case) while
+   * the MINT survives (its monotonic law outlives the session: a
+   * post-reset dispatch mints strictly past every pre-reset one).
+   */
+  reset(): void;
 }
 
 export type UseWriteLoopStore = UseBoundStore<StoreApi<WriteLoopStoreState>>;
@@ -45,5 +53,6 @@ export function createWriteLoopStore(): UseWriteLoopStore {
       return minted;
     },
     dispatch: (event) => set((state) => ({ write: reduceWrite(state.write, event) })),
+    reset: () => set((state) => ({ write: reduceWrite(state.write, { type: 'reset' }) })),
   }));
 }

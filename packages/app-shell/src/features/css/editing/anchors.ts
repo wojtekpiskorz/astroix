@@ -1,5 +1,6 @@
 import type { ResourceGrant, SessionRef } from '@wojciechpiskorz/astroix-protocol';
 import { create } from 'zustand';
+import { registerFeatureStoreReset } from '../../../state/feature-store-registry.ts';
 import { sameSessionPair } from '../../../state/session-gate.ts';
 
 /**
@@ -37,6 +38,11 @@ interface CssAnchorState {
   /** The conflict-reload / revocation clear. */
   clear(): void;
 }
+
+// The #372 registration: module scope, beside the store's creation —
+// the sequencer's clear-stores step drops every anchor at every commit
+// (a trivial set; the pair-bind belt stays for the same-document window).
+registerFeatureStoreReset('css:anchors', () => useCssAnchorStore.getState().clear());
 
 export const useCssAnchorStore = create<CssAnchorState>((set, get) => ({
   session: null,

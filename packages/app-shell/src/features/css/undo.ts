@@ -1,5 +1,6 @@
 import type { SessionRef } from '@wojciechpiskorz/astroix-protocol';
 import { create } from 'zustand';
+import { registerFeatureStoreReset } from '../../state/feature-store-registry.ts';
 import { sameSessionPair } from '../../state/session-gate.ts';
 
 /**
@@ -72,3 +73,8 @@ export const useCssUndoStore = create<CssUndoState>((set, get) => ({
 export function undoDepth(): number {
   return useCssUndoStore.getState().entries.length;
 }
+
+// The #372 registration: module scope, beside the store's creation —
+// the sequencer's clear-stores step clears this stack at every commit
+// (a trivial set; the pair-bind belt stays for the same-document window).
+registerFeatureStoreReset('css:undo', () => useCssUndoStore.getState().clear());

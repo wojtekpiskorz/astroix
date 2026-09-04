@@ -59,6 +59,11 @@ export {
   useEditSessionStore,
 } from '../state/edit-session-store';
 export {
+  type FeatureStoreReset,
+  type FeatureStoreResetHandle,
+  registerFeatureStoreReset,
+} from '../state/feature-store-registry';
+export {
   matchedSelectors,
   type RuntimeRuleSelector,
   rematchSelection,
