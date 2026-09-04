@@ -15,6 +15,7 @@ import type {
   SessionSnapshot,
   WritePlan,
 } from '@wojciechpiskorz/astroix-protocol';
+import { COMMAND_MUTATION } from '@wojciechpiskorz/astroix-protocol';
 import { projectHostname } from '@wojciechpiskorz/astroix-runtime/origin';
 import {
   type ControlPlaneComposition,
@@ -39,10 +40,12 @@ import { stagedFixtureCopy } from '../../../../apps/web/src/stage-e2e.ts';
  *
  * Its home is a test-helpers module under the ticket's owned path
  * (`packages/runtime/test/project-switch/`), NEVER product code: the
- * harness imports the apps/web composition because that is where the
- * landed composition lives, not because the runtime package depends on
- * the app (the import direction is test-helper → composition host, the
- * same direction `apps/web/src/executor.test.ts` already uses).
+ * harness imports the apps/web composition because #240 ruled that the
+ * composition lives in apps/web (the composition host), because the
+ * ticket's owner-sanctioned paths include this reach, and because a
+ * test helper reaching the composition host is not a package
+ * dependency — the same test-tier → composition-host direction the
+ * e2e lane already drives.
  *
  * ── THE STABLE K-FAMILY API (#254's AC; K2 and K3 import THIS, they
  * never re-derive the sequence) ─────────────────────────────────────
@@ -156,7 +159,11 @@ export interface SwitchHarness {
   deactivate(): Promise<WireResponse>;
   /** The current project document — GET the served app page, parse the real bootstrap metas. */
   projectDocument(): Promise<SwitchDocument>;
-  /** One POST `/__astroix/api/v1` with the exact evidence the command's shape demands. */
+  /**
+   * One POST `/__astroix/api/v1` with the exact evidence the command's
+   * shape demands. The envelope rides VERBATIM — its requestId reaches
+   * the wire, so stale-authority replays keep their probe ids.
+   */
   post(envelope: RequestEnvelope, credentials: WireCredentials): Promise<WireResponse>;
   /** One admitted inspect (a read) — the grant enrichment included when the payload carries it. */
   inspect(request: InspectionRequest, document: SwitchDocument): Promise<WireResponse>;
@@ -168,7 +175,12 @@ export interface SwitchHarness {
   openHmr(document: SwitchDocument): Promise<LiveProbe>;
   /** One GET through the origin lease to the project's own dev server (proxied, never reserved). */
   fetchProxied(document: SwitchDocument, path: string): Promise<WireResponse>;
-  /** A mutation whose body completes only when the caller finishes it — the fault tier's primitive. */
+  /**
+   * A mutation whose body completes only when the caller finishes it —
+   * the fault tier's primitive. The envelope rides VERBATIM, so
+   * `splitAt` indexes the actual sent serialization
+   * (`JSON.stringify(envelope)`).
+   */
   openDelayedMutation(
     envelope: RequestEnvelope,
     document: SwitchDocument,
@@ -228,13 +240,12 @@ export async function createSwitchHarness(): Promise<SwitchHarness> {
           command: { kind: 'deactivate' },
         },
         credentialsOf(document),
-        nextRequestId,
         true,
       );
     },
     projectDocument: currentDocument,
     post: async (envelope, credentials) =>
-      await postEnvelope(port, envelope, credentials, nextRequestId, mutationOf(envelope)),
+      await postEnvelope(port, envelope, credentials, mutationOf(envelope)),
     inspect: async (request, document) =>
       await postEnvelope(
         port,
@@ -245,7 +256,6 @@ export async function createSwitchHarness(): Promise<SwitchHarness> {
           command: { kind: 'inspect', request },
         },
         credentialsOf(document),
-        nextRequestId,
         false,
       ),
     applyEdit: async (plan, document) =>
@@ -258,14 +268,13 @@ export async function createSwitchHarness(): Promise<SwitchHarness> {
           command: { kind: 'apply-edit', plan },
         },
         credentialsOf(document),
-        nextRequestId,
         true,
       ),
     openEvents: async (document) => await openEvents(port, document),
     openHmr: async (document) => await openHmr(port, document),
     fetchProxied: async (document, path) => await fetchProxied(port, document, path),
     openDelayedMutation: (envelope, document, splitAt) =>
-      openDelayedMutation(port, envelope, document, nextRequestId, splitAt),
+      openDelayedMutation(port, envelope, document, splitAt),
     tree: async (root) => await treeOf(root),
     subtreePids: async () => await subtreePids(),
     close: async () => {
@@ -297,7 +306,6 @@ async function activate(
       command: { kind: 'activate', projectKey: project.key },
     },
     { cookie: launcher.cookie, client: launcher.client },
-    nextRequestId,
     true,
   );
   if (response.status !== 200) {
@@ -392,9 +400,14 @@ async function documentOf(
 
 // ——— the wire ———
 
-/** Whether a command is a mutation (the admission's evidence shape depends on it). */
+/**
+ * Whether a command is a mutation (the admission's evidence shape depends
+ * on it) — derived from the protocol's ONE home table (`COMMAND_MUTATION`),
+ * never re-spelled here: a future read kind flips the real client's
+ * evidence and this harness's together (#334's fork failure mode).
+ */
 function mutationOf(envelope: RequestEnvelope): boolean {
-  return envelope.command.kind !== 'inspect' && envelope.command.kind !== 'list-projects';
+  return COMMAND_MUTATION[envelope.command.kind];
 }
 
 /** The Host header a credential set rides on — the launcher, or the named project's virtual host. */
@@ -412,17 +425,22 @@ function credentialsOf(document: SwitchDocument): WireCredentials {
   };
 }
 
-/** One admitted POST with the exact evidence the admission spine demands for the command's shape. */
-async function postEnvelope(
-  port: number,
-  envelope: RequestEnvelope,
+/**
+ * The POST head's exact evidence — the ONE spelling of what the
+ * admission spine demands: the Host, the host-capability cookie, the
+ * client binding, the JSON content type, the command-shape evidence
+ * (mutation marker + exact Origin for mutations, same-origin Fetch
+ * Metadata for reads), and the honest Content-Length. `hold` leaves
+ * the connection open — the delayed mutation's body completes later.
+ */
+function postHead(
+  host: string,
   credentials: WireCredentials,
-  nextRequestId: () => string,
+  body: string,
   mutation: boolean,
-): Promise<WireResponse> {
-  const body = JSON.stringify({ ...envelope, requestId: nextRequestId() });
-  const host = hostOf(credentials, port);
-  const lines = [
+  hold: boolean,
+): string {
+  return [
     'POST /__astroix/api/v1 HTTP/1.1',
     `Host: ${host}`,
     `Cookie: __astroix_host=${credentials.cookie}`,
@@ -432,11 +450,27 @@ async function postEnvelope(
       ? [`Origin: http://${host}`, 'X-Astroix-Request: 1']
       : ['Sec-Fetch-Site: same-origin']),
     `Content-Length: ${Buffer.byteLength(body, 'utf8')}`,
-    'Connection: close',
+    ...(hold ? [] : ['Connection: close']),
     '',
-    body,
-  ];
-  return await rawExchange(port, lines.join('\r\n'), ACTIVATION_BUDGET_MS);
+    '',
+  ].join('\r\n');
+}
+
+/**
+ * One admitted POST with the exact evidence the admission spine demands
+ * for the command's shape. The envelope rides VERBATIM — its requestId
+ * reaches the wire (internal callers mint through the harness counter;
+ * battery replays keep their probe ids).
+ */
+async function postEnvelope(
+  port: number,
+  envelope: RequestEnvelope,
+  credentials: WireCredentials,
+  mutation: boolean,
+): Promise<WireResponse> {
+  const body = JSON.stringify(envelope);
+  const head = postHead(hostOf(credentials, port), credentials, body, mutation, false);
+  return await rawExchange(port, `${head}${body}`, ACTIVATION_BUDGET_MS);
 }
 
 // ——— the live probes ———
@@ -571,23 +605,11 @@ function openDelayedMutation(
   port: number,
   envelope: RequestEnvelope,
   document: SwitchDocument,
-  nextRequestId: () => string,
   splitAt: number,
 ): DelayedMutation {
-  const body = JSON.stringify({ ...envelope, requestId: nextRequestId() });
-  const host = `${document.project.hostname}:${port}`;
-  const head = [
-    'POST /__astroix/api/v1 HTTP/1.1',
-    `Host: ${host}`,
-    `Cookie: __astroix_host=${document.hostCapability}`,
-    `X-Astroix-Client: ${document.clientCapability}`,
-    'Content-Type: application/json',
-    `Origin: http://${host}`,
-    'X-Astroix-Request: 1',
-    `Content-Length: ${Buffer.byteLength(body, 'utf8')}`,
-    '',
-    '',
-  ].join('\r\n');
+  const body = JSON.stringify(envelope);
+  const credentials = credentialsOf(document);
+  const head = postHead(hostOf(credentials, port), credentials, body, true, true);
   const socket = connect({ host: '127.0.0.1', port });
   socket.on('connect', () => {
     socket.write(head);

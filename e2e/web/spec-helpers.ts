@@ -103,9 +103,12 @@ export async function restoreIdle(page: Page): Promise<void> {
  * on a document whose capture listener is between epochs and is lost).
  * Event-ordered: the two baseline navigations complete BEFORE the
  * settle clock starts, and the settle window proves no third navigation
- * is in flight.
+ * is in flight. `position` selects the staged copy to activate (the
+ * A-B-A switch harness reaches 1; every other battery takes the default
+ * 0) — the ONE spelling of this settle discipline, never re-derived
+ * (#254 review: the copy had already drifted at birth).
  */
-export async function activateSettled(page: Page): Promise<void> {
+export async function activateSettled(page: Page, position = 0): Promise<void> {
   const frameNavigations: string[] = [];
   const onNavigated = (frame: Frame): void => {
     if (frame.parentFrame() !== null) frameNavigations.push(frame.url());
@@ -113,7 +116,7 @@ export async function activateSettled(page: Page): Promise<void> {
   page.on('framenavigated', onNavigated);
   await page.goto('/__astroix/app/');
   await expect(page.getByTestId('session-label')).toHaveText('idle', { timeout: LOAD_BUDGET_MS });
-  await activateButton(page, 0).click();
+  await activateButton(page, position).click();
   await page.waitForURL(PROJECT_APP_URL, { timeout: BOOT_BUDGET_MS });
   await expect(page.getByTestId('canvas-origin-state')).toHaveText('project', {
     timeout: LOAD_BUDGET_MS,

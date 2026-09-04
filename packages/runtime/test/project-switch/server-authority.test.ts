@@ -62,8 +62,10 @@ import {
  *    leak's residue until #412's fix lands.
  *
  * Everything asserted is wire-oracle truth (statuses, envelopes,
- * streams, sockets, file bytes, real pids) — never composition
- * internals. Grants and raw bytes are always CAPTURED while their
+ * streams, sockets, file bytes, real pids) PLUS the supervisor's own
+ * public snapshot — the commit oracle #411's poisoned envelopes force —
+ * never private composition mechanics (seats, candidates, grant
+ * tables). Grants and raw bytes are always CAPTURED while their
  * generation is live and replayed after the switch — a stale-authority
  * probe is never conditional on reaching a retired host.
  */

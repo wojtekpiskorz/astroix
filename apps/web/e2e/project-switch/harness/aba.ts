@@ -1,11 +1,9 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { expect, type Frame, type Page } from '@playwright/test';
+import { expect, type Page } from '@playwright/test';
 import {
-  activateButton,
-  BOOT_BUDGET_MS,
+  activateSettled,
   LOAD_BUDGET_MS,
-  PROJECT_APP_URL,
   restoreIdle,
 } from '../../../../../e2e/web/spec-helpers.ts';
 import { rawExchange } from '../../../src/e2e-wire.ts';
@@ -58,37 +56,14 @@ export async function abaEntryBytes(project: 'project-a' | 'project-b'): Promise
 }
 
 /**
- * The settled deterministic activation (the batteries' shared prefix,
- * position-parameterized for the switch): land on the launcher,
- * activate, wait for the project app, settle the canvas past the young
- * dev server's one post-connect self-reload, and capture the committed
- * document's authority set.
+ * The settled deterministic activation, position-parameterized for the
+ * switch: the web lane's ONE settle discipline (`activateSettled`,
+ * imported — never re-derived; #254 review caught the copy already
+ * drifting at birth), then the generation wait and the committed
+ * document's captured authority set.
  */
 export async function abaActivate(page: Page, position: 0 | 1): Promise<AbaCapture> {
-  // The canvas settle (the batteries' own discipline), listener attached
-  // BEFORE the first navigation so the baseline child-frame loads count:
-  // wait out the young dev server's one post-connect self-reload, then
-  // prove no further navigation is in flight — a later gesture never
-  // races the rebuild's epoch switch.
-  const navigations: string[] = [];
-  const onNavigated = (frame: Frame): void => {
-    if (frame.parentFrame() !== null) navigations.push(frame.url());
-  };
-  page.on('framenavigated', onNavigated);
-  await page.goto('/__astroix/app/');
-  await expect(page.getByTestId('session-label')).toHaveText('idle', { timeout: LOAD_BUDGET_MS });
-  await activateButton(page, position).click();
-  await page.waitForURL(PROJECT_APP_URL, { timeout: BOOT_BUDGET_MS });
-  await expect(page.getByTestId('canvas-origin-state')).toHaveText('project', {
-    timeout: LOAD_BUDGET_MS,
-  });
-  await expect
-    .poll(() => navigations.length, { timeout: LOAD_BUDGET_MS * 2 })
-    .toBeGreaterThanOrEqual(2);
-  navigations.length = 0;
-  await page.waitForTimeout(1500);
-  expect(navigations).toEqual([]);
-  page.removeListener('framenavigated', onNavigated);
+  await activateSettled(page, position);
   await expect(page.getByTestId('session-generation')).toHaveText(/^\d+$/, {
     timeout: LOAD_BUDGET_MS,
   });
