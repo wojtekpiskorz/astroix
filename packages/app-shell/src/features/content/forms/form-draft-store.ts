@@ -153,9 +153,24 @@ export const useFormDraftStore = create<FormDraftState>((set, get) => ({
         // already lives in the values; an unparsed tail was never a value).
         return { mode, rawText: toRawText(state.draftValues), parseError: null };
       }
-      // Returning to form remounts the form on the current values; the
-      // mount report re-derives the halves.
-      return { mode, rawText: null, parseError: null, mountId: state.mountId + 1 };
+      // Returning to form remounts the form on the current values — and
+      // the halves are re-partitioned from those SAME values here, not
+      // left for the remount's mount report: without this, the one
+      // mount-effect-tick window renders the unknown-fields section from
+      // the PRE-raw unknown half (stale after raw edits), and an edit
+      // landing in that window would merge the stale part over the
+      // pre-raw known half — resurrecting keys the raw edit removed.
+      // Refreshing both halves makes the window consistent by
+      // construction (the mount report then re-lands the same halves).
+      const { known, unknown } = partitionValues(state.fields, state.draftValues);
+      return {
+        mode,
+        rawText: null,
+        parseError: null,
+        mountId: state.mountId + 1,
+        knownValues: known,
+        unknownPart: unknown,
+      };
     }),
   reportFormValues: (values) =>
     set((state) => {
@@ -163,6 +178,14 @@ export const useFormDraftStore = create<FormDraftState>((set, get) => ({
       // The unknown half is re-derived from the STANDING whole — the
       // report order can never clobber unclaimed keys (a mount report
       // after raw-mode edits picks up the raw edit's unknown keys).
+      //
+      // Edge, deliberate: the re-derivation runs against `fields` frozen
+      // at `open()` — a collection-revision (schema) movement while the
+      // draft lives re-partitions against the OLD walk until the draft
+      // resets (the stale-baseline diagnostic names entry-revision
+      // movement only). J3's write lane is the consumer that catches a
+      // schema-moved baseline: its grants bind the exact revision, so a
+      // config/schema edit under a draft surfaces there, never silently.
       const unknown = partitionValues(state.fields, state.draftValues).unknown;
       return {
         knownValues: values,

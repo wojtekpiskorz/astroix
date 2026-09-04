@@ -262,4 +262,23 @@ describe('the mode-switch law', () => {
     store().reportRawText('title: should be ignored');
     expect(store().draftValues).toEqual(BLOG_BASELINE.values);
   });
+
+  it('refreshes the halves at the raw→form transition — no stale-unknown window before the mount report', () => {
+    openBlog();
+    // a raw edit removes the unknown key and rewrites a known one
+    store().setMode('raw');
+    store().reportRawText('title: raw edit');
+    expect(store().parseError).toBeNull();
+    store().setMode('form');
+    // BEFORE any mount report fires: both halves are the partition of
+    // the CURRENT values — the pre-raw unknown half ({custom}) is gone
+    // by construction, not by mount-report timing
+    const state = store();
+    expect(state.unknownPart).toEqual({});
+    expect(state.knownValues).toEqual({ title: 'raw edit' });
+    // an unknown-section edit landing in that window cannot resurrect
+    // the raw edit's removals (the merge base is the fresh known half)
+    store().reportUnknownPart({ added: 'in the window' });
+    expect(store().draftValues).toEqual({ title: 'raw edit', added: 'in the window' });
+  });
 });
