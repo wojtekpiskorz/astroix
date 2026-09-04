@@ -9,14 +9,17 @@ import { clearShellStores } from '../state/shell-stores.ts';
  * amendment 3 — the transition-commit teardown): at commit the client
  * aborts old fetches, closes old SSE, removes old-generation queries,
  * and clears the shell stores — live selection, canvas state, active
- * entry, edit grants, undo state, pending mutations — BEFORE
+ * entry, edit grants, undo state — BEFORE
  * navigation. The order is the contract: navigation is the LAST step,
  * and nothing session-scoped survives it. The clearing list's
  * "scheduled debounces" die here too, but not as a store slot: the
  * navigate step's document replacement kills every pending timer, the
  * consuming hook's unmount cleanup cancels them first, and a fire that
  * raced past both meets the pair-bind anchor clear's `source-drift`
- * refusal.
+ * refusal. "Pending mutations" were never a store slot either (#406's
+ * no-second-book judgment): the honest pending accounting lives in the
+ * write loops' own machines, and none of it survives the document
+ * replacement.
  *
  * The `clear-stores` step's reach includes the FEATURE stores (#372,
  * ruled 2026-09-04): every feature-local zustand store registered with
