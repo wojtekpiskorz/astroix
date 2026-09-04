@@ -52,9 +52,11 @@ const schemasFixture = inspectionFixture('content-schemas.json');
 
 const REVISION = 'f'.repeat(64);
 const NEXT_REVISION = 'e'.repeat(64);
+const THIRD_REVISION = '9'.repeat(64);
 const COLLECTION_REVISION = 'd'.repeat(64);
 const GRANT_TOKEN = 'b'.repeat(48);
 const NEXT_GRANT_TOKEN = 'c'.repeat(48);
+const THIRD_GRANT_TOKEN = '8'.repeat(48);
 
 /** One wire-shaped grant fixture — the issued claim, echoed verbatim. */
 function grantFixture(input?: { readonly sha256?: string; readonly token?: string }): unknown {
@@ -584,6 +586,85 @@ describe('the mounted write loop', () => {
       '[data-astroix-form-field="title"] input',
     ) as HTMLInputElement;
     expect(input.value).toBe('Edited title');
+    await waitFor(
+      () => byTestId(container, 'intent-state').getAttribute('data-intent-state') === 'none',
+    );
+  });
+
+  it('writes TWICE from one pane — the landing reopens the draft, and the follow-on grant carries the second write', async () => {
+    const container = mountPane();
+    openEntry('blog', 'hello-builder');
+    await settleReady(
+      container,
+      contentPayload({ entryGrant: () => grantFixture(), entryRaw: () => RAW_HELLO }),
+    );
+    // the first write lands
+    editTitle(container, 'Edited title');
+    await waitFor(
+      () => byTestId(container, 'intent-state').getAttribute('data-intent-state') === 'ready',
+    );
+    click(byTestId(container, 'write-entry'));
+    await waitFor(() => writeState(container) === 'pending');
+    await actAsync(async () => {
+      wire.resolveEdit(1, NEXT_GRANT_TOKEN);
+    });
+    await waitFor(() => writeState(container) === 'refresh-required');
+    await settleReady(
+      container,
+      contentPayload({
+        entryRevision: () => NEXT_REVISION,
+        entryData: (_collection, id) =>
+          id === 'hello-builder'
+            ? {
+                ...(collectionsFixture.collections[0]?.entries[2]?.data ?? {}),
+                title: 'Edited title',
+              }
+            : undefined,
+        entryGrant: () => grantFixture({ sha256: NEXT_REVISION, token: NEXT_GRANT_TOKEN }),
+        entryRaw: () => RAW_HELLO.replace('Hello builder', 'Edited title'),
+      }),
+    );
+    await waitFor(() => writeState(container) === 'idle');
+    await waitFor(
+      () => byTestId(container, 'intent-state').getAttribute('data-intent-state') === 'none',
+    );
+
+    // THE reopen: the landing cleared the committed draft, and the pane
+    // must have re-opened one on the served truth — a bound draft
+    // again, never the orphaned truth view (display-correct, edit-dead)
+    await waitFor(() => useFormDraftStore.getState().binding !== null);
+
+    // the SECOND write from the same pane: the next edit is admissible,
+    // and the FIRST write's follow-on grant authorizes the dispatch
+    editTitle(container, 'Edited again');
+    await waitFor(
+      () => byTestId(container, 'intent-state').getAttribute('data-intent-state') === 'ready',
+    );
+    click(byTestId(container, 'write-entry'));
+    await waitFor(() => writeState(container) === 'pending');
+    expect(wire.edits).toHaveLength(2);
+    expect(wire.edits[1]?.plan.grant.token).toBe(NEXT_GRANT_TOKEN);
+    await actAsync(async () => {
+      wire.resolveEdit(2, THIRD_GRANT_TOKEN);
+    });
+    await waitFor(() => writeState(container) === 'refresh-required');
+    await settleReady(
+      container,
+      contentPayload({
+        entryRevision: () => THIRD_REVISION,
+        entryData: (_collection, id) =>
+          id === 'hello-builder'
+            ? {
+                ...(collectionsFixture.collections[0]?.entries[2]?.data ?? {}),
+                title: 'Edited again',
+              }
+            : undefined,
+        entryGrant: () => grantFixture({ sha256: THIRD_REVISION, token: THIRD_GRANT_TOKEN }),
+        entryRaw: () => RAW_HELLO.replace('Hello builder', 'Edited again'),
+      }),
+    );
+    await waitFor(() => writeState(container) === 'idle');
+    expect(titleValue(container)).toBe('Edited again');
     await waitFor(
       () => byTestId(container, 'intent-state').getAttribute('data-intent-state') === 'none',
     );

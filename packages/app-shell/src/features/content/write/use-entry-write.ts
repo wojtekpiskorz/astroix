@@ -89,9 +89,10 @@ export function useEntryWrite(view: EntryFormView): EntryWriteControls {
   // paint the pre-write values under the post-write revision, and the
   // pane would never self-correct (the reopen is once). So the loop
   // holds until both moved, the retry below keeps refetching until
-  // they do, and the landing — draft cleared, the form slice's open
-  // effect reopening on the served truth whatever the machine's phase
-  // raced to — is the only reopen there is.
+  // they do, and the landing — the draft cleared, the cleared binding
+  // re-arming the form slice's open effect to reopen on the served
+  // truth (whatever the machine's phase raced to) — is the only
+  // reopen there is.
   const awaitedRef = useRef<{ readonly revision: string; readonly values: unknown } | null>(null);
   const [refreshAttempts, setRefreshAttempts] = useState(0);
   const servedProjectionMoved = (() => {

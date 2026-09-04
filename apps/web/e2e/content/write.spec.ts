@@ -163,7 +163,7 @@ function expectedTitleWrite(raw: string, nextTitle: string): string {
 
 test.describe.configure({ mode: 'serial' });
 
-test('a form write lands byte-exact through the grant, refreshes the pane, and the canvas follows', async ({
+test('form writes land byte-exact through the grant — TWICE from one pane — and the canvas follows', async ({
   page,
 }) => {
   test.setTimeout(300_000);
@@ -215,11 +215,32 @@ test('a form write lands byte-exact through the grant, refreshes the pane, and t
   // the routes family refetched after the commit (the loop's invalidation)
   expect(commands().inspects('routes')).toBeGreaterThan(routesBefore.count);
 
-  // the wire law: the one write carried a grant, never a path
+  // THE double write from ONE pane: the landing cleared the committed
+  // draft, and the pane must have REOPENED on the served truth — the
+  // next edit is admissible again (a pane that stayed cleared would
+  // swallow the report and never arm the gesture), and the refreshed
+  // inspection's grant at the new revision authorizes the dispatch
+  const afterFirst = after;
+  await titleInput(page).fill('Hello builder (twice)');
+  await expect(page.getByTestId('intent-state')).toHaveAttribute('data-intent-state', 'ready');
+  await expect(writeButton(page)).toBeEnabled();
+  await writeButton(page).click();
+  await expect(writeState(page)).toHaveAttribute('data-write-state', /pending|refresh-required/);
+  await expect(writeState(page)).toHaveAttribute('data-write-state', 'idle', { timeout: 60_000 });
+
+  // BYTE-EXACT twice over: the oracle over the FIRST write's bytes
+  const afterTwice = await entryBytes();
+  expect(afterTwice).toBe(expectedTitleWrite(afterFirst, 'Hello builder (twice)'));
+  await expect(titleInput(page)).toHaveValue('Hello builder (twice)');
+  await expect(page.getByTestId('intent-state')).toHaveAttribute('data-intent-state', 'none');
+
+  // the wire law: the two writes each carried a grant, never a path
   const writes = commands().writes;
-  expect(writes.length).toBe(1);
-  expect(writes[0]?.body).toContain('"grant"');
-  expect(writes[0]?.body).not.toMatch(/"(\/Users\/|\/private\/|\/tmp\/|file:\/\/)/);
+  expect(writes.length).toBe(2);
+  for (const write of writes) {
+    expect(write.body).toContain('"grant"');
+    expect(write.body).not.toMatch(/"(\/Users\/|\/private\/|\/tmp\/|file:\/\/)/);
+  }
 
   await restoreIdle(page);
 });
@@ -236,7 +257,7 @@ test('a raw write lands through the same grant-bound loop', async ({ page }) => 
   await expect(pane(page)).toHaveAttribute('data-form-mode', 'raw');
   const text = await rawText(page).inputValue();
   await rawText(page).fill(
-    text.replace('title: Hello builder (edited)', 'title: Raw-written title'),
+    text.replace('title: Hello builder (twice)', 'title: Raw-written title'),
   );
   await expect(page.getByTestId('intent-state')).toHaveAttribute('data-intent-state', 'ready');
   await writeButton(page).click();
