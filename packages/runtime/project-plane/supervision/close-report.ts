@@ -43,7 +43,13 @@ export interface SupervisionCloseAccounting {
   readonly managedAstroReaped: boolean;
   /** Every aborted readiness probe settled within the stop bound. */
   readonly probesSettled: boolean;
-  /** Which children ignored SIGTERM and had to be SIGKILLed — escalation with a successful reap is still complete cleanup. */
+  /**
+   * Which children were ended by SIGKILL — the stop ladder's escalation
+   * after an ignored SIGTERM, or the crash law's synchronous sibling
+   * reap (#365: a worker crash kills the managed dev server in the
+   * terminal transition's own tick, no TERM rung). Escalation with a
+   * successful reap is still complete cleanup.
+   */
   readonly killEscalations: readonly SupervisionChild[];
 }
 

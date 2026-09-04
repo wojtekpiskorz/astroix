@@ -65,7 +65,15 @@ export type { SupervisedWorkerWire } from './worker-wire.ts';
  * - **Crash is terminal** — either child exiting before a caller stop
  *   terminates the run, revokes admission, and cleans the SIBLING
  *   without auto-restart: nothing here re-spawns, ever; a crashed plane
- *   stays dead by construction (the next run is a new supervisor).
+ *   stays dead by construction (the next run is a new supervisor). On a
+ *   worker crash the managed dev server is SIGKILLed in the terminal
+ *   transition's own tick — before any await (#365) — so the reap's
+ *   decisive rung is durable against the supervisor's own degradation:
+ *   the crash path is exactly where the supervisor's process may be
+ *   torn down mid-close, and every awaited rung it had not reached yet
+ *   would die with it. A crashed plane dies together; a sibling that
+ *   survived its supervisor would live on holding Astro's PID-checked
+ *   dev lock and poison every later activation of that root.
  * - **Normal stop order** (the ticket's contract): the worker's IPC stop
  *   closes its runners, watchers, timers, and composition first; then
  *   the supervisor's own probe sockets settle; then BOTH exact children
@@ -370,6 +378,18 @@ export function createProjectPlaneSupervisor(
   async function runClose(
     reason: SupervisionCloseReport['reason'],
   ): Promise<SupervisionCloseReport> {
+    // The crash law's sibling reap (#365), delivered in the terminal
+    // transition's own synchronous tick — before any await. The worker's
+    // exit event and this kill share one event-loop callback, so nothing
+    // between the observation and the signal can truncate the reap: not
+    // a later step's failure, not a caller's exit, not the supervisor's
+    // own degraded machinery on the crash path. SIGKILL because it is
+    // the one rung the sibling cannot outlive its supervisor through —
+    // a crashed plane owes no graceful window, and Astro's dev lock is
+    // PID-liveness-checked (a dead holder never blocks re-activation;
+    // a live orphan always does).
+    const devServerCrashKill = reason === 'worker-crash';
+    if (devServerCrashKill) devServerChild.kill('SIGKILL');
     const gracefulExited = await gracefulWorkerClose(reason);
     const probesSettled = await settleProbes();
     const [workerTermination, devServerTermination] = await Promise.all([
@@ -384,6 +404,7 @@ export function createProjectPlaneSupervisor(
         gone: devServerGone,
         termGraceMs: bounds.termGraceMs,
         killReapMs: bounds.killReapMs,
+        crashKilled: devServerCrashKill,
       }),
     ]);
     workerChild.removeListener('message', onWorkerMessage);
@@ -506,9 +527,20 @@ async function terminateAndReap(input: {
   readonly gone: Promise<void>;
   readonly termGraceMs: number;
   readonly killReapMs: number;
+  /**
+   * The crash law's sibling reap (#365): the SIGKILL was already
+   * delivered synchronously at the crash observation — this ladder runs
+   * no TERM rung and reports the escalation it inherited (the report
+   * must never pretend a graceful TERM). Only the exit observation
+   * remains, bounded as always; the re-sent SIGKILL past the grace is
+   * idempotent and unignorable.
+   */
+  readonly crashKilled?: boolean;
 }): Promise<{ readonly reaped: boolean; readonly escalated: boolean }> {
-  input.child.kill('SIGTERM');
-  if (await raceBound(input.gone, input.termGraceMs)) return { reaped: true, escalated: false };
+  if (input.crashKilled !== true) input.child.kill('SIGTERM');
+  if (await raceBound(input.gone, input.termGraceMs)) {
+    return { reaped: true, escalated: input.crashKilled === true };
+  }
   input.child.kill('SIGKILL');
   const reaped =
     input.killReapMs > 0
