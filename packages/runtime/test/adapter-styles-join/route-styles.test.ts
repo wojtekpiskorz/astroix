@@ -1,5 +1,6 @@
 import { EventEmitter } from 'node:events';
-import { readFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -26,6 +27,8 @@ const ROUTE_COMPONENT = 'src/pages/index.astro';
 const DEV_CSS_MODULE = `virtual:astro:dev-css:${ROUTE_COMPONENT}`;
 
 const SEAM_DEV_CSS_IMPORT = 'virtual:astro:dev-css module import for the active route component';
+const SEAM_SOURCE_WALK =
+  'styles join source-walk correspondence (compiled scoped modules ↔ walked static sources)';
 
 interface FakeComposition {
   readonly server: ViteServerLike;
@@ -240,4 +243,179 @@ describe('createRouteStylesJoin (composition, over the real fixture sources)', (
       },
     });
   });
+
+  it('rejects the custom-srcDir world instead of minting a silent revision (#302)', async () => {
+    // A staged custom-srcDir project (the stagedFixtureCopy idiom — the
+    // canonical fixture is frozen): the route lives under lib/ with its
+    // styles there, while src/ exists and holds a DIFFERENT styled page —
+    // the quiet arm of the defect, where the src/-rooted walk used to
+    // serve the src-only all-null payload and mint a revision silently.
+    // The #302 cross-check rejects, naming the real condition.
+    const world = await stageCustomSrcDirWorld();
+    try {
+      const joiner = createRouteStylesJoin({ server: world.server, seams: world.seams });
+      const rejection = await joiner.join({ routeComponent: LIB_ROUTE.component }).then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+      expect(rejection).toBeInstanceOf(AdapterError);
+      const error = rejection as AdapterError;
+      expect(error.code).toBe('seam-rejected');
+      expect(error.details).toMatchObject({
+        seam: SEAM_SOURCE_WALK,
+        seamClass: 'fail-closed private',
+        expected: 'a static scoped block for at least one file the compiled scoped modules name',
+        observed:
+          'compiled scoped modules correlating with no static scoped block (the source walk and the compiler observed different source trees)',
+      });
+
+      // The failed pass minted nothing: the first successful join over
+      // the same joiner — the healthy src-rooted route in the same world
+      // — starts at revision 1, and its payload is exactly the walked
+      // tree's records with the compiled selector joined.
+      world.setDevCssImport(async () => ({
+        css: new Set([{ id: SRC_MODULE_ID, url: SRC_STYLE_URL, content: 'never read' }]),
+      }));
+      const healthy = await joiner.join({ routeComponent: SRC_ROUTE.component });
+      expect(healthy.revision).toBe(1);
+      expect(healthy.records).toHaveLength(1);
+      expect(healthy.records[0]).toMatchObject({
+        selector: '.src-title',
+        file: 'src/pages/index.astro',
+        effectiveSelector: '.src-title[data-astro-cid-src]',
+      });
+    } finally {
+      await world.dispose();
+    }
+  });
 });
+
+// ——— the staged custom-srcDir world (#302) ———
+
+const LIB_ROUTE = {
+  component: 'lib/pages/index.astro',
+  contents: '<style>.lib-title { color: #1e293b; }</style>',
+  compiledCss: '.lib-title[data-astro-cid-lib] { color: #1e293b; }',
+};
+const SRC_ROUTE = {
+  component: 'src/pages/index.astro',
+  contents: '<style>.src-title { color: red; }</style>',
+  compiledCss: '.src-title[data-astro-cid-src] { color: red; }',
+};
+const SRC_MODULE_ID = `/abs/proj/${SRC_ROUTE.component}?astro&type=style&index=0&lang.css`;
+const SRC_STYLE_URL = `/${SRC_ROUTE.component}?astro&type=style&index=0&lang.css`;
+
+interface StagedCustomSrcDirWorld {
+  readonly server: ViteServerLike;
+  readonly seams: ProjectRuntimeSeams;
+  /** Overrides the dev-css module set the next pass observes. */
+  setDevCssImport(impl: () => Promise<unknown>): void;
+  dispose(): Promise<void>;
+}
+
+/**
+ * Stages a temp project whose route lives under a custom `lib/` srcDir
+ * while `src/` also exists with its own styled page, plus composition
+ * stand-ins (the file's fakeComposition idiom) that serve either
+ * route's page and scoped style module — the initial dev-css set names
+ * the lib module, the world the defect mints silently over.
+ */
+async function stageCustomSrcDirWorld(): Promise<StagedCustomSrcDirWorld> {
+  const projectRoot = await mkdtemp(join(tmpdir(), 'astroix-302-srcdir-'));
+  for (const route of [LIB_ROUTE, SRC_ROUTE]) {
+    await mkdir(join(projectRoot, route.component, '..'), { recursive: true });
+    await writeFile(join(projectRoot, route.component), route.contents);
+  }
+
+  const routes = [LIB_ROUTE, SRC_ROUTE];
+  const styleUrlOf = (route: (typeof routes)[number]) =>
+    `/${route.component}?astro&type=style&index=0&lang.css`;
+  const resolvedIdOf = (route: (typeof routes)[number]) =>
+    `/abs/proj/${route.component}?astro&type=style&index=0&lang.css`;
+  const styleCodeOf = (route: (typeof routes)[number]) =>
+    `const __vite__css = ${JSON.stringify(route.compiledCss)}`;
+  // One node object per route — the ownership proof reads the SAME node
+  // under the resolved id and the url (identity, not shape).
+  const nodes = new Map(
+    routes.map((route) => [route, { transformResult: { code: styleCodeOf(route) } }]),
+  );
+
+  const devCssImportRef: { current: () => Promise<unknown> } = {
+    current: async () => ({
+      css: new Set([
+        {
+          id: `/abs/proj/${LIB_ROUTE.component}?astro&type=style&index=0&lang.css`,
+          url: styleUrlOf(LIB_ROUTE),
+          content: 'never read',
+        },
+      ]),
+    }),
+  };
+  const emitter = new EventEmitter();
+  const runner = {
+    import: (id: string) =>
+      id === `virtual:astro:dev-css:${LIB_ROUTE.component}` ||
+      id === `virtual:astro:dev-css:${SRC_ROUTE.component}`
+        ? devCssImportRef.current()
+        : Promise.reject(new Error(`unexpected import ${id}`)),
+    close: async () => {},
+    isClosed: () => true,
+  };
+  const client = {
+    transformRequest: async (url: string): Promise<{ code: string } | null> => {
+      if (routes.some((route) => url === `/${route.component}`)) {
+        return { code: 'export default {}' };
+      }
+      const styled = routes.find((route) => url === styleUrlOf(route));
+      return styled === undefined ? null : { code: styleCodeOf(styled) };
+    },
+    moduleGraph: {
+      getModuleById: (id: string): unknown => {
+        const owner = routes.find((route) => resolvedIdOf(route) === id);
+        return owner === undefined ? undefined : nodes.get(owner);
+      },
+      getModuleByUrl: async (url: string): Promise<unknown> => {
+        const owner = routes.find((route) => styleUrlOf(route) === url);
+        return owner === undefined ? null : nodes.get(owner);
+      },
+    },
+    pluginContainer: {
+      resolveId: async (url: string): Promise<{ id: string } | null> => {
+        const owner = routes.find((route) => styleUrlOf(route) === url);
+        return owner === undefined ? null : { id: resolvedIdOf(owner) };
+      },
+    },
+  };
+  const server: ViteServerLike = {
+    environments: {
+      ssr: {
+        moduleGraph: { getModuleById: () => null, getModuleByUrl: () => null },
+        pluginContainer: { resolveId: async () => null },
+        hot: { api: { outsideEmitter: emitter } },
+      },
+      client,
+    },
+    watcher: { on: () => ({}) },
+    close: async () => {},
+  };
+  const seams: ProjectRuntimeSeams = {
+    certifiedPair: { astro: '7.2.10', vite: '8.2.2' },
+    projectRoot,
+    getViteConfig: () => async () => ({}),
+    vite: {
+      createServer: async () => server,
+      createServerModuleRunner: () => runner,
+    },
+    getDevCSSModuleName: (componentId: string) => `virtual:astro:dev-css:${componentId}`,
+  };
+  return {
+    server,
+    seams,
+    setDevCssImport: (impl: () => Promise<unknown>) => {
+      devCssImportRef.current = impl;
+    },
+    dispose: async () => {
+      await rm(projectRoot, { recursive: true, force: true });
+    },
+  };
+}
