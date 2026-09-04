@@ -14,13 +14,13 @@ import { WINDOW_SECURITY_PREFERENCES } from '../../../apps/desktop/src/main/secu
  * own gestures: opening the rule editor, typing a declaration value
  * through the real input (the native setter + input event, exactly
  * the browser's own change), and observing the write badge and the
- * canvas's COMPUTED style (HMR's reflection) straight from the live
- * documents.
+ * canvas document's own stylesheet tags (HMR's arrival face) straight
+ * from the live documents.
  *
  * Protocol: one JSON config on argv[2]; one `astroix-css-harness: <json>`
  * line per report on stdout; one JSON command per stdin line:
- * `activate`, `select {selector}`, `panel`, `edit {row, prop, value}`,
- * `status`, `canvas-computed {selector, property}`, `undo`, `quit`.
+ * `activate`, `select {selector}`, `edit {row, prop, value}`,
+ * `status`, `canvas-hmr {needle}`, `quit`.
  */
 
 interface HarnessConfig {
@@ -76,16 +76,9 @@ function report(event: Record<string, unknown>): void {
 type HarnessCommand =
   | { readonly op: 'activate' }
   | { readonly op: 'select'; readonly selector: string }
-  | { readonly op: 'panel' }
   | { readonly op: 'edit'; readonly row: number; readonly prop: string; readonly value: string }
   | { readonly op: 'status' }
-  | {
-      readonly op: 'canvas-computed';
-      readonly selector: string;
-      readonly property: string;
-    }
   | { readonly op: 'canvas-hmr'; readonly needle: string }
-  | { readonly op: 'undo' }
   | { readonly op: 'quit' };
 
 /** One bounded step-wise wait over an executeJavaScript probe. */
@@ -249,36 +242,6 @@ async function main(): Promise<void> {
         report({ kind: 'selected', selection: selected });
         return;
       }
-      case 'panel': {
-        const panel = await pollWebContents(
-          win.webContents,
-          `(() => {
-            const panel = document.querySelector('[data-testid="css-panel"]');
-            if (panel === null) return { state: 'no-panel' };
-            const stateEl = panel.querySelector('[data-testid="css-rules-state"]');
-            const rows = [...panel.querySelectorAll('[data-testid="css-rule"]')].map((row) => ({
-              selector: row.getAttribute('data-css-selector'),
-              file: row.getAttribute('data-css-file'),
-            }));
-            const state = stateEl !== null
-              ? stateEl.getAttribute('data-state')
-              : panel.querySelector('[data-testid="css-rule-list"]') !== null
-                ? 'ready'
-                : panel.querySelector('[data-testid="css-rules-diagnostic"]') !== null
-                  ? 'diagnostic'
-                  : 'unknown';
-            return { state, rows, editable: panel.querySelectorAll('input, textarea, select').length };
-          })()`,
-          (value) => {
-            const state = (value as { state?: string } | null)?.state;
-            return state !== undefined && state !== 'loading';
-          },
-          'the CSS panel settling',
-          150_000,
-        );
-        report({ kind: 'panel', panel });
-        return;
-      }
       case 'edit': {
         // the REAL edit gesture: open the row's editor, type the value
         // through the input's native setter + input event — exactly the
@@ -371,36 +334,6 @@ async function main(): Promise<void> {
           30_000,
         );
         report({ kind: 'canvas-hmr', hmr, needle: command.needle });
-        return;
-      }
-      case 'canvas-computed': {
-        const selector = JSON.stringify(command.selector);
-        const property = JSON.stringify(command.property);
-        const computed = await pollWebContents(
-          win.webContents,
-          `(() => {
-            const frame = document.querySelector('[data-astroix-canvas] iframe');
-            const doc = frame && frame.contentDocument;
-            const element = doc && doc.querySelector(${selector});
-            if (element === null || element === undefined) return { present: false };
-            return { present: true, value: window.getComputedStyle(element)[${property}] };
-          })()`,
-          (value) => (value as { present?: boolean } | null)?.present === true,
-          `the canvas computed ${command.property}`,
-          30_000,
-        );
-        report({ kind: 'canvas-computed', computed, property: command.property });
-        return;
-      }
-      case 'undo': {
-        const clicked = await pollWebContents(
-          win.webContents,
-          `(() => { const button = document.querySelector('[data-testid="css-undo"]'); if (button === null) return 'missing'; button.click(); return 'clicked'; })()`,
-          (value) => value === 'clicked',
-          'the undo button',
-          30_000,
-        );
-        report({ kind: 'undo-clicked', click: clicked });
         return;
       }
       case 'quit': {

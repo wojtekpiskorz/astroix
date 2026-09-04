@@ -11,8 +11,13 @@
  * holds no domain knowledge — no plan, no grant, no target.
  *
  * The reset law: `clear()` cancels every pending timer at once — the
- * transition-commit teardown's `debounces` clearing step calls it, so a
- * document being replaced never fires a dead session's write.
+ * consuming hook's UNMONT cleanup calls it (the document's death kills
+ * every pending pause before the replacement navigates), and a fire
+ * that raced past the teardown meets the consumer's pair-bind anchor
+ * clear, which refuses the dead session's write as `source-drift`.
+ * There is no sequencer step for it: the scheduler is loop-local
+ * accounting (`pendingKeys()`), never mirrored into the shell's
+ * edit-session slots — one source of truth, nothing to drift.
  */
 
 /** One scheduled dispatch's handle. */
@@ -33,7 +38,7 @@ export interface DebounceScheduler {
   cancel(key: string): void;
   /** Cancels every pending fire — the reset's clearing step. */
   clear(): void;
-  /** The keys with a pending fire (the accounting the edit-session store mirrors). */
+  /** The keys with a pending fire — the one accounting of pending pauses. */
   pendingKeys(): readonly string[];
 }
 

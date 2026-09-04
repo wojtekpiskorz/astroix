@@ -54,7 +54,6 @@ export {
 export {
   type HeldGrant,
   type PendingMutation,
-  type ScheduledDebounce,
   type UndoRecord,
   useEditSessionStore,
 } from '../state/edit-session-store';

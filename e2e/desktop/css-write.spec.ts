@@ -17,7 +17,9 @@ import { buildHarnessMain, freePort, HarnessRun, REPO } from './harness-kit.ts';
  * child (the write-executor child included — the lane's composition
  * forks it at the first accepted edit). The HMR reflection is the
  * project's OWN vite pipeline observed in the live canvas document's
- * computed style — nothing synthetic.
+ * stylesheet tags — nothing synthetic; the computed-cascade reflection
+ * is the WEB battery's face of the same law (Chromium skips style
+ * recalc for occluded harness windows).
  *
  * Lane gate, never release evidence (ADR-0008) — runs behind `npm run
  * test:desktop`'s config like the other real-Electron lanes.

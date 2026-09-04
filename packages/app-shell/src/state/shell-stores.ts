@@ -21,7 +21,6 @@ export interface ShellStoreSnapshot {
   readonly activeEntry: boolean;
   readonly grants: number;
   readonly undo: number;
-  readonly debounces: number;
   readonly pendingMutations: number;
 }
 
@@ -51,7 +50,6 @@ export function shellStoreSnapshot(): ShellStoreSnapshot {
     activeEntry: app.activeEntry !== null,
     grants: edit.grants.length,
     undo: edit.undo.length,
-    debounces: edit.debounces.length,
     pendingMutations: edit.pendingMutations.length,
   };
 }

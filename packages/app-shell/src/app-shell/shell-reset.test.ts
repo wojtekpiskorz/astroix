@@ -94,7 +94,6 @@ describe('composeShellReset', () => {
     const edit = useEditSessionStore.getState();
     edit.holdGrant(FIRST, { token: 'grant' });
     edit.pushUndo(FIRST, { token: 'undo' });
-    edit.scheduleDebounce(FIRST, { key: 'k', dueAtMs: 300 });
     edit.trackPendingMutation(FIRST, { key: 'm' });
     expect(shellStoreSnapshot().grants).toBe(1);
 
@@ -112,13 +111,12 @@ describe('composeShellReset', () => {
     expect(eventsClosed).toBe(1); // 2. old SSE closed
     expect(sessionQueryCount(queryClient)).toBe(0); // 3. old-generation queries removed
     expect(shellStoreSnapshot()).toEqual({
-      // 4. the seven store fields cleared
+      // 4. the six store fields cleared
       selection: false,
       canvas: false,
       activeEntry: false,
       grants: 0,
       undo: 0,
-      debounces: 0,
       pendingMutations: 0,
     });
     expect(gate.isCurrent()).toBe(false); // the state belt closed with the stores
@@ -262,7 +260,6 @@ describe('the feature-store wing (#372 — the registration registry)', () => {
       activeEntry: false,
       grants: 0,
       undo: 0,
-      debounces: 0,
       pendingMutations: 0,
     });
     expect(useDiscoveryStore.getState().collapsedFolders.size).toBe(0);

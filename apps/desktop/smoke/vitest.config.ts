@@ -19,8 +19,9 @@ import { defineConfig } from 'vitest/config';
  * project document → canvas selection → the read-only CSS panel). The
  * CSS auto-write lane (#250, I2) joins the same way: the real edit
  * gesture through the real rule editor, the real grant-bound
- * write-executor child, and the canvas's own computed style as the
- * HMR reflection.
+ * write-executor child, and the canvas document's own stylesheet tags
+ * as the HMR reflection (the computed cascade is the web battery's
+ * face of that law — occluded harness windows skip style recalc).
  */
 export default defineConfig({
   test: {

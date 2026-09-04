@@ -477,6 +477,62 @@ describe('the CSS auto-write loop — the frozen world', () => {
     expect(wire.edits.length).toBe(1);
   });
 
+  it('a second edit queued when the conflict landed re-arms the refused machine and converges — never the silent bound stall', async () => {
+    const container = mountPanel();
+    const served = servedPayload();
+    await landReady(container, served);
+    await openEditor(container);
+
+    // the first edit dispatches and is held in flight; the second edit
+    // (another declaration — its OWN pause key) settles its pause while
+    // the first is still pending, so its queued dispatch arrives at the
+    // machine exactly when the first edit's conflict does
+    typeInto(declInput(container, 'font-size'), '3.5rem');
+    await waitFor(() => wire.edits.length === 1);
+    typeInto(declInput(container, 'letter-spacing'), '0.3em');
+
+    // the first edit settles as a revision conflict: the stable refused
+    // state, and the reload resolved onto the (unchanged) served truth
+    await actAsync(async () => {
+      wire.failEdit('revision-conflict', { currentSha256: 'b'.repeat(64) });
+    });
+    await waitFor(() => writeState(container) === 'conflict');
+    await waitFor(() => wire.openCount() > 0);
+    await actAsync(async () => {
+      wire.resolveStyles(servedPayload({ revision: 4 }).payload, 4);
+    });
+
+    // the queued second edit RE-ARMS the refused machine (the fire gate
+    // holds schedule()'s own law for arriving work) and dispatches as
+    // the new attempt — waitFor's own 2 s bound is the stall pin: the
+    // convergence is INSIDE it, never the 15 s quiet bound dying
+    // silently with the badge stuck on the conflict
+    await waitFor(() => wire.edits.length === 2);
+    const second = wire.edits[1];
+    if (second === undefined) throw new Error('no second edit captured');
+    expect(second.plan.operation).toBe('splice');
+    if (second.plan.operation !== 'splice') return;
+    expect(second.plan.replacement).toBe('letter-spacing: 0.3em;');
+
+    // the honest convergence: the re-armed edit commits, its refresh
+    // lands on the moved truth, and the badge settles quiet
+    await actAsync(async () => {
+      wire.resolveEdit(1);
+    });
+    await waitFor(() => wire.openCount() > 0);
+    const from = cssSplice.baseline.contents.indexOf('letter-spacing: -0.02em;');
+    const nextRaw = spliceText(cssSplice.baseline.contents, {
+      start: from,
+      end: from + 'letter-spacing: -0.02em;'.length,
+      replacement: 'letter-spacing: 0.3em;',
+    });
+    await actAsync(async () => {
+      wire.resolveStyles(servedPayload({ revision: 5, homeRaw: nextRaw }).payload, 5);
+    });
+    await waitFor(() => writeState(container) === 'quiet');
+    expect(wire.edits.length).toBe(2);
+  });
+
   it('a grant death refuses without writing and reloads the served facts', async () => {
     const container = mountPanel();
     const served = servedPayload();

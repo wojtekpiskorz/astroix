@@ -50,7 +50,12 @@ import { type CssWriteStatus, cssWriteStatusOf } from './write-status.ts';
  * - **Conflicts are stable** — a revision conflict keeps the machine
  *   in its conflict state (the disk-truth SHA surfaced), clears undo
  *   (the stack's baselines died), and reloads the served truth — the
- *   next edit is a new attempt over fresh facts.
+ *   next edit is a new attempt over fresh facts, and "next edit"
+ *   includes one already queued when the conflict landed: arriving
+ *   work re-arms the refused machine at the fire gate exactly as a
+ *   fresh schedule does (J3's retry-recovery law), so the queued
+ *   intent converges honestly instead of stalling the quiet bound out
+ *   against a phase only a reset can leave.
  * - **Undo is a write** — the popped inverse splice dispatches through
  *   this same loop (the current grant, the same proofs), never a
  *   client-side trick; it is generation-local and dies at the pair
@@ -396,17 +401,47 @@ export function useCssAutoWrite(payload: BoundStylesPayload | null): CssAutoWrit
     setScheduledCount(scheduler.pendingKeys().length);
   }
 
+  /**
+   * Re-arms a refused machine for arriving queued work — `schedule()`'s
+   * own law for a new edit (J3's retry-recovery), held at the fire gate
+   * too: a stable `rejected` is a settled refusal, not busyness, and a
+   * quiet wait on it can never resolve early (only a reset leaves that
+   * phase), so without the re-arm a queued intent would stall the bound
+   * out and die. The reset makes the queued dispatch the new attempt it
+   * is.
+   */
+  function rearmRefusedMachine(): void {
+    if (useCssWriteStore.getState().write.phase === 'rejected') {
+      dispatchEvent({ type: 'reset' });
+    }
+  }
+
+  /**
+   * The busy gate's honest refusal: a machine still not quiet past the
+   * bound cannot mint a `submitted` (legal only from `idle`), so a bare
+   * `refuse('busy')` there is a dropped event pair, never a badge. The
+   * reset first — then the refusal lands and the bounded give-up is
+   * reported, not silent.
+   */
+  function refuseBusy(): void {
+    dispatchEvent({ type: 'reset' });
+    refuse('busy');
+  }
+
   /** Fires one scheduled key — the queue serializes, the intent reads live. */
   function fireKey(key: string): void {
     // the fired key is already gone from the scheduler's table — the
     // derived count reads exactly the pauses that remain
     syncScheduledCount();
     void queue.enqueue(async () => {
+      rearmRefusedMachine();
       await waitForQuiet(QUIET_BOUND_MS);
-      if (useCssWriteStore.getState().write.phase !== 'idle') return refuse('busy');
       const intent = intentsRef.current.get(key);
+      // the intent leaves the table on EVERY exit path — a dropped
+      // intent never survives to shadow a later same-key schedule
       intentsRef.current.delete(key);
       if (intent === undefined) return;
+      if (useCssWriteStore.getState().write.phase !== 'idle') return refuseBusy();
       await runIntent(intent);
     });
   }
@@ -452,8 +487,9 @@ export function useCssAutoWrite(payload: BoundStylesPayload | null): CssAutoWrit
     if (entry === null) return;
     useCssUndoStore.getState().pop(sessionRef.current.ref);
     void queue.enqueue(async () => {
+      rearmRefusedMachine();
       await waitForQuiet(QUIET_BOUND_MS);
-      if (useCssWriteStore.getState().write.phase !== 'idle') return refuse('busy');
+      if (useCssWriteStore.getState().write.phase !== 'idle') return refuseBusy();
       const anchor = useCssAnchorStore.getState().anchors.get(entry.file);
       if (anchor === undefined) {
         refuse('no-facts');

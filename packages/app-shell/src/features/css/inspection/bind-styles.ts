@@ -1,4 +1,5 @@
 import type { IndexPayloadRecord } from '../../../../../core/src/matcher.ts';
+import { asRecord, nonEmptyString } from '../../../editor/edit-drain/grant-claim.ts';
 import { bindCssWriteFacts, type CssWriteFact } from '../editing/write-facts.ts';
 
 /**
@@ -55,16 +56,6 @@ export function isSanitizedProjectFile(value: string): boolean {
     !/^[A-Za-z]:/.test(value) &&
     !value.includes('//')
   );
-}
-
-/** Narrows one unknown to a plain record. */
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : null;
-}
-
-/** One nonempty string field. */
-function nonEmptyString(value: unknown): string | null {
-  return typeof value === 'string' && value.length > 0 ? value : null;
 }
 
 /** One nonnegative integer field. */
