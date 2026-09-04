@@ -59,7 +59,7 @@ type SessionSnapshot = {
 ### 5. Browser and client reset semantics
 
 - Browser-callable global control operations are exactly `listProjects()`, `activate(projectKey)`, `deactivate()` — launcher and authoritative project target only. Project inspection and editing exist only on the active project host with its current `SessionRef` and capability.
-- TanStack Query keys start with `['astroix', runtimeEpoch, generation, ...]`. At commit the client aborts old fetches, closes old SSE, removes old-generation queries, and clears live DOM selection, canvas state, active entry, edit grants, undo state, scheduled debounces, and pending mutations before navigating.
+- TanStack Query keys start with `['astroix', runtimeEpoch, generation, ...]`. At commit the client aborts old fetches, closes old SSE, removes old-generation queries, and clears live DOM selection, canvas state, active entry, edit grants, and undo state before navigating. *Amended 2026-09-05 (owner ruling on [#424](https://github.com/wojtekpiskorz/astroix/issues/424)): the enumeration originally also named `scheduled debounces` and `pending mutations` — neither exists as a shell slot (the shared seam's scheduler is loop-local, dying with the document; pending-mutation accounting lives in the write loops' own machines per [#406](https://github.com/wojtekpiskorz/astroix/issues/406)'s no-second-book judgment).*
 - A retired project host returns `421 Misdirected Request`. An old tab stays invalid after an A-to-B-to-A cycle (new generation, host capability, client binding). Menu actions capture the `SessionRef` visible at creation and reject if stale at execution. App shell, API, and event responses use `Cache-Control: no-store`.
 
 ### 6. Edit authority
