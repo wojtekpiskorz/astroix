@@ -1006,7 +1006,10 @@ async function writeExecutorFor(
   try {
     await handle.ready;
   } catch {
-    inputs.writeExecutors.delete(key);
+    // identity-guarded: a concurrent first-write may have replaced this
+    // entry — deleting unconditionally would orphan the winner's live
+    // handle (untracked for close, lease-contentious for respawns)
+    if (inputs.writeExecutors.get(key) === handle) inputs.writeExecutors.delete(key);
     await handle.kill().catch(() => {});
     return null;
   }
