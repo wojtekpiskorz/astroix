@@ -30,6 +30,12 @@ import { activateButton, PROJECT_APP_URL, restoreIdle } from './spec-helpers.ts'
  * SERIAL like the lane's other batteries: one control plane, one
  * supervisor-global active session — every leg restores the idle state
  * for what follows.
+ *
+ * The landing and observation waits are load-shaped (#392): the canvas
+ * renders the young dev server's first compile and the activation
+ * commits spawn whole planes — budgets grow (120s transitions, 30s
+ * landing/render expects, #389's 30s polls), asserted values never
+ * change.
  */
 
 /** The canvas's frame locator — the plain iframe itself. */
@@ -51,12 +57,12 @@ test('the canvas shares the project origin with direct contentDocument access at
 }) => {
   test.setTimeout(180_000);
   await page.goto('/__astroix/app/');
-  await expect(page.getByTestId('session-label')).toHaveText('idle');
+  await expect(page.getByTestId('session-label')).toHaveText('idle', { timeout: 30_000 });
   await activateButton(page, 0).click();
-  await page.waitForURL(PROJECT_APP_URL);
+  await page.waitForURL(PROJECT_APP_URL, { timeout: 120_000 });
   // The canvas observed its first project document: the gate opens.
-  await expect(page.getByTestId('canvas-origin-state')).toHaveText('project');
-  await expect(page.getByTestId('canvas-inspection')).toHaveText('enabled');
+  await expect(page.getByTestId('canvas-origin-state')).toHaveText('project', { timeout: 30_000 });
+  await expect(page.getByTestId('canvas-inspection')).toHaveText('enabled', { timeout: 30_000 });
 
   const origin = new URL(page.url()).origin;
 
@@ -94,8 +100,10 @@ test('the canvas shares the project origin with direct contentDocument access at
     .toBe('Astroix fixture');
 
   // The shell surfaces the same observed URL.
-  await expect(page.getByTestId('canvas-url')).toHaveText(`${origin}/`);
-  await expect(canvas(page).locator('.hero-title')).toHaveText('Astroix fixture');
+  await expect(page.getByTestId('canvas-url')).toHaveText(`${origin}/`, { timeout: 30_000 });
+  await expect(canvas(page).locator('.hero-title')).toHaveText('Astroix fixture', {
+    timeout: 30_000,
+  });
 
   // Restore the idle state for the next leg.
   await restoreIdle(page);
@@ -104,17 +112,21 @@ test('the canvas shares the project origin with direct contentDocument access at
 test('navigation follows natural routes and every load is observed', async ({ page }) => {
   test.setTimeout(180_000);
   await page.goto('/__astroix/app/');
-  await expect(page.getByTestId('session-label')).toHaveText('idle');
+  await expect(page.getByTestId('session-label')).toHaveText('idle', { timeout: 30_000 });
   await activateButton(page, 0).click();
-  await page.waitForURL(PROJECT_APP_URL);
+  await page.waitForURL(PROJECT_APP_URL, { timeout: 120_000 });
   const origin = new URL(page.url()).origin;
-  await expect(page.getByTestId('canvas-url')).toHaveText(`${origin}/`);
+  await expect(page.getByTestId('canvas-url')).toHaveText(`${origin}/`, { timeout: 30_000 });
 
   // The canvas's own address control navigates a natural route.
   await page.getByTestId('canvas-address').fill('/blog/hello-builder');
   await page.getByTestId('canvas-navigate').click();
-  await expect(page.getByTestId('canvas-url')).toHaveText(`${origin}/blog/hello-builder`);
-  await expect(canvas(page).locator('.blog-title')).toHaveText('Hello builder');
+  await expect(page.getByTestId('canvas-url')).toHaveText(`${origin}/blog/hello-builder`, {
+    timeout: 30_000,
+  });
+  await expect(canvas(page).locator('.blog-title')).toHaveText('Hello builder', {
+    timeout: 30_000,
+  });
 
   // The observed URL is still the project's own: natural path, no query.
   const observed = new URL((await page.getByTestId('canvas-url').textContent()) ?? '');
@@ -126,8 +138,10 @@ test('navigation follows natural routes and every load is observed', async ({ pa
   await canvasFrame(page).evaluate(() => {
     location.assign('/');
   });
-  await expect(page.getByTestId('canvas-url')).toHaveText(`${origin}/`);
-  await expect(canvas(page).locator('.hero-title')).toHaveText('Astroix fixture');
+  await expect(page.getByTestId('canvas-url')).toHaveText(`${origin}/`, { timeout: 30_000 });
+  await expect(canvas(page).locator('.hero-title')).toHaveText('Astroix fixture', {
+    timeout: 30_000,
+  });
 
   // Restore the idle state for the next leg.
   await restoreIdle(page);
@@ -138,47 +152,49 @@ test('selection matches scoped runtime selectors through Element.matches and sur
 }) => {
   test.setTimeout(180_000);
   await page.goto('/__astroix/app/');
-  await expect(page.getByTestId('session-label')).toHaveText('idle');
+  await expect(page.getByTestId('session-label')).toHaveText('idle', { timeout: 30_000 });
   await activateButton(page, 0).click();
-  await page.waitForURL(PROJECT_APP_URL);
-  await expect(page.getByTestId('canvas-origin-state')).toHaveText('project');
-  await expect(page.getByTestId('canvas-selection-mode')).toHaveText('selection: on');
+  await page.waitForURL(PROJECT_APP_URL, { timeout: 120_000 });
+  await expect(page.getByTestId('canvas-origin-state')).toHaveText('project', { timeout: 30_000 });
+  await expect(page.getByTestId('canvas-selection-mode')).toHaveText('selection: on', {
+    timeout: 30_000,
+  });
 
   // Click the scoped-styled element inside the canvas: the click is
   // captured (no navigation), the identity lands, and the matched list
   // carries the SCOPED effective form the compiler emitted verbatim.
   await canvas(page).locator('.hero-title').click();
-  await expect(page.getByTestId('selection-tag')).toHaveText('h1');
+  await expect(page.getByTestId('selection-tag')).toHaveText('h1', { timeout: 30_000 });
   await expect(
     page
       .getByTestId('selection-matches')
       .locator("li[data-match-selector^='.hero-title[data-astro-cid-']"),
-  ).toHaveCount(1);
+  ).toHaveCount(1, { timeout: 30_000 });
   // …the GLOBAL form from the imported sheet: two plain occurrences
   // plus the media-conditioned one (same selector string, its condition
   // carried by the media attribute).
   await expect(
     page.getByTestId('selection-matches').locator('li[data-match-selector=".hero-title"]'),
-  ).toHaveCount(3);
+  ).toHaveCount(3, { timeout: 30_000 });
   await expect(
     page
       .getByTestId('selection-matches')
       .locator('li[data-match-selector=".hero-title"][data-match-media=""]'),
-  ).toHaveCount(2);
+  ).toHaveCount(2, { timeout: 30_000 });
   // …and the media-conditioned occurrence, its condition surfaced.
   const media = page
     .getByTestId('selection-matches')
     .locator('li[data-match-media="(max-width: 640px)"]');
-  await expect(media).toHaveCount(1);
+  await expect(media).toHaveCount(1, { timeout: 30_000 });
   await expect(media).toHaveAttribute('data-match-selector', '.hero-title');
 
   // A differently-shaped element matches through the same law: the
   // global .hero-lead rule matches, no foreign scoped form does.
   await canvas(page).locator('.hero-lead').click();
-  await expect(page.getByTestId('selection-tag')).toHaveText('p');
+  await expect(page.getByTestId('selection-tag')).toHaveText('p', { timeout: 30_000 });
   await expect(
     page.getByTestId('selection-matches').locator('li[data-match-selector=".hero-lead"]'),
-  ).toHaveCount(1);
+  ).toHaveCount(1, { timeout: 30_000 });
   await expect(
     page.getByTestId('selection-matches').locator("li[data-match-selector*='data-astro-cid']"),
   ).toHaveCount(0);
@@ -187,20 +203,20 @@ test('selection matches scoped runtime selectors through Element.matches and sur
   // the identity re-finds the element in the rebuilt DOM and the
   // runtime selectors re-match (the reload was eligible).
   await canvas(page).locator('.hero-title').click();
-  await expect(page.getByTestId('selection-tag')).toHaveText('h1');
+  await expect(page.getByTestId('selection-tag')).toHaveText('h1', { timeout: 30_000 });
   await canvasFrame(page).evaluate(() => {
     location.reload();
   });
-  await expect(page.getByTestId('canvas-url')).toHaveText(/\/$/);
-  await expect(page.getByTestId('selection-tag')).toHaveText('h1');
+  await expect(page.getByTestId('canvas-url')).toHaveText(/\/$/, { timeout: 30_000 });
+  await expect(page.getByTestId('selection-tag')).toHaveText('h1', { timeout: 30_000 });
   await expect(
     page
       .getByTestId('selection-matches')
       .locator("li[data-match-selector^='.hero-title[data-astro-cid-']"),
-  ).toHaveCount(1);
+  ).toHaveCount(1, { timeout: 30_000 });
   await expect(
     page.getByTestId('selection-matches').locator('li[data-match-selector=".hero-title"]'),
-  ).toHaveCount(3);
+  ).toHaveCount(3, { timeout: 30_000 });
 
   // Restore the idle state for the next leg.
   await restoreIdle(page);
@@ -220,11 +236,11 @@ test('stock Vite HMR rides the proxied native websocket, updates the canvas with
   });
 
   await page.goto('/__astroix/app/');
-  await expect(page.getByTestId('session-label')).toHaveText('idle');
+  await expect(page.getByTestId('session-label')).toHaveText('idle', { timeout: 30_000 });
   await activateButton(page, 0).click();
-  await page.waitForURL(PROJECT_APP_URL);
+  await page.waitForURL(PROJECT_APP_URL, { timeout: 120_000 });
   const origin = new URL(page.url()).origin;
-  await expect(page.getByTestId('canvas-url')).toHaveText(`${origin}/`);
+  await expect(page.getByTestId('canvas-url')).toHaveText(`${origin}/`, { timeout: 30_000 });
 
   // The canvas page's own HMR websocket: vite's native path on the
   // PROJECT origin (the transparent proxy tunnels it — never the dev
@@ -259,12 +275,12 @@ test('stock Vite HMR rides the proxied native websocket, updates the canvas with
 
   // Select before the mutation.
   await canvas(page).locator('.hero-title').click();
-  await expect(page.getByTestId('selection-tag')).toHaveText('h1');
+  await expect(page.getByTestId('selection-tag')).toHaveText('h1', { timeout: 30_000 });
 
   const heroTitleRows = page
     .getByTestId('selection-matches')
     .locator('li[data-match-selector=".hero-title"]');
-  await expect(heroTitleRows).toHaveCount(3);
+  await expect(heroTitleRows).toHaveCount(3, { timeout: 30_000 });
 
   // Mutate the DISPOSABLE copy (both files restored in the finally,
   // whatever happens below): the imported sheet for the hot CSS update,
@@ -275,17 +291,21 @@ test('stock Vite HMR rides the proxied native websocket, updates the canvas with
   const originalAstro = await readFile(astroPath, 'utf8');
   try {
     await writeFile(cssPath, `${originalCss}\n.hero-title { text-decoration: underline; }\n`);
+    // The hot-update propagation (file watcher → HMR frame → CSS apply)
+    // is load-shaped under a shared runner (#392): budget the wait, the
+    // asserted style never changes.
     await expect(canvas(page).locator('.hero-title')).toHaveCSS(
       'text-decoration-line',
       'underline',
+      { timeout: 30_000 },
     );
     // No document load happened — the update was hot, not a reload.
     expect(frameNavigations).toEqual([]);
     // The selection survived the reindex-shaped change and the matched
     // list re-ran against the document's updated rules: the new
     // occurrence of the global selector is matched now.
-    await expect(page.getByTestId('selection-tag')).toHaveText('h1');
-    await expect(heroTitleRows).toHaveCount(4);
+    await expect(page.getByTestId('selection-tag')).toHaveText('h1', { timeout: 30_000 });
+    await expect(heroTitleRows).toHaveCount(4, { timeout: 30_000 });
 
     // A template edit is vite's FULL-reload path — the vite-driven
     // eligible reload: the probe appears, and the selection survives it too.
@@ -296,13 +316,13 @@ test('stock Vite HMR rides the proxied native websocket, updates the canvas with
         '<section class="hero"><p data-hmr-probe>probe</p>',
       ),
     );
-    await expect(canvas(page).locator('[data-hmr-probe]')).toHaveCount(1);
-    await expect(page.getByTestId('selection-tag')).toHaveText('h1');
+    await expect(canvas(page).locator('[data-hmr-probe]')).toHaveCount(1, { timeout: 30_000 });
+    await expect(page.getByTestId('selection-tag')).toHaveText('h1', { timeout: 30_000 });
     await expect(
       page
         .getByTestId('selection-matches')
         .locator("li[data-match-selector^='.hero-title[data-astro-cid-']"),
-    ).toHaveCount(1);
+    ).toHaveCount(1, { timeout: 30_000 });
   } finally {
     // BOTH mutated files' canonical bytes go back whatever happened
     // above — the zero-injection spec that follows re-proves it with
@@ -320,15 +340,15 @@ test('an off-origin canvas stays visible with inspection disabled until it retur
 }) => {
   test.setTimeout(180_000);
   await page.goto('/__astroix/app/');
-  await expect(page.getByTestId('session-label')).toHaveText('idle');
+  await expect(page.getByTestId('session-label')).toHaveText('idle', { timeout: 30_000 });
   await activateButton(page, 0).click();
-  await page.waitForURL(PROJECT_APP_URL);
-  await expect(page.getByTestId('canvas-origin-state')).toHaveText('project');
+  await page.waitForURL(PROJECT_APP_URL, { timeout: 120_000 });
+  await expect(page.getByTestId('canvas-origin-state')).toHaveText('project', { timeout: 30_000 });
 
   // A live selection exists while on the project origin.
   await canvas(page).locator('.hero-title').click();
-  await expect(page.getByTestId('selection-tag')).toHaveText('h1');
-  await expect(page.getByTestId('canvas-inspection')).toHaveText('enabled');
+  await expect(page.getByTestId('selection-tag')).toHaveText('h1', { timeout: 30_000 });
+  await expect(page.getByTestId('canvas-inspection')).toHaveText('enabled', { timeout: 30_000 });
 
   // The fixture's CTA points off-origin; fulfill it locally (no
   // network) — the canvas navigates to a genuinely foreign origin.
@@ -342,30 +362,42 @@ test('an off-origin canvas stays visible with inspection disabled until it retur
 
   // Selection mode OFF so the link click navigates the canvas.
   await page.getByTestId('canvas-selection-mode').click();
-  await expect(page.getByTestId('canvas-selection-mode')).toHaveText('selection: off');
+  await expect(page.getByTestId('canvas-selection-mode')).toHaveText('selection: off', {
+    timeout: 30_000,
+  });
   await canvas(page).locator('.hero-cta').click();
 
   // Off-origin: the foreign document stays VISIBLE, inspection and
   // editing are disabled, the selection is gone, and the selection
   // control is unusable until the canvas returns.
-  await expect(page.getByTestId('canvas-origin-state')).toHaveText('external');
-  await expect(page.getByTestId('canvas-inspection')).toHaveText('disabled');
-  await expect(page.getByTestId('selection-tag')).toHaveText('none');
-  await expect(page.getByTestId('selection-matches').locator('li')).toHaveCount(0);
-  await expect(page.getByTestId('canvas-selection-mode')).toBeDisabled();
-  await expect(canvas(page).locator('body')).toContainText('external document');
+  await expect(page.getByTestId('canvas-origin-state')).toHaveText('external', {
+    timeout: 30_000,
+  });
+  await expect(page.getByTestId('canvas-inspection')).toHaveText('disabled', { timeout: 30_000 });
+  await expect(page.getByTestId('selection-tag')).toHaveText('none', { timeout: 30_000 });
+  await expect(page.getByTestId('selection-matches').locator('li')).toHaveCount(0, {
+    timeout: 30_000,
+  });
+  await expect(page.getByTestId('canvas-selection-mode')).toBeDisabled({ timeout: 30_000 });
+  await expect(canvas(page).locator('body')).toContainText('external document', {
+    timeout: 30_000,
+  });
 
   // Return through the canvas's own navigation: the gate reopens, the
   // selection control becomes usable again, and selection works.
   await page.getByTestId('canvas-address').fill('/');
   await page.getByTestId('canvas-navigate').click();
-  await expect(page.getByTestId('canvas-origin-state')).toHaveText('project');
-  await expect(page.getByTestId('canvas-inspection')).toHaveText('enabled');
-  await expect(page.getByTestId('canvas-selection-mode')).toBeEnabled();
+  await expect(page.getByTestId('canvas-origin-state')).toHaveText('project', {
+    timeout: 30_000,
+  });
+  await expect(page.getByTestId('canvas-inspection')).toHaveText('enabled', { timeout: 30_000 });
+  await expect(page.getByTestId('canvas-selection-mode')).toBeEnabled({ timeout: 30_000 });
   await page.getByTestId('canvas-selection-mode').click();
-  await expect(page.getByTestId('canvas-selection-mode')).toHaveText('selection: on');
+  await expect(page.getByTestId('canvas-selection-mode')).toHaveText('selection: on', {
+    timeout: 30_000,
+  });
   await canvas(page).locator('.hero-title').click();
-  await expect(page.getByTestId('selection-tag')).toHaveText('h1');
+  await expect(page.getByTestId('selection-tag')).toHaveText('h1', { timeout: 30_000 });
 
   await page.unroute(/astro\.build/);
   // Restore the idle state for whatever follows the battery.

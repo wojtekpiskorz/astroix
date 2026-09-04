@@ -54,16 +54,21 @@ test('a full hosting loop leaves the managed project untouched — bytes and met
   expect([...before.keys()]).toContain('package.json');
 
   await page.goto('/__astroix/app/');
-  await expect(page.getByTestId('session-label')).toHaveText('idle');
+  await expect(page.getByTestId('session-label')).toHaveText('idle', { timeout: 30_000 });
   await activateButton(page, 0).click();
-  await page.waitForURL(PROJECT_APP_URL);
+  await page.waitForURL(PROJECT_APP_URL, { timeout: 120_000 });
   // Start + inspect: the shell's live inspection and the loaded canvas.
-  await expect(page.getByTestId('inspect-revision')).toHaveText(/^\d+$/);
-  await expect(page.getByTestId('canvas-origin-state')).toHaveText('project');
+  // Load-shaped landing waits, sized for a shared CI runner (#392).
+  await expect(page.getByTestId('inspect-revision')).toHaveText(/^\d+$/, { timeout: 30_000 });
+  await expect(page.getByTestId('canvas-origin-state')).toHaveText('project', {
+    timeout: 30_000,
+  });
   // Navigation through the canvas: the project's own natural route.
   await page.getByTestId('canvas-address').fill('/blog/hello-builder');
   await page.getByTestId('canvas-navigate').click();
-  await expect(page.getByTestId('canvas-url')).toContainText('/blog/hello-builder');
+  await expect(page.getByTestId('canvas-url')).toContainText('/blog/hello-builder', {
+    timeout: 30_000,
+  });
   // Stop.
   await restoreIdle(page);
 
@@ -71,8 +76,10 @@ test('a full hosting loop leaves the managed project untouched — bytes and met
   // state in the project on the second pass either.
   await page.goto('/__astroix/app/');
   await activateButton(page, 0).click();
-  await page.waitForURL(PROJECT_APP_URL);
-  await expect(page.getByTestId('canvas-origin-state')).toHaveText('project');
+  await page.waitForURL(PROJECT_APP_URL, { timeout: 120_000 });
+  await expect(page.getByTestId('canvas-origin-state')).toHaveText('project', {
+    timeout: 30_000,
+  });
   await restoreIdle(page);
 
   const after = snapshotProject(PROJECT_A);

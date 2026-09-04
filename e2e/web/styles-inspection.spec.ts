@@ -109,9 +109,9 @@ test('a styles inspection over the wire settles with the converged payload for t
 }) => {
   test.setTimeout(240_000);
   await page.goto('/__astroix/app/');
-  await expect(page.getByTestId('session-label')).toHaveText('idle');
+  await expect(page.getByTestId('session-label')).toHaveText('idle', { timeout: 30_000 });
   await activateButton(page, 0).click();
-  await page.waitForURL(PROJECT_APP_URL);
+  await page.waitForURL(PROJECT_APP_URL, { timeout: 120_000 });
 
   // The converged payload may need a later fresh pass while the young
   // dev server settles its initial watcher churn (E3's contract: the
@@ -225,9 +225,9 @@ test('the negatives: unresolvable route, absent selection, malformed selection, 
 }) => {
   test.setTimeout(240_000);
   await page.goto('/__astroix/app/');
-  await expect(page.getByTestId('session-label')).toHaveText('idle');
+  await expect(page.getByTestId('session-label')).toHaveText('idle', { timeout: 30_000 });
   await activateButton(page, 0).click();
-  await page.waitForURL(PROJECT_APP_URL);
+  await page.waitForURL(PROJECT_APP_URL, { timeout: 120_000 });
 
   // An unresolvable route — well-formed, served by nothing: the honest
   // route-shaped 404, never a component or a guess.

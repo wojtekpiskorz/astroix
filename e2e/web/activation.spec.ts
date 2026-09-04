@@ -21,6 +21,14 @@ import { activateButton } from './spec-helpers.ts';
  * one coherent session history, and every leg restores the idle state
  * for the next one (the launcher label at each boundary is the state
  * machine's own derivation, pinned along the way).
+ *
+ * Every landing/transition wait in this battery is load-shaped (#392):
+ * an activation commit spawns a whole dev-server plane and the
+ * deactivation runs the fence/revocation pass before the launcher
+ * serves — under shared-runner load the 5s expect default and the 30s
+ * navigation default trip on machine load alone. The budgets grow
+ * (120s per transition wait, 30s per landing expect); the asserted
+ * values never change.
  */
 
 test.describe.configure({ mode: 'serial' });
@@ -30,29 +38,33 @@ test('activation commits through the settled transition and lands on the project
 }) => {
   test.setTimeout(180_000);
   await page.goto('/__astroix/app/');
-  await expect(page.getByTestId('session-label')).toHaveText('idle');
+  await expect(page.getByTestId('session-label')).toHaveText('idle', { timeout: 30_000 });
   await activateButton(page, 0).click();
-  await page.waitForURL(/^http:\/\/(?!launcher)[a-z2-7]+\.localhost:\d+\/__astroix\/app\/$/);
+  await page.waitForURL(/^http:\/\/(?!launcher)[a-z2-7]+\.localhost:\d+\/__astroix\/app\/$/, {
+    timeout: 120_000,
+  });
   // The project document is bound at the committed pair: generation 1
   // (the epoch's first attempt) and a live inspection revision.
-  await expect(page.getByTestId('session-generation')).toHaveText('1');
-  await expect(page.getByTestId('inspect-revision')).toHaveText(/^\d+$/);
+  await expect(page.getByTestId('session-generation')).toHaveText('1', { timeout: 30_000 });
+  await expect(page.getByTestId('inspect-revision')).toHaveText(/^\d+$/, { timeout: 30_000 });
 
   // Restore the idle state for the next leg.
   await page.getByTestId('deactivate').click();
-  await page.waitForURL(/launcher\.localhost:\d+\/__astroix\/app\//);
-  await expect(page.getByTestId('session-label')).toHaveText('idle');
+  await page.waitForURL(/launcher\.localhost:\d+\/__astroix\/app\//, { timeout: 120_000 });
+  await expect(page.getByTestId('session-label')).toHaveText('idle', { timeout: 30_000 });
 });
 
 test('deactivation completes the transition back to the launcher', async ({ page }) => {
   test.setTimeout(180_000);
   await page.goto('/__astroix/app/');
-  await expect(page.getByTestId('session-label')).toHaveText('idle');
+  await expect(page.getByTestId('session-label')).toHaveText('idle', { timeout: 30_000 });
   await activateButton(page, 1).click();
-  await page.waitForURL(/^http:\/\/(?!launcher)[a-z2-7]+\.localhost:\d+\/__astroix\/app\//);
+  await page.waitForURL(/^http:\/\/(?!launcher)[a-z2-7]+\.localhost:\d+\/__astroix\/app\/$/, {
+    timeout: 120_000,
+  });
   await page.getByTestId('deactivate').click();
-  await page.waitForURL(/launcher\.localhost:\d+\/__astroix\/app\//);
-  await expect(page.getByTestId('session-label')).toHaveText('idle');
+  await page.waitForURL(/launcher\.localhost:\d+\/__astroix\/app\//, { timeout: 120_000 });
+  await expect(page.getByTestId('session-label')).toHaveText('idle', { timeout: 30_000 });
 });
 
 test('a failed activation reports the sanitized failure and keeps the launcher', async ({
@@ -60,20 +72,22 @@ test('a failed activation reports the sanitized failure and keeps the launcher',
 }) => {
   test.setTimeout(180_000);
   await page.goto('/__astroix/app/');
-  await expect(page.getByTestId('session-label')).toHaveText('idle');
+  await expect(page.getByTestId('session-label')).toHaveText('idle', { timeout: 30_000 });
   await activateButton(page, 2).click(); // the broken root: no installation to resolve
-  await expect(page.getByTestId('last-failure')).toBeVisible();
-  await expect(page.getByTestId('last-failure')).toContainText('activation:');
-  await expect(page.getByTestId('session-label')).toHaveText('failed');
+  await expect(page.getByTestId('last-failure')).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId('last-failure')).toContainText('activation:', { timeout: 30_000 });
+  await expect(page.getByTestId('session-label')).toHaveText('failed', { timeout: 30_000 });
   await expect(page).toHaveURL(/launcher\.localhost:\d+\/__astroix\/app\//);
 
   // Restore the idle state: a successful activation clears the failure,
   // its deactivation returns the neutral label.
   await activateButton(page, 0).click();
-  await page.waitForURL(/^http:\/\/(?!launcher)[a-z2-7]+\.localhost:\d+\/__astroix\/app\//);
+  await page.waitForURL(/^http:\/\/(?!launcher)[a-z2-7]+\.localhost:\d+\/__astroix\/app\/$/, {
+    timeout: 120_000,
+  });
   await page.getByTestId('deactivate').click();
-  await page.waitForURL(/launcher\.localhost:\d+\/__astroix\/app\//);
-  await expect(page.getByTestId('session-label')).toHaveText('idle');
+  await page.waitForURL(/launcher\.localhost:\d+\/__astroix\/app\//, { timeout: 120_000 });
+  await expect(page.getByTestId('session-label')).toHaveText('idle', { timeout: 30_000 });
 });
 
 test('a stale session is refused after an A-to-B-to-A cycle while the hostname serves the current pair', async ({
@@ -82,9 +96,11 @@ test('a stale session is refused after an A-to-B-to-A cycle while the hostname s
 }) => {
   test.setTimeout(300_000);
   await page.goto('/__astroix/app/');
-  await expect(page.getByTestId('session-label')).toHaveText('idle');
+  await expect(page.getByTestId('session-label')).toHaveText('idle', { timeout: 30_000 });
   await activateButton(page, 0).click(); // generation 1 on project A
-  await page.waitForURL(/^http:\/\/(?!launcher)[a-z2-7]+\.localhost:\d+\/__astroix\/app\/$/);
+  await page.waitForURL(/^http:\/\/(?!launcher)[a-z2-7]+\.localhost:\d+\/__astroix\/app\/$/, {
+    timeout: 120_000,
+  });
   const projectAOrigin = new URL(page.url()).origin;
   const staleTab = page;
 
@@ -94,7 +110,9 @@ test('a stale session is refused after an A-to-B-to-A cycle while the hostname s
   const switchTab = await context.newPage();
   await switchTab.goto('/__astroix/app/');
   await activateButton(switchTab, 1).click();
-  await switchTab.waitForURL(/^http:\/\/(?!launcher)[a-z2-7]+\.localhost:\d+\/__astroix\/app\//);
+  await switchTab.waitForURL(/^http:\/\/(?!launcher)[a-z2-7]+\.localhost:\d+\/__astroix\/app\/$/, {
+    timeout: 120_000,
+  });
   const projectBOrigin = new URL(switchTab.url()).origin;
   expect(projectBOrigin).not.toBe(projectAOrigin);
 
@@ -112,7 +130,12 @@ test('a stale session is refused after an A-to-B-to-A cycle while the hostname s
   // jar now holds the new project-A capability.
   await switchTab.goto('/__astroix/app/');
   await activateButton(switchTab, 0).click();
-  await switchTab.waitForURL(`${projectAOrigin}/__astroix/app/`);
+  await switchTab.waitForURL(`${projectAOrigin}/__astroix/app/`, { timeout: 120_000 });
+  // Converge the generation text before the one-shot numeric read (#392:
+  // a one-shot read of rendered state races the first commits under load).
+  await expect(switchTab.getByTestId('session-generation')).toHaveText(/^\d+$/, {
+    timeout: 30_000,
+  });
   const freshGeneration = Number(await switchTab.getByTestId('session-generation').textContent());
   expect(freshGeneration).toBeGreaterThan(1);
 
@@ -120,8 +143,10 @@ test('a stale session is refused after an A-to-B-to-A cycle while the hostname s
   // client capability — and authority never outlives its session: the
   // dead binding is refused before any session question is asked.
   await staleTab.getByTestId('reinspect').click();
-  await expect(staleTab.getByTestId('command-error')).toBeVisible();
-  await expect(staleTab.getByTestId('command-error')).toHaveText('unauthorized');
+  await expect(staleTab.getByTestId('command-error')).toBeVisible({ timeout: 30_000 });
+  await expect(staleTab.getByTestId('command-error')).toHaveText('unauthorized', {
+    timeout: 30_000,
+  });
 
   // The stale-session refusal itself, over the raw wire with LIVE
   // authority and a STALE pair (the F2 admission's own law, observed
@@ -161,6 +186,6 @@ test('a stale session is refused after an A-to-B-to-A cycle while the hostname s
 
   // Restore the idle state for whatever follows the battery.
   await switchTab.getByTestId('deactivate').click();
-  await switchTab.waitForURL(/launcher\.localhost:\d+\/__astroix\/app\//);
-  await expect(switchTab.getByTestId('session-label')).toHaveText('idle');
+  await switchTab.waitForURL(/launcher\.localhost:\d+\/__astroix\/app\//, { timeout: 120_000 });
+  await expect(switchTab.getByTestId('session-label')).toHaveText('idle', { timeout: 30_000 });
 });
