@@ -16,13 +16,16 @@
  * for the CSS vertical is `matchedSelectors` (the shared matching law)
  * plus the selection identity, exported below.
  *
- * The Content vertical's discovery panel (J1, #251) is exported for the
+ * The Content vertical's discovery panel (J1, #251) is exported for
+ * the hosts' sidebar slots, and its entry-form pane (J2, #252) for the
+ * editor-dock slot the
  * hosts' sidebar slots — a feature consuming this shell (useShell +
  * the generation-scoped query discipline), never a part of it.
  */
 
 export { ProjectCanvas, type ProjectCanvasProps } from '../canvas/project-canvas';
 export { ContentDiscovery } from '../features/content/discovery/content-discovery';
+export { ContentEntryForm } from '../features/content/forms/content-entry-form';
 export { gatedSessionFetch, StaleSessionResultError } from '../query/gated-session-fetch';
 export { type GatedEventCallbacks, gatedSseHandlers } from '../query/session-events';
 export {
