@@ -1,4 +1,5 @@
 import type { ContentInspectionResult } from '../../astro-project-adapter/content/content-result.ts';
+import type { RouteSelectionResult } from '../../astro-project-adapter/routes/route-selection.ts';
 import type { RoutesInspectionResult } from '../../astro-project-adapter/routes/routes-inspection.ts';
 import type {
   StylesInspectionInput,
@@ -9,11 +10,13 @@ import type { StylesInvalidation } from '../../astro-project-adapter/styles/conv
 /**
  * The inspection seam the project-plane worker consumes (#230, ADR-0005
  * `inspect()`): the four typed families as plain async functions over
- * plain-data results. The worker defines the seam; the composition
+ * plain-data results, plus the control-plane-only route-selection
+ * resolution (#370). The worker defines the seam; the composition
  * runtime (`project-plane/composition/composition-runtime.ts`) implements
  * it by wiring the landed adapter surfaces — E1's composition seams (the
  * `project` family), E4's `inspectContent`, E5's
- * `createRoutesInspector`, and E3's convergence-gated styles inspection
+ * `createRoutesInspector`, #370's `createRouteSelectionResolver`, and
+ * E3's convergence-gated styles inspection
  * (`createConvergedStylesInspection` — the ONE styles entry this lane
  * wires; `route-styles.ts` stays the join's internal leg).
  *
@@ -39,7 +42,7 @@ export interface ProjectDescriptor {
   readonly certified: { readonly astro: string; readonly vite: string };
 }
 
-/** The four typed inspection branches — one per request family. */
+/** The four typed inspection branches — one per request family — plus the control-plane-only route-selection resolution. */
 export interface InspectionBranches {
   /** The `project` family: certified-pair descriptor, fresh per call. */
   project(): Promise<ProjectDescriptor>;
@@ -53,6 +56,16 @@ export interface InspectionBranches {
   content(): Promise<ContentInspectionResult>;
   /** The `routes` family: one bounded, abortable fresh pass (E5). */
   routes(input: { readonly signal?: AbortSignal }): Promise<RoutesInspectionResult>;
+  /**
+   * The route-selection resolution (#370): the observed canvas pathname
+   * to the active route's component — control-plane currency the
+   * executor consumes to dispatch the styles family; its answer never
+   * rides the wire (the no-disclosure law).
+   */
+  routeSelection(input: {
+    readonly route: string;
+    readonly signal?: AbortSignal;
+  }): Promise<RouteSelectionResult>;
 }
 
 /**

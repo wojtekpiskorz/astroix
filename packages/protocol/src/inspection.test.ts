@@ -62,4 +62,49 @@ describe('inspectionResultSchema', () => {
       'styles',
     ]);
   });
+
+  // #370, the ruling's additive wire shape: the styles request envelope
+  // gains the observed-canvas-pathname selection — optionally, so the
+  // pre-#370 shape still parses (closed unions stay closed; the field
+  // rides the existing envelope, never a new kind — the #351 precedent).
+  it('accepts the styles route selection additively — and still parses without one', () => {
+    expect(inspectionRequestSchema.safeParse({ kind: 'styles' }).success).toBe(true);
+    for (const route of ['/', '/blog/hello-builder', '/blog/2024/post', '/blog/']) {
+      expect(inspectionRequestSchema.safeParse({ kind: 'styles', route }).success, route).toBe(
+        true,
+      );
+    }
+  });
+
+  it('refuses route selections that are not observed pathnames', () => {
+    // not pathnames at all, or shapes the canvas can never observe
+    for (const route of [
+      '', // empty
+      'blog/hello-builder', // no leading slash — a relative shape
+      './blog', // a relative-filesystem shape
+      '/blog//x', // empty inner segment (protocol-relative-ish)
+      '//evil.example/x', // protocol-relative — a URL, not a pathname
+      '/blog?q=1', // a query — location.pathname never carries one
+      '/blog#top', // a fragment
+      '/blog\\x', // backslash
+      '/blog hello', // whitespace
+    ]) {
+      expect(inspectionRequestSchema.safeParse({ kind: 'styles', route }).success, route).toBe(
+        false,
+      );
+    }
+    // A pathname-shaped selection that is no route (an absolute
+    // filesystem path's shape among them) is NOT malformed — it parses,
+    // and resolution answers the honest 404; the schema's job is the
+    // pathname GRAMMAR alone (the value is client input, echoed nowhere).
+    expect(
+      inspectionRequestSchema.safeParse({ kind: 'styles', route: '/Users/woji/Dev' }).success,
+    ).toBe(true);
+    // non-string selections are equally malformed
+    expect(inspectionRequestSchema.safeParse({ kind: 'styles', route: 42 }).success).toBe(false);
+    // unknown siblings still refuse (the strict-object law)
+    expect(
+      inspectionRequestSchema.safeParse({ kind: 'styles', route: '/', extra: 1 }).success,
+    ).toBe(false);
+  });
 });

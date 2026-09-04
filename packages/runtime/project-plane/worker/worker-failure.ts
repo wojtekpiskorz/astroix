@@ -85,9 +85,15 @@ export function malformedRequestFailure(): WorkerFailure {
  * Maps one branch failure to the structured worker failure: an
  * `AdapterError` keeps its closed code and sanitized details; anything
  * else becomes the generic unexpected failure — its message is NEVER
- * forwarded (an unexpected error's text is untrusted free text).
+ * forwarded (an unexpected error's text is untrusted free text). The
+ * family names the closed request-kind set (the four protocol families
+ * plus the control-plane-only `route-selection` resolution, #370) — a
+ * closed enumeration the fixed templates interpolate, never free text.
  */
-export function branchFailure(family: InspectionFamily, error: unknown): WorkerFailure {
+export function branchFailure(
+  family: InspectionFamily | 'route-selection',
+  error: unknown,
+): WorkerFailure {
   if (error instanceof AdapterError) {
     return {
       code: 'inspection-failed',

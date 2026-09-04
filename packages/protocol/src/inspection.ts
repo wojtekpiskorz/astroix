@@ -5,7 +5,10 @@ import { z } from 'zod';
  * only typed `project`, `content`, `routes`, and `styles` requests; every
  * result carries a monotonic resource revision — the freshness contract
  * behind grants). No arbitrary module import, no client-selected
- * filesystem path, no raw Vite access exists on this surface.
+ * filesystem path, no raw Vite access exists on this surface. The one
+ * selection a request may carry is the styles family's `route` (#370):
+ * an observed canvas PATHNAME the control plane resolves to the active
+ * route server-side — never a component, never a filesystem path.
  *
  * Payload interiors are deliberately opaque here (`z.unknown()`): their
  * shapes are owned by the frozen behavior contracts
@@ -23,11 +26,40 @@ export type InspectionKind = z.infer<typeof inspectionKindSchema>;
 /** Monotonic per-resource version carried by every inspection result (ADR-0005/0006 §6). */
 export const resourceRevisionSchema = z.number().int().nonnegative();
 
+/**
+ * The observed canvas pathname a `styles` inspection carries as its
+ * route selection (#370, the ruling's wire shape): `/`-rooted, no
+ * query, no fragment, no empty segments, no whitespace, no backslash —
+ * the grammar `location.pathname` produces on the project origin. This
+ * is a selection INPUT, never a served value: it names a route the
+ * control plane resolves; the resolved component stays behind the
+ * runtime (the no-disclosure law).
+ */
+export function isObservedPathname(value: string): boolean {
+  return (
+    value.startsWith('/') &&
+    !value.includes('//') &&
+    !value.includes('\\') &&
+    !value.includes('?') &&
+    !value.includes('#') &&
+    !/\s/.test(value)
+  );
+}
+
+/** The wire-carried route selection: an observed canvas pathname. */
+export const observedPathnameSchema = z.string().min(1).refine(isObservedPathname, {
+  message: 'route must be an observed canvas pathname (/-rooted, no query, no fragment)',
+});
+
 export const inspectionRequestSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('project') }),
   z.strictObject({ kind: z.literal('content') }),
   z.strictObject({ kind: z.literal('routes') }),
-  z.strictObject({ kind: z.literal('styles') }),
+  // The `route` selection is additive (#370 over the #351 precedent: a
+  // closed envelope gains a field, never a kind): a styles request
+  // without one still parses — and the executor refuses it, because a
+  // styles inspection cannot be served without a selection.
+  z.strictObject({ kind: z.literal('styles'), route: observedPathnameSchema.optional() }),
 ]);
 
 /**

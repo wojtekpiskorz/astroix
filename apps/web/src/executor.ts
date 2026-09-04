@@ -14,7 +14,10 @@ import {
   type GrantTable,
 } from '@wojciechpiskorz/astroix-runtime/edit-authority/grants';
 import type { OriginLease, OriginListener } from '@wojciechpiskorz/astroix-runtime/origin';
-import type { ProjectRun } from '@wojciechpiskorz/astroix-runtime/project-runtime';
+import type {
+  ProjectRun,
+  WorkerInspectionRequest,
+} from '@wojciechpiskorz/astroix-runtime/project-runtime';
 import type { ProjectRegistry } from '@wojciechpiskorz/astroix-runtime/registry';
 import type { SessionClients } from '@wojciechpiskorz/astroix-runtime/session-supervisor/clients';
 import type {
@@ -63,14 +66,19 @@ import { neverSpawnedRun } from './never-spawned.ts';
  * revocation pass, its run is reaped, the failed no-active state is
  * reported — never a stranded session behind a live project host.
  *
- * Two families are deliberately NOT composed here, and answer the
+ * One family is deliberately NOT composed here, and answers the
  * closed catch-all rather than a lie:
  * - `apply-edit`: the edit-authority executor composition is the edit
  *   verticals' lane; no browser flow can issue one yet.
- * - The `styles` inspection family: its worker request needs the
- *   active route's component — a selection the closed protocol v1
- *   request envelope cannot carry. Binding that wire-carried selection
- *   is the CSS vertical's contract work.
+ *
+ * The `styles` family IS composed (#370): its protocol envelope carries
+ * the observed canvas pathname, and the executor resolves it to the
+ * active route's component through the run's control-plane-only
+ * `route-selection` dispatch before handing the worker its
+ * `routeComponent`. The component is this plane's own currency — the
+ * resolution result never enters a response envelope (the no-
+ * disclosure law), and the desktop composition (H7's shared executor)
+ * inherits the family identically.
  */
 
 /** One committed session's composition record — everything a transition binds (ADR-0006 §4 step 5). */
@@ -528,7 +536,17 @@ async function deactivate(
   };
 }
 
-/** The typed inspection dispatch onto the active run — three families map 1:1; `styles` defers to its vertical. */
+/**
+ * The typed inspection dispatch onto the active run — three families map
+ * 1:1; `styles` carries the observed canvas pathname (#370): the
+ * executor resolves it to the route's component through the run's
+ * control-plane-only `route-selection` dispatch, then issues the
+ * worker's `routeComponent` request. The resolution is a two-step
+ * mapping, and each step's refusal is its own honest answer: a styles
+ * request without a selection is malformed (the additive envelope
+ * parses, but the inspection cannot be served), an unresolvable route
+ * is a 404, and a rejected dispatch is the closed catch-all.
+ */
 async function inspect(
   envelope: RequestEnvelope,
   inputs: ExecutorInputs,
@@ -537,9 +555,30 @@ async function inspect(
   const seat = inputs.seatStore.active();
   if (seat === null || !samePair(seat.ref, envelope.session)) return staleSession();
   const request = envelope.command.request;
-  if (request.kind === 'styles') return notComposed();
   try {
-    const result = await seat.run.inspect(request);
+    // The styles family carries the observed canvas pathname (#370):
+    // the additive envelope also parses WITHOUT one, but the inspection
+    // cannot be served without a selection — the same malformed-shape
+    // refusal the admission layer would answer had the field been
+    // required. The selection maps through the run's control-plane-only
+    // resolution onto the worker's `routeComponent` request; the other
+    // three families dispatch 1:1.
+    let dispatched: WorkerInspectionRequest;
+    if (request.kind === 'styles') {
+      const { route } = request;
+      if (route === undefined) return stylesRouteRequired();
+      const mapped = await stylesRequestFor(seat, route);
+      if (mapped === null) return notFoundRoute();
+      dispatched = mapped;
+    } else {
+      dispatched = request;
+    }
+    const result = await seat.run.inspect(dispatched);
+    // The wire belt: a route-selection result can never ride an
+    // envelope — the protocol's closed inspection union refuses the kind
+    // and the component it carries (the no-disclosure law, enforced here
+    // rather than trusted).
+    if (result.kind === 'route-selection') return notComposed();
     return {
       protocolVersion: 1,
       requestId: envelope.requestId,
@@ -549,6 +588,24 @@ async function inspect(
   } catch {
     return notComposed();
   }
+}
+
+/**
+ * Maps the wire-carried selection onto the worker's styles request:
+ * resolves the observed pathname through the run, then carries the
+ * component into `routeComponent`. `null` is the honest unresolvable
+ * answer (the caller's 404); a rejected dispatch propagates (the
+ * caller's catch-all) — and the resolution result itself is consumed
+ * here, never forwarded: the component stays control-plane currency.
+ */
+async function stylesRequestFor(
+  seat: SessionSeat,
+  route: string,
+): Promise<WorkerInspectionRequest | null> {
+  const resolved = await seat.run.inspect({ kind: 'route-selection', route });
+  if (resolved.kind !== 'route-selection') throw new Error('dispatch defect');
+  const selection = resolved.payload.selection;
+  return selection === null ? null : { kind: 'styles', routeComponent: selection.component };
 }
 
 /**
@@ -661,6 +718,35 @@ function notFoundProject(): PublicError {
     message: 'the requested resource does not exist',
     retryable: false,
     details: { what: 'project' },
+  };
+}
+
+/**
+ * The unresolvable styles selection (#370): the observed pathname
+ * matches no project page route — a 404 naming the route, never a
+ * component, a filesystem fact, or a guess.
+ */
+function notFoundRoute(): PublicError {
+  return {
+    code: 'resource-not-found',
+    message: 'the requested resource does not exist',
+    retryable: false,
+    details: { what: 'route' },
+  };
+}
+
+/**
+ * A styles request without its route selection (#370): the envelope is
+ * additive (the pre-#370 shape still parses), but the inspection cannot
+ * be served without a selection — the same malformed-shape refusal the
+ * admission layer would answer had the field been required.
+ */
+function stylesRouteRequired(): PublicError {
+  return {
+    code: 'malformed-request',
+    message: 'a styles inspection must carry the observed canvas route',
+    retryable: false,
+    details: { issue: 'invalid-shape', pointer: 'command.request' },
   };
 }
 
