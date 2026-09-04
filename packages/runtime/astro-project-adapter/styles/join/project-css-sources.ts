@@ -11,6 +11,19 @@ import { stylesJoinRejected } from './effective-selector-join';
  * relative posix paths only; an absent or unreadable source directory
  * fails closed as a seam rejection instead of leaking a filesystem
  * error that names the root (ADR-0006 §7 output hygiene).
+ *
+ * Pre-alpha scope limitation (#302, owner ruling 2026-09-03): the walk
+ * covers the project's DEFAULT source directory (`src/`) only — a
+ * configured custom `srcDir` is out of scope until such projects enter
+ * supported territory (deriving the walk root from the route
+ * component's prefix is the deferred remedy; it wants #301's
+ * certification leg and a custom-srcDir fixture). A custom-srcDir
+ * project still fails closed on both arms: with no `src/` this walk
+ * rejects, and with a style-free `src/` while the styles live under the
+ * custom dir, the join's hollow-payload cross-check
+ * (`effective-selector-join.ts`) rejects instead of minting a silent
+ * revision — the rejection names the real condition (the walk and the
+ * compiler observed different source trees), never a hollow payload.
  */
 
 const SEAM_JOIN_SOURCE_WALK = 'styles join project CSS source walk';
