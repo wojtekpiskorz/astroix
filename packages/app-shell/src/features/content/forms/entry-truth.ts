@@ -59,6 +59,101 @@ function nonEmptyString(value: unknown): string | null {
   return typeof value === 'string' && value.length > 0 ? value : null;
 }
 
+/** The walked node's shared base fields, as the binders thread them. */
+interface NodeBaseFields {
+  readonly path: string;
+  readonly label: string;
+  readonly required: boolean;
+  readonly initial?: unknown;
+}
+
+/** The walked node kinds with no kind-specific payload to bind. */
+const SIMPLE_NODE_KINDS = ['string', 'number', 'boolean', 'image'] as const;
+type SimpleNodeKind = (typeof SIMPLE_NODE_KINDS)[number];
+
+/** Binds a string-or-number options list — the enum vocabularies' shared shape. */
+function bindOptions(value: unknown): (string | number)[] | null {
+  if (!Array.isArray(value)) return null;
+  const options: (string | number)[] = [];
+  for (const option of value) {
+    if (typeof option !== 'string' && typeof option !== 'number') return null;
+    options.push(option);
+  }
+  return options;
+}
+
+/** Binds one enum node — the declared options, all string-or-number. */
+function bindEnumNode(record: Record<string, unknown>, base: NodeBaseFields): FormFieldNode | null {
+  const options = bindOptions(record.options);
+  return options === null ? null : { kind: 'enum', options, ...base };
+}
+
+/** Binds one array node — the item kind, plus the item enum's options when the item is one. */
+function bindArrayNode(
+  record: Record<string, unknown>,
+  base: NodeBaseFields,
+): FormFieldNode | null {
+  const item = asRecord(record.item);
+  if (item === null) return null;
+  if (
+    item.kind !== 'string' &&
+    item.kind !== 'number' &&
+    item.kind !== 'boolean' &&
+    item.kind !== 'enum'
+  ) {
+    return null;
+  }
+  const options = item.kind === 'enum' ? bindOptions(item.options) : undefined;
+  if (options === null) return null;
+  return {
+    kind: 'array',
+    item: { kind: item.kind, ...(options === undefined ? {} : { options }) },
+    ...base,
+  };
+}
+
+/** Binds one group node — the children walk, recursively, all-or-nothing. */
+function bindGroupNode(
+  record: Record<string, unknown>,
+  base: NodeBaseFields,
+): FormFieldNode | null {
+  if (!Array.isArray(record.children)) return null;
+  const children: FormFieldNode[] = [];
+  for (const child of record.children) {
+    const bound = bindFieldNode(child);
+    if (bound === null) return null;
+    children.push(bound);
+  }
+  return { kind: 'group', children, ...base };
+}
+
+/** The kind-specific binders — the dispatch table `bindFieldNode` reads. */
+const NODE_KIND_BINDERS: Record<
+  string,
+  (record: Record<string, unknown>, base: NodeBaseFields) => FormFieldNode | null
+> = {
+  enum: bindEnumNode,
+  array: bindArrayNode,
+  group: bindGroupNode,
+};
+
+/** Binds the kind-specific slice of one node — the per-kind binders' dispatch. */
+function bindKindSlice(
+  record: Record<string, unknown>,
+  base: NodeBaseFields,
+): FormFieldNode | null {
+  const kind = record.kind;
+  if (typeof kind !== 'string') return null;
+  if ((SIMPLE_NODE_KINDS as readonly string[]).includes(kind)) {
+    return { kind: kind as SimpleNodeKind, ...base };
+  }
+  if (kind === 'raw') {
+    const reason = nonEmptyString(record.reason);
+    return reason === null ? null : { kind: 'raw', reason, ...base };
+  }
+  return (NODE_KIND_BINDERS[kind] ?? (() => null))(record, base);
+}
+
 /** Binds one walked-tree node — every kind structural, one drift rejects the walk. */
 function bindFieldNode(value: unknown): FormFieldNode | null {
   const record = asRecord(value);
@@ -67,70 +162,13 @@ function bindFieldNode(value: unknown): FormFieldNode | null {
   const label = typeof record.label === 'string' ? record.label : null;
   const required = typeof record.required === 'boolean' ? record.required : null;
   if (path === null || label === null || required === null) return null;
-  const base = {
+  const base: NodeBaseFields = {
     path,
     label,
     required,
     ...(record.initial !== undefined ? { initial: record.initial } : {}),
   };
-  switch (record.kind) {
-    case 'string':
-    case 'number':
-    case 'boolean':
-    case 'image':
-      return { kind: record.kind, ...base };
-    case 'raw': {
-      const reason = nonEmptyString(record.reason);
-      return reason === null ? null : { kind: 'raw', reason, ...base };
-    }
-    case 'enum': {
-      if (!Array.isArray(record.options)) return null;
-      const options: (string | number)[] = [];
-      for (const option of record.options) {
-        if (typeof option !== 'string' && typeof option !== 'number') return null;
-        options.push(option);
-      }
-      return { kind: 'enum', options, ...base };
-    }
-    case 'array': {
-      const item = asRecord(record.item);
-      if (item === null) return null;
-      if (
-        item.kind !== 'string' &&
-        item.kind !== 'number' &&
-        item.kind !== 'boolean' &&
-        item.kind !== 'enum'
-      ) {
-        return null;
-      }
-      let options: (string | number)[] | undefined;
-      if (item.kind === 'enum') {
-        if (!Array.isArray(item.options)) return null;
-        options = [];
-        for (const option of item.options) {
-          if (typeof option !== 'string' && typeof option !== 'number') return null;
-          options.push(option);
-        }
-      }
-      return {
-        kind: 'array',
-        item: { kind: item.kind, ...(options === undefined ? {} : { options }) },
-        ...base,
-      };
-    }
-    case 'group': {
-      if (!Array.isArray(record.children)) return null;
-      const children: FormFieldNode[] = [];
-      for (const child of record.children) {
-        const bound = bindFieldNode(child);
-        if (bound === null) return null;
-        children.push(bound);
-      }
-      return { kind: 'group', children, ...base };
-    }
-    default:
-      return null;
-  }
+  return bindKindSlice(record, base);
 }
 
 /** Binds a collection's schema result — declared plus the walked tree. */
@@ -199,6 +237,38 @@ function bindEntry(value: unknown): {
   };
 }
 
+/** Finds the named record in a payload array by one string field — the shared lookup. */
+function findNamedRecord(
+  candidates: readonly unknown[],
+  field: string,
+  expected: string,
+): Record<string, unknown> | null {
+  for (const candidate of candidates) {
+    const record = asRecord(candidate);
+    if (record !== null && record[field] === expected) return record;
+  }
+  return null;
+}
+
+/** Binds the target collection's outer truth: revision, schema, entries array. */
+function bindCollectionSlice(collection: Record<string, unknown>): {
+  revision: string;
+  declared: boolean;
+  fields: FormFieldNode[];
+  entries: readonly unknown[];
+} | null {
+  const revision = nonEmptyString(collection.revision);
+  const schema = bindSchema(collection.schema);
+  if (revision === null || schema === null) return null;
+  if (!Array.isArray(collection.entries)) return null;
+  return {
+    revision,
+    declared: schema.declared,
+    fields: schema.fields,
+    entries: collection.entries,
+  };
+}
+
 /**
  * Binds the active entry's slice of one content-inspection payload.
  * Structural over exactly what the forms slice consumes — the target
@@ -213,27 +283,11 @@ export function bindEntryTruth(
 ): EntryTruthOutcome {
   const record = asRecord(payload);
   if (record === null || !Array.isArray(record.collections)) return { outcome: 'drift' };
-  let boundCollection: Record<string, unknown> | null = null;
-  for (const candidate of record.collections) {
-    const candidateRecord = asRecord(candidate);
-    if (candidateRecord !== null && candidateRecord.name === collection) {
-      boundCollection = candidateRecord;
-      break;
-    }
-  }
+  const boundCollection = findNamedRecord(record.collections, 'name', collection);
   if (boundCollection === null) return { outcome: 'absent' };
-  const collectionRevision = nonEmptyString(boundCollection.revision);
-  const schema = bindSchema(boundCollection.schema);
-  if (collectionRevision === null || schema === null) return { outcome: 'drift' };
-  if (!Array.isArray(boundCollection.entries)) return { outcome: 'drift' };
-  let boundEntry: Record<string, unknown> | null = null;
-  for (const candidate of boundCollection.entries) {
-    const candidateRecord = asRecord(candidate);
-    if (candidateRecord !== null && candidateRecord.id === entryId) {
-      boundEntry = candidateRecord;
-      break;
-    }
-  }
+  const slice = bindCollectionSlice(boundCollection);
+  if (slice === null) return { outcome: 'drift' };
+  const boundEntry = findNamedRecord(slice.entries, 'id', entryId);
   if (boundEntry === null) return { outcome: 'absent' };
   const entry = bindEntry(boundEntry);
   if (entry === null) return { outcome: 'drift' };
@@ -242,13 +296,13 @@ export function bindEntryTruth(
     truth: {
       collection,
       entryId,
-      schemaDeclared: schema.declared,
-      fields: schema.fields,
+      schemaDeclared: slice.declared,
+      fields: slice.fields,
       values: entry.values,
       body: entry.body,
       revision: entry.revision,
       inspectedIssues: entry.issues,
-      collectionRevision,
+      collectionRevision: slice.revision,
     },
   };
 }

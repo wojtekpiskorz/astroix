@@ -121,6 +121,64 @@ function validateArrayItem(
   });
 }
 
+/** Validates one present leaf value against its kind — string/number/boolean shapes and enum membership. */
+function validateLeafValue(
+  issues: DraftIssue[],
+  inline: Record<string, string>,
+  node: FormFieldNode,
+  value: unknown,
+): void {
+  if (node.kind === 'string' || node.kind === 'number' || node.kind === 'boolean') {
+    const message = leafShapeMessage(node.kind, value);
+    if (message !== null) add(issues, inline, 'field', node.path, message);
+    return;
+  }
+  if (node.kind === 'enum') {
+    if (!node.options.includes(value as string | number)) {
+      add(issues, inline, 'schema', node.path, `must be one of: ${node.options.join(', ')}`);
+    }
+    return;
+  }
+  // image: display-only (the picker is deferred) — the projection's
+  // metadata round-trips untouched; no shape check is honest here.
+  // raw: any shape is the raw field's purpose — the raw space's own
+  // parse diagnostics are the pane's, not a shape constraint's.
+}
+
+/** Validates one present array value: the array shape plus every row's item kind. */
+function validateArrayValue(
+  issues: DraftIssue[],
+  inline: Record<string, string>,
+  node: FormFieldNode,
+  values: unknown,
+  value: unknown,
+): void {
+  if (node.kind !== 'array') return;
+  if (!Array.isArray(value)) {
+    add(issues, inline, 'field', node.path, 'must be an array');
+    return;
+  }
+  validateArrayItem(issues, inline, node, value);
+}
+
+/** Validates one present group value: the record shape, then every child. */
+function validateGroupValue(
+  issues: DraftIssue[],
+  inline: Record<string, string>,
+  node: FormFieldNode,
+  values: unknown,
+  value: unknown,
+): void {
+  if (node.kind !== 'group') return;
+  if (!isPlainRecord(value)) {
+    add(issues, inline, 'field', node.path, 'must be an object');
+    return;
+  }
+  for (const child of node.children) {
+    validateNode(issues, inline, child, values);
+  }
+}
+
 /** Validates one walked node — recursion happens at groups. */
 function validateNode(
   issues: DraftIssue[],
@@ -141,47 +199,9 @@ function validateNode(
     return;
   }
 
-  switch (node.kind) {
-    case 'string':
-    case 'number':
-    case 'boolean': {
-      const message = leafShapeMessage(node.kind, value);
-      if (message !== null) add(issues, inline, 'field', node.path, message);
-      return;
-    }
-    case 'enum': {
-      if (!node.options.includes(value as string | number)) {
-        add(issues, inline, 'schema', node.path, `must be one of: ${node.options.join(', ')}`);
-      }
-      return;
-    }
-    case 'image':
-      // Display-only (the picker is deferred): the projection's metadata
-      // round-trips untouched; no shape check is honest here.
-      return;
-    case 'raw':
-      // Any shape is the raw field's purpose — the raw space's own parse
-      // diagnostics are the pane's, not a shape constraint's.
-      return;
-    case 'array': {
-      if (!Array.isArray(value)) {
-        add(issues, inline, 'field', node.path, 'must be an array');
-        return;
-      }
-      validateArrayItem(issues, inline, node, value);
-      return;
-    }
-    case 'group': {
-      if (!isPlainRecord(value)) {
-        add(issues, inline, 'field', node.path, 'must be an object');
-        return;
-      }
-      for (const child of node.children) {
-        validateNode(issues, inline, child, values);
-      }
-      return;
-    }
-  }
+  validateLeafValue(issues, inline, node, value);
+  validateArrayValue(issues, inline, node, values, value);
+  validateGroupValue(issues, inline, node, values, value);
 }
 
 /** The empty report — no values, no text, no revision movement. */
