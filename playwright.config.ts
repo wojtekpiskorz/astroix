@@ -59,7 +59,9 @@ if (specFiles.length === 0 || missing.length > 0 || emptied.length > 0) {
 
 // The content vertical's battery (J1, #251) lives at the ticket's owned
 // path under apps/web — same guard idiom, so its project can never
-// pass with zero tests either.
+// pass with zero tests either. When a SECOND content spec lands, fold
+// this single-file shape and the dir-scan shape above into one shared
+// vacuity-guard idiom (#374's rider): two hand-rolled shapes drift.
 const CONTENT_SPEC = join('apps', 'web', 'e2e', 'content', 'discovery-navigation.spec.ts');
 const contentSpecTests = existsSync(CONTENT_SPEC)
   ? (readFileSync(CONTENT_SPEC, 'utf8').match(/^\s*test\(/gm) ?? []).length
