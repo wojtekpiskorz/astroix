@@ -1,5 +1,6 @@
 import type { QueryClient } from '@tanstack/react-query';
 import { removeSessionQueries } from '../query/session-query-cache.ts';
+import { clearRegisteredFeatureStores } from '../state/feature-store-registry.ts';
 import type { SessionGate } from '../state/session-gate.ts';
 import { clearShellStores } from '../state/shell-stores.ts';
 
@@ -11,6 +12,12 @@ import { clearShellStores } from '../state/shell-stores.ts';
  * entry, edit grants, undo state, scheduled debounces, pending
  * mutations — BEFORE navigation. The order is the contract: navigation
  * is the LAST step, and nothing session-scoped survives it.
+ *
+ * The `clear-stores` step's reach includes the FEATURE stores (#372,
+ * ruled 2026-09-04): every feature-local zustand store registered with
+ * the state layer's reset registry clears inside the same step, right
+ * after the shell stores — the store's reset semantics stay
+ * feature-owned, the timing is the sequencer's.
  *
  * `runShellReset` is the explicit sequencer: the pinned step order, an
  * action per step, and injectable observers (the unit tests pin the
@@ -91,6 +98,7 @@ export function composeShellReset(inputs: ShellResetCompositionInputs): {
           removeQueries: () => removeSessionQueries(inputs.queryClient),
           clearStores: () => {
             clearShellStores();
+            clearRegisteredFeatureStores();
             inputs.gate.move(null);
           },
           navigate: () => inputs.navigate(inputs.url),
