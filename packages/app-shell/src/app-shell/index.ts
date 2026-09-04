@@ -59,10 +59,8 @@ export {
   useEditSessionStore,
 } from '../state/edit-session-store';
 export {
-  clearRegisteredFeatureStores,
   type FeatureStoreReset,
   type FeatureStoreResetHandle,
-  registeredFeatureStoreKeys,
   registerFeatureStoreReset,
 } from '../state/feature-store-registry';
 export {
