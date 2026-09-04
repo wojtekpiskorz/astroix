@@ -209,19 +209,13 @@ export function useEntryWrite(view: EntryFormView): EntryWriteControls {
       refused === null && facts !== null && view.intent !== null
         ? buildEntryWritePlan({ facts, intent: view.intent, fields: view.fields })
         : null;
-    if (refused !== null) {
-      const seq = nextSeq();
-      dispatchEvent({ type: 'submitted', seq });
-      dispatchEvent({ type: 'rejected', seq, code: refused });
-      return;
-    }
-    if (serialized === null || !serialized.ok) {
+    if (refused !== null || serialized === null || !serialized.ok) {
       const seq = nextSeq();
       dispatchEvent({ type: 'submitted', seq });
       dispatchEvent({
         type: 'rejected',
         seq,
-        code: serialized === null ? 'no-grant' : serialized.code,
+        code: refused ?? (serialized?.ok === false ? serialized.code : 'no-grant'),
       });
       return;
     }
@@ -238,29 +232,40 @@ export function useEntryWrite(view: EntryFormView): EntryWriteControls {
         ? { revision: view.baselineRevision, values: view.intent.baseline.values }
         : null;
     try {
-      const result = await session.applyEdit(serialized.plan);
-      const settled = classifySettle(result);
-      if (settled.kind === 'committed') {
-        dispatchEvent({ type: 'committed', seq, revision: settled.revision });
-        if (settled.nextGrantToken !== null) {
-          holdGrant(session.ref, { token: settled.nextGrantToken });
-        }
-      } else {
-        dispatchEvent({ type: 'rejected', seq, code: settled.code });
-      }
+      const kind = settleDispatch(seq, classifySettle(await session.applyEdit(serialized.plan)));
+      await refreshAfterSettle(seq, kind);
     } catch (error) {
-      const settled = classifySettle(error instanceof Error ? error : new Error('unknown'));
-      if (settled.kind === 'conflict') {
-        dispatchEvent({ type: 'conflict', seq, currentSha256: settled.currentSha256 });
-      } else if (settled.kind === 'rejected') {
-        dispatchEvent({ type: 'rejected', seq, code: settled.code });
-      } else {
-        dispatchEvent({ type: 'uncertain', seq });
-      }
+      settleDispatch(seq, classifySettle(error instanceof Error ? error : new Error('unknown')));
       await refreshAfterSettle(seq, 'uncertain');
-      return;
     }
-    await refreshAfterSettle(seq, 'committed');
+  }
+
+  /**
+   * Dispatches one settle's machine events — the shared tail of both
+   * settle paths (the awaited result and the caught error). Returns
+   * the refresh kind the settle's phase implies: `committed` or
+   * `uncertain` (every error-side settle — conflict included —
+   * converged through its own refresh).
+   */
+  function settleDispatch(
+    seq: number,
+    settled: ReturnType<typeof classifySettle>,
+  ): 'committed' | 'uncertain' {
+    if (settled.kind === 'committed') {
+      dispatchEvent({ type: 'committed', seq, revision: settled.revision });
+      if (settled.nextGrantToken !== null) {
+        holdGrant(session.ref, { token: settled.nextGrantToken });
+      }
+      return 'committed';
+    }
+    if (settled.kind === 'conflict') {
+      dispatchEvent({ type: 'conflict', seq, currentSha256: settled.currentSha256 });
+    } else if (settled.kind === 'rejected') {
+      dispatchEvent({ type: 'rejected', seq, code: settled.code });
+    } else {
+      dispatchEvent({ type: 'uncertain', seq });
+    }
+    return 'uncertain';
   }
 
   /**

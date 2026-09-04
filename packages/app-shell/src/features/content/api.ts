@@ -401,6 +401,25 @@ export function bindEntryWriteFacts(entry: unknown): EntryWriteFacts | null {
   // The served projection must be PRESENT (the runtime serializes every
   // entry's `data`); its interior is a carried truth, never validated here.
   if (!('data' in record)) return null;
+  const grant = bindGrantClaim(grantRecord);
+  if (grant === null) return null;
+  return {
+    grant,
+    raw: record.raw,
+    baselineSha256: grant.baseline.type === 'sha256' ? grant.baseline.sha256 : null,
+    servedValues: record.data,
+  };
+}
+
+/** The bound grant claim — the wire shape the plan echoes verbatim. */
+type BoundGrantClaim = EntryWriteFacts['grant'];
+
+/**
+ * Binds the issued grant claim field-for-field — `null` on any drift.
+ * The revision contract's shape decides the companion baseline SHA the
+ * write loop carries (null on expected-absent creation).
+ */
+function bindGrantClaim(grantRecord: Record<string, unknown>): BoundGrantClaim | null {
   const token = nonEmptyString(grantRecord.token);
   const kind = nonEmptyString(grantRecord.kind);
   const displayPath = nonEmptyString(grantRecord.displayPath);
@@ -413,25 +432,15 @@ export function bindEntryWriteFacts(entry: unknown): EntryWriteFacts | null {
   }
   if (operations.length === 0) return null;
   const baselineRecord = asRecord(grantRecord.baseline);
-  let baseline: EntryWriteFacts['grant']['baseline'];
-  let baselineSha256: string | null;
   if (baselineRecord?.type === 'sha256') {
     const sha256 = nonEmptyString(baselineRecord.sha256);
     if (sha256 === null) return null;
-    baseline = { type: 'sha256', sha256 };
-    baselineSha256 = sha256;
-  } else if (baselineRecord?.type === 'expected-absent') {
-    baseline = { type: 'expected-absent' };
-    baselineSha256 = null;
-  } else {
-    return null;
+    return { token, kind, operations, displayPath, baseline: { type: 'sha256', sha256 } };
   }
-  return {
-    grant: { token, kind, operations, displayPath, baseline },
-    raw: record.raw,
-    baselineSha256,
-    servedValues: record.data,
-  };
+  if (baselineRecord?.type === 'expected-absent') {
+    return { token, kind, operations, displayPath, baseline: { type: 'expected-absent' } };
+  }
+  return null;
 }
 
 /**
