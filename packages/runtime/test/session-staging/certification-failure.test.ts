@@ -112,6 +112,31 @@ describe('the certification failure category — reachable, enriched, bounded (#
     expect(sessionLabel(snapshot)).toBe('failed');
   });
 
+  it('prerelease-shaped pair facts still enrich the message — the report requirement holds for real npm prereleases (#415)', async () => {
+    // The both-poles coherence: the facade's admission pins version
+    // facts to the semver-ish shape (which real npm prereleases satisfy),
+    // and this belt composes over the admitted facts — the enrichment
+    // must not have been over-tightened into dropping the ADR-0005
+    // report for a legitimate prerelease pair.
+    const { supervisor, control } = fixture();
+    const facts: CertificationFacts = {
+      detected: { astro: '7.3.0-beta.1', vite: '8.3.0-rc.2' },
+      certified: [{ astro: '7.2.10', vite: '8.2.2' }],
+      rejectedContract: CONTRACT,
+    };
+    const attempt = begunOf(supervisor.begin(PROJECT_A));
+    runOf(control, 1).failReadyUncertifiedPair(facts);
+
+    const error = await rejectionOf(attempt.ready);
+    if (!(error instanceof ActivationFailedError)) {
+      throw new Error('expected ActivationFailedError');
+    }
+    expect(error.failure.category).toBe('certification');
+    expect(error.message).toContain('detected astro@7.3.0-beta.1 + vite@8.3.0-rc.2');
+    expect(error.message).toContain('certified pairs: astro@7.2.10 + vite@8.2.2');
+    expect(sanitizedTextSchema.safeParse(error.failure.message).success).toBe(true);
+  });
+
   it('every other boot code still maps unchanged — the existing categories keep their readings', async () => {
     const { supervisor, control } = fixture();
     const expectations: ReadonlyArray<

@@ -104,9 +104,12 @@ export type ProjectRunBootErrorCode =
  * The certification facts an uncertified-pair boot rejection carries
  * (ADR-0005's explicit report requirement: the detected pair, the
  * certified pairs, and the rejected contract). These are the adapter's
- * sanctioned `details` payload, re-validated at admission — the strings
- * are disclosure-checked before they ride the error, so nothing a
- * hostile project manifest carried can surface through the boot path.
+ * sanctioned `details` payload, re-validated at admission — every pair
+ * version pinned to its semver-ish shape and every string
+ * disclosure-checked before they ride the error (#415, the #352 ruling's
+ * facts pole), so nothing a hostile project manifest carried — a
+ * tag-adjacent `lts/...` version, a path, a range — can surface through
+ * the boot path.
  */
 export interface CertificationFacts {
   readonly detected: ExactPairValue;
@@ -153,25 +156,74 @@ export class ProjectRunBootError extends Error {
 /** The adapter's compatibility origin — the only certification-bearing code admitted. */
 const UNCERTIFIED_PAIR_CODE = 'uncertified-pair';
 
-/** A fact string the certification payload may carry: non-empty and disclosure-free. */
+/**
+ * The semver-ish version shape every pair fact is pinned to at admission
+ * (#415 — the #352 ruling's facts pole; `packages/protocol`'s tightened
+ * `findDisclosure` is the composed-text pole, #414): the official semver
+ * grammar — `MAJOR.MINOR.PATCH` as numeric identifiers without leading
+ * zeros, plus the prerelease (`-`) and build (`+`) allowances npm
+ * manifests actually emit (`7.2.10`, `8.2.2`, `7.3.0-beta.1`) — anchored
+ * whole. Format-tightness kills the letter-adjacent class at the source:
+ * a tag-adjacent string (`lts/express`, `node@lts/express`), a path
+ * (`7.3.0/Users/secret`, `/Users/secret`, `24/bin/node`), a range
+ * (`^7.2.10`, `7.x`), a bare tag (`latest`), or a drifted `v7.2.10` is
+ * not a version, so none of it can ride a fact into a disclosure
+ * surface — the admission refuses it as a shape drift, honestly
+ * classified `launch-failed`, never a silent pass.
+ */
+const VERSION_FACT_PATTERN =
+  /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*)?(?:\+[0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*)?$/;
+
+/**
+ * The version fact's length ceiling: far above any version npm has ever
+ * published (real identifiers sit under ~40 characters) and far below
+ * every byte budget, so an overlong "version" fails the admission as a
+ * shape refusal here instead of leaning on a downstream composition
+ * budget to drop it later.
+ */
+const VERSION_FACT_MAX_LENGTH = 128;
+
+/**
+ * A pair version fact: a string, within the length ceiling, disclosure-
+ * free (the general fact law, held behind the pin — a shape-matching
+ * version can never trip the disclosure guard today; the check guards
+ * coherence if the pin is ever widened), and pinned to the semver-ish
+ * version shape — the facts pole of the #352 ruling.
+ */
+function isVersionFact(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    value.length > 0 &&
+    value.length <= VERSION_FACT_MAX_LENGTH &&
+    VERSION_FACT_PATTERN.test(value) &&
+    findDisclosure(value) === null
+  );
+}
+
+/**
+ * A free-form fact string the certification payload may carry: non-empty
+ * and disclosure-free. The rejected contract's law — it is a range
+ * expression ("exact Astro/Vite pair certification must pass…"), never a
+ * version, so it keeps the shape-agnostic fact discipline.
+ */
 function isFactText(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0 && findDisclosure(value) === null;
 }
 
-/** One pair value in the certification payload — both versions fact strings. */
+/** One pair value in the certification payload — both versions pinned to the semver-ish version fact shape. */
 function isFactPair(value: unknown): value is ExactPairValue {
   if (typeof value !== 'object' || value === null) return false;
   const record = value as Record<string, unknown>;
-  return isFactText(record.astro) && isFactText(record.vite);
+  return isVersionFact(record.astro) && isVersionFact(record.vite);
 }
 
 /**
  * Validates a boot-path rejection into the certification facts — or null
  * when the origin is anything else: another adapter code, no code at
- * all, or an `uncertified-pair` whose payload drifted in shape or carries
- * disclosure-shaped text. The admission never guesses (#319): a drifted
- * origin reports `launch-failed`, never a partially-trusted
- * certification.
+ * all, or an `uncertified-pair` whose payload drifted in shape, carries
+ * a version outside the semver-ish pin, or carries disclosure-shaped
+ * text. The admission never guesses (#319): a drifted origin reports
+ * `launch-failed`, never a partially-trusted certification.
  */
 function certificationFactsOf(error: unknown): CertificationFacts | null {
   if (typeof error !== 'object' || error === null) return null;
@@ -185,7 +237,8 @@ function certificationFactsOf(error: unknown): CertificationFacts | null {
 /**
  * The adapter's uncertified-pair detail payload, validated whole: the
  * detected pair, a non-empty certified list of pairs, and the rejected
- * contract — every string a non-empty, disclosure-free fact.
+ * contract — every pair version pinned to the semver-ish fact shape
+ * (#415), the contract a non-empty disclosure-free fact.
  */
 function certificationPayloadOf(payload: Record<string, unknown>): CertificationFacts | null {
   if (!isFactPair(payload.detected)) return null;
