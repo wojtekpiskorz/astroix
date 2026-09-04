@@ -228,9 +228,17 @@ export async function startNativeHost(
     // The granted origin joins the approved navigation set before the
     // top level replaces onto it (the policy's own grant, #362).
     navigation.approveOrigin(ask.origin);
-    void (target?.replaceTopLevel(ask.origin) ?? Promise.resolve(null)).then((identity) => {
-      controlPlane.hostObservation(ask.requestId, identity !== null, identity);
-    });
+    void (target?.replaceTopLevel(ask.origin) ?? Promise.resolve(null))
+      .then((identity) => {
+        controlPlane.hostObservation(ask.requestId, identity !== null, identity);
+      })
+      .catch(() => {
+        // The honest unobserved reply: a rejection must never strand
+        // the child's handshake waiter without an answer (the
+        // activation would hang until channel loss) or surface as an
+        // unhandled rejection.
+        controlPlane.hostObservation(ask.requestId, false, null);
+      });
   };
 
   // — the ONE control-plane child through the private boot —

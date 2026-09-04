@@ -463,7 +463,9 @@ export async function createControlPlaneComposition(
  * the top level is replaced —
  *
  * - the origin lease is granted FIRST (the origin must serve before the
- *   host can load anything from it);
+ *   host can load anything from it) and recorded onto the trail at
+ *   grant time, so a throw anywhere in the handshake leaves the F7
+ *   aftermath the exact inventory to retire;
  * - the adoption binds at the target's CURRENT observed document (the
  *   document surface can serve the project app — the capability
  *   exists), which the phase-2 replacement then invalidates by H4's
@@ -471,8 +473,13 @@ export async function createControlPlaneComposition(
  * - the REBIND at the observed post-replacement document is the live
  *   grant — the one the Electron host's injection carries and the one
  *   the page's every exchange rides.
+ *
+ * Exported for the executor's focused stranded-adoption legs: they wire
+ * this REAL production seam over their manual-run fixtures — never a
+ * re-derivation, because the grant-before-trail-record ordering is
+ * exactly the class of wiring defect a copy would faithfully reproduce.
  */
-function electronHostAdoption(
+export function electronHostAdoption(
   handshake: HostMainFrameHandshake,
   inputs: ExecutorInputs,
   seatStore: SeatStore,
@@ -499,6 +506,15 @@ function electronHostAdoption(
         projectKey: active.projectKey,
         upstream: { host: '127.0.0.1', port: devServerPort },
       });
+      // The trail records the lease AT GRANT TIME: `adoptSession`
+      // re-records it (idempotently) once its own grants land, but a
+      // throw between here and there — a host that cannot report the
+      // current document, a refused bind — must still leave the
+      // aftermath the exact inventory to retire. An unrecorded live
+      // lease escapes the ordered pass, and the router's one-active-
+      // lease law then refuses every later grant (`lease-occupied`)
+      // until app quit.
+      trail.lease = lease;
       const current = await handshake.currentDocument();
       if (current === null) throw new Error('the host could not report the authoritative document');
       inputs.authority.declareAuthoritativeTarget(current.webContentsId);

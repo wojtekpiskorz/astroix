@@ -1,4 +1,5 @@
 import type { DocumentAuthorityPort } from '@wojciechpiskorz/astroix-runtime/client-authority';
+import { APP_PATH } from '../../../web/src/documents.ts';
 import {
   type ClientCapabilityInjection,
   installClientCapabilityInjection,
@@ -212,7 +213,7 @@ export function createAuthoritativeTargetHost(
     },
     replaceTopLevel: async (origin) => {
       if (live === null) return null;
-      const outcome = await live.guard.loadProjectOrigin(`${origin}/__astroix/app/`);
+      const outcome = await live.guard.loadProjectOrigin(`${origin}${APP_PATH}`);
       if (outcome.kind !== 'loaded') return null;
       const navigationId = live.binding.currentNavigationId();
       if (navigationId < 1) return null;
