@@ -334,6 +334,16 @@ async function activate(
   // attempts, never a stale leftover.
   const devPort = await inputs.freePort();
   inputs.pendingDevPorts.push(devPort);
+  // Re-read in the SAME synchronous block as push and begin (#419 review):
+  // a same-project activation can commit during the port await above,
+  // and the guard at the top would then admit a second plane for the
+  // same root — the exact crash it exists to refuse.
+  const activeAfterPort = inputs.supervisor.snapshot().active;
+  if (activeAfterPort !== undefined && activeAfterPort.projectKey === projectKey) {
+    const returned = inputs.pendingDevPorts.pop();
+    if (returned !== devPort) throw new Error('dispatch defect: port queue desync');
+    return activationResult(envelope.requestId, activeAfterPort.ref, projectKey, inputs);
+  }
   const begun = inputs.supervisor.begin(projectKey);
   if (begun.kind === 'refused') {
     const returned = inputs.pendingDevPorts.pop();

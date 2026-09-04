@@ -201,6 +201,22 @@ export interface WireCredentials {
 }
 
 /** Boots the harness: stages A and B, composes the real control plane, registers both roots. */
+/**
+ * The plane's real child pids (the K-family's process oracle): the subtree
+ * minus this test process, keeping only the worker and the managed dev
+ * server by their spawn command shape. Single-homed here so a runtime lane
+ * changing the spawn argv breaks ONE copy, not a battery that then matches
+ * nothing and turns vacuously green (#419 review).
+ */
+export async function planePids(harness: SwitchHarness): Promise<number[]> {
+  const subtree = await harness.subtreePids();
+  return [...subtree]
+    .filter(
+      ([pid, command]) => pid !== process.pid && /worker-child\.ts|astro\.mjs dev/.test(command),
+    )
+    .map(([pid]) => pid);
+}
+
 export async function createSwitchHarness(): Promise<SwitchHarness> {
   const scratchRoot = await mkdtemp(join(tmpdir(), 'astroix-aba-'));
   const rootA = await stagedFixtureCopy(scratchRoot, 'project-a');

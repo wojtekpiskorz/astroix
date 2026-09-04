@@ -8,6 +8,7 @@ import {
   ACTIVATION_BUDGET_MS,
   createSwitchHarness,
   launcherDocument,
+  planePids,
   pollUntil,
   SETTLE_BUDGET_MS,
   type SwitchHarness,
@@ -56,15 +57,6 @@ function errorCode(body: string): string {
  * oracle spelling: the `ps` polls appear as transient helpers a raw
  * child count would flicker on).
  */
-async function planePids(harness: SwitchHarness): Promise<number[]> {
-  const subtree = await harness.subtreePids();
-  return [...subtree]
-    .filter(
-      ([pid, command]) => pid !== process.pid && /worker-child\.ts|astro\.mjs dev/.test(command),
-    )
-    .map(([pid]) => pid);
-}
-
 /** One bounded sleep — the observation window's interval. */
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => {

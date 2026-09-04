@@ -7,6 +7,7 @@ import {
   createSwitchHarness,
   type LiveProbe,
   launcherDocument,
+  planePids,
   pollUntil,
   rawExchange,
   SETTLE_BUDGET_MS,
@@ -211,15 +212,6 @@ async function entryOf(project: SwitchProject): Promise<string> {
  * polls themselves appear as pre-exec `(node)` children while their
  * exec is in flight, so a raw child count flickers and can never settle.
  */
-async function planePids(harness: SwitchHarness): Promise<number[]> {
-  const subtree = await harness.subtreePids();
-  return [...subtree]
-    .filter(
-      ([pid, command]) => pid !== process.pid && /worker-child\.ts|astro\.mjs dev/.test(command),
-    )
-    .map(([pid]) => pid);
-}
-
 /** Whether one promise settled inside the budget — a probe, never a naked sleep. */
 async function settledWithin(promise: Promise<unknown>, budgetMs: number): Promise<boolean> {
   return await Promise.race([
