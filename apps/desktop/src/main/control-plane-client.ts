@@ -8,7 +8,9 @@ import {
   type DesktopChildRequest,
   deactivateRequest,
   hostObservationResultRequest,
+  listProjectsRequest,
   parseDesktopChildReport,
+  type RegisteredProjectsResult,
   type RegisterResult,
   registerRootRequest,
   type TransitionOutcome,
@@ -89,6 +91,13 @@ export interface ControlPlaneClient {
   /** False once the channel or child is gone. */
   readonly connected: boolean;
   registerRoot(root: string): Promise<RegisterResult>;
+  /**
+   * The boot-time registry listing (#367): the sanitized summaries of
+   * every record the registry persisted across launches — main asks once
+   * the child reported its boot complete, so the second launch's
+   * activation menu is built from what the first launch registered.
+   */
+  listRegisteredProjects(): Promise<RegisteredProjectsResult>;
   activate(projectKey: string): Promise<TransitionOutcome>;
   deactivate(sessionRef: SessionRef): Promise<TransitionOutcome>;
   /** Answers one host-observation ask with the observed document identity (or the honest unobserved). */
@@ -110,13 +119,18 @@ export interface ControlPlaneClientOptions {
   readonly bootDeadlineMs?: number;
 }
 
-/** The one refused transition shape every lost-channel call answers with (the register side carries its own constant). */
+/** The one refused transition shape every lost-channel call answers with (the register/listing sides carry their own constants). */
 const UNAVAILABLE: TransitionOutcome = {
   kind: 'refused',
   reason: 'control-plane-unavailable',
 } as const;
 
 const REGISTER_UNAVAILABLE: RegisterResult = {
+  ok: false,
+  code: 'control-plane-unavailable',
+} as const;
+
+const LISTING_UNAVAILABLE: RegisteredProjectsResult = {
   ok: false,
   code: 'control-plane-unavailable',
 } as const;
@@ -128,6 +142,7 @@ export function connectControlPlaneChild(options: ControlPlaneClientOptions): Co
     number,
     {
       readonly register?: (result: RegisterResult) => void;
+      readonly projects?: (result: RegisteredProjectsResult) => void;
       readonly transition?: (outcome: TransitionOutcome) => void;
       readonly authority?: () => void;
     }
@@ -149,6 +164,7 @@ export function connectControlPlaneChild(options: ControlPlaneClientOptions): Co
     lost = true;
     for (const settle of pending.values()) {
       settle.register?.(REGISTER_UNAVAILABLE);
+      settle.projects?.(LISTING_UNAVAILABLE);
       settle.transition?.(UNAVAILABLE);
       settle.authority?.();
     }
@@ -206,6 +222,11 @@ export function connectControlPlaneChild(options: ControlPlaneClientOptions): Co
       settle.register(report.result);
       return;
     }
+    if (report.kind === 'projects-result' && settle.projects !== undefined) {
+      pending.delete(report.requestId);
+      settle.projects(report.result);
+      return;
+    }
     if (report.kind === 'transition-result' && settle.transition !== undefined) {
       pending.delete(report.requestId);
       settle.transition(report.outcome);
@@ -248,12 +269,14 @@ export function connectControlPlaneChild(options: ControlPlaneClientOptions): Co
     build: (requestId: number) => DesktopChildRequest,
     settle: {
       register?: (result: RegisterResult) => void;
+      projects?: (result: RegisteredProjectsResult) => void;
       transition?: (o: TransitionOutcome) => void;
       authority?: () => void;
     },
   ): void {
     if (lost) {
       settle.register?.(REGISTER_UNAVAILABLE);
+      settle.projects?.(LISTING_UNAVAILABLE);
       settle.transition?.(UNAVAILABLE);
       settle.authority?.();
       return;
@@ -264,6 +287,7 @@ export function connectControlPlaneChild(options: ControlPlaneClientOptions): Co
     if (sent === false || sent === null) {
       pending.delete(requestId);
       settle.register?.(REGISTER_UNAVAILABLE);
+      settle.projects?.(LISTING_UNAVAILABLE);
       settle.transition?.(UNAVAILABLE);
       settle.authority?.();
     }
@@ -298,6 +322,10 @@ export function connectControlPlaneChild(options: ControlPlaneClientOptions): Co
       registerRoot: (root) =>
         new Promise<RegisterResult>((resolve) => {
           request((requestId) => registerRootRequest(requestId, root), { register: resolve });
+        }),
+      listRegisteredProjects: () =>
+        new Promise<RegisteredProjectsResult>((resolve) => {
+          request((requestId) => listProjectsRequest(requestId), { projects: resolve });
         }),
       activate: (projectKey) =>
         new Promise<TransitionOutcome>((resolve) => {

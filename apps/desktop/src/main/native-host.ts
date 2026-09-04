@@ -197,6 +197,20 @@ export async function startNativeHost(
   let quitSettled = false;
   /** The registered projects (the sanitized summaries) — the activation menu's data. */
   const registeredProjects: GrantedProjectSummary[] = [];
+
+  /**
+   * One summary into the activation menu's data — idempotent by project
+   * key: a re-added root (the registry's `existed: true`, the same key)
+   * replaces its row, and a boot listing that repeats a locally-known
+   * key grows nothing (#367's two shapes, one idiom).
+   */
+  const upsertRegisteredProject = (summary: GrantedProjectSummary): void => {
+    const existing = registeredProjects.findIndex(
+      (project) => project.projectKey === summary.projectKey,
+    );
+    if (existing === -1) registeredProjects.push(summary);
+    else registeredProjects[existing] = summary;
+  };
   /** The main-side authoritative-target host — born when the composition's port arrives. */
   let target: AuthoritativeTargetHost | null = null;
   /** The launcher origin the composition published — the main window's idle document. */
@@ -252,6 +266,10 @@ export async function startNativeHost(
         navigation.approveOrigin(launcherOrigin);
         target = seam.createAuthoritativeTarget(launcherOrigin, navigation, controlPlane);
         showLauncher();
+        // The boot-time listing (#367): the registry persisted across
+        // launches, and the second launch's activation surface is built
+        // from what it holds — asked for here, over the same channel.
+        refreshRegisteredProjects();
       },
       onLost: (reason) => observer({ kind: 'control-plane-lost', reason }),
       onSessionState: (sessionRef) => {
@@ -273,18 +291,32 @@ export async function startNativeHost(
   const selectionObserver: NativeSelectionObserver = {
     onRegistered: (summary) => {
       // A re-added root answers `existed: true` with the same projectKey —
-      // dedupe so the Session menu grows no duplicate Activate row (#367's
-      // cheap half; the boot-time listing half stays the owner's ruling).
-      const existing = registeredProjects.findIndex(
-        (project) => project.projectKey === summary.projectKey,
-      );
-      if (existing === -1) registeredProjects.push(summary);
-      else registeredProjects[existing] = summary;
+      // the upsert keeps the Session menu idempotent (#367's re-add shape).
+      upsertRegisteredProject(summary);
       observer({ kind: 'registered', summary });
       installMenu();
     },
     onRegistrationRefused: (code) => observer({ kind: 'registration-refused', code }),
     onSelectionCanceled: () => observer({ kind: 'selection-canceled' }),
+  };
+
+  /**
+   * The boot-time listing's landing (#367): every persisted summary joins
+   * the activation menu's data through the same idempotent upsert the
+   * native registration uses — a listing that races a fresh registration
+   * merges by key, never duplicating and never dropping what the registry
+   * had not yet seen. A refused listing leaves the menu as it was: the
+   * Add Existing Project entry point still works, and nothing is guessed.
+   */
+  const refreshRegisteredProjects = (): void => {
+    void controlPlane
+      .listRegisteredProjects()
+      .then((result) => {
+        if (!result.ok) return;
+        for (const summary of result.summaries) upsertRegisteredProject(summary);
+        installMenu();
+      })
+      .catch(() => {});
   };
 
   /**

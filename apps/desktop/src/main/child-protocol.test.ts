@@ -7,9 +7,11 @@ import {
   deactivateRequest,
   documentCapabilityReport,
   hostObservationResultRequest,
+  listProjectsRequest,
   observeDocumentRequest,
   parseDesktopChildReport,
   parseDesktopChildRequest,
+  projectsResultReport,
   registerResultReport,
   registerRootRequest,
   replaceTopLevelRequest,
@@ -41,6 +43,11 @@ describe('parseDesktopChildRequest', () => {
     expect(parseDesktopChildRequest(deactivateRequest(3, SESSION_REF))).toMatchObject({
       kind: 'deactivate',
       requestId: 3,
+    });
+    expect(parseDesktopChildRequest(listProjectsRequest(4))).toEqual({
+      astroix: 'astroix.desktop-private-channel',
+      kind: 'list-projects',
+      requestId: 4,
     });
   });
 
@@ -284,6 +291,59 @@ describe('parseDesktopChildReport', () => {
     expect(
       parseDesktopChildReport({
         ...registerResultReport(1, { ok: false, code: 'root-unavailable' }),
+        surplus: 'field',
+      } as never),
+    ).toBeNull();
+  });
+
+  it('lifts the boot-time listing ask and its sanitized answer (#367)', () => {
+    // The ask: main requests the registry's persisted records.
+    expect(
+      parseDesktopChildRequest({ ...listProjectsRequest(4), extra: true } as never),
+    ).toBeNull();
+    expect(
+      parseDesktopChildRequest({
+        astroix: 'astroix.desktop-private-channel',
+        kind: 'list-projects',
+        requestId: 0,
+      }),
+    ).toBeNull();
+    // The answer: the sanitized summaries lift; one drifted entry drops
+    // the whole reply, never a partial parse.
+    const summaries = [
+      { projectKey: 'key1', displayName: 'site', availability: 'available' },
+      { projectKey: 'key2', displayName: 'gone', availability: 'unavailable' },
+    ] as const;
+    expect(parseDesktopChildReport(projectsResultReport(5, { ok: true, summaries }))).toMatchObject(
+      { kind: 'projects-result', requestId: 5 },
+    );
+    expect(
+      parseDesktopChildReport(
+        projectsResultReport(5, {
+          ok: true,
+          summaries: [
+            ...summaries,
+            { projectKey: 'key3', displayName: 'x', availability: 'maybe' },
+          ],
+        } as never),
+      ),
+    ).toBeNull();
+    expect(
+      parseDesktopChildReport(
+        projectsResultReport(5, { ok: true, summaries: { not: 'an-array' } } as never),
+      ),
+    ).toBeNull();
+    expect(
+      parseDesktopChildReport(
+        projectsResultReport(5, { ok: false, code: 'control-plane-unavailable' }),
+      ),
+    ).toMatchObject({ kind: 'projects-result', requestId: 5 });
+    expect(
+      parseDesktopChildReport(projectsResultReport(5, { ok: false, code: 'made-up' } as never)),
+    ).toBeNull();
+    expect(
+      parseDesktopChildReport({
+        ...projectsResultReport(5, { ok: true, summaries }),
         surplus: 'field',
       } as never),
     ).toBeNull();
