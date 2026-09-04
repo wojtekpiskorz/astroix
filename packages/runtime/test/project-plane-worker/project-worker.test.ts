@@ -73,7 +73,7 @@ async function waitForEvent(
 
 const tick = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-describe('typed dispatch over the four families', () => {
+describe('typed dispatch over the closed request set', () => {
   it('dispatches each family to its branch and wraps the payload with kind and revision', async () => {
     const plane = fakePlane();
     const worker = workerWith(plane);
@@ -104,6 +104,60 @@ describe('typed dispatch over the four families', () => {
     expect(plane.calls.content).toBe(1);
     expect(plane.calls.styles[0]?.routeComponent).toBe('src/pages/index.astro');
     expect(plane.calls.routes).toHaveLength(1);
+  });
+
+  it('dispatches the control-plane-only route-selection resolution (#370): pathname in, selection out', async () => {
+    const plane = fakePlane();
+    const worker = workerWith(plane);
+
+    const resolved = await worker.dispatch({ kind: 'route-selection', route: '/' });
+    expect(resolved).toEqual({
+      kind: 'route-selection',
+      revision: 1,
+      payload: plane.payloads.routeSelection,
+    });
+    expect(plane.calls.routeSelection[0]?.route).toBe('/');
+
+    // An unresolvable route is RESULT data (the executor's 404), never a
+    // dispatch failure — the branch refuses nothing a client can fix.
+    plane.payloads.routeSelection = { revision: 0, selection: null };
+    const unresolvable = await worker.dispatch({ kind: 'route-selection', route: '/no/such' });
+    expect(unresolvable.kind).toBe('route-selection');
+    if (unresolvable.kind !== 'route-selection') throw new Error('unreachable narrowing');
+    expect(unresolvable.payload.selection).toBeNull();
+    // The revision rides the branch's own counter (the adapter-side pass
+    // counter, like routes/styles — never a worker-side one).
+    expect(unresolvable.revision).toBe(2);
+
+    // A rejected pass (seam drift) is the structured branch failure —
+    // the sanitized carrier, never a raw error.
+    plane.behaviors.routeSelection = 'raw-throw';
+    const rejection = await rejectionOf(worker.dispatch({ kind: 'route-selection', route: '/' }));
+    expect(rejection.failure.code).toBe('inspection-failed');
+    expect(rejection.failure.message).not.toContain('/Users/secret');
+
+    // The request is closed: no extra fields, and the route must be a
+    // /-rooted string — refused before any branch runs.
+    plane.behaviors.routeSelection = 'ok';
+    const malformed = await rejectionOf(
+      worker.dispatch({
+        kind: 'route-selection',
+        route: 'not-rooted',
+      } as unknown as Parameters<ProjectWorker['dispatch']>[0]),
+    );
+    expect(malformed.failure.code).toBe('malformed-request');
+    const overCarrying = await rejectionOf(
+      worker.dispatch({
+        kind: 'route-selection',
+        route: '/',
+        attempts: 2,
+      } as unknown as Parameters<ProjectWorker['dispatch']>[0]),
+    );
+    expect(overCarrying.failure.code).toBe('malformed-request');
+    // Exactly the three admitted dispatches reached the branch (resolved,
+    // unresolvable, and the failed pass); both malformed shapes were
+    // refused before it.
+    expect(plane.calls.routeSelection).toHaveLength(3);
   });
 
   it('threads the styles request inputs (routeComponent, attempts) to the branch', async () => {

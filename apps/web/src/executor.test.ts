@@ -136,7 +136,7 @@ interface ManualRun {
   readonly stopCalls: () => number;
 }
 
-function manualRun(): ManualRun {
+function manualRun(inspect?: ProjectRun['inspect']): ManualRun {
   let stopCalls = 0;
   let settle: (report: SupervisionCloseReport) => void = () => {};
   const closed = new Promise<SupervisionCloseReport>((resolve) => {
@@ -144,7 +144,7 @@ function manualRun(): ManualRun {
   });
   const run: ProjectRun = {
     ready: Promise.resolve(),
-    inspect: () => Promise.reject(new Error("inspection is not this lane's subject")),
+    inspect: inspect ?? (() => Promise.reject(new Error("inspection is not this lane's subject"))),
     subscribe: () => () => {},
     stop: () => {
       stopCalls += 1;
@@ -269,7 +269,12 @@ interface Harness {
  * makes, never a re-derivation of its ordering.
  */
 async function bootHarness(
-  options: { readonly refuseGrant?: boolean; readonly hostHandshake?: HostMainFrameHandshake } = {},
+  options: {
+    readonly refuseGrant?: boolean;
+    readonly hostHandshake?: HostMainFrameHandshake;
+    /** The manual runs' inspect seam (#370): the styles legs script the route-selection/styles answers here. */
+    readonly runInspect?: ProjectRun['inspect'];
+  } = {},
 ): Promise<Harness> {
   const scratch = await mkdtemp(join(tmpdir(), 'astroix-stranded-adoption-'));
   const rootA = join(scratch, 'project-a');
@@ -300,7 +305,7 @@ async function bootHarness(
     clients: sessionClients,
     startCandidate: (request) => {
       const port = pendingDevPorts.shift();
-      const manual = manualRun();
+      const manual = manualRun(options.runInspect);
       runs.push(manual);
       if (port !== undefined) candidates.remember(manual.run, port, request.sessionRef);
       return manual.run;
@@ -686,6 +691,201 @@ describe('the stranded-adoption convergence (#333, direction (a))', () => {
       expect(h.journal.lastIndexOf('lease:grant:a')).toBeGreaterThan(
         h.journal.indexOf('lease:revoke:a'),
       );
+    } finally {
+      await h.close();
+    }
+  });
+});
+
+/** One inspect request envelope — the session-scoped command over an inspection request. */
+function inspectRequest(
+  session: SessionRef | undefined,
+  request: unknown,
+  requestId: string,
+): RequestEnvelope {
+  return {
+    protocolVersion: 1,
+    requestId,
+    ...(session === undefined ? {} : { session }),
+    command: { kind: 'inspect', request },
+  } as RequestEnvelope;
+}
+
+/**
+ * The #370 legs: the styles inspection's wire-carried route selection,
+ * mapped end-to-end through the executor. The run seam is scripted
+ * exactly at the run boundary (the sanctioned stand-in level — the
+ * resolution seam and the worker dispatch have their own focused
+ * suites): a route-selection dispatch answers with the resolved
+ * component (or the honest unresolvable null), and the styles dispatch
+ * that follows must carry exactly that component as its
+ * `routeComponent`. The matrix the issue names — selection
+ * present/absent, resolvable/unresolvable, stale session — plus the
+ * disclosure sweep: the component never enters a response envelope.
+ */
+describe('the styles inspection route selection (#370)', () => {
+  /** A scripted run inspect: records every dispatch, answers route-selection and styles. */
+  function scriptedRun(selection: { readonly pattern: string; readonly component: string } | null) {
+    const dispatched: unknown[] = [];
+    const inspect: ProjectRun['inspect'] = async (request) => {
+      dispatched.push(request);
+      if (request.kind === 'route-selection') {
+        return { kind: 'route-selection', revision: 1, payload: { revision: 1, selection } };
+      }
+      return {
+        kind: 'styles',
+        revision: 4,
+        payload: { revision: 4, invalidationRevision: 2, records: [] },
+      };
+    };
+    return { inspect, dispatched };
+  }
+
+  it('serves a styles inspection by resolving the observed pathname and dispatching the component', async () => {
+    const script = scriptedRun({
+      pattern: '/blog/[slug]',
+      component: 'src/pages/blog/[slug].astro',
+    });
+    const h = await bootHarness({ runInspect: script.inspect });
+    try {
+      const first = activationOf(await h.execute(activate(PROJECT_A, 'req-1')));
+      const response = await h.execute(
+        inspectRequest(
+          first.target.session,
+          { kind: 'styles', route: '/blog/hello-builder' },
+          'req-2',
+        ),
+      );
+      if (!('protocolVersion' in response) || response.result.kind !== 'inspection') {
+        throw new Error(`expected an inspection envelope, received: ${JSON.stringify(response)}`);
+      }
+      // The served result is the WORKER's styles answer, verbatim.
+      expect(response.result.result).toEqual({
+        kind: 'styles',
+        revision: 4,
+        payload: { revision: 4, invalidationRevision: 2, records: [] },
+      });
+      // The mapping is the ruled two-step: route-selection in, then the
+      // styles request carrying exactly the resolved component.
+      expect(script.dispatched).toEqual([
+        { kind: 'route-selection', route: '/blog/hello-builder' },
+        { kind: 'styles', routeComponent: 'src/pages/blog/[slug].astro' },
+      ]);
+      // The disclosure sweep: the component — the pattern is public, the
+      // component is not — never enters the served envelope.
+      expect(JSON.stringify(response)).not.toContain('src/pages');
+      expect(JSON.stringify(response)).not.toContain('route-selection');
+    } finally {
+      await h.close();
+    }
+  });
+
+  it('answers an unresolvable route with the route-shaped 404 — never a component, never a guess', async () => {
+    const script = scriptedRun(null);
+    const h = await bootHarness({ runInspect: script.inspect });
+    try {
+      const first = activationOf(await h.execute(activate(PROJECT_A, 'req-1')));
+      const response = await h.execute(
+        inspectRequest(first.target.session, { kind: 'styles', route: '/no/such/route' }, 'req-2'),
+      );
+      expect(response).toEqual({
+        code: 'resource-not-found',
+        message: 'the requested resource does not exist',
+        retryable: false,
+        details: { what: 'route' },
+      });
+      // The resolution dispatched once; no styles request follows a 404.
+      expect(script.dispatched).toEqual([{ kind: 'route-selection', route: '/no/such/route' }]);
+    } finally {
+      await h.close();
+    }
+  });
+
+  it('refuses a styles request without a selection — the additive envelope parses, the inspection cannot serve', async () => {
+    const script = scriptedRun({ pattern: '/', component: 'src/pages/index.astro' });
+    const h = await bootHarness({ runInspect: script.inspect });
+    try {
+      const first = activationOf(await h.execute(activate(PROJECT_A, 'req-1')));
+      const response = await h.execute(
+        inspectRequest(first.target.session, { kind: 'styles' }, 'req-2'),
+      );
+      expect(response).toEqual({
+        code: 'malformed-request',
+        message: 'a styles inspection must carry the observed canvas route',
+        retryable: false,
+        details: { issue: 'invalid-shape', pointer: 'command.request' },
+      });
+      // Nothing dispatched: there is no selection to resolve.
+      expect(script.dispatched).toEqual([]);
+    } finally {
+      await h.close();
+    }
+  });
+
+  it('refuses a stale session before any resolution runs', async () => {
+    const script = scriptedRun({ pattern: '/', component: 'src/pages/index.astro' });
+    const h = await bootHarness({ runInspect: script.inspect });
+    try {
+      await activationOf(await h.execute(activate(PROJECT_A, 'req-1')));
+      const stale = await h.execute(
+        inspectRequest(
+          { runtimeEpoch: 'stale-epoch', generation: 99 },
+          { kind: 'styles', route: '/' },
+          'req-2',
+        ),
+      );
+      expect(stale).toEqual({
+        code: 'stale-session',
+        message: 'the request carries a session that is not the current one',
+        retryable: false,
+      });
+      expect(script.dispatched).toEqual([]);
+    } finally {
+      await h.close();
+    }
+  });
+
+  it('answers the closed catch-all when the run rejects a dispatch — never the raw error', async () => {
+    const dispatched: unknown[] = [];
+    const inspect: ProjectRun['inspect'] = async (request) => {
+      dispatched.push(request);
+      throw new Error('a raw worker failure at /Users/secret/project-root');
+    };
+    const h = await bootHarness({ runInspect: inspect });
+    try {
+      const first = activationOf(await h.execute(activate(PROJECT_A, 'req-1')));
+      const response = await h.execute(
+        inspectRequest(first.target.session, { kind: 'styles', route: '/' }, 'req-2'),
+      );
+      expect(response).toEqual({
+        code: 'internal-error',
+        message: 'the request could not be completed',
+        retryable: false,
+      });
+      expect(JSON.stringify(response)).not.toContain('/Users/secret');
+      expect(dispatched).toEqual([{ kind: 'route-selection', route: '/' }]);
+    } finally {
+      await h.close();
+    }
+  });
+
+  it('still serves the three selection-less families 1:1 — the additive envelope changed nothing else', async () => {
+    const dispatched: unknown[] = [];
+    const inspect: ProjectRun['inspect'] = async (request) => {
+      dispatched.push(request);
+      return { kind: 'routes', revision: 1, payload: { revision: 1, routes: [] } };
+    };
+    const h = await bootHarness({ runInspect: inspect });
+    try {
+      const first = activationOf(await h.execute(activate(PROJECT_A, 'req-1')));
+      const response = await h.execute(
+        inspectRequest(first.target.session, { kind: 'routes' }, 'req-2'),
+      );
+      if (!('protocolVersion' in response) || response.result.kind !== 'inspection') {
+        throw new Error(`expected an inspection envelope, received: ${JSON.stringify(response)}`);
+      }
+      expect(response.result.result.kind).toBe('routes');
+      expect(dispatched).toEqual([{ kind: 'routes' }]);
     } finally {
       await h.close();
     }

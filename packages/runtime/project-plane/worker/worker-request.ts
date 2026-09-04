@@ -1,4 +1,5 @@
 import type { ContentInspectionResult } from '../../astro-project-adapter/content/content-result.ts';
+import type { RouteSelectionResult } from '../../astro-project-adapter/routes/route-selection.ts';
 import type { RoutesInspectionResult } from '../../astro-project-adapter/routes/routes-inspection.ts';
 import type { ConvergedStylesPayload } from '../../astro-project-adapter/styles/convergence/converged-styles-inspection.ts';
 import { isProjectRelativePath } from '../../astro-project-adapter/styles/convergence/invalidation-source.ts';
@@ -11,13 +12,20 @@ import type { ProjectDescriptor } from './inspection-branches.ts';
  * protocol's closed inspection families (`packages/protocol/src/inspection.ts`)
  * — the worker layer adds the per-family typed inputs the landed adapter
  * surfaces require (`routeComponent` for styles) and the typed payload
- * interiors the protocol deliberately keeps opaque.
+ * interiors the protocol deliberately keeps opaque — plus ONE
+ * control-plane-only member the protocol never mirrors: the
+ * `route-selection` resolution (#370), the executor's pathname→component
+ * mapping behind the wire-carried styles selection. Its result carries
+ * the route COMPONENT, which no payload law lets the renderer see; it
+ * can never ride the wire — the executor consumes it and dispatches the
+ * styles request, and the protocol's closed result union would refuse
+ * the kind outright (defense in depth at the envelope layer).
  *
- * The validator is the boundary guard: only these four closed shapes
- * enter dispatch. There is no generic request kind, no module/import
- * field, no filesystem-path field, and no extra-field tolerance — an
- * unknown or over-carrying request is rejected before any branch runs
- * (the ticket's migration policy, and the #199 negative surface at this
+ * The validator is the boundary guard: only these closed shapes enter
+ * dispatch. There is no generic request kind, no module/import field, no
+ * filesystem-path field, and no extra-field tolerance — an unknown or
+ * over-carrying request is rejected before any branch runs (the
+ * ticket's migration policy, and the #199 negative surface at this
  * seam).
  */
 
@@ -33,7 +41,7 @@ function isRouteComponent(value: unknown): value is string {
   return typeof value === 'string' && value.endsWith('.astro') && isProjectRelativePath(value);
 }
 
-/** One typed inspection request — exactly the four ADR-0005 families, nothing else. */
+/** One typed inspection request — the four ADR-0005 families plus the control-plane-only route-selection resolution. */
 export type WorkerInspectionRequest =
   | { readonly kind: 'project' }
   | { readonly kind: 'content' }
@@ -44,11 +52,20 @@ export type WorkerInspectionRequest =
       readonly routeComponent: string;
       /** Total fresh passes for this inspection (E3 `attempts`); default 1. */
       readonly attempts?: number;
+    }
+  | {
+      /**
+       * The control-plane-only resolution (#370): the observed canvas
+       * pathname the executor carries; the answer's component is the
+       * styles request's `routeComponent`, never a wire payload.
+       */
+      readonly kind: 'route-selection';
+      readonly route: string;
     };
 
 /**
- * Whether `value` is one of the four typed inspection requests: the
- * closed `kind` discriminant, no extra fields, and the styles family's
+ * Whether `value` is one of the typed inspection requests: the closed
+ * `kind` discriminant, no extra fields, and the styles family's
  * `routeComponent`/`attempts` fields shape-valid. Strict on unknown
  * fields by design — an over-carrying request is a protocol drift, not
  * data to forward.
@@ -59,6 +76,13 @@ export function isWorkerInspectionRequest(value: unknown): value is WorkerInspec
   const kind = record.kind;
   if (kind === 'project' || kind === 'content' || kind === 'routes') {
     return Object.keys(record).length === 1;
+  }
+  if (kind === 'route-selection') {
+    return (
+      Object.keys(record).length === 2 &&
+      typeof record.route === 'string' &&
+      record.route.startsWith('/')
+    );
   }
   if (kind !== 'styles') return false;
   const keys = Object.keys(record);
@@ -91,4 +115,10 @@ export type WorkerInspectionResult =
       readonly kind: 'styles';
       readonly revision: number;
       readonly payload: ConvergedStylesPayload;
+    }
+  | {
+      /** Control-plane-only (#370): consumed by the executor, never forwarded — the payload carries the component. */
+      readonly kind: 'route-selection';
+      readonly revision: number;
+      readonly payload: RouteSelectionResult;
     };

@@ -27,11 +27,14 @@ const WEB_SPEC_DIR = join('e2e', 'web');
 // `canvas.spec.ts` + `zero-injection.spec.ts` joined at #242 (G3): the
 // natural-route same-origin canvas's battery and the managed-project
 // zero-injection snapshots.
+// `styles-inspection.spec.ts` joined at #370: the wire-carried styles
+// route selection's battery over the live host.
 const EXPECTED_WEB_SPECS = [
   'activation.spec.ts',
   'app-shell.spec.ts',
   'canvas.spec.ts',
   'launcher.spec.ts',
+  'styles-inspection.spec.ts',
   'zero-injection.spec.ts',
 ] as const;
 const MINIMUM_TESTS_PER_SPEC = 1;

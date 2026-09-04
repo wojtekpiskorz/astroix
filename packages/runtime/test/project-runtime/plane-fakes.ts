@@ -110,6 +110,18 @@ export function fakeWorkerWire(): FakeWorkerWire {
           revision: revisions.styles,
           payload: { revision: revisions.styles, invalidationRevision: 0, records: [] },
         };
+      case 'route-selection':
+        // #370: the facade passes the control-plane-only resolution
+        // through — a resolved root selection is a fine stand-in; these
+        // fakes prove the FACADE, never the seam.
+        return {
+          kind: 'route-selection',
+          revision: 1,
+          payload: {
+            revision: 1,
+            selection: { pattern: '/', component: 'src/pages/index.astro' },
+          },
+        };
     }
   };
 

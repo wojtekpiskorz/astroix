@@ -1,6 +1,7 @@
 import type { AdapterErrorDetails } from '../../astro-project-adapter/adapter-error.ts';
 import { AdapterError } from '../../astro-project-adapter/adapter-error.ts';
 import type { ContentInspectionResult } from '../../astro-project-adapter/content/content-result.ts';
+import type { RouteSelectionResult } from '../../astro-project-adapter/routes/route-selection.ts';
 import type { RoutesInspectionResult } from '../../astro-project-adapter/routes/routes-inspection.ts';
 import type {
   ConvergedStylesPayload,
@@ -18,6 +19,7 @@ import type {
 /**
  * The #230 focused-test stand-in, at the sanctioned level: a fake at
  * the worker's TYPED DISPATCH BOUNDARY (the four inspection branches +
+ * the control-plane-only route-selection resolution (#370) +
  * the raw invalidation stream + the plane close) — NOT a third fake
  * composition/runner pair (the E4/E5 harnesses own that idiom at the
  * seam layer; the recorded advisory note rules the worker lane fakes
@@ -45,6 +47,7 @@ export interface FakePlane {
     styles: BranchBehavior;
     content: BranchBehavior;
     routes: BranchBehavior;
+    routeSelection: BranchBehavior;
   };
   /** The payload knobs for 'ok' behavior. */
   readonly payloads: {
@@ -52,6 +55,7 @@ export interface FakePlane {
     styles: ConvergedStylesPayload;
     content: ContentInspectionResult;
     routes: RoutesInspectionResult;
+    routeSelection: RouteSelectionResult;
   };
   /** The styles outcome knob: 'ok' serves `payloads.styles`; these force an unfinished outcome. */
   stylesOutcomeOverride: 'mismatch' | 'raced' | null;
@@ -61,17 +65,21 @@ export interface FakePlane {
     content: number;
     styles: StylesInspectionInput[];
     routes: Array<{ signal?: AbortSignal }>;
+    routeSelection: Array<{ route: string; signal?: AbortSignal }>;
   };
   /** Every signal the styles branch observed (merged lifecycle/caller). */
   readonly stylesSignals: Array<AbortSignal | undefined>;
   /** Every signal the routes branch observed. */
   readonly routesSignals: Array<AbortSignal | undefined>;
+  /** Every signal the route-selection branch observed. */
+  readonly routeSelectionSignals: Array<AbortSignal | undefined>;
   /** Resolve to release a 'hang' branch (the hang also releases on its signal's abort). */
   readonly release: {
     project: () => void;
     content: () => void;
     styles: () => void;
     routes: () => void;
+    routeSelection: () => void;
   };
   /** How many times `plane.close()` ran, and whether it rejects. */
   readonly close: { calls: number; behavior: 'ok' | 'fail' };
@@ -125,6 +133,7 @@ export function fakePlane(): FakePlane {
     content: 0,
     styles: [],
     routes: [],
+    routeSelection: [],
   };
   const stylesSignals: Array<AbortSignal | undefined> = [];
   const routesSignals: Array<AbortSignal | undefined> = [];
@@ -139,22 +148,28 @@ export function fakePlane(): FakePlane {
 
   const fake: FakePlane = {
     plane: undefined as unknown as ProjectWorkerPlane,
-    behaviors: { project: 'ok', styles: 'ok', content: 'ok', routes: 'ok' },
+    behaviors: { project: 'ok', styles: 'ok', content: 'ok', routes: 'ok', routeSelection: 'ok' },
     payloads: {
       project: { certified: { astro: '7.2.10', vite: '8.2.2' } },
       styles: { revision: 1, invalidationRevision: 0, records: [] },
       content: { collections: [], diagnostics: [], revision: 'sha-content-truth' },
       routes: { revision: 1, routes: [] },
+      routeSelection: {
+        revision: 1,
+        selection: { pattern: '/', component: 'src/pages/index.astro' },
+      },
     },
     stylesOutcomeOverride: null,
     calls,
     stylesSignals,
     routesSignals,
+    routeSelectionSignals: [],
     release: {
       project: () => releases.project?.(),
       content: () => releases.content?.(),
       styles: () => releases.styles?.(),
       routes: () => releases.routes?.(),
+      routeSelection: () => releases.routeSelection?.(),
     },
     close,
     sourceListenerCount: () => sourceListeners.size,
@@ -237,6 +252,14 @@ export function fakePlane(): FakePlane {
         const payload = fake.payloads.routes;
         return { ...payload, revision: calls.routes.length };
       });
+    },
+    routeSelection: (input: { route: string; signal?: AbortSignal }) => {
+      calls.routeSelection.push(input);
+      fake.routeSelectionSignals.push(input.signal);
+      return runBehavior(fake.behaviors.routeSelection, input.signal, 'routeSelection', () => ({
+        ...fake.payloads.routeSelection,
+        revision: calls.routeSelection.length,
+      }));
     },
   };
 

@@ -53,9 +53,12 @@ export { type ProxyHealthPrerequisite, satisfiedProxyHealth } from './proxy-heal
  *   compatibility contract — the launch pre-flight fails the pair
  *   before any child spawns, and the facade's admission is the one
  *   origin-gated, shape-gated mapping into that code).
- * - **`inspect`** accepts ONLY the four typed request families (E6's
+ * - **`inspect`** accepts ONLY the closed typed request set (E6's
  *   guard re-applied at this boundary — defense in depth, never the
- *   sole gate) and settles with the revisioned typed results THE
+ *   sole gate): the four protocol families plus the control-plane-only
+ *   `route-selection` resolution (#370 — the executor's pathname→
+ *   component mapping whose component answer never rides the wire).
+ *   It settles with the revisioned typed results THE
  *   supervised worker produced, dispatched over the supervisor's
  *   worker-wire facet (correlated ids ≥ 1; divergent revisions from any
  *   other worker would break the revision contract).
@@ -264,10 +267,11 @@ export interface ProjectRun {
   readonly ready: Promise<void>;
   /**
    * Dispatches one typed inspection to THE supervised worker; settles with
-   * its revisioned typed result. Lawful before `ready` settles: work
-   * dispatched mid-start queues on the launch and settles (or rejects with
-   * the structured shutdown failure) once the plane arrives — readiness
-   * gates observation, not dispatch.
+   * its revisioned typed result — the four protocol families plus the
+   * control-plane-only `route-selection` resolution (#370). Lawful before
+   * `ready` settles: work dispatched mid-start queues on the launch and
+   * settles (or rejects with the structured shutdown failure) once the
+   * plane arrives — readiness gates observation, not dispatch.
    */
   inspect(request: WorkerInspectionRequest): Promise<WorkerInspectionResult>;
   /** Subscribes to the run's public events (revisioned invalidations, structured diagnostics); the return unbinds. */
