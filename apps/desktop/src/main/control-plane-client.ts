@@ -135,7 +135,7 @@ const LISTING_UNAVAILABLE: RegisteredProjectsResult = {
   code: 'control-plane-unavailable',
 } as const;
 
-/** One pending exchange's fail-closed settle callbacks (advisory r1: every lost/unavailable path settles through settleUnavailable, never a hand-kept copy). */
+/** One pending exchange's fail-closed settle callbacks. */
 interface PendingSettle {
   readonly register?: (result: RegisterResult) => void;
   readonly projects?: (result: RegisteredProjectsResult) => void;
