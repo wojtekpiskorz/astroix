@@ -135,18 +135,26 @@ const LISTING_UNAVAILABLE: RegisteredProjectsResult = {
   code: 'control-plane-unavailable',
 } as const;
 
+/** One pending exchange's fail-closed settle callbacks (advisory r1: every lost/unavailable path settles through settleUnavailable, never a hand-kept copy). */
+interface PendingSettle {
+  readonly register?: (result: RegisterResult) => void;
+  readonly projects?: (result: RegisteredProjectsResult) => void;
+  readonly transition?: (outcome: TransitionOutcome) => void;
+  readonly authority?: () => void;
+}
+
+/** The one fail-closed settle for every lost/unavailable path — a missed site here is a hang, not a refusal, so all three grow together. */
+function settleUnavailable(settle: PendingSettle): void {
+  settle.register?.(REGISTER_UNAVAILABLE);
+  settle.projects?.(LISTING_UNAVAILABLE);
+  settle.transition?.(UNAVAILABLE);
+  settle.authority?.();
+}
+
 /** Connects one spawned child: capability first message, then the correlation loop. */
 export function connectControlPlaneChild(options: ControlPlaneClientOptions): ControlPlaneClient {
   const { handle, host } = options;
-  const pending = new Map<
-    number,
-    {
-      readonly register?: (result: RegisterResult) => void;
-      readonly projects?: (result: RegisteredProjectsResult) => void;
-      readonly transition?: (outcome: TransitionOutcome) => void;
-      readonly authority?: () => void;
-    }
-  >();
+  const pending = new Map<number, PendingSettle>();
   let nextRequestId = 0;
   let lost = false;
   let bootedPort: number | false = false;
@@ -162,12 +170,7 @@ export function connectControlPlaneChild(options: ControlPlaneClientOptions): Co
   const markLost = (reason: ControlPlaneLossReason): void => {
     if (lost) return;
     lost = true;
-    for (const settle of pending.values()) {
-      settle.register?.(REGISTER_UNAVAILABLE);
-      settle.projects?.(LISTING_UNAVAILABLE);
-      settle.transition?.(UNAVAILABLE);
-      settle.authority?.();
-    }
+    for (const settle of pending.values()) settleUnavailable(settle);
     pending.clear();
     if (bootedPort === false) settleBoot(false);
     host.onLost(reason);
@@ -265,20 +268,9 @@ export function connectControlPlaneChild(options: ControlPlaneClientOptions): Co
     return nextRequestId;
   }
 
-  function request(
-    build: (requestId: number) => DesktopChildRequest,
-    settle: {
-      register?: (result: RegisterResult) => void;
-      projects?: (result: RegisteredProjectsResult) => void;
-      transition?: (o: TransitionOutcome) => void;
-      authority?: () => void;
-    },
-  ): void {
+  function request(build: (requestId: number) => DesktopChildRequest, settle: PendingSettle): void {
     if (lost) {
-      settle.register?.(REGISTER_UNAVAILABLE);
-      settle.projects?.(LISTING_UNAVAILABLE);
-      settle.transition?.(UNAVAILABLE);
-      settle.authority?.();
+      settleUnavailable(settle);
       return;
     }
     const requestId = nextId();
@@ -286,10 +278,7 @@ export function connectControlPlaneChild(options: ControlPlaneClientOptions): Co
     const sent = handle.send(build(requestId));
     if (sent === false || sent === null) {
       pending.delete(requestId);
-      settle.register?.(REGISTER_UNAVAILABLE);
-      settle.projects?.(LISTING_UNAVAILABLE);
-      settle.transition?.(UNAVAILABLE);
-      settle.authority?.();
+      settleUnavailable(settle);
     }
   }
 
