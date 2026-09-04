@@ -18,6 +18,8 @@
     "src",
     "packages",
     "apps",
+    "scripts/qualification",
+    "tests/qualification",
     "e2e/*.spec.ts",
     "e2e/web",
     "e2e/desktop",
