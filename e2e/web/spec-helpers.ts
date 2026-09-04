@@ -122,17 +122,18 @@ export async function canvasSelect(page: Page, selector: string): Promise<void> 
  * splice-writer the frozen edit contracts were derived through, so a
  * drift from the corpus's behavior is a defect, not a diff.
  */
-export function expectedFontSizeWrite(
+export function expectedDeclarationWrite(
   before: string,
+  property: string,
   fromValue: string,
   nextValue: string,
 ): string {
-  const replaced = `font-size: ${fromValue};`;
+  const replaced = `${property}: ${fromValue};`;
   const start = before.indexOf(replaced);
   if (start === -1) throw new Error(`the staged sheet lost "${replaced}"`);
   return spliceText(before, {
     start,
     end: start + replaced.length,
-    replacement: `font-size: ${nextValue};`,
+    replacement: `${property}: ${nextValue};`,
   });
 }

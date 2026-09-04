@@ -5,7 +5,7 @@ import {
   BOOT_BUDGET_MS,
   canvasSelect,
   cssBytes,
-  expectedFontSizeWrite,
+  expectedDeclarationWrite,
   LAUNCHER_APP_URL,
   LOAD_BUDGET_MS,
   restoreIdle,
@@ -83,7 +83,7 @@ test('an accepted CSS write drains through the normal switch — the new generat
   await input.fill('3.5rem');
   await expect
     .poll(async () => await cssBytes(), { timeout: WRITE_SETTLE_MS })
-    .toBe(expectedFontSizeWrite(before, '3rem', '3.5rem'));
+    .toBe(expectedDeclarationWrite(before, 'font-size', '3rem', '3.5rem'));
   await expect(page.getByTestId('css-write-status')).toHaveAttribute('data-write-state', 'quiet', {
     timeout: WRITE_SETTLE_MS,
   });
@@ -106,7 +106,7 @@ test('an accepted CSS write drains through the normal switch — the new generat
   await expect(page.getByTestId('css-write-status')).toHaveAttribute('data-write-state', 'quiet', {
     timeout: LOAD_BUDGET_MS,
   });
-  expect(await cssBytes()).toBe(expectedFontSizeWrite(before, '3rem', '3.5rem'));
+  expect(await cssBytes()).toBe(expectedDeclarationWrite(before, 'font-size', '3rem', '3.5rem'));
   // exactly the one mutation — the new generation wrote nothing
   expect(writeCount()).toBe(1);
 
@@ -150,7 +150,7 @@ test('an unresolved CSS write at the switch reports nothing false and grants no 
   await input.fill('3.5rem');
   await expect
     .poll(async () => await cssBytes(), { timeout: WRITE_SETTLE_MS })
-    .toBe(expectedFontSizeWrite(before, '3rem', '3.5rem'));
+    .toBe(expectedDeclarationWrite(before, 'font-size', '3rem', '3.5rem'));
 
   // deactivate while the response is still held: the transition sees
   // an already-settled write (nothing to drain), the document is reset
@@ -175,7 +175,7 @@ test('an unresolved CSS write at the switch reports nothing false and grants no 
   });
   await expect(page.getByTestId('css-undo')).toBeDisabled();
   expect(writeCount()).toBe(1);
-  expect(await cssBytes()).toBe(expectedFontSizeWrite(before, '3rem', '3.5rem'));
+  expect(await cssBytes()).toBe(expectedDeclarationWrite(before, 'font-size', '3rem', '3.5rem'));
 
   // restore the fixture bytes for whatever follows the battery
   await writeFile(STAGED_CSS_FILE, before);

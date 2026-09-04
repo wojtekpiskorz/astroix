@@ -286,8 +286,7 @@ async function main(): Promise<void> {
             undoDisabled: (() => {
               const button = document.querySelector('[data-testid="css-undo"]');
               if (button === null) return null;
-              const probe = button;
-              return 'disabled' in probe ? Boolean(probe.disabled) : null;
+              return 'disabled' in button ? Boolean(button.disabled) : null;
             })(),
             decls: [...document.querySelectorAll('[data-testid="css-decl-input"]')].map(
               (input) => ({

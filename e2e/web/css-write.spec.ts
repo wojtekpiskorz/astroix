@@ -7,7 +7,7 @@ import {
   CANVAS_FRAME,
   canvasSelect,
   cssBytes,
-  expectedFontSizeWrite,
+  expectedDeclarationWrite,
   LOAD_BUDGET_MS,
   restoreIdle,
   STAGED_CSS_FILE,
@@ -111,23 +111,6 @@ function writeState(page: Page) {
   return page.getByTestId('css-write-status');
 }
 
-/** The oracle's expected bytes: one declaration of the first global rule spliced to its next value. */
-function expectedDeclarationWrite(
-  before: string,
-  property: string,
-  fromValue: string,
-  nextValue: string,
-): string {
-  const replaced = `${property}: ${fromValue};`;
-  const start = before.indexOf(replaced);
-  if (start === -1) throw new Error(`the staged sheet lost "${replaced}"`);
-  return spliceText(before, {
-    start,
-    end: start + replaced.length,
-    replacement: `${property}: ${nextValue};`,
-  });
-}
-
 test.describe.configure({ mode: 'serial' });
 
 test('auto-write lands the frozen splice bytes byte-exact, HMR reflects them, and the grant renews', async ({
@@ -166,7 +149,7 @@ test('auto-write lands the frozen splice bytes byte-exact, HMR reflects them, an
     // BYTE-EXACT: the staged sheet's bytes are the pure oracle's bytes
     await expect
       .poll(async () => await cssBytes(), { timeout: WRITE_SETTLE_MS })
-      .toBe(expectedFontSizeWrite(before, '3rem', '3.5rem'));
+      .toBe(expectedDeclarationWrite(before, 'font-size', '3rem', '3.5rem'));
 
     // the loop converged: the refresh landed, the badge went quiet, the
     // editor re-opened on the served truth (the written value)
@@ -192,7 +175,7 @@ test('auto-write lands the frozen splice bytes byte-exact, HMR reflects them, an
     // RENEWED grant (the follow-on or the fresh facts' — either way the
     // chain moved), lands byte-exact and HMR-reflects
     await spacingInput.fill('0.3em');
-    const afterFirst = expectedFontSizeWrite(before, '3rem', '3.5rem');
+    const afterFirst = expectedDeclarationWrite(before, 'font-size', '3rem', '3.5rem');
     await expect
       .poll(async () => await cssBytes(), { timeout: WRITE_SETTLE_MS })
       .toBe(expectedDeclarationWrite(afterFirst, 'letter-spacing', '-0.02em', '0.3em'));
@@ -254,7 +237,7 @@ test('undo restores the exact bytes through the same grant-bound loop', async ({
   await input.fill('3.5rem');
   await expect
     .poll(async () => await cssBytes(), { timeout: WRITE_SETTLE_MS })
-    .toBe(expectedFontSizeWrite(before, '3rem', '3.5rem'));
+    .toBe(expectedDeclarationWrite(before, 'font-size', '3rem', '3.5rem'));
   await expect(writeState(page)).toHaveAttribute('data-write-state', 'quiet', {
     timeout: WRITE_SETTLE_MS,
   });
@@ -297,7 +280,7 @@ test('coalesced typing dispatches ONE write and the badge settles back to quiet'
 
     await expect
       .poll(async () => await cssBytes(), { timeout: WRITE_SETTLE_MS })
-      .toBe(expectedFontSizeWrite(before, '3rem', '3.5rem'));
+      .toBe(expectedDeclarationWrite(before, 'font-size', '3rem', '3.5rem'));
     await expect(writeState(page)).toHaveAttribute('data-write-state', 'quiet', {
       timeout: WRITE_SETTLE_MS,
     });
@@ -393,7 +376,7 @@ test('tampered replays are refused grant-bound: wrong kind, cross-session, stale
   await input.fill('3.5rem');
   await expect
     .poll(async () => await cssBytes(), { timeout: WRITE_SETTLE_MS })
-    .toBe(expectedFontSizeWrite(before, '3rem', '3.5rem'));
+    .toBe(expectedDeclarationWrite(before, 'font-size', '3rem', '3.5rem'));
   const honest = capture().writes[0];
   if (honest === undefined) throw new Error('no honest write captured');
   const envelope = JSON.parse(honest.body) as {
@@ -448,7 +431,7 @@ test('tampered replays are refused grant-bound: wrong kind, cross-session, stale
   expect(['grant-rejected', 'revision-conflict']).toContain(stale.code);
 
   // none of the replays wrote: the sheet is the honest write's bytes
-  expect(await cssBytes()).toBe(expectedFontSizeWrite(before, '3rem', '3.5rem'));
+  expect(await cssBytes()).toBe(expectedDeclarationWrite(before, 'font-size', '3rem', '3.5rem'));
 
   await restoreIdle(page);
 });

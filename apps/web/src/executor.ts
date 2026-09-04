@@ -781,9 +781,7 @@ async function enrichStylesPayload(
     if (typeof file === 'string' && file.length > 0) files.add(file);
   }
   const writeFacts = (
-    await Promise.all(
-      [...files].map(async (file) => await enrichStylesFile(seat, root, table, file, records)),
-    )
+    await Promise.all([...files].map((file) => enrichStylesFile(seat, root, table, file, records)))
   ).filter((fact) => fact !== null);
   if (writeFacts.length === 0) return payload;
   return { ...(payload as object), writeFacts };
