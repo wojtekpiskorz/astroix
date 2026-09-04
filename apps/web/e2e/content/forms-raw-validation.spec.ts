@@ -1,9 +1,7 @@
 import { expect, type Page, type Request, test } from '@playwright/test';
 import {
-  activateButton,
-  BOOT_BUDGET_MS,
+  activateProject,
   LOAD_BUDGET_MS,
-  PROJECT_APP_URL,
   restoreIdle,
   SETTLE_BUDGET_MS,
 } from '../../../../e2e/web/spec-helpers.ts';
@@ -81,14 +79,6 @@ function captureCommands(page: Page): () => { inspects: number; writes: string[]
   });
 }
 
-/** Activates the first staged fixture copy and lands the project document. */
-async function activateProject(page: Page): Promise<void> {
-  await page.goto('/__astroix/app/');
-  await expect(page.getByTestId('session-label')).toHaveText('idle', { timeout: LOAD_BUDGET_MS });
-  await activateButton(page, 0).click();
-  await page.waitForURL(PROJECT_APP_URL, { timeout: BOOT_BUDGET_MS });
-}
-
 test.describe.configure({ mode: 'serial' });
 
 test('the pane builds form state from the live schema and inspected values', async ({ page }) => {
@@ -105,7 +95,9 @@ test('the pane builds form state from the live schema and inspected values', asy
   await expect(pane(page)).toHaveAttribute('data-form-status', 'ready', {
     timeout: SETTLE_BUDGET_MS,
   });
-  await expect(pane(page)).toHaveAttribute('data-form-mode', 'form');
+  await expect(pane(page)).toHaveAttribute('data-form-mode', 'form', {
+    timeout: LOAD_BUDGET_MS,
+  });
 
   // the frozen blog walk over the live inspection: every widget kind
   // renders from the inspected values (the projection)
@@ -174,7 +166,9 @@ test('form and raw switch preserves everything, and validation reports without w
     timeout: LOAD_BUDGET_MS,
   });
   await pane(page).locator('[data-astroix-form-mode-button="raw"]').click();
-  await expect(pane(page)).toHaveAttribute('data-form-mode', 'raw');
+  await expect(pane(page)).toHaveAttribute('data-form-mode', 'raw', {
+    timeout: LOAD_BUDGET_MS,
+  });
   await expect(rawText(page)).toHaveValue(/title: Form edit/);
   await expect(rawText(page)).toHaveValue(/tone: bold/);
 
@@ -185,7 +179,9 @@ test('form and raw switch preserves everything, and validation reports without w
   await pane(page).locator('[data-astroix-form-mode-button="form"]').click();
   await expect(titleInput(page)).toHaveValue('Raw edit');
   // the raw-added unknown key rides the explicit unknown-fields section
-  await expect(pane(page).locator('[data-astroix-unknown-fields]')).toHaveCount(1);
+  await expect(pane(page).locator('[data-astroix-unknown-fields]')).toHaveCount(1, {
+    timeout: LOAD_BUDGET_MS,
+  });
   await expect(pane(page).locator('[data-astroix-raw-field="__unknown__"]')).toContainText(
     'fromRaw: true',
   );
@@ -200,13 +196,17 @@ test('form and raw switch preserves everything, and validation reports without w
   // the intent blocks — and nothing ever leaves the document
   await pane(page).locator('[data-astroix-form-mode-button="raw"]').click();
   await rawText(page).fill('title: "unterminated');
-  await expect(pane(page).locator('[data-issue-kind="parse"]')).toHaveCount(1);
+  await expect(pane(page).locator('[data-issue-kind="parse"]')).toHaveCount(1, {
+    timeout: LOAD_BUDGET_MS,
+  });
   await expect(page.getByTestId('intent-state')).toHaveAttribute('data-intent-state', 'invalid', {
     timeout: LOAD_BUDGET_MS,
   });
   // recovery: a complete document (the required title and date present)
   await rawText(page).fill('title: fixed\ndate: 2026-08-26T00:00:00.000Z');
-  await expect(pane(page).locator('[data-issue-kind="parse"]')).toHaveCount(0);
+  await expect(pane(page).locator('[data-issue-kind="parse"]')).toHaveCount(0, {
+    timeout: LOAD_BUDGET_MS,
+  });
   await expect(page.getByTestId('intent-state')).toHaveAttribute('data-intent-state', 'ready', {
     timeout: LOAD_BUDGET_MS,
   });

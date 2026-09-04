@@ -53,6 +53,9 @@ export const BOOT_BUDGET_MS = 120_000;
  */
 export const SETTLE_BUDGET_MS = 60_000;
 
+/** The canvas select's toPass retry ceiling — three load-budget windows for the interactive retry loop (named: the last multiplier in the file). */
+export const CANVAS_SELECT_RETRY_MS = LOAD_BUDGET_MS * 3;
+
 /**
  * The write batteries' settle budget (#250): the first accepted edit
  * forks the real write-executor child, and the settle spans the fork,
@@ -66,6 +69,16 @@ export const STAGED_CSS_FILE = join(stagedCopyRoot('project-a'), 'src', 'pages',
 /** The staged sheet's current bytes — the write batteries' disk truth. */
 export async function cssBytes(): Promise<string> {
   return await readFile(STAGED_CSS_FILE, 'utf8');
+}
+
+/** Activates the first staged fixture copy and lands the project document (the content batteries' shared opening). */
+export async function activateProject(page: Page): Promise<void> {
+  await page.goto('/__astroix/app/');
+  await expect(page.getByTestId('session-label')).toHaveText('idle', {
+    timeout: LOAD_BUDGET_MS,
+  });
+  await activateButton(page, 0).click();
+  await page.waitForURL(PROJECT_APP_URL, { timeout: BOOT_BUDGET_MS });
 }
 
 /**
@@ -126,7 +139,7 @@ export async function canvasSelect(page: Page, selector: string): Promise<void> 
   await expect(async () => {
     await page.frameLocator(CANVAS_FRAME).locator(selector).click();
     await expect(page.getByTestId('selection-tag')).not.toHaveText('none', { timeout: 2_000 });
-  }).toPass({ timeout: LOAD_BUDGET_MS * 3 });
+  }).toPass({ timeout: CANVAS_SELECT_RETRY_MS });
 }
 
 /**

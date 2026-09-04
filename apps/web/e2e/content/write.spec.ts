@@ -4,10 +4,9 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expect, type Page, type Request, test } from '@playwright/test';
 import {
-  activateButton,
+  activateProject,
   BOOT_BUDGET_MS,
   LOAD_BUDGET_MS,
-  PROJECT_APP_URL,
   restoreIdle,
   SETTLE_BUDGET_MS,
   WRITE_SETTLE_MS,
@@ -103,14 +102,6 @@ function captureCommands(page: Page): () => {
       commands.filter((command) => command.body.includes(`"kind":"${family}"`)).length,
     writes: commands.filter((command) => command.kind === 'apply-edit'),
   });
-}
-
-/** Activates the first staged fixture copy and lands the project document. */
-async function activateProject(page: Page): Promise<void> {
-  await page.goto('/__astroix/app/');
-  await expect(page.getByTestId('session-label')).toHaveText('idle', { timeout: LOAD_BUDGET_MS });
-  await activateButton(page, 0).click();
-  await page.waitForURL(PROJECT_APP_URL, { timeout: BOOT_BUDGET_MS });
 }
 
 /** Opens the entry and waits for the pane's ready state. */
@@ -238,7 +229,9 @@ test('form writes land byte-exact through the grant — TWICE from one pane — 
   });
 
   // the canvas followed through the project's own HMR
-  await expect(canvasTitle).toHaveText('Hello builder (edited)', { timeout: LOAD_BUDGET_MS });
+  await expect(canvasTitle).toHaveText('Hello builder (edited)', {
+    timeout: WRITE_SETTLE_MS,
+  });
 
   // the routes family refetched after the commit (the loop's invalidation)
   expect(commands().inspects('routes')).toBeGreaterThan(routesBefore.count);

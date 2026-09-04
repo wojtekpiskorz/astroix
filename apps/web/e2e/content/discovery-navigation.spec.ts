@@ -1,9 +1,7 @@
 import { expect, type Page, type Request, test } from '@playwright/test';
 import {
-  activateButton,
-  BOOT_BUDGET_MS,
+  activateProject,
   LOAD_BUDGET_MS,
-  PROJECT_APP_URL,
   restoreIdle,
   SETTLE_BUDGET_MS,
 } from '../../../../e2e/web/spec-helpers.ts';
@@ -51,8 +49,6 @@ test('discovery lists the fixture collections and entries from the live content 
   page,
 }) => {
   test.setTimeout(180_000);
-  await page.goto('/__astroix/app/');
-  await expect(page.getByTestId('session-label')).toHaveText('idle', { timeout: LOAD_BUDGET_MS });
 
   // The panel's data source is the wire: one content inspection and one
   // routes inspection under the bound pair — E4 and E5, nothing else.
@@ -69,8 +65,7 @@ test('discovery lists the fixture collections and entries from the live content 
     }
   });
 
-  await activateButton(page, 0).click();
-  await page.waitForURL(PROJECT_APP_URL, { timeout: BOOT_BUDGET_MS });
+  await activateProject(page);
 
   // First content inspection boots a fresh runner over the managed dev
   // server — generous bound, then the settled ready state.
@@ -119,10 +114,7 @@ test('discovery lists the fixture collections and entries from the live content 
 
 test('selecting a nested-id entry navigates the canvas to its natural route', async ({ page }) => {
   test.setTimeout(180_000);
-  await page.goto('/__astroix/app/');
-  await expect(page.getByTestId('session-label')).toHaveText('idle', { timeout: LOAD_BUDGET_MS });
-  await activateButton(page, 0).click();
-  await page.waitForURL(PROJECT_APP_URL, { timeout: BOOT_BUDGET_MS });
+  await activateProject(page);
   const origin = new URL(page.url()).origin;
   await expect(discoveryPanel(page)).toHaveAttribute('data-discovery-status', 'ready', {
     timeout: SETTLE_BUDGET_MS,
@@ -161,10 +153,7 @@ test('selecting a nested-id entry navigates the canvas to its natural route', as
 
 test('the flat blog id takes the segment-param spelling over the catch-all', async ({ page }) => {
   test.setTimeout(180_000);
-  await page.goto('/__astroix/app/');
-  await expect(page.getByTestId('session-label')).toHaveText('idle', { timeout: LOAD_BUDGET_MS });
-  await activateButton(page, 0).click();
-  await page.waitForURL(PROJECT_APP_URL, { timeout: BOOT_BUDGET_MS });
+  await activateProject(page);
   const origin = new URL(page.url()).origin;
   await expect(discoveryPanel(page)).toHaveAttribute('data-discovery-status', 'ready', {
     timeout: SETTLE_BUDGET_MS,
@@ -187,10 +176,7 @@ test('the flat blog id takes the segment-param spelling over the catch-all', asy
 
 test('an unrouted entry click navigates nothing and reports the legend', async ({ page }) => {
   test.setTimeout(180_000);
-  await page.goto('/__astroix/app/');
-  await expect(page.getByTestId('session-label')).toHaveText('idle', { timeout: LOAD_BUDGET_MS });
-  await activateButton(page, 0).click();
-  await page.waitForURL(PROJECT_APP_URL, { timeout: BOOT_BUDGET_MS });
+  await activateProject(page);
   const origin = new URL(page.url()).origin;
   await expect(discoveryPanel(page)).toHaveAttribute('data-discovery-status', 'ready', {
     timeout: SETTLE_BUDGET_MS,
