@@ -272,7 +272,14 @@ export async function startNativeHost(
 
   const selectionObserver: NativeSelectionObserver = {
     onRegistered: (summary) => {
-      registeredProjects.push(summary);
+      // A re-added root answers `existed: true` with the same projectKey —
+      // dedupe so the Session menu grows no duplicate Activate row (#367's
+      // cheap half; the boot-time listing half stays the owner's ruling).
+      const existing = registeredProjects.findIndex(
+        (project) => project.projectKey === summary.projectKey,
+      );
+      if (existing === -1) registeredProjects.push(summary);
+      else registeredProjects[existing] = summary;
       observer({ kind: 'registered', summary });
       installMenu();
     },
