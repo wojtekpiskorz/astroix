@@ -17,12 +17,49 @@ import { stageWebLane, WEB_LANE_PORT } from './apps/web/src/stage-e2e.ts';
 // vitest *.test.ts files — Playwright's default (*.test.ts too) would
 // load them as specs and die at their vitest imports.
 
-// ——— the nonzero-discovery guard (#240's AC: the web project "cannot
+// ——— the shared nonzero-discovery guard (#240's AC: a project "cannot
 // pass with zero tests") ———
-// The web project's expected spec set is named here; deleting a spec,
-// emptying one, or breaking its discovery fails EVERY playwright run at
-// config load — the plain-build project alone can never green the lane.
-const WEB_SPEC_DIR = join('e2e', 'web');
+// The web and content projects name their expected spec sets here — a
+// spec missing, emptied, or landed unlisted fails EVERY playwright run
+// at config load — the plain-build project alone can never green the
+// lane. plain-build carries no enumeration (its nonzero guard is its
+// spec's own); the project-switch family riding chromium-content is
+// pending #427.
+// One idiom for every project since #408 folded #374's rider: the web
+// project's dir scan and the content project's onetime single-file
+// check were two hand-rolled shapes, and they drifted — the second and
+// third content specs (#252, #253) had landed unguarded.
+const MINIMUM_TESTS_PER_SPEC = 1;
+
+function assertNonVacuousDiscovery(options: {
+  project: string;
+  specDir: string;
+  expectedSpecs: readonly string[];
+  rationale: string;
+}): void {
+  const { project, specDir, expectedSpecs, rationale } = options;
+  const specFiles = existsSync(specDir)
+    ? readdirSync(specDir).filter((name) => name.endsWith('.spec.ts'))
+    : [];
+  const missing = expectedSpecs.filter((name) => !specFiles.includes(name));
+  const emptied = specFiles.filter(
+    (name) =>
+      (readFileSync(join(specDir, name), 'utf8').match(/^\s*test\(/gm) ?? []).length <
+      MINIMUM_TESTS_PER_SPEC,
+  );
+  // `unexpected` is the derived ceiling over the enumeration's floor —
+  // the vitest sibling's principle: no hand-maintained list to forget.
+  const unexpected = specFiles.filter((name) => !expectedSpecs.includes(name));
+  if (missing.length > 0 || emptied.length > 0 || unexpected.length > 0) {
+    throw new Error(
+      `playwright config: the ${project} E2E project's discovery is vacuous (missing: ${missing.join(', ') || 'none'}; ` +
+        `specs with no tests: ${emptied.join(', ') || 'none'}; ` +
+        `unexpected: ${unexpected.join(', ') || 'none'}) — ${rationale}`,
+    );
+  }
+}
+
+// The web project's expected spec set.
 // `app-shell.spec.ts` joined at #241 (G2): the rebuilt shell's own legs.
 // `canvas.spec.ts` + `zero-injection.spec.ts` joined at #242 (G3): the
 // natural-route same-origin canvas's battery and the managed-project
@@ -35,6 +72,7 @@ const WEB_SPEC_DIR = join('e2e', 'web');
 // the CSS vertical's grant-bound auto-write battery (byte-exact
 // splices, HMR reflection, conflict, undo, renewed grants, tampered
 // replays) and its pending-write-during-switch battery.
+const WEB_SPEC_DIR = join('e2e', 'web');
 const EXPECTED_WEB_SPECS = [
   'activation.spec.ts',
   'app-shell.spec.ts',
@@ -46,38 +84,29 @@ const EXPECTED_WEB_SPECS = [
   'styles-inspection.spec.ts',
   'zero-injection.spec.ts',
 ] as const;
-const MINIMUM_TESTS_PER_SPEC = 1;
-const specFiles = existsSync(WEB_SPEC_DIR)
-  ? readdirSync(WEB_SPEC_DIR).filter((name) => name.endsWith('.spec.ts'))
-  : [];
-const missing = EXPECTED_WEB_SPECS.filter((name) => !specFiles.includes(name));
-const emptied = specFiles.filter(
-  (name) =>
-    (readFileSync(join(WEB_SPEC_DIR, name), 'utf8').match(/^\s*test\(/gm) ?? []).length <
-    MINIMUM_TESTS_PER_SPEC,
-);
-if (specFiles.length === 0 || missing.length > 0 || emptied.length > 0) {
-  throw new Error(
-    `playwright config: the web E2E project's discovery is vacuous (missing: ${missing.join(', ') || 'none'}; ` +
-      `specs with no tests: ${emptied.join(', ') || 'none'}) — the restored product-E2E lane must discover its expected tests (#240)`,
-  );
-}
+assertNonVacuousDiscovery({
+  project: 'web',
+  specDir: WEB_SPEC_DIR,
+  expectedSpecs: EXPECTED_WEB_SPECS,
+  rationale: 'the restored product-E2E lane must discover its expected tests (#240)',
+});
 
-// The content vertical's battery (J1, #251) lives at the ticket's owned
-// path under apps/web — same guard idiom, so its project can never
-// pass with zero tests either. When a SECOND content spec lands, fold
-// this single-file shape and the dir-scan shape above into one shared
-// vacuity-guard idiom (#374's rider): two hand-rolled shapes drift.
-const CONTENT_SPEC = join('apps', 'web', 'e2e', 'content', 'discovery-navigation.spec.ts');
-const contentSpecTests = existsSync(CONTENT_SPEC)
-  ? (readFileSync(CONTENT_SPEC, 'utf8').match(/^\s*test\(/gm) ?? []).length
-  : 0;
-if (contentSpecTests < MINIMUM_TESTS_PER_SPEC) {
-  throw new Error(
-    "playwright config: the content E2E project's discovery is vacuous " +
-      `(${CONTENT_SPEC} carries ${contentSpecTests} tests) — the Content vertical lane must discover its expected tests (#251)`,
-  );
-}
+// The content vertical's battery lives at the vertical's owned path
+// under apps/web (J1, #251, and #252/#253 after it) — same guard idiom,
+// so its project can never pass with zero tests either; #408's fold
+// pinned the set after the later specs had drifted in unguarded.
+const CONTENT_SPEC_DIR = join('apps', 'web', 'e2e', 'content');
+const EXPECTED_CONTENT_SPECS = [
+  'discovery-navigation.spec.ts',
+  'forms-raw-validation.spec.ts',
+  'write.spec.ts',
+] as const;
+assertNonVacuousDiscovery({
+  project: 'content',
+  specDir: CONTENT_SPEC_DIR,
+  expectedSpecs: EXPECTED_CONTENT_SPECS,
+  rationale: 'the Content vertical lane must discover its expected tests (#251)',
+});
 
 // The lane's test-owned staging runs at CONFIG LOAD (ahead of the
 // webServer spawn, order guaranteed): two staged fixture copies, one

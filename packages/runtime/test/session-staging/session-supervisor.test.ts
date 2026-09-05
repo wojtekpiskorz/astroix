@@ -42,7 +42,8 @@ import {
  * The #236 focused tests, part 1 — the staged activation state machine:
  * the snapshot as the source of truth (never a flat enum), generation
  * reservation with the concurrent-activation refusal (the protocol's
- * 409), private candidate readiness under a still-authoritative old
+ * 409), the one-active-plane-per-root same-root refusal (#420), private
+ * candidate readiness under a still-authoritative old
  * session, rollback-before-commit preserving the old ready session,
  * cancellation, the commit linearization, crash observation without
  * automatic restart, snapshot notifications, and the output-hygiene
@@ -230,6 +231,92 @@ describe('generation reservation — every attempt consumes one', () => {
   });
 });
 
+describe('the same-root admission — one active plane per root (#420)', () => {
+  it('refuses a begin for the ACTIVE session’s root: no second plane, no generation spent, nothing started', async () => {
+    const { supervisor, control } = fixture();
+    const first = await staged(supervisor, control);
+    await first.candidate.commit();
+    const before = supervisor.snapshot();
+
+    const refused = supervisor.begin(PROJECT_A);
+    expect(refused).toEqual({ kind: 'refused', reason: 'same-root-active' });
+    // the refused begin is a pure refusal: no candidate started, the
+    // committed session untouched, and no generation consumed — the next
+    // ADMITTED attempt still takes the very next generation
+    expect(control.requests).toHaveLength(1);
+    expect(supervisor.snapshot()).toEqual(before);
+    expect(begunOf(supervisor.begin(PROJECT_B)).ref.generation).toBe(2);
+  });
+
+  it('refuses a begin for the IN-FLIGHT attempt’s root with the same classified reason — the structural law outranks the concurrent one', async () => {
+    const { supervisor, control } = fixture();
+    const first = begunOf(supervisor.begin(PROJECT_A)); // nothing active: the first plane for A is staging
+
+    // same root, attempt in flight: both admission laws trip; the
+    // specific one names the truth — the root already holds its (staging)
+    // plane, which is exactly the second-plane shape, not merely a busy machine
+    expect(supervisor.begin(PROJECT_A)).toEqual({
+      kind: 'refused',
+      reason: 'same-root-active',
+    });
+    // a DIFFERENT root under the same in-flight attempt keeps the
+    // pre-existing law and its reason unchanged
+    expect(supervisor.begin(PROJECT_B)).toEqual({
+      kind: 'refused',
+      reason: 'concurrent-activation',
+    });
+    // still a pure refusal on both counts
+    expect(control.requests).toHaveLength(1);
+    expect(runOf(control, 1).stopCalls).toBe(0);
+
+    // the attempt ends and the refusal lifts with it: the root is free again
+    runOf(control, 1).failReady('launch-failed');
+    await rejectionOf(first.ready);
+    await first.closed;
+    expect(begunOf(supervisor.begin(PROJECT_A)).ref.generation).toBe(2);
+  });
+
+  it('a different root proceeds — the staged switch onto another root is the lawful path', async () => {
+    const { supervisor, control } = fixture();
+    const first = await staged(supervisor, control);
+    await first.candidate.commit();
+
+    const second = supervisor.begin(PROJECT_B);
+    expect(second.kind).toBe('begun');
+    expect(control.requests).toHaveLength(2);
+    expect(control.requests[1]?.projectKey).toBe(PROJECT_B);
+    expect(supervisor.snapshot().active?.projectKey).toBe(PROJECT_A); // the old session stays authoritative
+  });
+
+  it('the drain-window shape: the refusal keys on the active truth and holds until the deactivation-side clear — the belt’s 200 is what the client sees mid-drain', async () => {
+    const { supervisor, control } = fixture();
+    const first = await staged(supervisor, control);
+    await first.candidate.commit();
+
+    // THE DISCLOSURE (#420 ruling bullet 4, K2’s contract note): during a
+    // deactivation drain the active truth is STILL SET here — the
+    // supervisor learns the linearized deactivation only through
+    // revoke('deactivation') — so the seam-level answer for the draining
+    // root is the structural refusal through the whole window. Through
+    // the composition this activate never reaches begin: the #413 belt
+    // re-reads the same active truth and answers the point-in-time-honest
+    // idempotent 200 first. This refusal is the defense-in-depth for
+    // races that bypass the belt — its truth runs one transition behind
+    // during drains, by the ruling’s own disclosure.
+    expect(supervisor.begin(PROJECT_A)).toEqual({
+      kind: 'refused',
+      reason: 'same-root-active',
+    });
+
+    // the deactivation-side clear empties the active entry, and with it
+    // the root’s one plane — the explicit deactivate-then-activate the
+    // launcher drives is admissible again, fresh generation and all
+    const revoked = await supervisor.revoke('deactivation');
+    expect(revoked).toEqual({ kind: 'revoked', revoked: first.attempt.ref });
+    expect(begunOf(supervisor.begin(PROJECT_A)).ref.generation).toBe(2);
+  });
+});
+
 describe('private candidate readiness — the old session stays authoritative', () => {
   it('the candidate run starts at begin and readies while the old session is untouched', async () => {
     const { supervisor, control } = fixture();
@@ -381,7 +468,9 @@ describe('cancellation', () => {
     const first = await staged(supervisor, control);
     await first.candidate.commit();
 
-    const settled = await staged(supervisor, control, PROJECT_A); // generation 2
+    // a different root: the same-root shape is refused at admission now
+    // (#420), so the settled-then-cancel leg rides a lawful A→B switch
+    const settled = await staged(supervisor, control, PROJECT_B); // generation 2
     await settled.candidate.commit();
     const refused = await rejectionOf(settled.attempt.cancel('user'));
     if (refused instanceof StageRejectedError) {
