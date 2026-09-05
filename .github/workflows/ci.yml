@@ -53,7 +53,7 @@ jobs:
   # or truncated run, duplicate case IDs, skip/todo/fixme, focused leaks
   # (a `test.only` reports only its case — the missing-IDs check fires),
   # and unregistered new cases all fail it. The playwright config's own
-  # vacuity guards (#240/#408/#435) stay load-bearing at config load.
+  # vacuity guards (#240/#408/#432/#435) stay load-bearing at config load.
   # This job is deterministic-gated beside `check` (both must be green
   # to merge); the advisory ai-review job stays untouched by design.
   product-web:
