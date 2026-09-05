@@ -1,10 +1,11 @@
 import { readFileSync } from 'node:fs';
-import { readFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expect, type Page, type Request, test } from '@playwright/test';
 import {
   activateProject,
+  activateSettled,
   LOAD_BUDGET_MS,
   restoreIdle,
   SETTLE_BUDGET_MS,
@@ -32,7 +33,11 @@ import { stagedCopyRoot } from '../../src/stage-e2e.ts';
  * UI-only project-relative form).
  *
  * SERIAL like the lane's other batteries: one control plane, one
- * supervisor-global active session.
+ * supervisor-global active session — and the battery's exit restores
+ * the staged entry bytes it touched (#422): the legs chain their
+ * writes inside this file by design, and the final leg's tail returns
+ * the entry to the canonical fixture's own truth for whatever battery
+ * follows.
  *
  * Every landing/transition wait is load-shaped (#396, the #392 pass
  * extended to this battery): the shared activation prefix carries the
@@ -47,6 +52,30 @@ import { stagedCopyRoot } from '../../src/stage-e2e.ts';
 const PROJECT_A = stagedCopyRoot('project-a');
 /** The entry file the battery edits. */
 const ENTRY_FILE = join(PROJECT_A, 'src/content/blog/hello-builder.md');
+/**
+ * The canonical fixture's own entry bytes — the battery's restore
+ * target (#422): the staged copy is returned to the fixture's truth at
+ * the battery's exit, so whatever battery follows inherits pristine
+ * staged bytes, never this battery's writes. Read from the tracked
+ * fixture (the staging's immutable source), the same workspace-root
+ * path idiom as the frozen corpus below.
+ */
+const PRISTINE_ENTRY_BYTES = readFileSync(
+  join(
+    dirname(fileURLToPath(import.meta.url)),
+    '..',
+    '..',
+    '..',
+    '..',
+    'e2e',
+    'fixture',
+    'src',
+    'content',
+    'blog',
+    'hello-builder.md',
+  ),
+  'utf8',
+);
 
 /** The pane's root. */
 function pane(page: Page) {
@@ -369,46 +398,84 @@ test('a stale response cannot overwrite the committed server result across a ses
     await route.fallback();
   });
 
-  await titleInput(page).fill('Delayed write title');
-  await expect(page.getByTestId('intent-state')).toHaveAttribute('data-intent-state', 'ready', {
-    timeout: LOAD_BUDGET_MS,
-  });
-  await writeButton(page).click();
-  await expect(writeState(page)).toHaveAttribute('data-write-state', /pending|refresh-required/, {
-    timeout: LOAD_BUDGET_MS,
-  });
+  // SERIAL battery hygiene (#422, trap a): the leg restores the staged
+  // bytes it touched — the css-write batteries' writeFile idiom — so
+  // the finally returns the entry to the canonical fixture's own truth
+  // whatever happens below, and the battery that follows inherits
+  // pristine staged bytes (the legs above chain their writes inside
+  // this one file by design; the restore belongs to the file's exit).
+  try {
+    await titleInput(page).fill('Delayed write title');
+    await expect(page.getByTestId('intent-state')).toHaveAttribute('data-intent-state', 'ready', {
+      timeout: LOAD_BUDGET_MS,
+    });
+    await writeButton(page).click();
+    await expect(writeState(page)).toHaveAttribute('data-write-state', /pending|refresh-required/, {
+      timeout: LOAD_BUDGET_MS,
+    });
 
-  // the write crossed and SETTLED server-side before any transition:
-  // the staged file's bytes are the committed result (the executor's
-  // fork+commit is the write-settle shape — the #250 budget)
-  await expect
-    .poll(async () => (await entryBytes()).includes('Delayed write title'), {
-      timeout: WRITE_SETTLE_MS,
-    })
-    .toBe(true);
+    // the write crossed and SETTLED server-side before any transition:
+    // the staged file's bytes are the committed result (the executor's
+    // fork+commit is the write-settle shape — the #250 budget)
+    await expect
+      .poll(async () => (await entryBytes()).includes('Delayed write title'), {
+        timeout: WRITE_SETTLE_MS,
+      })
+      .toBe(true);
 
-  // deactivate while the response is still held: the transition sees
-  // an already-settled write (nothing to drain), the document is reset
-  // and replaced — the stale response cannot deliver anything anywhere
+    // deactivate while the response is still held: the transition sees
+    // an already-settled write (nothing to drain), the document is reset
+    // and replaced — the stale response cannot deliver anything anywhere
+    await restoreIdle(page);
+
+    // the still-held handler must not outlive the test as an error: the
+    // lingering fulfill belongs to a dead request and is ignored here
+    await page.unrouteAll({ behavior: 'ignoreErrors' });
+    await activateProject(page);
+    await openEntry(page, 'hello-builder');
+
+    // the NEW generation's server truth IS the committed result — the
+    // drained write's bytes, the written title, a live revision
+    await expect(titleInput(page)).toHaveValue('Delayed write title', {
+      timeout: LOAD_BUDGET_MS,
+    });
+    await expect(page.getByTestId('entry-revision')).not.toHaveText(/revision: none/, {
+      timeout: LOAD_BUDGET_MS,
+    });
+    await expect(writeState(page)).toHaveAttribute('data-write-state', 'idle');
+    expect(await entryBytes()).toBe(expectedTitleWrite(before, 'Delayed write title'));
+    expect(commands().writes).toHaveLength(1);
+  } finally {
+    await writeFile(ENTRY_FILE, PRISTINE_ENTRY_BYTES);
+  }
+
   await restoreIdle(page);
+});
 
-  // the still-held handler must not outlive the test as an error: the
-  // lingering fulfill belongs to a dead request and is ignored here
-  await page.unrouteAll({ behavior: 'ignoreErrors' });
+test('the battery leaves the staged entry at the fixture bytes — serial hygiene', async () => {
+  test.setTimeout(60_000);
+  // #422's trap-(a) teeth: whatever the legs above wrote, the staged
+  // copy the battery leaves behind equals the canonical fixture's own
+  // bytes. A serial battery that fails before its restore tail used to
+  // hand every later battery a project-a whose hello-builder title was
+  // `Delayed write title` — this leg reds the moment that residue
+  // returns.
+  expect(await entryBytes()).toBe(PRISTINE_ENTRY_BYTES);
+});
+
+test('an idempotent re-activation over the already-active project settles through the shared discipline', async ({
+  page,
+}) => {
+  test.setTimeout(300_000);
+  // #422's trap-(b) teeth, asserted directly on the warm shape: the
+  // #413/#419 idempotent law — activating the already-active project
+  // answers the CURRENT session (no fresh plane, no young-server
+  // post-connect self-reload) — and the shared settle discipline must
+  // hold HONESTLY over it: one canvas navigation is the settled truth,
+  // never a misleading `>= 2, Received: 1` red that points the next
+  // battery at the settle helper instead of the real upstream failure
+  // that left the session active.
   await activateProject(page);
-  await openEntry(page, 'hello-builder');
-
-  // the NEW generation's server truth IS the committed result — the
-  // drained write's bytes, the written title, a live revision
-  await expect(titleInput(page)).toHaveValue('Delayed write title', {
-    timeout: LOAD_BUDGET_MS,
-  });
-  await expect(page.getByTestId('entry-revision')).not.toHaveText(/revision: none/, {
-    timeout: LOAD_BUDGET_MS,
-  });
-  await expect(writeState(page)).toHaveAttribute('data-write-state', 'idle');
-  expect(await entryBytes()).toBe(expectedTitleWrite(before, 'Delayed write title'));
-  expect(commands().writes).toHaveLength(1);
-
+  await activateSettled(page);
   await restoreIdle(page);
 });

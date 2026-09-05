@@ -1,7 +1,7 @@
-import { readFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { readFile, writeFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
 import { expect, type Frame, type Page, type Route } from '@playwright/test';
-import { stagedCopyRoot } from '../../apps/web/src/stage-e2e.ts';
+import { stagedCopyRoot, WEB_E2E_SCRATCH_ENV } from '../../apps/web/src/stage-e2e.ts';
 import { spliceText } from '../../packages/core/src/splice-writer.ts';
 
 /**
@@ -83,6 +83,12 @@ export async function activateProject(page: Page): Promise<void> {
   });
   await activateButton(page, 0).click();
   await page.waitForURL(PROJECT_APP_URL, { timeout: BOOT_BUDGET_MS });
+  // #422 (trap b): this landing records its session for the
+  // warm-activation memo too — a content leg that fails mid-test
+  // leaves the session active, and the next battery's settled
+  // activation over that warm shape must recognize it (the memo's
+  // law lives with activateSettled below).
+  await recordLandedSession(page);
 }
 
 /**
@@ -100,17 +106,114 @@ export async function restoreIdle(page: Page): Promise<void> {
 }
 
 /**
+ * The invocation-scoped warm-activation memo (#422, trap b): every
+ * (runtime epoch, generation) pair a battery helper's landing has
+ * served, kept as one JSON file keyed by the invocation's scratch root
+ * but living OUTSIDE it (see settleMemoPath), so the record crosses the
+ * project/worker boundaries of the serial run (one control plane, one
+ * scratch root, one worker at a time). Its law rests on two supervisor
+ * truths: every activation attempt — committed, failed, or cancelled —
+ * consumes a FRESH generation, and the idempotent re-activation
+ * (#413/#419) returns the CURRENT session's pair. So a pair the memo
+ * already knows is the SAME live session — never a fresh plane — and
+ * its dev server has been up since the first landing: the canvas has
+ * no young-server post-connect self-reload pending, and ONE navigation
+ * is the settled truth. An unknown pair is a session this invocation
+ * never landed: a young plane whose one self-reload the settle
+ * discipline must still wait for.
+ */
+
+/** The landed document's session identity — the bootstrap metas every served project document carries. */
+interface LandedSession {
+  readonly epoch: string;
+  readonly generation: number;
+}
+
+/** Reads the landed project document's session identity off its own served metas (the K harness's proven surface). */
+async function landedSession(page: Page): Promise<LandedSession> {
+  const epoch = await page.locator('meta[name="astroix-epoch"]').getAttribute('content');
+  const generation = await page.locator('meta[name="astroix-generation"]').getAttribute('content');
+  if (epoch === null || generation === null || !/^\d+$/.test(generation)) {
+    throw new Error('the landed project document did not carry its session identity metas');
+  }
+  return { epoch, generation: Number.parseInt(generation, 10) };
+}
+
+/**
+ * The memo file's path OUTSIDE the scratch root, keyed by it — the
+ * invocation identity without the wiped directory. The root is
+ * disposable by design: the staging wipes it on every real (re)stage,
+ * and Playwright re-evaluates the config in every worker — before the
+ * config's worker guard (#422), a replacement worker's re-evaluation
+ * wiped the root MID-INVOCATION after any failed leg (the observed
+ * cascade doom: the memo died exactly when the warm shape needed it,
+ * and the live plane's staged files vanished under it). Outside the
+ * root the memo survives every wipe, and its keys are epoch-scoped, so
+ * a stale file from a previous invocation over an explicit (reused)
+ * scratch root can never match the new control plane's epoch. Fails
+ * loudly when no staging has run.
+ */
+function settleMemoPath(): string {
+  const root = process.env[WEB_E2E_SCRATCH_ENV];
+  if (root === undefined || root === '') {
+    throw new Error(
+      `spec-helpers: ${WEB_E2E_SCRATCH_ENV} is unset — the warm-activation memo is keyed by the staging's scratch root (#422)`,
+    );
+  }
+  const tag = root.split(/[\\/]/).filter(Boolean).pop();
+  if (tag === undefined) throw new Error(`spec-helpers: malformed scratch root "${root}" (#422)`);
+  return join(dirname(root), `.astroix-${tag}-settle-generations.json`);
+}
+
+/** Records one landed session and answers whether it was already known — the warm/cold discriminator. */
+async function recordLandedSession(page: Page): Promise<boolean> {
+  const session = await landedSession(page);
+  const key = `${session.epoch}#${session.generation}`;
+  const path = settleMemoPath();
+  let known: string[];
+  try {
+    known = JSON.parse(await readFile(path, 'utf8')) as string[];
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      known = [];
+    } else {
+      throw error;
+    }
+  }
+  const warm = known.includes(key);
+  if (!warm) {
+    await writeFile(path, `${JSON.stringify([...known, key], undefined, 2)}\n`, 'utf8');
+  }
+  return warm;
+}
+
+/**
  * The batteries' shared activation prefix: land on the launcher,
- * activate, and WAIT FOR THE CANVAS TO SETTLE — the initial load plus
- * the young dev server's one post-connect self-reload (the canvas
- * battery's own HMR-leg discipline; a click racing that rebuild lands
- * on a document whose capture listener is between epochs and is lost).
- * Event-ordered: the two baseline navigations complete BEFORE the
- * settle clock starts, and the settle window proves no third navigation
- * is in flight. `position` selects the staged copy to activate (the
- * A-B-A switch harness reaches 1; every other battery takes the default
- * 0) — the ONE spelling of this settle discipline, never re-derived
- * (#254 review: the copy had already drifted at birth).
+ * activate, and WAIT FOR THE CANVAS TO SETTLE — the initial load plus,
+ * on a COLD activation, the young dev server's one post-connect
+ * self-reload (the canvas battery's own HMR-leg discipline; a click
+ * racing that rebuild lands on a document whose capture listener is
+ * between epochs and is lost). Event-ordered: the baseline navigations
+ * complete BEFORE the settle clock starts, and the settle window
+ * proves no further navigation is in flight. `position` selects the
+ * staged copy to activate (the A-B-A switch harness reaches 1; every
+ * other battery takes the default 0) — the ONE spelling of this
+ * settle discipline, never re-derived (#254 review: the copy had
+ * already drifted at birth).
+ *
+ * #422 (trap b): the settle is WARM-TOLERANT. The navigation count is
+ * a proxy for "the young server's one post-connect reload happened",
+ * and that proxy is simply wrong for the idempotent re-activation
+ * (#413/#419's law): activating an already-active project answers the
+ * CURRENT session over a warm plane, which legitimately settles with
+ * ONE canvas navigation — a fixed ≥ 2 baseline reds the NEXT battery's
+ * first settle after any upstream leg failed mid-test and left the
+ * session active, pointing at this helper instead of the real failure.
+ * The warm/cold discriminator is the landed session's memo membership
+ * (see the memo above): a known pair settles on ≥ 1 navigation, an
+ * unknown pair — a fresh plane — keeps the cold ≥ 2 reload guard. The
+ * pair is recorded BEFORE the poll so a settle that fails still seeds
+ * the memo: the battery that follows a failed leg settles honestly.
  */
 export async function activateSettled(page: Page, position = 0): Promise<void> {
   const frameNavigations: string[] = [];
@@ -125,9 +228,10 @@ export async function activateSettled(page: Page, position = 0): Promise<void> {
   await expect(page.getByTestId('canvas-origin-state')).toHaveText('project', {
     timeout: LOAD_BUDGET_MS,
   });
+  const warm = await recordLandedSession(page);
   await expect
     .poll(() => frameNavigations.length, { timeout: SETTLE_BUDGET_MS })
-    .toBeGreaterThanOrEqual(2);
+    .toBeGreaterThanOrEqual(warm ? 1 : 2);
   frameNavigations.length = 0;
   await page.waitForTimeout(1500);
   expect(frameNavigations).toEqual([]);
