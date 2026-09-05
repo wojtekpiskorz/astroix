@@ -48,7 +48,7 @@ const STYLE_TAG = /<style\b[^>]*>([\s\S]*?)<\/style>/g;
  * sourcemaps, so this static scan is the only mapping to what's on disk —
  * and the only one that sees `is:inline` blocks.
  */
-export function buildCssIndex(sources: SourceFile[]): CssRuleRecord[] {
+export function buildCssIndex(sources: readonly SourceFile[]): CssRuleRecord[] {
   const records: CssRuleRecord[] = [];
   for (const source of sources) {
     const fileRecords = source.file.endsWith('.css')

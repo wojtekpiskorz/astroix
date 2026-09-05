@@ -20,12 +20,14 @@ import { cleanupScratch, freePort, makeScratch } from './lane-harness.ts';
  * processes — the stand-in worker (E6's wire subset) and the stand-in dev
  * server (a real loopback socket) spawned through the same exact-child
  * spawn path production uses. Crash is terminal and never auto-restarts;
- * the crash law reaps the managed dev-server sibling in the terminal
- * transition's own tick (#365 — a crashed plane dies together, its
- * sibling never left alive holding Astro's dev lock); the graceful stop
- * runs the ordered close (worker internals, sockets, then terminate+reap
- * both exact children); escalation and reap bounds are exercised against
- * children that really ignore or delay SIGTERM.
+ * the crash law reaps the surviving sibling in the terminal transition's
+ * own tick — the managed dev server on a worker crash (#365, never left
+ * alive holding Astro's dev lock), the worker on a managed-astro crash
+ * (#402, the mirror: never left waiting out the stop-bound → TERM-grace
+ * → KILL ladder a torn-down supervisor would truncate into an orphan);
+ * the graceful stop runs the ordered close (worker internals, sockets,
+ * then terminate+reap both exact children); escalation and reap bounds
+ * are exercised against children that really ignore or delay SIGTERM.
  */
 
 const STAND_IN_WORKER = fileURLToPath(new URL('./stand-in-worker.js', import.meta.url));
@@ -348,7 +350,19 @@ describe('crash is terminal — the sibling is cleaned, never restarted', () => 
     expect(await portRefused(lane.port)).toBe(true);
   }, 15_000);
 
-  it('a managed-Astro crash stops the worker gracefully and reports it complete', async () => {
+  it('a managed-Astro crash reaps the worker sibling in the crash tick — no stop, no TERM, only the kill (#402)', async () => {
+    // The #402 mirror of #365's law: the dev server died, the worker
+    // survives — and a crashed plane dies together. Before #402 the
+    // surviving worker was owed a graceful window first (IPC stop → its
+    // close report), so its decisive SIGKILL sat behind the AWAITED
+    // stop-bound → TERM-grace → KILL ladder; a supervisor torn down
+    // inside that window orphaned the worker (the mirror truncation
+    // class — smaller blast radius than #365's, a leaked process rather
+    // than a poisoned dev lock, and the same law anyway). The reap is
+    // now delivered in the terminal transition's own synchronous tick:
+    // the cooperative worker below would have stopped gracefully on
+    // main (stop marker stamped, report received) — the tick kill
+    // precedes every one of those rungs.
     const lane = await startLane();
     await lane.supervisor.ready;
     await crash(lane.astroControlDir);
@@ -359,14 +373,80 @@ describe('crash is terminal — the sibling is cleaned, never restarted', () => 
       outcome: 'complete',
       failures: [],
     });
-    expect(report.accounting.workerReportReceived).toBe(true);
+    // The crash law denied the worker its window: no report was ever
+    // expected (the supervisor killed it — it did not fail to report
+    // inside a bound it was given), and the ledger says the worker died
+    // by SIGKILL — the report never pretends a graceful stop.
+    expect(report.accounting.workerReportReceived).toBe(false);
+    expect(report.accounting.workerReaped).toBe(true);
     expect(report.accounting.managedAstroReaped).toBe(true);
-    expect(await markerStamps(lane.markerDir, 'worker-stop-received')).toHaveLength(1);
+    expect(report.accounting.killEscalations).toEqual(['worker']);
+    expect(lane.supervisor.admission).toBe('revoked');
+    expect(lane.supervisor.state).toBe('closed');
+
+    // Nothing but the tick kill ever reached the worker: the IPC stop
+    // never came (no marker — red on main, which stamped it), and a
+    // SIGKILLed process runs no exit handler (the cooperative worker's
+    // exit stamp is absent too — on main it exited 0 voluntarily).
+    expect(await markerStamps(lane.markerDir, 'worker-stop-received')).toHaveLength(0);
+    expect(await markerStamps(lane.markerDir, 'worker-exit')).toHaveLength(0);
+    // The crashed dev server died its own death (its exit handler ran).
     expect(await markerStamps(lane.markerDir, 'astro-exit')).toHaveLength(1);
 
     await new Promise((resolve) => setTimeout(resolve, 150));
     expect(await markerStamps(lane.markerDir, 'worker-boot')).toHaveLength(1);
     expect(await markerStamps(lane.markerDir, 'astro-boot')).toHaveLength(1);
+  }, 15_000);
+
+  it('a TERM-immune worker hanging on stop is reaped by the managed-astro crash tick, not the awaited ladder (#402)', async () => {
+    // The issue's exact construction: the dev server crashes and the
+    // surviving worker is the pathological one — it never answers the
+    // stop and ignores SIGTERM (only a KILL can end it). On main the
+    // decisive SIGKILL was reached only through the AWAITED ladder: the
+    // full stop bound, then the full TERM grace, before the KILL — the
+    // widened bounds below make that ladder need ≥ 3 s, while the
+    // crash-tick reap resolves in single-digit milliseconds. The
+    // deadline race is the truncation window made observable: a
+    // supervisor torn down at the 2 s mark would have orphaned the
+    // still-waiting worker on main; under the tick reap the plane is
+    // long dead by then.
+    const lane = await startLane({
+      workerBehaviors: { hangStop: true },
+      bounds: { stopTimeoutMs: 1500, termGraceMs: 1500 },
+    });
+    await lane.supervisor.ready;
+    const workerPid = Number.parseInt(
+      await readFile(join(lane.markerDir, 'worker-pid'), 'utf8'),
+      10,
+    );
+    await crash(lane.astroControlDir);
+
+    const deadline = new Promise<null>((resolve) => {
+      setTimeout(() => resolve(null), 2000);
+    });
+    const report = await Promise.race([lane.supervisor.closed, deadline]);
+    expect(report).not.toBeNull(); // red on main: the awaited ladder needs ≥ 3 s (1500 ms stop bound + 1500 ms TERM grace)
+    expect(report).toMatchObject({
+      reason: 'managed-astro-crash',
+      outcome: 'complete',
+      failures: [],
+    });
+    expect(report?.accounting.workerReportReceived).toBe(false);
+    expect(report?.accounting.workerReaped).toBe(true);
+    expect(report?.accounting.killEscalations).toEqual(['worker']);
+
+    // Only the tick kill ever reached the TERM-immune worker: the stop
+    // never came (on main it stamped worker-stop-received before
+    // hanging), the TERM never came (on main the ladder's TERM rung
+    // stamped worker-term-ignored), and a SIGKILLed process runs no
+    // exit handler.
+    expect(await markerStamps(lane.markerDir, 'worker-stop-received')).toHaveLength(0);
+    expect(await markerStamps(lane.markerDir, 'worker-term-ignored')).toHaveLength(0);
+    expect(await markerStamps(lane.markerDir, 'worker-exit')).toHaveLength(0);
+    // The cross-process death witness: nothing answers the worker's PID
+    // anymore — ESRCH, not a live process (the supervisor's report does
+    // not carry PIDs; the witness is test machinery like #365's port).
+    expect(() => process.kill(workerPid, 0)).toThrow();
   }, 15_000);
 
   it('a worker boot failure is terminal: ready rejects, the sibling is cleaned, no serving ever happened', async () => {
@@ -407,10 +487,13 @@ describe('crash is terminal — the sibling is cleaned, never restarted', () => 
       },
       devServerPort: port,
       startupTimeoutMs: 3000,
-      // The widened boot bound, same family as the sibling startup legs:
-      // this stop races the worker's loaded boot (the spawn error fires
-      // at t≈0 while the worker is mid-boot); a 600 ms bound TERMs it
-      // mid-boot under suite-scale load and voids the close report.
+      // The #402 crash law makes the close a tick reap: the spawn error
+      // fires at t≈0 while the worker is mid-boot, and the SIGKILLed
+      // worker is owed no window — the old widened stop bound existed
+      // to let its loaded boot reach the graceful stop before the bound
+      // TERMed it mid-boot and voided the close report; with no report
+      // ever expected on a crash path, no boot-race accommodation
+      // remains, and the bound only guards the probes' abort settling.
       stopTimeoutMs: 10_000,
       termGraceMs: 200,
       killReapMs: 200,
@@ -435,7 +518,11 @@ describe('crash is terminal — the sibling is cleaned, never restarted', () => 
     const report = await supervisor.closed;
     expect(report.reason).toBe('managed-astro-crash');
     expect(report.outcome).toBe('complete');
-    expect(report.accounting.workerReportReceived).toBe(true);
+    // The crash-killed worker (possibly still mid-boot) was never asked
+    // for a report — the mirror tick reap (#402), recorded in the ledger.
+    expect(report.accounting.workerReportReceived).toBe(false);
+    expect(report.accounting.workerReaped).toBe(true);
+    expect(report.accounting.killEscalations).toEqual(['worker']);
   }, 15_000);
 });
 

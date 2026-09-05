@@ -108,7 +108,12 @@ export function fakeWorkerWire(): FakeWorkerWire {
         return {
           kind: 'styles',
           revision: revisions.styles,
-          payload: { revision: revisions.styles, invalidationRevision: 0, records: [] },
+          payload: {
+            revision: revisions.styles,
+            invalidationRevision: 0,
+            records: [],
+            fileDigests: {},
+          },
         };
       case 'route-selection':
         // #370: the facade passes the control-plane-only resolution

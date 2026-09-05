@@ -820,15 +820,18 @@ function sha256Of(bytes: Buffer): string {
  * client-selected resource) plus the file's raw text (the splice
  * planner's byte anchor). Additive by construction (the payload a
  * pre-write client binds keeps parsing without it); best-effort per
- * file — a file whose records do not fit the read bytes serves
- * UN-enriched (read-only truth), never a grant over bytes the records
- * were not indexed over. Issuance supersedes the session's previous
- * grant for the same target (the table's own law), so the freshest
- * inspection a document binds always carries the live grant — and
- * issuance order across files is NOT load-bearing (each target
- * supersedes only its own previous grant), so the per-file
- * enrichments parallelize exactly like the content family's, with
- * `Promise.all` keeping the served `writeFacts` order deterministic.
+ * file — a file whose published digest does not match the bytes read
+ * serves UN-enriched (read-only truth), never a grant over records the
+ * walk was not indexed over (#405: the per-file digest the converged
+ * inspection publishes is the freshness proof content's per-entry
+ * revision already was — length-fit alone cannot see same-length
+ * drift). Issuance supersedes the session's previous grant for the same
+ * target (the table's own law), so the freshest inspection a document
+ * binds always carries the live grant — and issuance order across files
+ * is NOT load-bearing (each target supersedes only its own previous
+ * grant), so the per-file enrichments parallelize exactly like the
+ * content family's, with `Promise.all` keeping the served `writeFacts`
+ * order deterministic.
  */
 async function enrichStylesPayload(
   seat: SessionSeat,
@@ -836,19 +839,27 @@ async function enrichStylesPayload(
   payload: unknown,
 ): Promise<unknown> {
   const authority = enrichmentAuthority(seat, inputs);
-  const record = payload as { records?: unknown };
+  const record = payload as { records?: unknown; fileDigests?: unknown };
   if (authority === null || !Array.isArray(record?.records)) return payload;
   const { table, root } = authority;
   // The bound array keeps the guard's narrowing inside the parallel map —
   // a property narrowing never survives into a closure on its own.
   const records: readonly unknown[] = record.records;
+  // The payload's published per-file digests (#405): a payload without
+  // them proves nothing beyond length — every file serves un-enriched.
+  const digests =
+    typeof record.fileDigests === 'object' && record.fileDigests !== null
+      ? (record.fileDigests as Record<string, unknown>)
+      : null;
   const files = new Set<string>();
   for (const entry of records) {
     const file = (entry as { file?: unknown })?.file;
     if (typeof file === 'string' && file.length > 0) files.add(file);
   }
   const writeFacts = (
-    await Promise.all([...files].map((file) => enrichStylesFile(seat, root, table, file, records)))
+    await Promise.all(
+      [...files].map((file) => enrichStylesFile(seat, root, table, file, records, digests)),
+    )
   ).filter((fact) => fact !== null);
   if (writeFacts.length === 0) return payload;
   return { ...(payload as object), writeFacts };
@@ -856,9 +867,12 @@ async function enrichStylesPayload(
 
 /**
  * One file's write fact — `null` when the facts cannot be proven: the
- * file unreadable, or any record of it carrying a range beyond the
- * bytes actually read (the indexed truth and the disk drifted apart —
- * the read-only answer, never a grant over incoherent anchors).
+ * file unreadable, the payload's published digest absent or unequal to
+ * the bytes actually read (the indexed truth and the disk drifted apart
+ * — #405's same-length drift window included, which a length-fit can
+ * never see), or any record of it carrying a range beyond the bytes the
+ * grant would bind (the structural coherence belt over the same read).
+ * The read-only answer, never a grant over incoherent anchors.
  */
 async function enrichStylesFile(
   seat: SessionSeat,
@@ -866,6 +880,7 @@ async function enrichStylesFile(
   table: GrantTable,
   file: string,
   records: readonly unknown[],
+  digests: Record<string, unknown> | null,
 ): Promise<unknown> {
   let bytes: Buffer;
   try {
@@ -873,11 +888,18 @@ async function enrichStylesFile(
   } catch {
     return null;
   }
+  // The freshness proof (#405): the converged pass published this file's
+  // walk-time digest — the disk's current bytes must hash to it exactly.
+  // A mismatch (or an unpublished digest) means the records were indexed
+  // over different bytes than this disk now holds, so the file serves
+  // un-enriched: stale records never ride a freshly-issued grant.
+  const published = digests === null ? undefined : digests[file];
+  if (typeof published !== 'string' || sha256Of(bytes) !== published) return null;
   const raw = bytes.toString('utf8');
-  // The coherence gate: every record of this file must fit the bytes
-  // the grant would bind — the ranges are string indices over exactly
-  // these contents, and one that does not fit is proof the indexed
-  // truth is not this disk's.
+  // The coherence belt: every record of this file must fit the bytes the
+  // grant would bind — the ranges are string indices over exactly these
+  // contents, and one that does not fit is proof the indexed truth is
+  // not this disk's (structural, over the digest-proven read).
   const fits = records.every((entry) => {
     const candidate = entry as { file?: unknown; range?: { end?: unknown } };
     if (candidate?.file !== file) return true;

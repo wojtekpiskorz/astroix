@@ -148,7 +148,7 @@ export function fakePlane(): FakePlane {
     behaviors: { project: 'ok', styles: 'ok', content: 'ok', routes: 'ok', routeSelection: 'ok' },
     payloads: {
       project: { certified: { astro: '7.2.10', vite: '8.2.2' } },
-      styles: { revision: 1, invalidationRevision: 0, records: [] },
+      styles: { revision: 1, invalidationRevision: 0, records: [], fileDigests: {} },
       content: { collections: [], diagnostics: [], revision: 'sha-content-truth' },
       routes: { revision: 1, routes: [] },
       routeSelection: {

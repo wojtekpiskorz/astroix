@@ -55,6 +55,11 @@ import { verifyJoinedPayload, verifyStylesParity } from './parity';
  * timers, no stale-result acceptance — `attempts` bounds the immediate
  * fresh re-passes (each fully verified), and exhaustion returns the last
  * unfinished outcome for the caller's later retry.
+ *
+ * The payload also publishes the static walk's per-file digests (#405)
+ * under the SAME freshness discipline — one read inside the pass, so a
+ * published digest is the indexed truth's own, and the pass-level
+ * invalidation race check guards it exactly as it guards the records.
  */
 
 /** The converged styles payload — plain data only, stamped at an invalidation epoch. */
@@ -64,6 +69,15 @@ export interface ConvergedStylesPayload {
   /** The invalidation revision this payload converged at — valid until the source advances past it. */
   readonly invalidationRevision: number;
   readonly records: readonly EffectiveSelectorRecord[];
+  /**
+   * Per project-relative file: SHA-256 hex over the static walk's exact
+   * bytes at this pass (#405) — the indexed truth's own digest. The
+   * write enrichment re-verifies a later disk read against it, closing
+   * the same-length drift window length-fit alone could not see: a
+   * mismatch serves the file un-enriched, never a fresh grant over
+   * stale records. JSON-safe by construction (worker IPC + the wire).
+   */
+  readonly fileDigests: Readonly<Record<string, string>>;
 }
 
 /** One styles inspection outcome — converged data, a classified mismatch, or an invalidation race. */
@@ -116,10 +130,14 @@ type UnfinishedPass =
     }
   | { readonly outcome: 'raced'; readonly invalidationRevision: number };
 
-/** What one pass body produced: classified mismatch data, or the joined records. */
+/** What one pass body produced: classified mismatch data, or the joined records with the walk's digests. */
 type PassData =
   | { readonly kind: 'mismatch'; readonly mismatch: StylesMismatch }
-  | { readonly kind: 'records'; readonly records: readonly EffectiveSelectorRecord[] };
+  | {
+      readonly kind: 'records';
+      readonly records: readonly EffectiveSelectorRecord[];
+      readonly fileDigests: Readonly<Record<string, string>>;
+    };
 
 /**
  * Creates the inspector over a composition server's seams. The
@@ -177,6 +195,7 @@ export function createConvergedStylesInspection(input: {
             revision,
             invalidationRevision: passRevision,
             records: pass.result.records,
+            fileDigests: pass.result.fileDigests,
           },
           evidence,
         };
@@ -209,7 +228,11 @@ async function runPass(
     { routeComponent },
   );
   signal?.throwIfAborted();
-  const staticRecords = buildCssIndex(await readProjectCssSources(input.seams.projectRoot));
+  // One walk: the sources for the static index AND the per-file digests
+  // the payload publishes (#405) come from the same single read — the
+  // digest is the indexed truth's own, never a second read's.
+  const walk = await readProjectCssSources(input.seams.projectRoot);
+  const staticRecords = buildCssIndex(walk.sources);
   signal?.throwIfAborted();
   const mismatch = verifyStylesParity(staticRecords, compiled, {
     requiredScopedFiles: [routeComponent],
@@ -219,7 +242,7 @@ async function runPass(
     requiredScopedFiles: [routeComponent],
   });
   verifyJoinedPayload(staticRecords, compiled, records);
-  return { kind: 'records', records };
+  return { kind: 'records', records, fileDigests: walk.fileDigests };
 }
 
 /**

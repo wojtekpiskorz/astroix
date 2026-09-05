@@ -47,8 +47,9 @@ export interface SupervisionCloseAccounting {
    * Which children were ended by SIGKILL — the stop ladder's escalation
    * after an ignored SIGTERM, or the crash law's synchronous sibling
    * reap (#365: a worker crash kills the managed dev server in the
-   * terminal transition's own tick, no TERM rung). Escalation with a
-   * successful reap is still complete cleanup.
+   * terminal transition's own tick, no TERM rung; #402 mirrors it — a
+   * managed-astro crash kills the surviving worker in that same tick).
+   * Escalation with a successful reap is still complete cleanup.
    */
   readonly killEscalations: readonly SupervisionChild[];
 }
@@ -64,7 +65,13 @@ export interface SupervisionCloseReport {
 /** The observed facts one close ran against. */
 export interface SupervisionCloseFacts {
   readonly reason: SupervisionStopReason;
-  /** A close report was expected from the worker: it had answered readiness and the worker itself did not crash. */
+  /**
+   * A close report was expected from the worker: it had answered
+   * readiness and no crash terminated the plane — a crashed worker
+   * cannot report, and a crash-killed survivor (#402's tick reap) was
+   * never asked: the supervisor denied the window, the worker did not
+   * fail to deliver inside it.
+   */
   readonly workerReportExpected: boolean;
   readonly workerReportReceived: boolean;
   /** The worker's own report outcome, when received; true when nothing claims otherwise. */
@@ -79,7 +86,8 @@ export interface SupervisionCloseFacts {
  * Classifies one close into its report: every failure category in
  * stop-sequence order, `complete` exactly when none fired. A crash path
  * never fails the worker-report categories (a crashed worker cannot
- * report; its sibling cleanup is what the report judges).
+ * report, and a crash-killed survivor was never asked — its sibling
+ * cleanup is what the report judges).
  */
 export function classifySupervisionClose(facts: SupervisionCloseFacts): SupervisionCloseReport {
   const failures = failedCategories(facts);
