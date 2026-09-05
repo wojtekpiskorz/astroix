@@ -127,8 +127,11 @@ let selected;
 try {
   database.exec('CREATE TABLE qualification (id INTEGER PRIMARY KEY, fact TEXT NOT NULL)');
   const insert = database.prepare('INSERT INTO qualification (fact) VALUES (?)');
+  // better-sqlite3's run() returns { changes, lastInsertRowid } — the
+  // inserted count is `changes`, never the statement's return value
   inserted =
-    insert.run('bundled-node-native-addon') + insert.run('in-memory-create-insert-select-close');
+    insert.run('bundled-node-native-addon').changes +
+    insert.run('in-memory-create-insert-select-close').changes;
   selected = database.prepare('SELECT id, fact FROM qualification ORDER BY id').all();
   const count = database.prepare('SELECT COUNT(*) AS n FROM qualification').get();
   if (
