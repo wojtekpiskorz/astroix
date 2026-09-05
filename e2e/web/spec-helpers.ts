@@ -79,6 +79,21 @@ export const CANVAS_SELECT_RETRY_MS = LOAD_BUDGET_MS * 3;
  */
 export const WRITE_SETTLE_MS = 90_000;
 
+/**
+ * The undo settle budget (#439): the same grant-bound write loop as the
+ * forward write — the debounce dispatch, the retained executor's
+ * commit, and the post-commit refresh convergence — over a pipeline
+ * that stalled PAST WRITE_SETTLE_MS twice under heavy local machine
+ * load (load average 20-47; solo green ~29 s, calm-machine full green,
+ * CI green — a pure load stall, the file still at the written value at
+ * 90 s with no error), so the undo's settle span gets its own budget
+ * sized past the observed stall class (2x the red'd ceiling, the
+ * family's decisive-resize idiom) rather than inheriting the forward
+ * write's first-edit budget. Single-homed here so a future resize is
+ * one line, not another fleet-wide literal diff.
+ */
+export const UNDO_SETTLE_MS = 180_000;
+
 /** The staged copy the write batteries edit (registered first — position 0). */
 export const STAGED_CSS_FILE = join(stagedCopyRoot('project-a'), 'src', 'pages', 'home.css');
 
