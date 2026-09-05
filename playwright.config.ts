@@ -138,6 +138,27 @@ assertNonVacuousDiscovery({
   rationale: 'the project-switch family must discover its expected tests (#254/#255)',
 });
 
+// The whole-tree ceiling: `chromium-content` matches `e2e/**/*.spec.ts`
+// under apps/web — including zero-directory `**/` matches directly in
+// `e2e/` — so a spec ANYWHERE in that tree runs in the lane. This call
+// derives its expected set from the two family arrays (subdir-prefixed,
+// the recursive scan's relative-path shape — no new hand-maintained
+// list), so a new family directory or a stray top-level spec fails
+// config load until it is enumerated. The per-family calls above stay:
+// they attribute failures to the family better than one parent error
+// would.
+const EXPECTED_APPS_WEB_E2E_SPECS = [
+  ...EXPECTED_CONTENT_SPECS.map((name) => `content/${name}`),
+  ...EXPECTED_PROJECT_SWITCH_SPECS.map((name) => `project-switch/${name}`),
+] as const;
+assertNonVacuousDiscovery({
+  project: 'apps/web e2e tree',
+  specDir: join('apps', 'web', 'e2e'),
+  expectedSpecs: EXPECTED_APPS_WEB_E2E_SPECS,
+  rationale:
+    'every spec in the content host tree belongs to an enumerated family (#240/#408 — the tree cannot grow a silent family)',
+});
+
 // The lane's test-owned staging runs at CONFIG LOAD (ahead of the
 // webServer spawn, order guaranteed): two staged fixture copies, one
 // broken root, the isolated registry, and the env file the host boots
