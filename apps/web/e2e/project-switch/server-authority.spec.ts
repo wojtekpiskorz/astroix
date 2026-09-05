@@ -1,13 +1,14 @@
-import { writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
 import { expect, type Locator, type Page, test } from '@playwright/test';
 import {
   BOOT_BUDGET_MS,
   canvasSelect,
+  captureWriteCount,
+  holdApplyEditResponses,
   LOAD_BUDGET_MS,
+  restoreWritten,
   WRITE_SETTLE_MS,
 } from '../../../../e2e/web/spec-helpers.ts';
-import { stagedCopyRoot, WEB_LANE_PORT } from '../../src/stage-e2e.ts';
+import { WEB_LANE_PORT } from '../../src/stage-e2e.ts';
 import {
   type AbaCapture,
   abaActivate,
@@ -44,7 +45,15 @@ import {
 const WRITTEN = 'project-a' as const;
 const UNTOUCHED = 'project-b' as const;
 
-/** Opens the CSS editor on the first GLOBAL row and returns the font-size input. */
+/**
+ * Opens the CSS editor on the first GLOBAL row and returns the
+ * font-size input WITHOUT waiting it to a served value — the
+ * read-then-derive variant #425's shared options-form home
+ * (`e2e/web/spec-helpers.ts` `openGlobalEditor`) deliberately cannot
+ * serve: this battery's first leg reads the served truth off the input
+ * before any value could be known (the sheet's state at battery start
+ * is order-dependent), so the open hands back the locator raw.
+ */
 async function openGlobalEditor(page: Page): Promise<Locator> {
   await expect(page.getByTestId('css-rule-list')).toBeVisible({ timeout: BOOT_BUDGET_MS });
   await expect(page.locator('[data-testid="css-rule"]')).toHaveCount(4, {
@@ -69,27 +78,6 @@ async function openEntry(page: Page, entryId: string): Promise<void> {
 /** The title widget's input inside the form. */
 function titleInput(page: Page): Locator {
   return pane(page).locator('[data-astroix-form-field="title"] input');
-}
-
-/** Counts the apply-edit requests that crossed. */
-function captureWriteCount(page: Page): () => number {
-  let count = 0;
-  page.on('request', (request) => {
-    if (!request.url().endsWith('/__astroix/api/v1')) return;
-    if (request.method() !== 'POST') return;
-    const kind = (request.postDataJSON() as { command?: { kind?: string } } | null)?.command?.kind;
-    if (kind === 'apply-edit') count += 1;
-  });
-  return () => count;
-}
-
-/** Restores the staged bytes this battery touched — the lane's restore discipline. */
-async function restoreWritten(sheet: string, entry: string): Promise<void> {
-  await writeFile(join(stagedCopyRoot(WRITTEN), 'src', 'pages', 'home.css'), sheet);
-  await writeFile(
-    join(stagedCopyRoot(WRITTEN), 'src', 'content', 'blog', 'hello-builder.md'),
-    entry,
-  );
 }
 
 test.describe.configure({ mode: 'serial' });
@@ -180,21 +168,7 @@ test('a held write response crossing the switch delivers nothing — the returni
   // delay every apply-edit RESPONSE far past the transition: the
   // REQUEST crosses immediately (the server accepts it, the executor
   // commits the bytes), and only the fulfilled response trails.
-  await page.route('**/__astroix/api/v1', async (route) => {
-    const body = route.request().postDataJSON() as { command?: { kind?: string } } | null;
-    if (body?.command?.kind === 'apply-edit') {
-      const response = await route.fetch();
-      await page.waitForTimeout(10_000);
-      try {
-        await route.fulfill({ response });
-      } catch {
-        // the request died with the replaced document — the stale
-        // response could not deliver anything, which is the point
-      }
-      return;
-    }
-    await route.fallback();
-  });
+  await holdApplyEditResponses(page);
 
   await titleInput(page).fill('Hello builder (held)');
   await page.getByTestId('write-entry').click();

@@ -1,6 +1,13 @@
 import { readFile, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { expect, type Frame, type Page, type Route } from '@playwright/test';
+import {
+  expect,
+  type Frame,
+  type Locator,
+  type Page,
+  type Request,
+  type Route,
+} from '@playwright/test';
 import { settleMemoPath, stagedCopyRoot } from '../../apps/web/src/stage-e2e.ts';
 import { spliceText } from '../../packages/core/src/splice-writer.ts';
 
@@ -15,8 +22,13 @@ import { spliceText } from '../../packages/core/src/splice-writer.ts';
  * #423's review homed the #393 freeze/abort ordering-proof pair here
  * as well — the K2 harness had copied the app-shell battery's locals
  * line-for-line, and the discipline has a recorded history of needing
- * revision under load. Test-only, imported by the lane's specs; no
- * product code touches it.
+ * revision under load. #425 single-homed the write batteries' four
+ * carried spellings here too: the open-editor local (four of its five
+ * per-battery shapes — K1's read-then-derive variant stays
+ * battery-local, see openGlobalEditor below), the mutation counter,
+ * the staged-bytes restore, and the held-apply-edit-response route
+ * block. Test-only, imported by the lane's specs; no product code
+ * touches it.
  */
 
 /** The list item whose staged copy is at `position` (0 and 1 are the fixture copies; 2 is broken). */
@@ -297,6 +309,105 @@ export function expectedDeclarationWrite(
     start,
     end: start + replaced.length,
     replacement: `${property}: ${nextValue};`,
+  });
+}
+
+/**
+ * Opens the CSS editor on one GLOBAL row and returns one declaration's
+ * value input (#425 single-homing: the write batteries' per-battery
+ * spellings — css-write's options form, css-write-switch's and the
+ * K-family's positional-served forms — homed as the ONE options shape,
+ * css-write's, the most general). The derived-served-value call sites
+ * keep passing their derived values explicitly — the served truth is
+ * battery-owned, never hardcoded (#423's discipline). `row` defaults to
+ * the first GLOBAL row (1), `prop` to the vertical's font-size
+ * declaration, and `served` to the pristine fixture's `3rem` — the
+ * css-write battery's own opening truth. K1's read-then-derive variant
+ * (server-authority.spec.ts) deliberately stays battery-local: its
+ * caller reads the served value off the input BEFORE it can be known,
+ * a shape the wait-on-open home cannot serve.
+ */
+export async function openGlobalEditor(
+  page: Page,
+  options: { readonly row?: number; readonly prop?: string; readonly served?: string } = {},
+): Promise<Locator> {
+  const row = options.row ?? 1;
+  const prop = options.prop ?? 'font-size';
+  await expect(page.getByTestId('css-rule-list')).toBeVisible({ timeout: BOOT_BUDGET_MS });
+  await expect(page.locator('[data-testid="css-rule"]')).toHaveCount(4, {
+    timeout: LOAD_BUDGET_MS,
+  });
+  await page.locator('[data-testid="css-rule-edit"]').nth(row).click();
+  await expect(page.getByTestId('css-rule-editor')).toBeVisible({ timeout: LOAD_BUDGET_MS });
+  const input = page.locator(`[data-testid="css-decl-input"][data-css-prop="${prop}"]`);
+  await expect(input).toHaveValue(options.served ?? '3rem', { timeout: LOAD_BUDGET_MS });
+  return input;
+}
+
+/**
+ * Counts the apply-edit requests that crossed the wire (#425
+ * single-homing: three byte-identical per-battery spellings — the
+ * switch battery's and the K specs' `captureWriteCount` /
+ * `captureMutationCount` — one listener, one name; K3's spec reads it
+ * through its `mutationCount` local variable).
+ */
+export function captureWriteCount(page: Page): () => number {
+  let count = 0;
+  page.on('request', (request: Request) => {
+    if (!request.url().endsWith('/__astroix/api/v1')) return;
+    if (request.method() !== 'POST') return;
+    const kind = (request.postDataJSON() as { command?: { kind?: string } } | null)?.command?.kind;
+    if (kind === 'apply-edit') count += 1;
+  });
+  return () => count;
+}
+
+/** The staged copy's blog entry — the Content vertical's disk truth (project A, the written copy). */
+export const STAGED_ENTRY_FILE = join(
+  stagedCopyRoot('project-a'),
+  'src',
+  'content',
+  'blog',
+  'hello-builder.md',
+);
+
+/**
+ * Restores the staged bytes the switch batteries touched — the K
+ * family's restore discipline (#425 single-homing: three byte-identical
+ * per-battery copies): the sheet and the blog entry of project A, the
+ * written copy (project B is never written).
+ */
+export async function restoreWritten(sheet: string, entry: string): Promise<void> {
+  await writeFile(STAGED_CSS_FILE, sheet);
+  await writeFile(STAGED_ENTRY_FILE, entry);
+}
+
+/**
+ * Holds every apply-edit RESPONSE far past the transition (#425
+ * single-homing: four line-for-line per-battery copies — the CSS
+ * switch battery's, the content write battery's, and the K specs'
+ * two): the REQUEST crosses immediately (`route.fetch` re-issues it
+ * while the session is live — the server accepts it, the executor
+ * commits the bytes, and the caller's disk-poll proves the
+ * settlement), and only the fulfilled response trails — it arrives
+ * after the document is replaced, and a fulfilled response into a
+ * dead request delivers nothing anywhere.
+ */
+export async function holdApplyEditResponses(page: Page): Promise<void> {
+  await page.route('**/__astroix/api/v1', async (route: Route) => {
+    const body = route.request().postDataJSON() as { command?: { kind?: string } } | null;
+    if (body?.command?.kind === 'apply-edit') {
+      const response = await route.fetch();
+      await page.waitForTimeout(10_000);
+      try {
+        await route.fulfill({ response });
+      } catch {
+        // the request died with the replaced document — the stale
+        // response could not deliver anything, which is the point
+      }
+      return;
+    }
+    await route.fallback();
   });
 }
 

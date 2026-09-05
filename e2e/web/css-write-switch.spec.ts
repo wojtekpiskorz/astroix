@@ -1,13 +1,16 @@
 import { writeFile } from 'node:fs/promises';
-import { expect, type Page, type Request, test } from '@playwright/test';
+import { expect, test } from '@playwright/test';
 import {
   activateSettled,
   BOOT_BUDGET_MS,
   canvasSelect,
+  captureWriteCount,
   cssBytes,
   expectedDeclarationWrite,
+  holdApplyEditResponses,
   LAUNCHER_APP_URL,
   LOAD_BUDGET_MS,
+  openGlobalEditor,
   restoreIdle,
   STAGED_CSS_FILE,
   WRITE_SETTLE_MS,
@@ -34,37 +37,14 @@ import {
  * supervisor-global active session — every leg restores the idle state.
  */
 
-/** Counts the apply-edit requests that crossed. */
-function captureWriteCount(page: Page): () => number {
-  let count = 0;
-  page.on('request', (request: Request) => {
-    if (!request.url().endsWith('/__astroix/api/v1')) return;
-    if (request.method() !== 'POST') return;
-    const kind = (request.postDataJSON() as { command?: { kind?: string } } | null)?.command?.kind;
-    if (kind === 'apply-edit') count += 1;
-  });
-  return () => count;
-}
-
 /**
  * The batteries' shared activation prefix, the canvas selection, the
- * staged sheet's bytes, the settle budget, and the font-size oracle all
- * live in `spec-helpers.ts` (the lane's established home for the
- * batteries' carried duplication).
+ * staged sheet's bytes, the settle budget, the font-size oracle, the
+ * open-editor local, the mutation counter, and the held-response
+ * route block (#425's single-homing) all live in `spec-helpers.ts`
+ * (the lane's established home for the batteries' carried
+ * duplication).
  */
-
-/** Opens the editor on the first GLOBAL row and returns the font-size input. */
-async function openGlobalEditor(page: Page, servedValue = '3rem') {
-  await expect(page.getByTestId('css-rule-list')).toBeVisible({ timeout: BOOT_BUDGET_MS });
-  await expect(page.locator('[data-testid="css-rule"]')).toHaveCount(4, {
-    timeout: LOAD_BUDGET_MS,
-  });
-  await page.locator('[data-testid="css-rule-edit"]').nth(1).click();
-  await expect(page.getByTestId('css-rule-editor')).toBeVisible({ timeout: BOOT_BUDGET_MS });
-  const input = page.locator('[data-testid="css-decl-input"][data-css-prop="font-size"]');
-  await expect(input).toHaveValue(servedValue, { timeout: LOAD_BUDGET_MS });
-  return input;
-}
 
 test.describe.configure({ mode: 'serial' });
 
@@ -102,7 +82,7 @@ test('an accepted CSS write drains through the normal switch — the new generat
   // live quiet loop — never a resumed old-generation state
   await activateSettled(page);
   await canvasSelect(page, '.hero-title');
-  await openGlobalEditor(page, '3.5rem');
+  await openGlobalEditor(page, { served: '3.5rem' });
   await expect(page.getByTestId('css-write-status')).toHaveAttribute('data-write-state', 'quiet', {
     timeout: LOAD_BUDGET_MS,
   });
@@ -131,21 +111,7 @@ test('an unresolved CSS write at the switch reports nothing false and grants no 
   // before the deactivation begins), and only the fulfilled response
   // trails — it arrives after the document is replaced, and a
   // fulfilled response into a dead request delivers nothing anywhere.
-  await page.route('**/__astroix/api/v1', async (route) => {
-    const body = route.request().postDataJSON() as { command?: { kind?: string } } | null;
-    if (body?.command?.kind === 'apply-edit') {
-      const response = await route.fetch();
-      await page.waitForTimeout(10_000);
-      try {
-        await route.fulfill({ response });
-      } catch {
-        // the request died with the replaced document — the stale
-        // response could not deliver anything, which is the point
-      }
-      return;
-    }
-    await route.fallback();
-  });
+  await holdApplyEditResponses(page);
 
   await input.fill('3.5rem');
   await expect
@@ -169,7 +135,7 @@ test('an unresolved CSS write at the switch reports nothing false and grants no 
   // disabled undo (the old generation's undo state died with its
   // document — nothing of the dead session resumed here), and no
   // second mutation ever crossed
-  await openGlobalEditor(page, '3.5rem');
+  await openGlobalEditor(page, { served: '3.5rem' });
   await expect(page.getByTestId('css-write-status')).toHaveAttribute('data-write-state', 'quiet', {
     timeout: LOAD_BUDGET_MS,
   });
