@@ -181,6 +181,17 @@ async function bind(
   return event as unknown as BoundReport | RefusedReport;
 }
 
+/**
+ * One bind report asserted into its bound shape — the narrowing every
+ * bind site reads (the refusal's full report — role and reason — is the
+ * failure's print, not just the kind).
+ */
+function expectBound(report: BoundReport | RefusedReport, id: string): BoundReport {
+  expect(report, `the ${id} bind`).toMatchObject({ kind: 'bound' });
+  if (report.kind !== 'bound') throw new Error(`the ${id} bind did not land`);
+  return report;
+}
+
 /** One renderer fetch driven to its report. */
 async function probe(run: K3HarnessRun, id: string, label: string, forge?: string): Promise<void> {
   run.send({ op: 'fetch', id, label, ...(forge === undefined ? {} : { forge }) });
@@ -208,22 +219,10 @@ describe('the editor-versus-diagnostics document authority — real Electron, re
 
     // the editor binds; the diagnostics bind with SEPARATELY minted
     // capabilities of their own.
-    const editor = await bind(run, 'bind-editor', 'editor');
-    expect(editor.kind).toBe('bound');
-    const d1 = await bind(run, 'bind-diagnostic', 'd1');
-    const d2 = await bind(run, 'bind-diagnostic', 'd2');
-    const d3 = await bind(run, 'bind-diagnostic', 'd3');
-    expect(d1.kind).toBe('bound');
-    expect(d2.kind).toBe('bound');
-    expect(d3.kind).toBe('bound');
-    if (
-      editor.kind !== 'bound' ||
-      d1.kind !== 'bound' ||
-      d2.kind !== 'bound' ||
-      d3.kind !== 'bound'
-    ) {
-      throw new Error('unreachable — the bound shape is asserted above');
-    }
+    const editor = expectBound(await bind(run, 'bind-editor', 'editor'), 'editor');
+    const d1 = expectBound(await bind(run, 'bind-diagnostic', 'd1'), 'd1');
+    const d2 = expectBound(await bind(run, 'bind-diagnostic', 'd2'), 'd2');
+    const d3 = expectBound(await bind(run, 'bind-diagnostic', 'd3'), 'd3');
     const capabilities = new Set([editor.capability, d1.capability, d2.capability, d3.capability]);
     expect(capabilities.size).toBe(4);
 
@@ -275,22 +274,10 @@ describe('the editor-versus-diagnostics document authority — real Electron, re
     // and the live documents inject the new values — while a renderer
     // forging the OLD editor value leaves with the NEW capability.
     run.send({ op: 'set-session', epoch: 'k3-epoch', generation: 2 });
-    const editorNext = await bind(run, 'bind-editor', 'editor');
-    const d1Next = await bind(run, 'bind-diagnostic', 'd1');
-    const d2Next = await bind(run, 'bind-diagnostic', 'd2');
-    const d3Next = await bind(run, 'bind-diagnostic', 'd3');
-    expect(editorNext.kind).toBe('bound');
-    expect(d1Next.kind).toBe('bound');
-    expect(d2Next.kind).toBe('bound');
-    expect(d3Next.kind).toBe('bound');
-    if (
-      editorNext.kind !== 'bound' ||
-      d1Next.kind !== 'bound' ||
-      d2Next.kind !== 'bound' ||
-      d3Next.kind !== 'bound'
-    ) {
-      throw new Error('unreachable — the bound shape is asserted above');
-    }
+    const editorNext = expectBound(await bind(run, 'bind-editor', 'editor'), 'editor');
+    const d1Next = expectBound(await bind(run, 'bind-diagnostic', 'd1'), 'd1');
+    const d2Next = expectBound(await bind(run, 'bind-diagnostic', 'd2'), 'd2');
+    const d3Next = expectBound(await bind(run, 'bind-diagnostic', 'd3'), 'd3');
     expect(editorNext.capability).not.toBe(editor.capability);
     expect(d1Next.capability).not.toBe(d1.capability);
     expect(d2Next.capability).not.toBe(d2.capability);
@@ -308,18 +295,10 @@ describe('the editor-versus-diagnostics document authority — real Electron, re
   it('disables edits fail-closed on revocation and navigation — and every rebinding is a fresh mint', async () => {
     const run = await launchWindowedRun();
 
-    const editor = await bind(run, 'bind-editor', 'editor');
-    const d1 = await bind(run, 'bind-diagnostic', 'd1');
-    const d2 = await bind(run, 'bind-diagnostic', 'd2');
-    const d3 = await bind(run, 'bind-diagnostic', 'd3');
-    if (
-      editor.kind !== 'bound' ||
-      d1.kind !== 'bound' ||
-      d2.kind !== 'bound' ||
-      d3.kind !== 'bound'
-    ) {
-      throw new Error('the initial binds did not all land');
-    }
+    const editor = expectBound(await bind(run, 'bind-editor', 'editor'), 'editor');
+    const d1 = expectBound(await bind(run, 'bind-diagnostic', 'd1'), 'd1');
+    const d2 = expectBound(await bind(run, 'bind-diagnostic', 'd2'), 'd2');
+    expectBound(await bind(run, 'bind-diagnostic', 'd3'), 'd3');
 
     // the CDP-detach face: a revoked capability dies INSTANTLY for its
     // document alone — the other documents' authority is untouched.
@@ -336,9 +315,7 @@ describe('the editor-versus-diagnostics document authority — real Electron, re
 
     // the recovery is a FRESH mint at the same document — never a
     // revival of the revoked capability.
-    const d1Rebound = await bind(run, 'bind-diagnostic', 'd1');
-    expect(d1Rebound.kind).toBe('bound');
-    if (d1Rebound.kind !== 'bound') throw new Error('unreachable');
+    const d1Rebound = expectBound(await bind(run, 'bind-diagnostic', 'd1'), 'd1');
     expect(d1Rebound.capability).not.toBe(d1.capability);
     await probe(run, 'd1', 'r3');
     expect(clientHeaderPairs(origin.byLabel('r3'))[0]?.value).toBe(d1Rebound.capability);
@@ -351,9 +328,7 @@ describe('the editor-versus-diagnostics document authority — real Electron, re
       'the diagnostic navigation',
     );
     expect(await injected(run, 'd2')).toBeNull();
-    const d2Rebound = await bind(run, 'bind-diagnostic', 'd2');
-    expect(d2Rebound.kind).toBe('bound');
-    if (d2Rebound.kind !== 'bound') throw new Error('unreachable');
+    const d2Rebound = expectBound(await bind(run, 'bind-diagnostic', 'd2'), 'd2');
     expect(d2Rebound.capability).not.toBe(d2.capability);
 
     // a REAL renderer crash kills that document's authority; the

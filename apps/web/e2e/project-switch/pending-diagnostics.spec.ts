@@ -30,6 +30,7 @@ import {
   claimHostileWorker,
   delayedCallbackOutcome,
   plantDelayedCallback,
+  type SwReport,
   stageHostileWorker,
   swReports,
 } from './scenarios/hostile-sw.ts';
@@ -112,6 +113,26 @@ function waitForMutationCrossed(page: Page): Promise<void> {
 /** The error envelope's code — every refusal assertion reads the closed vocabulary. */
 function errorCode(body: string): string {
   return (JSON.parse(body) as { error?: { code?: string } }).error?.code ?? 'none';
+}
+
+/**
+ * The worker's FIRST report of one kind — polled until it exists and
+ * returned by the same poll, so no site fetches the reports a second
+ * time (and no report assertion needs the optional chain).
+ */
+async function swReportOf(page: Page, kind: string): Promise<SwReport> {
+  let found: SwReport | undefined;
+  await expect
+    .poll(
+      async () => {
+        found = (await swReports(page)).find((report) => report.kind === kind);
+        return found !== undefined;
+      },
+      { timeout: LOAD_BUDGET_MS },
+    )
+    .toBe(true);
+  if (found === undefined) throw new Error(`the worker never reported "${kind}"`);
+  return found;
 }
 
 /**
@@ -480,13 +501,8 @@ test('a hostile Service Worker cannot cross generations — replays die at the r
   // retired origin refuses it, and the bytes stay the exact single
   // committed write (no double write, no revived authority).
   await armSwAttack(page, { cmd: 'arm-replay' });
-  await expect
-    .poll(async () => (await swReports(page)).find((report) => report.kind === 'replay'), {
-      timeout: LOAD_BUDGET_MS,
-    })
-    .toBeDefined();
-  const replay = (await swReports(page)).find((report) => report.kind === 'replay');
-  expect(replay?.status).toBe(421);
+  const replay = await swReportOf(page, 'replay');
+  expect(replay.status).toBe(421);
   expect(await abaSheetBytes(WRITTEN)).toBe(
     expectedDeclarationWrite(sheetBefore, 'font-size', served, committed),
   );
@@ -515,11 +531,7 @@ test('a hostile Service Worker cannot cross generations — replays die at the r
   await recordCssWriteStates(switchTab);
   await armSwAttack(page, { cmd: 'arm-stale-mutation' });
   await liveInput.fill(served);
-  await expect
-    .poll(async () => (await swReports(page)).find((report) => report.kind === 'stale-delivered'), {
-      timeout: LOAD_BUDGET_MS,
-    })
-    .toBeDefined();
+  await swReportOf(page, 'stale-delivered');
   // the disk truth is the byte oracle: the server never saw the
   // write, so the bytes stay the exact single committed A1 write.
   await expect
@@ -563,25 +575,15 @@ test('a hostile Service Worker cannot cross generations — replays die at the r
     'rejected',
     { timeout: WRITE_SETTLE_MS },
   );
-  await expect
-    .poll(async () => (await swReports(page)).find((report) => report.kind === 'rewrite-outcome'), {
-      timeout: LOAD_BUDGET_MS,
-    })
-    .toBeDefined();
-  const tamper = (await swReports(page)).find((report) => report.kind === 'rewrite-outcome');
-  expect(tamper?.status).toBe(403);
+  const tamper = await swReportOf(page, 'rewrite-outcome');
+  expect(tamper.status).toBe(403);
   expect(await abaSheetBytes(WRITTEN)).toContain(`font-size: ${recoveredSize};`);
 
   // and the worker NEVER saw B's origin — origin isolation held for
   // the whole battery: B's generation was unreachable by A's worker.
   await armSwAttack(page, { cmd: 'dump' });
-  await expect
-    .poll(async () => (await swReports(page)).find((report) => report.kind === 'dump'), {
-      timeout: LOAD_BUDGET_MS,
-    })
-    .toBeDefined();
-  const dump = (await swReports(page)).find((report) => report.kind === 'dump');
-  expect(dump?.log?.origins).not.toContain(`http://${b1.host}`);
+  const dump = await swReportOf(page, 'dump');
+  expect(dump.log?.origins).not.toContain(`http://${b1.host}`);
 
   // restore the staged bytes and the idle state.
   await restoreWritten(sheetBefore, entryBefore);

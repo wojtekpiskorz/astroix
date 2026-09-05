@@ -92,10 +92,13 @@ export async function stylesWriteFactOf(
   return fact;
 }
 
-/** A mutation whose body has not completed yet — `finish()` lands it, `destroy()` abandons it. */
+/**
+ * A mutation whose body has not completed yet — `finish()` lands it,
+ * bounded like the socket base beneath it (a 5 s destroy-and-settle
+ * timer, never a hung leg).
+ */
 export interface HeldBodyMutation {
   finish(): Promise<{ readonly status: number; readonly body: string }>;
-  destroy(): void;
 }
 
 /**
@@ -122,16 +125,27 @@ export function openHeldBodyMutation(
     finish: () =>
       new Promise((resolve, reject) => {
         const chunks: Buffer[] = [];
-        socket.on('data', (chunk: Buffer) => chunks.push(chunk));
-        socket.on('error', (error: Error) => reject(error));
-        socket.on('close', () => {
+        // The rawExchange base's own bound, mirrored: destroy and settle,
+        // never a hung leg — the close the timer forces lands in the same
+        // settle as a natural one.
+        const timer = setTimeout(() => {
+          socket.destroy();
+          settle();
+        }, 5_000);
+        const settle = (): void => {
+          clearTimeout(timer);
           const text = Buffer.concat(chunks).toString('latin1');
           const split = text.indexOf('\r\n\r\n');
           const status = Number.parseInt(/^HTTP\/1\.1 (\d{3})/.exec(text)?.[1] ?? '0', 10);
           resolve({ status, body: split === -1 ? '' : text.slice(split + 4) });
+        };
+        socket.on('data', (chunk: Buffer) => chunks.push(chunk));
+        socket.on('error', (error: Error) => {
+          clearTimeout(timer);
+          reject(error);
         });
+        socket.on('close', settle);
         socket.write(body.slice(splitAt));
       }),
-    destroy: () => socket.destroy(),
   };
 }

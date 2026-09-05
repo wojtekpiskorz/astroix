@@ -66,7 +66,6 @@ type HarnessCommand =
   | { readonly op: 'bind-diagnostic'; readonly id: string }
   | { readonly op: 'fetch'; readonly id: string; readonly label: string; readonly forge?: string }
   | { readonly op: 'state'; readonly id: string }
-  | { readonly op: 'counts' }
   | { readonly op: 'set-session'; readonly epoch: string; readonly generation: number }
   | { readonly op: 'session-replaced'; readonly epoch: string; readonly generation: number }
   | { readonly op: 'revoke'; readonly id: string }
@@ -271,7 +270,6 @@ async function main(): Promise<void> {
     readonly 'bind-diagnostic': typeof bindDiagnostic;
     readonly fetch: typeof forgedFetch;
     readonly state: (command: Extract<HarnessCommand, { op: 'state' }>) => Promise<void>;
-    readonly counts: () => Promise<void>;
     readonly 'set-session': (command: Extract<HarnessCommand, { op: 'set-session' }>) => void;
     readonly 'session-replaced': (
       command: Extract<HarnessCommand, { op: 'session-replaced' }>,
@@ -288,12 +286,6 @@ async function main(): Promise<void> {
     fetch: forgedFetch,
     state: async (command) => {
       report(stateView(command.id));
-    },
-    counts: async () => {
-      const grants = authority.grants();
-      const counts = { editor: 0, diagnostic: 0 };
-      for (const grant of grants) counts[grant.role] += 1;
-      report({ kind: 'counts', counts, live: grants.length });
     },
     'set-session': (command) => {
       currentSession = { runtimeEpoch: command.epoch, generation: command.generation };
