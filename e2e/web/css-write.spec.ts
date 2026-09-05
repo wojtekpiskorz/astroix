@@ -136,7 +136,9 @@ test('auto-write lands the frozen splice bytes byte-exact, HMR reflects them, an
 
     // the edit schedules the settled pause — the badge says so before any wire traffic
     await input.fill('3.5rem');
-    await expect(writeState(page)).toHaveAttribute('data-write-state', 'scheduled');
+    await expect(writeState(page)).toHaveAttribute('data-write-state', 'scheduled', {
+      timeout: LOAD_BUDGET_MS,
+    });
 
     // the pause fires exactly ONE apply-edit; the machine goes writing
     await expect
@@ -364,7 +366,7 @@ test('an external interference conflicts: no bytes written, the stable conflict 
       timeout: LOAD_BUDGET_MS,
     });
     // undo cleared: the stack's baselines died with the conflicted world
-    await expect(page.getByTestId('css-undo')).toBeDisabled();
+    await expect(page.getByTestId('css-undo')).toBeDisabled({ timeout: LOAD_BUDGET_MS });
   } finally {
     await writeFile(STAGED_CSS_FILE, before);
   }

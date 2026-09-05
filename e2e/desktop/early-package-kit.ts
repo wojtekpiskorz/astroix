@@ -344,18 +344,19 @@ end tell`;
  * Polls one probe until its answer is accepted — the drive's
  * load-tolerant wait (#442), in the kit's own probe idiom: every probe
  * call carries the 15 s probe timeout (the availability probe's class),
- * the ceiling is the kit's 30 s window/menu bound (~30x the calm shape,
- * generous under load), and the interval acknowledges that each
- * osascript spawn already costs a good fraction of a second. A probe
- * that errors (the queried UI not present YET) polls on; only the
- * ceiling reds, naming what was waited for.
+ * the ceiling is the kit's fixed 30 s window/menu bound (~30x the calm
+ * shape, generous under load — never an override), and the interval
+ * acknowledges that each osascript spawn already costs a good fraction
+ * of a second. A probe that errors (the queried UI not present YET)
+ * polls on; only the ceiling reds, naming what was waited for.
  */
 async function pollSystemEvents(
   probe: string,
   what: string,
-  options: { readonly timeoutMs?: number; readonly accept?: (answer: string) => boolean } = {},
+  options: { readonly accept?: (answer: string) => boolean } = {},
 ): Promise<void> {
-  const { timeoutMs = 30_000, accept = (answer) => answer !== '0' && answer.length > 0 } = options;
+  const timeoutMs = 30_000;
+  const { accept = (answer) => answer !== '0' && answer.length > 0 } = options;
   const deadline = Date.now() + timeoutMs;
   let lastAnswer = '';
   let lastError: unknown;
@@ -373,6 +374,24 @@ async function pollSystemEvents(
     `early-package: ${what} was not observed within ${timeoutMs} ms ` +
       `(last probe answer: ${JSON.stringify(lastAnswer)}` +
       `${lastError === undefined ? '' : `; last probe error: ${String(lastError)}`})`,
+  );
+}
+
+/**
+ * Sends ONE System Events action line to the packaged app's process —
+ * the drive's single ceremony wrapper: every action (the menu click,
+ * each keystroke) is one line inside the same tell block, so the drive
+ * reads as its five steps and the sent script stays byte-for-byte the
+ * one the drive always sent.
+ */
+async function astroixAction(action: string, timeoutMs: number): Promise<void> {
+  await osascript(
+    `tell application "System Events"
+  tell process "Astroix"
+    ${action}
+  end tell
+end tell`,
+    timeoutMs,
   );
 }
 
@@ -411,52 +430,20 @@ export async function registerThroughNativePicker(
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
       await activateApp();
-      await osascript(
-        `tell application "System Events"
-  tell process "Astroix"
-    click menu item "Add Existing Project…" of menu "File" of menu bar item "File" of menu bar 1
-  end tell
-end tell`,
+      await astroixAction(
+        'click menu item "Add Existing Project…" of menu "File" of menu bar item "File" of menu bar 1',
         30_000,
       );
       await pollSystemEvents(PICKER_SHEET_PROBE, 'the native picker sheet');
-      await osascript(
-        `tell application "System Events"
-  tell process "Astroix"
-    keystroke "g" using {command down, shift down}
-  end tell
-end tell`,
-        15_000,
-      );
+      await astroixAction('keystroke "g" using {command down, shift down}', 15_000);
       await pollSystemEvents(GO_TO_FOLDER_FIELD_PROBE, 'the Go-to-Folder path field');
-      await osascript(
-        `tell application "System Events"
-  tell process "Astroix"
-    keystroke "${projectRoot}"
-  end tell
-end tell`,
-        15_000,
-      );
+      await astroixAction(`keystroke "${projectRoot}"`, 15_000);
       await pollSystemEvents(GO_TO_FOLDER_VALUE_PROBE, 'the typed path landing in the field', {
         accept: (value) => value === projectRoot,
       });
-      await osascript(
-        `tell application "System Events"
-  tell process "Astroix"
-    keystroke return
-  end tell
-end tell`,
-        15_000,
-      );
+      await astroixAction('keystroke return', 15_000);
       await pollSystemEvents(GO_TO_FOLDER_ABSENT_PROBE, 'the Go-to-Folder sheet dismissing');
-      await osascript(
-        `tell application "System Events"
-  tell process "Astroix"
-    keystroke return
-  end tell
-end tell`,
-        15_000,
-      );
+      await astroixAction('keystroke return', 15_000);
       const event = await run.waitForEvent('registered', 'the native registration event');
       return event;
     } catch (error) {
