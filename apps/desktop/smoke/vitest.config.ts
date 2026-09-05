@@ -21,13 +21,19 @@ import { defineConfig } from 'vitest/config';
  * gesture through the real rule editor, the real grant-bound
  * write-executor child, and the canvas document's own stylesheet tags
  * as the HMR reflection (the computed cascade is the web battery's
- * face of that law — occluded harness windows skip style recalc).
+ * face of that law — occluded harness windows skip style recalc). The
+ * K3 pending-diagnostics lane (#256) joins the same way at its owned
+ * path: the real document authority over the real F2/F4 tables,
+ * multi-window — the editor-versus-diagnostic capability injection
+ * and rebinding (the include is this lane's registration; the owned
+ * spec cannot run without it).
  */
 export default defineConfig({
   test: {
     environment: 'node',
     include: [
       'apps/desktop/smoke/desktop-smoke.test.ts',
+      'apps/desktop/e2e/**/*.spec.ts',
       'e2e/desktop/css-inspection*.spec.ts',
       'e2e/desktop/css-write*.spec.ts',
       'e2e/desktop/document-authority*.spec.ts',
