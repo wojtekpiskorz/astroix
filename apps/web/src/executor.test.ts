@@ -42,10 +42,7 @@ import {
   createSessionCompletion,
   type SessionCompletion,
 } from '@wojciechpiskorz/astroix-runtime/session-supervisor/completion';
-import {
-  createEditFence,
-  DRAIN_DEADLINE_MS,
-} from '@wojciechpiskorz/astroix-runtime/session-supervisor/fence';
+import { createEditFence } from '@wojciechpiskorz/astroix-runtime/session-supervisor/fence';
 import { FIRST_COMMIT_REVOCATION } from '@wojciechpiskorz/astroix-runtime/session-supervisor/revocation';
 import {
   createSessionSupervisor,
@@ -63,7 +60,6 @@ import {
 } from './control-plane.ts';
 import {
   createExecutor,
-  EDIT_OUTCOME_DEADLINE_MS,
   type ExecutorInputs,
   type SeatStore,
   type SessionSeat,
@@ -1131,15 +1127,5 @@ describe("the composition teardown's write-executor stop bound (#410)", () => {
     expect(await stopping).toBe('timed-out');
     expect(hung.kills()).toBe(1);
     expect(healthy.kills()).toBe(0);
-  });
-});
-
-describe('the edit-outcome deadline tie (#410)', () => {
-  it("the executor's edit-outcome deadline IS the fence's drain deadline — one constant through the public surface", () => {
-    // The pre-#410 tree restated the literal here; this pin fails that
-    // tree's shape at load (no export) and fails a future divergence at
-    // the assertion — a drain-deadline change the composition does not
-    // follow is a gate-red, never a silent early give-up.
-    expect(EDIT_OUTCOME_DEADLINE_MS).toBe(DRAIN_DEADLINE_MS);
   });
 });

@@ -953,9 +953,10 @@ async function applyEdit(
   // land — and the fence keeps tracking the accepted work either way
   // (its no-silent-work law); the answer maps through the bounded-drain
   // vocabulary's failure fold, the same closed catch-all `unknown` gets.
-  const awaited = await awaitEditOutcome(
+  const awaited = await raceBoundedSettlement(
     submission.outcome,
-    inputs.editOutcomeDeadlineMs ?? EDIT_OUTCOME_DEADLINE_MS,
+    // The fence's own `DRAIN_DEADLINE_MS`, directly (#410) — one constant, one law.
+    inputs.editOutcomeDeadlineMs ?? DRAIN_DEADLINE_MS,
   );
   const outcome: ExecutorOutcome | null = captured.outcome;
   if (outcome === null) {
@@ -1118,30 +1119,24 @@ async function disposeHungExecutor(
 }
 
 /**
- * The outcome await's default bound — the F5 fence's `DRAIN_DEADLINE_MS`
- * itself, consumed through the fence's package surface (#410): one
- * constant, one law, so a future drain-deadline change can never leave
- * the composition's edit await silently diverged (the non-divergence pin
- * lives in this module's focused legs). Exported for that pin alone —
- * the use site is the composition's default, see
- * {@link ExecutorInputs.editOutcomeDeadlineMs}.
+ * The one bounded-settlement race (#391's idiom, #410's shared home):
+ * races one settlement promise against a deadline, never against the
+ * child's terminality — the seam's two awaits (the edit outcome await
+ * below, the composition teardown's write-executor stop wait in
+ * control-plane.ts) are this one body, with the callers mapping the
+ * generic verdict onto their own vocabulary. The raced promises
+ * resolve, never reject (the fence settles a rejecting thunk as an
+ * honest failure; the spawner's stop promise settles on the `closed`
+ * message or the exit) — the rejection belt only preserves that
+ * contract if those surfaces themselves drift.
  */
-export const EDIT_OUTCOME_DEADLINE_MS = DRAIN_DEADLINE_MS;
-
-/**
- * The bounded outcome await (#391): races the fence's per-operation
- * promise against the deadline, never against the child's terminality.
- * The per-op promise resolves, never rejects (the fence settles a
- * rejecting thunk as an honest failure) — the rejection belt below
- * only preserves that contract if the fence surface itself drifts.
- */
-function awaitEditOutcome(
-  outcome: Promise<unknown>,
+export function raceBoundedSettlement(
+  settlement: Promise<unknown>,
   deadlineMs: number,
 ): Promise<'settled' | 'timed-out'> {
   return new Promise((resolve, reject) => {
     const disarm = setTimeout(() => resolve('timed-out'), deadlineMs);
-    outcome.then(
+    settlement.then(
       () => {
         clearTimeout(disarm);
         resolve('settled');

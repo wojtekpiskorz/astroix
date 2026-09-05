@@ -64,6 +64,7 @@ import {
   createExecutor,
   type ExecutorInputs,
   type HostAdoptionSeam,
+  raceBoundedSettlement,
   type SeatStore,
   type SessionSeat,
   stopOwnedRuns,
@@ -511,37 +512,9 @@ export async function createControlPlaneComposition(
  * exit; a child alive but unresponsive with no write in flight produces
  * neither, and the pre-#410 close loop awaited that promise with no
  * bound — the same bounded-outcome class #391 landed one seam over, at
- * teardown. Exported for the focused stop-bound legs.
+ * teardown. The focused stop-bound legs inject their own bounds.
  */
-export const EXECUTOR_STOP_TIMEOUT_MS = 5000;
-
-/**
- * The bounded stop wait (#410) — `awaitEditOutcome`'s idiom (#391)
- * mirrored at the teardown seam: races one settlement — the handle's
- * stop promise, or the killed handle's observed exit — against the
- * bound, never against the child's terminality. The raced promises
- * resolve, never rejects (they settle on the `closed` message or the
- * exit); the rejection belt only preserves that contract if the
- * spawner surface itself drifts.
- */
-function awaitExecutorStop(
-  settlement: Promise<unknown>,
-  deadlineMs: number,
-): Promise<'stopped' | 'timed-out'> {
-  return new Promise((resolve, reject) => {
-    const disarm = setTimeout(() => resolve('timed-out'), deadlineMs);
-    settlement.then(
-      () => {
-        clearTimeout(disarm);
-        resolve('stopped');
-      },
-      (error: unknown) => {
-        clearTimeout(disarm);
-        reject(error);
-      },
-    );
-  });
-}
+const EXECUTOR_STOP_TIMEOUT_MS = 5000;
 
 /**
  * Stops the composition's forked write executors inside the stop bound
@@ -568,17 +541,19 @@ export async function stopOwnedWriteExecutors(
   let report: 'stopped' | 'timed-out' = 'stopped';
   await Promise.all(
     [...handles].map(async (handle) => {
-      const verdict = await awaitExecutorStop(
+      // The shared race's generic verdict mapped onto this pass's own
+      // vocabulary: settled IS stopped here.
+      const race = await raceBoundedSettlement(
         handle.stop().catch(() => {}),
         deadlineMs,
       );
-      if (verdict === 'timed-out') {
+      if (race === 'timed-out') {
         report = 'timed-out';
         // The kill is fired, never awaited ahead of the race (the stop
         // promise is unbounded; the exit observation is the bounded
         // one) — the verdict stays `timed-out` either way.
         void handle.kill().catch(() => {});
-        await awaitExecutorStop(
+        await raceBoundedSettlement(
           handle.exited.catch(() => {}),
           deadlineMs,
         );
