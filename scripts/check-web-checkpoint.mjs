@@ -6,7 +6,8 @@
  *   npm run check:web               the checkpoint: runs the FULL product
  *                                   battery (`playwright test` — the root
  *                                   config's chromium / chromium-content /
- *                                   plain-build projects, on the staging's
+ *                                   chromium-project-switch / plain-build
+ *                                   projects, on the staging's
  *                                   disposable fixture copies and isolated
  *                                   port; `reuseExistingServer: false` means
  *                                   an existing server is NEVER adopted) with

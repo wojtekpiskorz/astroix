@@ -229,7 +229,9 @@ test('undo restores the exact bytes through the same grant-bound loop', async ({
 
   // the undo gesture is armed and dispatches the inverse splice — the
   // arming render is load-shaped like every other inner expect (#392's
-  // sweep class), never the 5 s default
+  // sweep class), never left to the default (the library's 5 s before
+  // #459 pinned the config-level default at this same 30 s; the marker
+  // stays explicit)
   await expect(page.getByTestId('css-undo')).toBeEnabled({ timeout: LOAD_BUDGET_MS });
   await page.getByTestId('css-undo').click();
   // #439: the inverse write rides the same debounced loop over the

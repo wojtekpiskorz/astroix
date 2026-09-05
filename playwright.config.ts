@@ -23,9 +23,9 @@ import { stageWebLane, WEB_LANE_PORT } from './apps/web/src/stage-e2e.ts';
 // spec sets here — a spec missing, emptied, or landed unlisted fails
 // EVERY playwright run at config load — the plain-build project alone
 // can never green the lane. plain-build carries no enumeration (its
-// nonzero guard is its spec's own); the project-switch family rides
-// the chromium-content project's match today — its enumeration is
-// correct under every answer to #427's open scoping ruling.
+// nonzero guard is its spec's own); the project-switch family's specs
+// run in their own chromium-project-switch project (#427 part 2) and
+// carry their enumeration below.
 // One idiom for every project since #408 folded #374's rider: the web
 // project's dir scan and the content project's onetime single-file
 // check were two hand-rolled shapes, and they drifted — the second and
@@ -117,13 +117,16 @@ assertNonVacuousDiscovery({
 });
 
 // The project-switch family's battery (the K-family) lives at the
-// vertical's owned path under apps/web, riding the chromium-content
-// project's e2e/** match today — the mechanical half of #427 (PR #435)
-// closed the same vacuity drift #408 closed for the content family, one
-// family further. The `harness/` subdir stays outside the enumeration
-// (it holds `.ts` files, not specs — and the recursive scan now guards
-// subdirectories too), and the enumeration is correct under every answer
-// to #427's open scoping ruling, which stays with the owner.
+// vertical's owned path under apps/web, in its OWN
+// chromium-project-switch project since #427 part 2 (owner ruling: CI
+// signal attribution follows the vertical) — the mechanical half of
+// #427 (PR #435) had closed the same vacuity drift #408 closed for the
+// content family while the family still rode the chromium-content
+// project's e2e/** match. The `harness/` subdir stays outside the
+// enumeration (it holds `.ts` files, not specs — and the recursive scan
+// now guards subdirectories too), and the enumeration's label names the
+// family's own project, so a vacuity failure attributes to the project
+// that would have run nothing.
 // `client-reset.spec.ts` joined at #255 (K2): the client-reset proof
 // across A-B-A switching — the returning-A generation starts empty and
 // stale client authority is refused.
@@ -139,16 +142,19 @@ const EXPECTED_PROJECT_SWITCH_SPECS = [
   'server-authority.spec.ts',
 ] as const;
 assertNonVacuousDiscovery({
-  project: 'project-switch',
+  project: 'chromium-project-switch',
   specDir: PROJECT_SWITCH_SPEC_DIR,
   expectedSpecs: EXPECTED_PROJECT_SWITCH_SPECS,
   rationale: 'the project-switch family must discover its expected tests (#254/#255/#256)',
 });
 
-// The whole-tree ceiling: `chromium-content` matches `e2e/**/*.spec.ts`
-// under apps/web — including zero-directory `**/` matches directly in
-// `e2e/` — so a spec ANYWHERE in that tree runs in the lane. This call
-// derives its expected set from the two family arrays (subdir-prefixed,
+// The whole-tree ceiling: the two apps/web-rooted projects jointly
+// match `e2e/**/*.spec.ts` under apps/web (`chromium-content` over the
+// whole tree minus its testIgnore'd `project-switch/**` subtree,
+// `chromium-project-switch` over that subtree) — including
+// zero-directory `**/` matches directly in `e2e/` — so a spec ANYWHERE
+// in that tree runs in the lane, exactly once. This call derives its
+// expected set from the two family arrays (subdir-prefixed,
 // the recursive scan's relative-path shape — no new hand-maintained
 // list), so a new family directory or a stray top-level spec fails
 // config load until it is enumerated. The per-family calls above stay:
@@ -197,6 +203,18 @@ export default defineConfig({
   retries: 0,
   reporter: process.env.CI ? 'github' : 'list',
   globalTeardown: './apps/web/src/teardown-e2e.ts',
+  // The config-level expect budget (#459, RULE-IN): every expect that
+  // carries no explicit `{ timeout: … }` waits up to 30 s, not the
+  // library's 5 s — the un-optioned-drift class (an expect added
+  // without a load-shaped budget silently riding 5 s) is
+  // unconstructible in both spec trees. The ruling's snippet spelled
+  // it `use: { expect: … }`; the pinned @playwright/test 1.62 types
+  // place the option here instead — `TestConfig.expect`, inherited by
+  // every project (the `use` object takes no `expect` key, TS2769).
+  // Behavior-identical today: every explicit option (the named
+  // budgets, the deliberately short 2 s inner check inside
+  // spec-helpers' toPass retry) overrides a default and stays as it is.
+  expect: { timeout: 30_000 },
   use: {
     baseURL: `http://launcher.localhost:${WEB_LANE_PORT}`,
   },
@@ -224,11 +242,26 @@ export default defineConfig({
     },
     // The content vertical's battery (J1, #251) at the ticket's owned
     // path — its own testDir under apps/web, the same booted webServer
-    // and control plane as the chromium project above.
+    // and control plane as the chromium project above. Since #427 part 2
+    // it testIgnores the project-switch subtree: that family runs in its
+    // own project below, and without the ignore both projects would
+    // discover the same specs and run them twice.
     {
       name: 'chromium-content',
       testDir: 'apps/web',
       testMatch: 'e2e/**/*.spec.ts',
+      testIgnore: 'e2e/project-switch/**',
+      use: { ...devices['Desktop Chrome'] },
+    },
+    // The project-switch family's battery (the K family, #254/#255/#256)
+    // at the vertical's owned path — its OWN project since #427 part 2
+    // (owner ruling: CI signal attribution follows the vertical — a
+    // content-battery red must not carry the K family's name and vice
+    // versa), same booted webServer and control plane, same device.
+    {
+      name: 'chromium-project-switch',
+      testDir: 'apps/web',
+      testMatch: 'e2e/project-switch/**/*.spec.ts',
       use: { ...devices['Desktop Chrome'] },
     },
     {
