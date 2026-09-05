@@ -37,6 +37,8 @@
     "verify:package": "node --experimental-transform-types --import ./apps/desktop/raw-node-register.mjs apps/desktop/scripts/verify-package.mjs",
     "smoke:package": "node apps/desktop/scripts/run-early-package-smoke.mjs",
     "qualify": "node --experimental-transform-types --import ./apps/desktop/raw-node-register.mjs scripts/qualification/cli.ts",
+    "candidate": "node --experimental-transform-types --import ./apps/desktop/raw-node-register.mjs scripts/candidate/cli.ts",
+    "test:candidate": "node --experimental-transform-types --import ./apps/desktop/raw-node-register.mjs --test scripts/candidate/candidate.test.ts",
     "certify:adapter": "vitest run --config packages/runtime/astro-project-adapter/certification/vitest.config.ts"
   },
   "devDependencies": {

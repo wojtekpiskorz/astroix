@@ -94,6 +94,14 @@ const SRC_ROOT = join(ROOT, 'src');
 // exported pure validation layer plus the real checkpoint run itself
 // (`npm run check:web`); the entry records the tier, not a coverage
 // claim.
+// scripts/candidate (#259, L2 — review round 1, advisory addendum; the
+// #378 directory precedent) joins as a CC-only watchlist root: the
+// restricted-candidate workflow drives the real one build, real draft
+// upload/download, and the real qualification matrix (children, sockets,
+// a ~169MB artifact), so honest per-function unit coverage does not
+// exist there — its truth is the node:test self-test battery (`npm run
+// test:candidate`) over the exported pure laws plus the workflow's own
+// fail-closed runs; the entry records the tier, not a coverage claim.
 const RISK_ROOTS = [
   SRC_ROOT,
   join(ROOT, 'packages/core'),
@@ -104,6 +112,7 @@ const RISK_ROOTS = [
   join(ROOT, 'apps/desktop'),
   join(ROOT, 'scripts/qualification'),
   join(ROOT, 'scripts/check-web-checkpoint.mjs'),
+  join(ROOT, 'scripts/candidate'),
 ];
 // Roots are directories (walked recursively) or single files (joined by
 // exact path — the checkpoint script is a one-file .mjs root, #257 K4);

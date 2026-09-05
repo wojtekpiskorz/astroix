@@ -47,3 +47,13 @@ apps/desktop/test-results/*
 apps/desktop/test-results/early-package-smoke/*
 !apps/desktop/test-results/early-package-smoke/evidence.json
 !apps/desktop/test-results/early-package-smoke/run.log
+
+# the restricted-candidate workflow's evidence root (#259, L2): run
+# outputs (manifests, logs, L1 evidence) are build evidence, never
+# source — one dry run's manifest.json is committed by exception after
+# the blanket rules, the early-package-smoke precedent (#248)
+qualification/manifests/*
+!qualification/manifests/.gitkeep
+!qualification/manifests/dry-run-259/
+qualification/manifests/dry-run-259/*
+!qualification/manifests/dry-run-259/manifest.json

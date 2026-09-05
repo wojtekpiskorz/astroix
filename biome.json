@@ -12,6 +12,7 @@
       "!dist",
       "!playwright-report",
       "!test-results",
+      "!qualification/manifests",
       "!packages/app-shell/src/chrome.css"
     ]
   },
