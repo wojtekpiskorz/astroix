@@ -73,7 +73,16 @@ export type { SupervisedWorkerWire } from './worker-wire.ts';
  *   torn down mid-close, and every awaited rung it had not reached yet
  *   would die with it. A crashed plane dies together; a sibling that
  *   survived its supervisor would live on holding Astro's PID-checked
- *   dev lock and poison every later activation of that root.
+ *   dev lock and poison every later activation of that root. The mirror
+ *   path — a managed-astro crash, the worker surviving — reaps the
+ *   worker by the same law (#402): SIGKILL in the same synchronous
+ *   tick, no IPC stop, no TERM rung. The orphaned worker holds no dev
+ *   lock (it leaks a process rather than poisoning re-activation), but
+ *   its awaited TERM→grace→KILL ladder was the same truncation window —
+ *   a supervisor torn down inside the grace window orphaned it — and a
+ *   crashed plane owes either sibling no graceful window. The normal
+ *   stop's ordered graceful close is untouched: only the crash paths
+ *   kill in the tick.
  * - **Normal stop order** (the ticket's contract): the worker's IPC stop
  *   closes its runners, watchers, timers, and composition first; then
  *   the supervisor's own probe sockets settle; then BOTH exact children
@@ -379,17 +388,27 @@ export function createProjectPlaneSupervisor(
     reason: SupervisionCloseReport['reason'],
   ): Promise<SupervisionCloseReport> {
     // The crash law's sibling reap (#365), delivered in the terminal
-    // transition's own synchronous tick — before any await. The worker's
-    // exit event and this kill share one event-loop callback, so nothing
-    // between the observation and the signal can truncate the reap: not
-    // a later step's failure, not a caller's exit, not the supervisor's
-    // own degraded machinery on the crash path. SIGKILL because it is
-    // the one rung the sibling cannot outlive its supervisor through —
-    // a crashed plane owes no graceful window, and Astro's dev lock is
-    // PID-liveness-checked (a dead holder never blocks re-activation;
-    // a live orphan always does).
+    // transition's own synchronous tick — before any await. The crashed
+    // child's exit event and this kill share one event-loop callback, so
+    // nothing between the observation and the signal can truncate the
+    // reap: not a later step's failure, not a caller's exit, not the
+    // supervisor's own degraded machinery on the crash path. SIGKILL
+    // because it is the one rung the sibling cannot outlive its
+    // supervisor through — a crashed plane owes no graceful window, and
+    // Astro's dev lock is PID-liveness-checked (a dead holder never
+    // blocks re-activation; a live orphan always does). #402 mirrors the
+    // law onto the surviving worker: on a managed-astro crash its only
+    // reap was the AWAITED stop-bound → TERM-grace → KILL ladder, and a
+    // supervisor torn down inside that window orphaned it. The worker
+    // holds no dev lock — the leak is a process, not re-activation
+    // poisoning — but the decisive rung gets the same durable tick, and
+    // the worker's graceful window (IPC stop + close report) is owed by
+    // a normal close alone.
+    const crashReason = reason === 'worker-crash' || reason === 'managed-astro-crash';
     const devServerCrashKill = reason === 'worker-crash';
+    const workerCrashKill = reason === 'managed-astro-crash';
     if (devServerCrashKill) devServerChild.kill('SIGKILL');
+    if (workerCrashKill) workerChild.kill('SIGKILL');
     const gracefulExited = await gracefulWorkerClose(reason);
     const probesSettled = await settleProbes();
     const [workerTermination, devServerTermination] = await Promise.all([
@@ -398,6 +417,7 @@ export function createProjectPlaneSupervisor(
         gone: workerGone,
         termGraceMs: bounds.termGraceMs,
         killReapMs: bounds.killReapMs,
+        crashKilled: workerCrashKill,
       }),
       terminateAndReap({
         child: devServerChild,
@@ -413,7 +433,7 @@ export function createProjectPlaneSupervisor(
     if (devServerTermination.escalated) killEscalations.push('managed-astro');
     const report = classifySupervisionClose({
       reason,
-      workerReportExpected: reason !== 'worker-crash' && workerAnswered,
+      workerReportExpected: !crashReason && workerAnswered,
       workerReportReceived: workerReport !== null,
       workerCleanupComplete: workerReport === null || workerReport.outcome === 'complete',
       workerReaped: gracefulExited || workerTermination.reaped,
@@ -426,9 +446,17 @@ export function createProjectPlaneSupervisor(
     return report;
   }
 
-  /** The worker's graceful close: IPC stop, then its close report AND exit, both inside the stop bound. */
+  /**
+   * The worker's graceful close: IPC stop, then its close report AND
+   * exit, both inside the stop bound. A crashed worker is already gone
+   * — nothing to ask, and its exit was the close's own cause. A worker
+   * crash-killed in the terminal tick (#402's mirror of #365) gets no
+   * window to close in — the ladder alone observes the exit, so this
+   * step claims no graceful exit it did not see.
+   */
   async function gracefulWorkerClose(reason: SupervisionCloseReport['reason']): Promise<boolean> {
     if (reason === 'worker-crash') return true; // already gone — nothing to ask
+    if (reason === 'managed-astro-crash') return false; // crash-killed at the tick — only the ladder observes the exit
     sendWorkerStop();
     return raceBound(Promise.all([workerReported, workerGone]), bounds.stopTimeoutMs);
   }
@@ -528,12 +556,12 @@ async function terminateAndReap(input: {
   readonly termGraceMs: number;
   readonly killReapMs: number;
   /**
-   * The crash law's sibling reap (#365): the SIGKILL was already
-   * delivered synchronously at the crash observation — this ladder runs
-   * no TERM rung and reports the escalation it inherited (the report
-   * must never pretend a graceful TERM). Only the exit observation
-   * remains, bounded as always; the re-sent SIGKILL past the grace is
-   * idempotent and unignorable.
+   * The crash law's sibling reap (#365, mirrored onto the worker by
+   * #402): the SIGKILL was already delivered synchronously at the crash
+   * observation — this ladder runs no TERM rung and reports the
+   * escalation it inherited (the report must never pretend a graceful
+   * TERM). Only the exit observation remains, bounded as always; the
+   * re-sent SIGKILL past the grace is idempotent and unignorable.
    */
   readonly crashKilled?: boolean;
 }): Promise<{ readonly reaped: boolean; readonly escalated: boolean }> {
