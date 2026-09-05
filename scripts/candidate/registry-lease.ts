@@ -1,7 +1,15 @@
-import { type ChildProcess, execFile, spawn } from 'node:child_process';
+import { type ChildProcess, spawn } from 'node:child_process';
 import { mkdir, readFile, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
-import { promisify } from 'node:util';
+import {
+  appleEventQuit,
+  awaitChildExit,
+  buildLaunchEnv,
+  delay,
+  escalateSignals,
+  processesReferencing,
+  type TerminationStep,
+} from '../qualification/process-stage.ts';
 
 /**
  * The registry-lease leg of the candidate matrix (#259, L2): the
@@ -14,24 +22,21 @@ import { promisify } from 'node:util';
  * proof that the first holder released (#209's law, observed from
  * outside).
  *
- * Two sequential boots of the extracted app, isolated like L1's process
- * stage (temp HOME + `ASTROIX_DESKTOP_USER_DATA` + the browser-level
- * `--user-data-dir`, minimal inherited env): each must emit
- * `control-plane-booted`, the lease file must exist as a 0600 regular
- * file inside a 0700 `private-state` directory while the child lives,
- * the Apple-event quit must settle both boots, and nothing may
- * survive. The pure shaping (`leaseFindings`) is exported for the
- * focused self-tests; the launcher is macOS-only by construction
- * (osascript, .app bundles).
+ * Two sequential boots of the extracted app, isolated and quit through
+ * L1's process law — IMPORTED, never forked (review round 1, advisory
+ * addendum: `scripts/qualification/process-stage.ts` is the one law for
+ * the launch env, the Apple-event quit, the bounded exit wait, the
+ * signal escalation, and the `pgrep`/`ps` process tree). Each boot must
+ * emit `control-plane-booted`, the lease file must exist as a 0600
+ * regular file inside a 0700 `private-state` directory while the child
+ * lives, the quit must settle both boots, and nothing may survive. The
+ * pure shaping (`leaseFindings`) is exported for the focused
+ * self-tests; the launcher is macOS-only by construction (osascript,
+ * .app bundles).
  */
-
-const execFileAsync = promisify(execFile);
 
 /** The product's public log prefix (the H1 wire the smoke kit reads). */
 export const PRODUCT_LOG_PREFIX = 'astroix-desktop: ';
-
-/** The launch-env allowlist — the #231 `minimalChildEnv` species (L1's law, shared). */
-const LAUNCH_ENV_KEYS = ['PATH', 'TMPDIR', 'LANG'] as const;
 
 export interface LeaseLegInput {
   /** The extracted application bundle (`…/Astroix.app`). */
@@ -77,32 +82,7 @@ export function leaseFindings(input: {
 }): { ok: boolean; findings: string[]; storageUnsupported: boolean } {
   const findings: string[] = [];
   for (const boot of [input.firstBoot, input.secondBoot]) {
-    if (!boot.booted) {
-      findings.push(
-        `boot ${String(boot.boot)} never reported control-plane-booted${boot.exitedEarly !== null ? ` (early exit code ${String(boot.exitedEarly.code)} signal ${String(boot.exitedEarly.signal)})` : ''}`,
-      );
-      continue;
-    }
-    if (!boot.lease.present) {
-      findings.push(`boot ${String(boot.boot)} booted without the registry-writer lease file`);
-      continue;
-    }
-    if (!boot.lease.regularFile) {
-      findings.push(`boot ${String(boot.boot)}'s lease file is not a regular file`);
-    }
-    if (boot.lease.fileMode !== '600') {
-      findings.push(
-        `boot ${String(boot.boot)}'s lease file mode is ${String(boot.lease.fileMode)}, not 600`,
-      );
-    }
-    if (boot.lease.directoryMode !== '700') {
-      findings.push(
-        `boot ${String(boot.boot)}'s private-state directory mode is ${String(boot.lease.directoryMode)}, not 700`,
-      );
-    }
-    if (boot.quitOutcome !== 'exited-on-own-quit-surface') {
-      findings.push(`boot ${String(boot.boot)}'s quit did not settle (${boot.quitOutcome})`);
-    }
+    findings.push(...bootFindings(boot));
   }
   // the second boot is the release proof — it only counts when it booted
   if (input.secondBoot.booted && !input.firstBoot.booted) {
@@ -128,6 +108,38 @@ export function leaseFindings(input: {
     );
   }
   return { ok: findings.length === 0, findings, storageUnsupported };
+}
+
+/** One boot's own conjunction: booted, lease present as a 0600 regular file in a 0700 directory, quit settled. */
+function bootFindings(boot: BootFacts): string[] {
+  const findings: string[] = [];
+  if (!boot.booted) {
+    findings.push(
+      `boot ${String(boot.boot)} never reported control-plane-booted${boot.exitedEarly !== null ? ` (early exit code ${String(boot.exitedEarly.code)} signal ${String(boot.exitedEarly.signal)})` : ''}`,
+    );
+    return findings;
+  }
+  if (!boot.lease.present) {
+    findings.push(`boot ${String(boot.boot)} booted without the registry-writer lease file`);
+    return findings;
+  }
+  if (!boot.lease.regularFile) {
+    findings.push(`boot ${String(boot.boot)}'s lease file is not a regular file`);
+  }
+  if (boot.lease.fileMode !== '600') {
+    findings.push(
+      `boot ${String(boot.boot)}'s lease file mode is ${String(boot.lease.fileMode)}, not 600`,
+    );
+  }
+  if (boot.lease.directoryMode !== '700') {
+    findings.push(
+      `boot ${String(boot.boot)}'s private-state directory mode is ${String(boot.lease.directoryMode)}, not 700`,
+    );
+  }
+  if (boot.quitOutcome !== 'exited-on-own-quit-surface') {
+    findings.push(`boot ${String(boot.boot)}'s quit did not settle (${boot.quitOutcome})`);
+  }
+  return findings;
 }
 
 /** Runs the two-boot lease leg. macOS-only; every phase bounded. */
@@ -169,15 +181,7 @@ async function bootAndQuit(
   userData: string,
   log: (line: string) => void,
 ): Promise<BootFacts> {
-  const env: NodeJS.ProcessEnv = {
-    HOME: home,
-    ASTROIX_DESKTOP_USER_DATA: userData,
-    ELECTRON_ENABLE_LOGGING: '0',
-  };
-  for (const key of LAUNCH_ENV_KEYS) {
-    const value = process.env[key];
-    if (typeof value === 'string' && value.length > 0) env[key] = value;
-  }
+  const env = buildLaunchEnv(home, userData);
   const state: {
     child: ChildProcess | null;
     spawnError: string | null;
@@ -236,38 +240,28 @@ async function bootAndQuit(
     `registry-lease: boot ${String(boot)} — booted=${String(state.booted)} lease.present=${String(lease.present)} lease.mode=${String(lease.fileMode)} dir.mode=${String(lease.directoryMode)}`,
   );
 
-  // ——— quit through the app's own surface ———
+  // ——— quit through the app's own surface (L1's termination law, shared) ———
   let quitOutcome = 'not-attempted';
   if (state.spawnError !== null) {
     quitOutcome = 'spawn-error';
   } else if (exitedEarly() !== null) {
     quitOutcome = 'early-exit';
   } else {
-    try {
-      await execFileAsync('osascript', ['-e', `tell application id "${input.bundleId}" to quit`], {
-        timeout: input.quitTimeoutMs,
-      });
-    } catch {
-      // fall through to the signal escalation — the outcome records it
-    }
-    const exit = await awaitExit(state.child, input.quitTimeoutMs);
-    if (exit !== null) {
+    const quit = await appleEventQuit(input.bundleId, input.quitTimeoutMs);
+    const exit = await awaitChildExit(state.child, input.quitTimeoutMs);
+    if (exit !== null && quit.ok) {
       quitOutcome = 'exited-on-own-quit-surface';
     } else {
-      state.child?.kill('SIGTERM');
-      const afterTerm = await awaitExit(state.child, 10_000);
-      if (afterTerm === null) {
-        for (const row of await processesReferencing(input.stagingRoot)) {
-          try {
-            process.kill(Number(row.pid), 'SIGKILL');
-          } catch {
-            // already gone
-          }
-        }
-        state.child?.kill('SIGKILL');
-        await awaitExit(state.child, 5_000);
+      // the quit surface failed or was ignored: the shared escalation
+      // reaps the child and the owned tree, and the outcome records it
+      const steps: TerminationStep[] = [];
+      await escalateSignals(state.child, { stagingRoot: input.stagingRoot }, steps, (boundMs) =>
+        awaitChildExit(state.child, boundMs),
+      );
+      for (const step of steps) {
+        log(`registry-lease: termination step ${step.step} — ${step.detail}`);
       }
-      quitOutcome = 'forced';
+      quitOutcome = quit.ok ? 'termination-forced' : 'quit-surface-unavailable';
     }
   }
   return {
@@ -295,64 +289,6 @@ async function observeLease(userData: string): Promise<BootFacts['lease']> {
   } catch {
     return { present: false, regularFile: false, fileMode: null, directoryMode: null };
   }
-}
-
-/** The live process tree referencing `root` (L1's `pgrep` + `ps` law). */
-async function processesReferencing(root: string): Promise<{ pid: string; command: string }[]> {
-  const pattern = root.replace(/[.+?^${}()|[\]\\*]/g, '\\$&');
-  let pids: string;
-  try {
-    const result = await execFileAsync('pgrep', ['-f', pattern], { timeout: 30_000 });
-    pids = result.stdout;
-  } catch {
-    return [];
-  }
-  const list = pids
-    .split('\n')
-    .map((pid) => pid.trim())
-    .filter((pid) => pid.length > 0)
-    .filter((pid) => pid !== String(process.pid));
-  if (list.length === 0) return [];
-  try {
-    const { stdout } = await execFileAsync('ps', ['-o', 'pid=,command=', '-p', list.join(',')], {
-      timeout: 30_000,
-    });
-    return stdout
-      .split('\n')
-      .map((line) => line.trim())
-      .filter((line) => line.length > 0)
-      .map((line) => ({
-        pid: line.split(/\s+/)[0] ?? '?',
-        command: line.split(/\s+/).slice(1).join(' '),
-      }));
-  } catch {
-    return [];
-  }
-}
-
-function awaitExit(
-  child: ChildProcess | null,
-  boundMs: number,
-): Promise<{ code: number | null; signal: string | null } | null> {
-  return new Promise((resolve) => {
-    if (child === null || child.exitCode !== null || child.signalCode !== null) {
-      resolve(child === null ? null : { code: child.exitCode, signal: child.signalCode });
-      return;
-    }
-    const timer = setTimeout(() => {
-      child.removeListener('exit', onExit);
-      resolve(null);
-    }, boundMs);
-    const onExit = (code: number | null, signal: string | null): void => {
-      clearTimeout(timer);
-      resolve({ code, signal });
-    };
-    child.once('exit', onExit);
-  });
-}
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /** Reads the extracted app's build manifest (the manifest inventory's node hash is the fixture's provenance anchor). */

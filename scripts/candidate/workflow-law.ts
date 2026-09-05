@@ -37,10 +37,11 @@ export const WORKFLOW_NAME = 'Pre-alpha candidate';
 /**
  * Validates one parsed workflow document (or a text that `parse`
  * consumed) against the law. Pure: the self-tests feed synthetic
- * documents; the live gate reads the real file.
+ * documents; the live gate reads the real file. The document-level law
+ * (name, trigger shape) stays here; each job's law lives in
+ * `jobProblems`.
  */
 export function validateWorkflow(doc: unknown): WorkflowVerdict {
-  const problems: string[] = [];
   const workflow = doc as {
     name?: unknown;
     on?: unknown;
@@ -50,27 +51,11 @@ export function validateWorkflow(doc: unknown): WorkflowVerdict {
   if (workflow === null || typeof workflow !== 'object') {
     return { ok: false, problems: ['the workflow document is not an object'] };
   }
+  const problems: string[] = [];
   if (workflow.name !== WORKFLOW_NAME) {
     problems.push(`the workflow name is "${String(workflow.name)}", not "${WORKFLOW_NAME}"`);
   }
-  // YAML 1.1 parses bare `on:` as boolean true — accept exactly that spelling
-  const triggers = (workflow.on ?? workflow.true) as unknown;
-  if (triggers === undefined || triggers === null || typeof triggers !== 'object') {
-    problems.push('the workflow declares no trigger object');
-  } else if (Array.isArray(triggers)) {
-    problems.push('the workflow trigger list must be exactly [workflow_dispatch]');
-  } else {
-    const keys = Object.keys(triggers);
-    if (keys.length !== 1 || keys[0] !== 'workflow_dispatch') {
-      problems.push(
-        `the workflow must trigger on workflow_dispatch ONLY (candidate checkpoints, never per-PR) — found [${keys.join(', ')}]`,
-      );
-    }
-    const dispatch = (triggers as Record<string, unknown>).workflow_dispatch;
-    if (dispatch === null || typeof dispatch !== 'object' || Array.isArray(dispatch)) {
-      problems.push('workflow_dispatch must carry its inputs as a mapping');
-    }
-  }
+  problems.push(...triggerProblems(workflow));
   const jobs = workflow.jobs as
     | Record<
         string,
@@ -82,40 +67,75 @@ export function validateWorkflow(doc: unknown): WorkflowVerdict {
     return { ok: problems.length === 0, problems };
   }
   for (const [jobId, job] of Object.entries(jobs)) {
-    const runsOn = job?.['runs-on'];
-    if (typeof runsOn !== 'string' || !runsOn.includes('macos')) {
-      problems.push(
-        `job ${jobId} must run on a macOS arm64 runner (the product shape, ADR-0008) — found ${String(runsOn)}`,
-      );
-    }
-    if (job?.['timeout-minutes'] === undefined) {
-      problems.push(
-        `job ${jobId} carries no timeout-minutes (a hung candidate must fail the job, never hang it)`,
-      );
-    }
-    const steps = Array.isArray(job?.steps) ? (job?.steps as Array<Record<string, unknown>>) : [];
-    const stepText = JSON.stringify(steps);
-    if (/npm\s+publish|gh release edit|changeset publish|npm run release/.test(stepText)) {
-      problems.push(
-        `job ${jobId} publishes or un-drafts — npm and public releases are forbidden (ADR-0008 restricted pre-alpha)`,
-      );
-    }
-    if (stepText.includes('--draft=false') || stepText.includes('draft: false')) {
-      problems.push(`job ${jobId} un-drafts a release — the candidate stays a restricted draft`);
-    }
-    if (stepText.includes('gh release create') && !stepText.includes('--draft')) {
-      problems.push(
-        `job ${jobId} creates a release without --draft — the candidate must land as a restricted draft`,
-      );
-    }
-    const hasEvidenceUpload = stepText.includes('upload-artifact');
-    if (!hasEvidenceUpload) {
-      problems.push(
-        `job ${jobId} uploads no artifacts — evidence survives every path (#129 doctrine)`,
-      );
-    }
+    problems.push(...jobProblems(jobId, job));
   }
   return { ok: problems.length === 0, problems };
+}
+
+/** The trigger law: `workflow_dispatch` alone (candidate checkpoints, never per-PR). */
+function triggerProblems(workflow: { on?: unknown; true?: unknown }): string[] {
+  const problems: string[] = [];
+  // YAML 1.1 parses bare `on:` as boolean true — accept exactly that spelling
+  const triggers = (workflow.on ?? workflow.true) as unknown;
+  if (triggers === undefined || triggers === null || typeof triggers !== 'object') {
+    problems.push('the workflow declares no trigger object');
+    return problems;
+  }
+  if (Array.isArray(triggers)) {
+    problems.push('the workflow trigger list must be exactly [workflow_dispatch]');
+    return problems;
+  }
+  const keys = Object.keys(triggers);
+  if (keys.length !== 1 || keys[0] !== 'workflow_dispatch') {
+    problems.push(
+      `the workflow must trigger on workflow_dispatch ONLY (candidate checkpoints, never per-PR) — found [${keys.join(', ')}]`,
+    );
+  }
+  const dispatch = (triggers as Record<string, unknown>).workflow_dispatch;
+  if (dispatch === null || typeof dispatch !== 'object' || Array.isArray(dispatch)) {
+    problems.push('workflow_dispatch must carry its inputs as a mapping');
+  }
+  return problems;
+}
+
+/** One job's law: a macOS arm64 runner, a timeout, no publish/un-draft step, evidence artifacts. */
+function jobProblems(
+  jobId: string,
+  job: { 'runs-on'?: unknown; steps?: unknown; 'timeout-minutes'?: unknown },
+): string[] {
+  const problems: string[] = [];
+  const runsOn = job?.['runs-on'];
+  if (typeof runsOn !== 'string' || !runsOn.includes('macos')) {
+    problems.push(
+      `job ${jobId} must run on a macOS arm64 runner (the product shape, ADR-0008) — found ${String(runsOn)}`,
+    );
+  }
+  if (job?.['timeout-minutes'] === undefined) {
+    problems.push(
+      `job ${jobId} carries no timeout-minutes (a hung candidate must fail the job, never hang it)`,
+    );
+  }
+  const steps = Array.isArray(job?.steps) ? (job?.steps as Array<Record<string, unknown>>) : [];
+  const stepText = JSON.stringify(steps);
+  if (/npm\s+publish|gh release edit|changeset publish|npm run release/.test(stepText)) {
+    problems.push(
+      `job ${jobId} publishes or un-drafts — npm and public releases are forbidden (ADR-0008 restricted pre-alpha)`,
+    );
+  }
+  if (stepText.includes('--draft=false') || stepText.includes('draft: false')) {
+    problems.push(`job ${jobId} un-drafts a release — the candidate stays a restricted draft`);
+  }
+  if (stepText.includes('gh release create') && !stepText.includes('--draft')) {
+    problems.push(
+      `job ${jobId} creates a release without --draft — the candidate must land as a restricted draft`,
+    );
+  }
+  if (!stepText.includes('upload-artifact')) {
+    problems.push(
+      `job ${jobId} uploads no artifacts — evidence survives every path (#129 doctrine)`,
+    );
+  }
+  return problems;
 }
 
 /** Reads and validates the live workflow file. */

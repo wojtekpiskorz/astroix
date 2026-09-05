@@ -29,16 +29,17 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { verifyBuildAttestation } from './build-attestation.ts';
 import { verifyTransfer } from './checksum.ts';
 import { checkDraftRef, draftAssetRef } from './draft-release.ts';
 import { readSourceFacts } from './git-state.ts';
 import { macOsClaim } from './host-facts.ts';
-import { type CandidateManifest, MATRIX_LEGS, validateManifest } from './manifest.ts';
+import { MATRIX_LEGS, type ManifestDraft, validateManifest } from './manifest.ts';
 import { CHARTER_PINS, reconcilePins } from './pins.ts';
 import { type BootFacts, leaseFindings } from './registry-lease.ts';
 import { validateWorkflow, validateWorkflowFile, WORKFLOW_PATH } from './workflow-law.ts';
@@ -454,8 +455,7 @@ test('macOS disclosure: only an exact 13.5 host earns the host-verified claim', 
 // ——— the evidence-manifest completeness law ———
 
 /** A complete green manifest — the shape every RED mutation starts from (top-level mutable: the mutations replace whole sections). */
-type MutableManifest = { -readonly [K in keyof CandidateManifest]: CandidateManifest[K] };
-function greenManifest(): MutableManifest {
+function greenManifest(): ManifestDraft {
   const sha = 'a'.repeat(64);
   const draft = draftAssetRef({ label: 'selftest', assetName: 'Astroix-darwin-arm64-0.1.0.zip' });
   return {
@@ -536,7 +536,7 @@ test('manifest completeness: the green shape is green', () => {
 });
 
 test('manifest completeness: missing evidence fails by name (each RED mode)', () => {
-  const cases: Array<[string, (manifest: MutableManifest) => void]> = [
+  const cases: Array<[string, (manifest: ManifestDraft) => void]> = [
     [
       'dirty source',
       (manifest) => {
@@ -723,6 +723,59 @@ test('the draft reference: the dry-run shape is deterministic in the label, and 
   assert.equal(checkDraftRef({ repository: '', tag: '', asset: '' }, draft), 'malformed');
 });
 
+test('the draft reference: a wrong asset name refuses as wrong-asset (the upload must land on the SAME asset)', () => {
+  const draft = draftAssetRef({
+    label: 'dry-run-259',
+    assetName: 'Astroix-darwin-arm64-0.1.0.zip',
+  });
+  assert.equal(
+    checkDraftRef(
+      {
+        repository: draft.repository,
+        tag: draft.tag,
+        asset: 'Astroix-darwin-arm64-0.2.0.zip',
+      },
+      draft,
+    ),
+    'wrong-asset',
+  );
+});
+
+// ——— the one-build attestation law (#259 review round 1: builtOnce
+// ——— records only what the recorder observed or verified) ———
+
+test('the build attestation: a named build manifest recording the received checksum is the only green shape', () => {
+  const sha = 'a'.repeat(64);
+  const manifest = { zip: { file: 'Astroix-darwin-arm64-0.1.0.zip', sha256: sha } };
+  assert.equal(verifyBuildAttestation({ buildManifest: manifest, receivedSha256: sha }), null);
+});
+
+test('the build attestation: a named build manifest recording different bytes refuses as wrong-checksum', () => {
+  const sha = 'a'.repeat(64);
+  const manifest = { zip: { file: 'Astroix-darwin-arm64-0.1.0.zip', sha256: sha } };
+  assert.equal(
+    verifyBuildAttestation({ buildManifest: manifest, receivedSha256: 'b'.repeat(64) }),
+    'wrong-checksum',
+  );
+});
+
+test('the build attestation: anything that is not a build manifest refuses as malformed-manifest', () => {
+  const sha = 'a'.repeat(64);
+  const brokenShapes: unknown[] = [
+    null,
+    {},
+    { zip: {} },
+    { zip: { file: '', sha256: sha } },
+    { zip: { file: 'Astroix.zip', sha256: 'not-hex' } },
+  ];
+  for (const broken of brokenShapes) {
+    assert.equal(
+      verifyBuildAttestation({ buildManifest: broken, receivedSha256: sha }),
+      'malformed-manifest',
+    );
+  }
+});
+
 // ——— the workflow law ———
 
 /** The workflow shape the law judges — loose on purpose: the mutations replace whole sections. */
@@ -819,4 +872,226 @@ test('the workflow law: the live file carries the checksum-before/checksum-after
   assert.equal(text.includes('checksum-after'), true);
   assert.equal(/checksum-before/.test(text), true);
   assert.equal(/gh release download/.test(text), true);
+  // every qualify step attests the one build it qualifies (#259 review
+  // round 1: a standalone recorder observed no build of its own)
+  assert.equal(text.includes('--built'), true);
+});
+
+// ——— the CLI's own refusal laws, driven live (#259 review round 1) ———
+// The L1 cli-arguments idiom: spawn the REAL CLI over the raw-Node
+// loader. The label-law leg runs everywhere (the argument parser's
+// refusal precedes the CLI's platform guard); the qualify-gate legs
+// need the gates the platform guard fronts, so they self-skip off the
+// candidate host shape and run for real on the candidate lane's macOS
+// arm64 hosts (ADR-0008).
+
+const CANDIDATE_CLI = join(HERE, 'cli.ts');
+const NODE_FLAGS = [
+  '--experimental-transform-types',
+  '--import',
+  './apps/desktop/raw-node-register.mjs',
+];
+const ON_CANDIDATE_HOST = process.platform === 'darwin' && process.arch === 'arm64';
+const CLI_HOST_SKIP = ON_CANDIDATE_HOST
+  ? false
+  : 'the candidate CLI admits macOS arm64 hosts only (ADR-0008) — its platform guard fires first';
+
+function runCandidateCli(args: readonly string[]): { status: number | null; stderr: string } {
+  const run = spawnSync(process.execPath, [...NODE_FLAGS, CANDIDATE_CLI, ...args], {
+    cwd: ROOT,
+    encoding: 'utf8',
+    timeout: 60_000,
+  });
+  return { status: run.status, stderr: run.stderr };
+}
+
+test('the label law: a label outside the closed charset is refused before anything derives a path from it', () => {
+  for (const label of ['../escape', 'nested/../path', 'Upper', 'with space', '.hidden', 'a:b']) {
+    const run = runCandidateCli([
+      'qualify',
+      '--label',
+      label,
+      '--zip',
+      '/tmp/absent.zip',
+      '--expected-sha256',
+      'a'.repeat(64),
+    ]);
+    assert.equal(run.status, 2, JSON.stringify(label));
+    assert.match(run.stderr, /--label must be lower-case letters, digits, and dashes/);
+  }
+});
+
+/**
+ * A scratch evidence layout: a prior manifest that must survive every
+ * refusal, a received ZIP, and a matching `--built` attestation (the
+ * packaging-manifest shape, recording the same checksum the run is
+ * held to).
+ */
+async function stageScratchEvidence(): Promise<{
+  scratch: string;
+  manifestDir: string;
+  priorManifest: Buffer;
+  zipPath: string;
+  builtPath: string;
+}> {
+  const sha = 'e'.repeat(64);
+  const scratch = await mkdtemp(join(tmpdir(), 'astroix-candidate-evidence-'));
+  const manifestDir = join(scratch, 'evidence');
+  await mkdir(manifestDir, { recursive: true });
+  const priorManifest = Buffer.from('{ "schema": 1, "label": "prior", "verdict": "sealed" }\n');
+  await writeFile(join(manifestDir, 'manifest.json'), priorManifest);
+  const zipPath = join(scratch, 'Astroix-darwin-arm64-0.1.0.zip');
+  await writeFile(zipPath, 'received bytes');
+  const builtPath = join(scratch, 'build-manifest.json');
+  await writeFile(
+    builtPath,
+    JSON.stringify({ zip: { file: 'Astroix-darwin-arm64-0.1.0.zip', sha256: sha } }),
+  );
+  return { scratch, manifestDir, priorManifest, zipPath, builtPath };
+}
+
+test('the evidence law: a REFUSED qualify leaves the prior manifest bytes intact (byte-equal before and after)', {
+  skip: CLI_HOST_SKIP,
+  timeout: 60_000,
+}, async () => {
+  const stage = await stageScratchEvidence();
+  try {
+    const base = [
+      'qualify',
+      '--zip',
+      stage.zipPath,
+      '--expected-sha256',
+      'e'.repeat(64),
+      '--label',
+      'selftest-preserve',
+      '--manifest-dir',
+      stage.manifestDir,
+      '--built',
+      stage.builtPath,
+    ];
+    // refusal 1 — a bad flag combination (downloaded mode without the transfer flags)
+    const badFlags = runCandidateCli([...base, '--mode', 'downloaded']);
+    assert.equal(badFlags.status, 1);
+    assert.match(badFlags.stderr, /downloaded mode requires both --uploaded and --downloaded/);
+    // refusal 2 — a refused draft reference (the wrong-asset direction)
+    const badRef = runCandidateCli([
+      ...base,
+      '--mode',
+      'downloaded',
+      '--uploaded',
+      '--downloaded',
+      '--draft-ref',
+      'wojtekpiskorz/astroix:pre-alpha-candidate-selftest-preserve:wrong-asset.zip',
+    ]);
+    assert.equal(badRef.status, 1);
+    assert.match(badRef.stderr, /wrong-asset/);
+    // neither refusal touched the prior evidence — byte for byte
+    assert.equal(
+      (await readFile(join(stage.manifestDir, 'manifest.json'))).equals(stage.priorManifest),
+      true,
+    );
+  } finally {
+    await rm(stage.scratch, { recursive: true, force: true });
+  }
+});
+
+test('the evidence law: a same-label re-run over an existing manifest is refused with a named code, never a rewrite', {
+  skip: CLI_HOST_SKIP,
+  timeout: 60_000,
+}, async () => {
+  const stage = await stageScratchEvidence();
+  try {
+    const run = runCandidateCli([
+      'qualify',
+      '--zip',
+      stage.zipPath,
+      '--expected-sha256',
+      'e'.repeat(64),
+      '--label',
+      'selftest-immutable',
+      '--manifest-dir',
+      stage.manifestDir,
+      '--built',
+      stage.builtPath,
+      '--mode',
+      'dry-run',
+    ]);
+    assert.equal(run.status, 1);
+    assert.match(run.stderr, /evidence-exists/);
+    assert.equal(
+      (await readFile(join(stage.manifestDir, 'manifest.json'))).equals(stage.priorManifest),
+      true,
+    );
+  } finally {
+    await rm(stage.scratch, { recursive: true, force: true });
+  }
+});
+
+test('the one-build honesty law: a bare downloaded-qualify without observation or attestation is refused — it can never record builtOnce: true', {
+  skip: CLI_HOST_SKIP,
+  timeout: 60_000,
+}, async () => {
+  const stage = await stageScratchEvidence();
+  try {
+    const freshDir = join(stage.scratch, 'fresh-evidence');
+    const run = runCandidateCli([
+      'qualify',
+      '--zip',
+      stage.zipPath,
+      '--expected-sha256',
+      'e'.repeat(64),
+      '--label',
+      'selftest-bare',
+      '--manifest-dir',
+      freshDir,
+      '--mode',
+      'downloaded',
+      '--uploaded',
+      '--downloaded',
+    ]);
+    assert.equal(run.status, 2);
+    assert.match(run.stderr, /qualify needs --built/);
+    // nothing was written — the misuse fires before any gate or matrix runs
+    assert.equal(existsSync(freshDir), false);
+  } finally {
+    await rm(stage.scratch, { recursive: true, force: true });
+  }
+});
+
+test('the one-build honesty law: an attestation naming a build whose checksum is not the received bytes refuses as wrong-checksum', {
+  skip: CLI_HOST_SKIP,
+  timeout: 60_000,
+}, async () => {
+  const stage = await stageScratchEvidence();
+  try {
+    const wrongBuilt = join(stage.scratch, 'wrong-build-manifest.json');
+    await writeFile(
+      wrongBuilt,
+      JSON.stringify({
+        zip: { file: 'Astroix-darwin-arm64-0.1.0.zip', sha256: 'f'.repeat(64) },
+      }),
+    );
+    const freshDir = join(stage.scratch, 'fresh-evidence');
+    const run = runCandidateCli([
+      'qualify',
+      '--zip',
+      stage.zipPath,
+      '--expected-sha256',
+      'e'.repeat(64),
+      '--label',
+      'selftest-attest',
+      '--manifest-dir',
+      freshDir,
+      '--built',
+      wrongBuilt,
+      '--mode',
+      'dry-run',
+    ]);
+    assert.equal(run.status, 1);
+    assert.match(run.stderr, /wrong-checksum/);
+    // the destination is never touched by a refusal
+    assert.equal(existsSync(freshDir), false);
+  } finally {
+    await rm(stage.scratch, { recursive: true, force: true });
+  }
 });

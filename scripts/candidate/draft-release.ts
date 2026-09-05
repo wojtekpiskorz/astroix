@@ -40,7 +40,12 @@ export function draftAssetRef(input: {
 }
 
 /** Why a supplied draft reference is refused. */
-export type DraftRefProblem = 'wrong-repository' | 'wrong-tag' | 'wrong-visibility' | 'malformed';
+export type DraftRefProblem =
+  | 'wrong-repository'
+  | 'wrong-tag'
+  | 'wrong-asset'
+  | 'wrong-visibility'
+  | 'malformed';
 
 /**
  * Checks a workflow-supplied `--draft-ref repository:tag:asset` against
@@ -65,6 +70,7 @@ export function checkDraftRef(
   }
   if (supplied.repository !== expected.repository) return 'wrong-repository';
   if (supplied.tag !== expected.tag) return 'wrong-tag';
+  if (supplied.asset !== expected.asset) return 'wrong-asset';
   if (supplied.visibility !== undefined && supplied.visibility !== 'restricted-draft') {
     return 'wrong-visibility';
   }

@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { mkdir, readdir, rm } from 'node:fs/promises';
+import { readdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 
 /**
@@ -101,7 +101,6 @@ export async function runNodeSassLeg(input: {
       () => undefined,
     );
   }
-  await mkdir(input.fixtureDir, { recursive: true }).catch(() => undefined); // no-op guard; the dir exists
   return {
     ok: findings.length === 0,
     findings,

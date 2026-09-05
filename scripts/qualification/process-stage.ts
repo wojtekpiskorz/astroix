@@ -139,7 +139,7 @@ export interface ProcessStageInput {
 const TAIL_LINES = 50;
 
 /** One observed exit — code and signal, each unknown until settled. */
-type ExitFacts = { readonly code: number | null; readonly signal: string | null };
+export type ExitFacts = { readonly code: number | null; readonly signal: string | null };
 
 /**
  * The mutable launch state every phase reads: the async `error` event
@@ -172,21 +172,7 @@ export async function launchTerminateAndAudit(
       ? { code: state.child.exitCode, signal: state.child.signalCode }
       : null;
   const awaitExit = (boundMs: number): Promise<ExitFacts | null> =>
-    new Promise((resolve) => {
-      if (settled() !== null) {
-        resolve(settled());
-        return;
-      }
-      const timer = setTimeout(() => {
-        state.child?.removeListener('exit', onExit);
-        resolve(null);
-      }, boundMs);
-      const onExit = (code: number | null, signal: string | null) => {
-        clearTimeout(timer);
-        resolve({ code, signal });
-      };
-      state.child?.once('exit', onExit);
-    });
+    awaitChildExit(state.child, boundMs);
 
   // ——— launch + settle ———
   const earlyExit = await observeSettle(state, input.settleMs, settled);
@@ -245,9 +231,10 @@ export async function launchTerminateAndAudit(
 /**
  * The launch environment: the isolation vars plus the #231 allowlist —
  * a MINIMAL allowlist inherited from the harness host and nothing else
- * (see the module law above).
+ * (see the module law above). Exported for the candidate workflow's
+ * lease leg (#259): one launch-env law, never a forked copy.
  */
-function buildLaunchEnv(home: string, userData: string): NodeJS.ProcessEnv {
+export function buildLaunchEnv(home: string, userData: string): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {
     HOME: home,
     [USER_DATA_ENV_VAR]: userData,
@@ -429,10 +416,10 @@ async function auditResiduals(
   return { pollMs: residualPollMs, polls, residuals, harnessKilled, postKillResiduals };
 }
 
-/** The graceful-then-forced signal escalation (SIGTERM, bounded; then SIGKILL the owned tree). */
-async function escalateSignals(
+/** The graceful-then-forced signal escalation (SIGTERM, bounded; then SIGKILL the owned tree). Exported for the candidate workflow's lease leg (#259) — one escalation law. */
+export async function escalateSignals(
   child: ChildProcess | null,
-  input: ProcessStageInput,
+  input: EscalationInput,
   steps: TerminationStep[],
   awaitExit: (boundMs: number) => Promise<ExitFacts | null>,
 ): Promise<{ usedKill: boolean }> {
@@ -459,8 +446,8 @@ async function escalateSignals(
   return { usedKill: false };
 }
 
-/** The Apple-event quit — the event Cmd+Q sends, addressed by bundle id (H6's `quitNormally`, translated). */
-async function appleEventQuit(
+/** The Apple-event quit — the event Cmd+Q sends, addressed by bundle id (H6's `quitNormally`, translated). Exported for the candidate workflow's lease leg (#259) — one quit law. */
+export async function appleEventQuit(
   bundleId: string,
   timeoutMs: number,
 ): Promise<{ ok: boolean; error?: string }> {
@@ -541,6 +528,43 @@ function escapeEre(text: string): string {
   return text.replace(/[.+?^${}()|[\]\\*]/g, '\\$&');
 }
 
-function delay(ms: number): Promise<void> {
+/** One termination step's escalation bounds — the structural subset of `ProcessStageInput` the escalation reads. */
+export interface EscalationInput {
+  /** The owned-tree root the SIGKILL sweep covers (`pgrep -f` over it). */
+  readonly stagingRoot: string;
+  /** Bound for the SIGTERM escalation (default 10 s). */
+  readonly termBoundMs?: number;
+  /** Bound after SIGKILL before the exit is considered unresolved (default 5 s). */
+  readonly killBoundMs?: number;
+}
+
+/**
+ * Awaits one child's exit, bounded — `null` when the bound expired
+ * unresolved. Exported for the candidate workflow's lease leg (#259):
+ * the one bounded-exit law, never a forked copy.
+ */
+export function awaitChildExit(
+  child: ChildProcess | null,
+  boundMs: number,
+): Promise<ExitFacts | null> {
+  return new Promise((resolve) => {
+    if (child === null || child.exitCode !== null || child.signalCode !== null) {
+      resolve(child === null ? null : { code: child.exitCode, signal: child.signalCode });
+      return;
+    }
+    const timer = setTimeout(() => {
+      child.removeListener('exit', onExit);
+      resolve(null);
+    }, boundMs);
+    const onExit = (code: number | null, signal: string | null): void => {
+      clearTimeout(timer);
+      resolve({ code, signal });
+    };
+    child.once('exit', onExit);
+  });
+}
+
+/** One bounded delay — the shared timer primitive (exported so the candidate workflow's lease leg runs the same law, #259). */
+export function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }

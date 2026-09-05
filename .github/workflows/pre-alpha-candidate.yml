@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
     inputs:
       label:
-        description: 'The candidate label (the evidence manifest directory and the draft tag derive from it)'
+        description: 'The candidate label (the evidence manifest directory and the draft tag derive from it). A failed UPLOAD-path run needs a NEW label — gh release create fails on the existing tag, fail-closed by construction.'
         required: true
         type: string
       mode:
@@ -86,6 +86,7 @@ jobs:
           npm run candidate -- qualify --zip "${{ steps.built.outputs.zip }}"
           --expected-sha256 "${{ steps.built.outputs.sha }}"
           --label "${{ inputs.label }}" --mode dry-run
+          --built "apps/desktop/out/candidates/${{ inputs.label }}/manifest.json"
 
       # ——— the upload path: the workflow's own draft-release steps ———
       # checksum-before was echoed at the locate step; the upload lands
@@ -124,6 +125,7 @@ jobs:
           --expected-sha256 "${{ steps.built.outputs.sha }}"
           --label "${{ inputs.label }}" --mode downloaded
           --draft-ref "wojtekpiskorz/astroix:${{ steps.built.outputs.tag }}:${{ steps.built.outputs.asset }}"
+          --built "apps/desktop/out/candidates/${{ inputs.label }}/manifest.json"
           --uploaded --downloaded
 
       # the evidence bundle survives every path — green included

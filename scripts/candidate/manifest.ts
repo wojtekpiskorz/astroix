@@ -107,6 +107,15 @@ export interface CandidateManifest {
   readonly verdict: { readonly ok: boolean; readonly failures: readonly string[] } | null;
 }
 
+/**
+ * The builder's mutable draft — the same sections, top-level mutable so
+ * the recorder updates its sections by replacement, never through
+ * `as`-casts on a readonly view. The readonly `CandidateManifest` is
+ * the presented shape at the serialization boundary (`serializeManifest`
+ * accepts the draft structurally; the file it writes is the record).
+ */
+export type ManifestDraft = { -readonly [K in keyof CandidateManifest]: CandidateManifest[K] };
+
 /** The fixed serialization: two-space indent, one trailing newline — byte-stable. */
 export function serializeManifest(manifest: CandidateManifest): string {
   return `${JSON.stringify(manifest, null, 2)}\n`;
@@ -127,55 +136,87 @@ export interface ManifestVerdict {
  * referencing the restricted draft asset" — and the failure-mode test:
  * qualification fails on missing evidence). Pure over the parsed
  * record; the CLI re-reads the written file from disk before sealing.
+ * One section checker per manifest section (the law's own order), so
+ * each stays a readable conjunction.
  */
 export function validateManifest(
   manifest: CandidateManifest,
   charterMinimumMacOS: string,
 ): ManifestVerdict {
+  const problems = [
+    ...scopeProblems(manifest),
+    ...sourceProblems(manifest),
+    ...pinsProblems(manifest),
+    ...buildProblems(manifest),
+    ...transferProblems(manifest),
+    ...hostClaimProblems(manifest, charterMinimumMacOS),
+    ...matrixProblems(manifest),
+    ...fixturesProblems(manifest),
+    ...verdictProblems(manifest),
+  ];
+  return { ok: problems.length === 0, problems };
+}
+
+/** The manifest's own identity: schema, label, and mode. */
+function scopeProblems(manifest: CandidateManifest): string[] {
   const problems: string[] = [];
-  const push = (problem: string): void => {
-    problems.push(problem);
-  };
-
-  if (manifest.schema !== MANIFEST_SCHEMA) push('the manifest is not schema 1');
-  if (manifest.label === '') push('the manifest carries no candidate label');
+  if (manifest.schema !== MANIFEST_SCHEMA) problems.push('the manifest is not schema 1');
+  if (manifest.label === '') problems.push('the manifest carries no candidate label');
   if (manifest.mode !== 'dry-run' && manifest.mode !== 'downloaded') {
-    push(`the manifest mode "${String(manifest.mode)}" is neither dry-run nor downloaded`);
+    problems.push(`the manifest mode "${String(manifest.mode)}" is neither dry-run nor downloaded`);
   }
+  return problems;
+}
 
-  // ——— source: identified, clean ———
+/** The source: identified by a 40-hex commit, clean at build time. */
+function sourceProblems(manifest: CandidateManifest): string[] {
+  const problems: string[] = [];
   if (!COMMIT_PATTERN.test(manifest.source.commit)) {
-    push(`the source commit "${manifest.source.commit}" is not a 40-hex git commit`);
+    problems.push(`the source commit "${manifest.source.commit}" is not a 40-hex git commit`);
   }
   if (manifest.source.clean !== true) {
-    push(`the source tree was dirty at build time: ${manifest.source.porcelain.join('; ')}`);
+    problems.push(
+      `the source tree was dirty at build time: ${manifest.source.porcelain.join('; ')}`,
+    );
   }
+  return problems;
+}
 
-  // ——— pins: reconciled ———
+/** The pins: reconciled against the charter, no open findings. */
+function pinsProblems(manifest: CandidateManifest): string[] {
   if (manifest.pins.reconciled !== true) {
-    push(`the pin reconciliation failed: ${JSON.stringify(manifest.pins.findings)}`);
+    return [`the pin reconciliation failed: ${JSON.stringify(manifest.pins.findings)}`];
   }
+  return [];
+}
 
-  // ——— build: one ZIP, identified ———
+/** The build: one ZIP, identified by checksum and byte count, recorded as the one build. */
+function buildProblems(manifest: CandidateManifest): string[] {
+  const problems: string[] = [];
   if (!SHA256_PATTERN.test(manifest.build.zip.sha256)) {
-    push('the build zip checksum is not 64 lower-case hex digits');
+    problems.push('the build zip checksum is not 64 lower-case hex digits');
   }
-  if (!(manifest.build.zip.bytes > 0)) push('the build zip byte count is missing');
-  if (manifest.build.builtOnce !== true) push('the build is not recorded as the one build');
+  if (!(manifest.build.zip.bytes > 0)) problems.push('the build zip byte count is missing');
+  if (manifest.build.builtOnce !== true)
+    problems.push('the build is not recorded as the one build');
+  return problems;
+}
 
-  // ——— transfer: one checksum across assembled/uploaded/downloaded ———
+/** The transfer: one checksum across assembled/uploaded/downloaded, and the restricted draft reference. */
+function transferProblems(manifest: CandidateManifest): string[] {
+  const problems: string[] = [];
   const transfer = manifest.transfer;
   if (
     !SHA256_PATTERN.test(transfer.checksumBefore) ||
     !SHA256_PATTERN.test(transfer.checksumAfter)
   ) {
-    push('the transfer checksums are not 64 lower-case hex digits');
+    problems.push('the transfer checksums are not 64 lower-case hex digits');
   }
   if (transfer.checksumBefore !== manifest.build.zip.sha256) {
-    push('the checksum-before is not the build checksum (the one-build law)');
+    problems.push('the checksum-before is not the build checksum (the one-build law)');
   }
   if (transfer.match !== true || transfer.checksumAfter !== transfer.checksumBefore) {
-    push(
+    problems.push(
       `the received checksum does not match the assembled one (${transfer.checksumAfter} vs ${transfer.checksumBefore})`,
     );
   }
@@ -183,15 +224,21 @@ export function validateManifest(
     manifest.mode === 'dry-run' &&
     (transfer.uploaded !== false || transfer.downloaded !== false)
   ) {
-    push('a dry run must not record an upload or a download');
+    problems.push('a dry run must not record an upload or a download');
   }
   if (
     manifest.mode === 'downloaded' &&
     (transfer.uploaded !== true || transfer.downloaded !== true)
   ) {
-    push('a downloaded-mode run must record both the upload and the download');
+    problems.push('a downloaded-mode run must record both the upload and the download');
   }
-  const draft = transfer.draftAsset;
+  problems.push(...draftAssetProblems(transfer.draftAsset));
+  return problems;
+}
+
+/** The draft asset reference: complete, and restricted-draft only. */
+function draftAssetProblems(draft: CandidateManifest['transfer']['draftAsset']): string[] {
+  const problems: string[] = [];
   if (
     draft.repository === '' ||
     draft.tag === '' ||
@@ -199,26 +246,32 @@ export function validateManifest(
     !draft.url.includes(draft.repository) ||
     !draft.url.includes(draft.tag)
   ) {
-    push('the draft asset reference is incomplete (repository, tag, asset, or url)');
+    problems.push('the draft asset reference is incomplete (repository, tag, asset, or url)');
   }
   if (draft.visibility !== 'restricted-draft') {
-    push(`the draft asset visibility "${String(draft.visibility)}" is not restricted-draft`);
+    problems.push(
+      `the draft asset visibility "${String(draft.visibility)}" is not restricted-draft`,
+    );
   }
+  return problems;
+}
 
-  // ——— host + the macOS-13.5 honesty law ———
+/** The host + the macOS-13.5 honesty law: never a host claim without an exact host. */
+function hostClaimProblems(manifest: CandidateManifest, charterMinimumMacOS: string): string[] {
+  const problems: string[] = [];
   const claim = manifest.minimumMacOS;
   if (claim.metadata !== charterMinimumMacOS) {
-    push(
+    problems.push(
       `the artifact's minimum-OS metadata "${claim.metadata}" is not the charter's ${charterMinimumMacOS}`,
     );
   }
   if (claim.controlledMinimumHost && claim.testedOn.swVersProduct !== charterMinimumMacOS) {
-    push(
+    problems.push(
       `the manifest claims a controlled ${charterMinimumMacOS} host but actually tested ${claim.testedOn.swVersProduct}`,
     );
   }
   if (claim.verifiedAs === 'host' && claim.testedOn.swVersProduct !== charterMinimumMacOS) {
-    push(
+    problems.push(
       'macOS host verification is claimed without an exact-version host (metadata-only is the only honest form here)',
     );
   }
@@ -226,59 +279,85 @@ export function validateManifest(
     !claim.disclosure.includes(claim.testedOn.swVersProduct) ||
     !claim.disclosure.includes(claim.testedOn.swVersBuild)
   ) {
-    push('the macOS disclosure does not name the actually-tested sw_vers product and build');
+    problems.push(
+      'the macOS disclosure does not name the actually-tested sw_vers product and build',
+    );
   }
+  return problems;
+}
 
-  // ——— matrix: every leg recorded and passed ———
+/** The matrix: every leg recorded, passed, with its log file. */
+function matrixProblems(manifest: CandidateManifest): string[] {
+  const problems: string[] = [];
   const recorded = new Map(manifest.matrix.map((leg) => [leg.leg, leg]));
   for (const leg of MATRIX_LEGS) {
     const record = recorded.get(leg);
     if (record === undefined) {
-      push(`the matrix carries no record for leg ${leg}`);
+      problems.push(`the matrix carries no record for leg ${leg}`);
       continue;
     }
     if (record.status !== 'passed') {
-      push(`matrix leg ${leg} did not pass (${String(record.summary)})`);
+      problems.push(`matrix leg ${leg} did not pass (${String(record.summary)})`);
     }
-    if (record.logFile === '') push(`matrix leg ${leg} names no log file`);
+    if (record.logFile === '') problems.push(`matrix leg ${leg} names no log file`);
   }
+  return problems;
+}
 
-  // ——— fixtures ———
-  const sqlite = manifest.fixtures.betterSqlite3;
+/** The fixtures: the native fixture executed from source, the unsupported dependency rejected and never installed. */
+function fixturesProblems(manifest: CandidateManifest): string[] {
+  return [
+    ...sqliteFixtureProblems(manifest.fixtures.betterSqlite3),
+    ...sassFixtureProblems(manifest.fixtures.nodeSass),
+  ];
+}
+
+/** The native fixture: executed, built from source, identified, and its in-memory sequence complete. */
+function sqliteFixtureProblems(sqlite: CandidateManifest['fixtures']['betterSqlite3']): string[] {
+  const problems: string[] = [];
   if (sqlite.executed !== true) {
-    push(`the better-sqlite3 fixture did not execute (${String(sqlite.detail)})`);
-  } else {
-    if (sqlite.builtFromSource !== true) {
-      push('the better-sqlite3 fixture was not built from source');
-    }
-    if (sqlite.runtime?.node === null || sqlite.runtime?.abi === null) {
-      push('the better-sqlite3 fixture recorded no runtime identity');
-    }
-    const memory = sqlite.inMemory ?? {};
-    if (
-      memory.created !== true ||
-      Number(memory.inserted ?? 0) < 1 ||
-      Number(memory.selected ?? 0) < 1 ||
-      memory.closed !== true
-    ) {
-      push('the better-sqlite3 in-memory create/insert/select/close sequence is not complete');
-    }
+    problems.push(`the better-sqlite3 fixture did not execute (${String(sqlite.detail)})`);
+    return problems;
   }
-  const sass = manifest.fixtures.nodeSass;
-  if (sass.rejected !== true) push('the node-sass fixture was not rejected');
-  if (sass.installed !== false) push('the node-sass fixture must never be installed');
+  if (sqlite.builtFromSource !== true) {
+    problems.push('the better-sqlite3 fixture was not built from source');
+  }
+  if (sqlite.runtime?.node === null || sqlite.runtime?.abi === null) {
+    problems.push('the better-sqlite3 fixture recorded no runtime identity');
+  }
+  const memory = sqlite.inMemory ?? {};
+  if (
+    memory.created !== true ||
+    Number(memory.inserted ?? 0) < 1 ||
+    Number(memory.selected ?? 0) < 1 ||
+    memory.closed !== true
+  ) {
+    problems.push(
+      'the better-sqlite3 in-memory create/insert/select/close sequence is not complete',
+    );
+  }
+  return problems;
+}
+
+/** The unsupported-dependency fixture: rejected prelaunch, never installed, diagnostic complete. */
+function sassFixtureProblems(sass: CandidateManifest['fixtures']['nodeSass']): string[] {
+  const problems: string[] = [];
+  if (sass.rejected !== true) problems.push('the node-sass fixture was not rejected');
+  if (sass.installed !== false) problems.push('the node-sass fixture must never be installed');
   const diagnostic = sass.diagnostic ?? {};
   for (const field of ['package', 'version', 'runtime', 'os', 'architecture', 'upstream-support']) {
     if (diagnostic[field] === undefined) {
-      push(`the node-sass diagnostic is missing the ${field} field`);
+      problems.push(`the node-sass diagnostic is missing the ${field} field`);
     }
   }
+  return problems;
+}
 
-  // ——— verdict ———
-  if (manifest.verdict === null) push('the manifest carries no sealed verdict');
-  else if (manifest.verdict.ok !== true && manifest.verdict.failures.length === 0) {
-    push('the verdict is red with no named failures');
+/** The verdict: sealed, and honest about its failures. */
+function verdictProblems(manifest: CandidateManifest): string[] {
+  if (manifest.verdict === null) return ['the manifest carries no sealed verdict'];
+  if (manifest.verdict.ok !== true && manifest.verdict.failures.length === 0) {
+    return ['the verdict is red with no named failures'];
   }
-
-  return { ok: problems.length === 0, problems };
+  return [];
 }

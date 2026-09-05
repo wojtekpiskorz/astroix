@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs';
 import { mkdir, readFile, rm } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { verifyBuildAttestation } from './build-attestation.ts';
 import { fileFacts } from './checksum.ts';
 import { draftAssetRef } from './draft-release.ts';
 import { readSourceFacts } from './git-state.ts';
@@ -26,7 +27,8 @@ import { readRepoPins } from './repo-pins.ts';
  *                                          `npm run package`), its
  *                                          facts verified and written
  *   candidate qualify --zip <path> --expected-sha256 <sha> --label <label>
- *              [--manifest-dir <dir>] [--mode dry-run|downloaded]
+ *              --built <manifest> [--manifest-dir <dir>]
+ *              [--mode dry-run|downloaded]
  *              [--draft-ref <repo:tag:asset>] [--uploaded] [--downloaded]
  *                                          the transfer proof + the full
  *                                          matrix + the evidence manifest
@@ -34,6 +36,19 @@ import { readRepoPins } from './repo-pins.ts';
  *                                          qualification, end to end
  *   candidate checksum <file>              one file's sha256 (the
  *                                          workflow's before/after steps)
+ *
+ * The evidence bundle is refusal-gated and immutable: every refusal —
+ * a bad flag, a refused draft reference, a label whose manifest
+ * already exists, a refused build attestation, a dirty tree — fires
+ * BEFORE the evidence directory is touched, and a label's manifest is
+ * written once; a failed run forces a NEW candidate label, never a
+ * rewrite (a failed UPLOAD-path run needs a new label too — `gh
+ * release create` fails on the existing tag, fail-closed by
+ * construction). `--built` names the packaging manifest attesting the
+ * one build the bytes came from, verified against --expected-sha256;
+ * the `run` path observes the build in-process and attests nothing.
+ * The manifest's `builtOnce` records only what the recorder observed
+ * or verified — never a default.
  *
  * Exit codes: 0 — green; 1 — a check failed (fail-closed, evidence
  * recorded); 2 — misuse. Nothing here rebuilds after the one build,
@@ -45,7 +60,7 @@ const ROOT = join(HERE, '..', '..');
 const USAGE = `usage: candidate <preflight|build|qualify|run|checksum> [flags]
   preflight
   build --label <label>
-  qualify --zip <path> --expected-sha256 <sha> --label <label>
+  qualify --zip <path> --expected-sha256 <sha> --label <label> --built <manifest>
           [--manifest-dir <dir>] [--mode dry-run|downloaded]
           [--draft-ref <repo:tag:asset>] [--uploaded] [--downloaded]
   run --label <label> [--manifest-dir <dir>]
@@ -61,10 +76,20 @@ interface CliArguments {
   readonly manifestDir?: string;
   readonly mode?: string;
   readonly draftRef?: string;
+  readonly built?: string;
   readonly uploaded: boolean;
   readonly downloaded: boolean;
   readonly positional?: string;
 }
+
+/**
+ * The label charset: lower-case letters, digits, and dashes, starting
+ * with a letter or digit. The label is path-derived (the manifest
+ * directory, the draft tag) and shell-derived in the dispatch workflow,
+ * so it must be a closed set — `../` segments and every other escape
+ * shape are refused here, before anything derives a path from them.
+ */
+const LABEL_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
 
 function parseArguments(argv: readonly string[]): CliArguments | { code: string; detail: string } {
   const command = argv[0];
@@ -75,23 +100,37 @@ function parseArguments(argv: readonly string[]): CliArguments | { code: string;
   if (!known.includes(command)) {
     return { code: 'unknown-command', detail: `unknown subcommand ${command}` };
   }
-  let positional: string | undefined;
-  const flags = new Map<string, string | true>();
-  const rest = argv.slice(1);
   if (command === 'checksum') {
-    positional = rest[0];
-    if (positional === undefined || positional.startsWith('--')) {
-      return { code: 'value-absent', detail: 'checksum needs exactly one file argument' };
-    }
-    if (rest.length > 1) {
-      return {
-        code: 'positional-argument',
-        detail: `unexpected extra argument ${String(rest[1])}`,
-      };
-    }
-    return { command, uploaded: false, downloaded: false, positional };
+    return parseChecksumArguments(command, argv.slice(1));
   }
+  return parseFlagArguments(command, argv.slice(1));
+}
+
+/** The checksum command's argument law: exactly one file, nothing else. */
+function parseChecksumArguments(
+  command: string,
+  rest: readonly string[],
+): CliArguments | { code: string; detail: string } {
+  const positional = rest[0];
+  if (positional === undefined || positional.startsWith('--')) {
+    return { code: 'value-absent', detail: 'checksum needs exactly one file argument' };
+  }
+  if (rest.length > 1) {
+    return {
+      code: 'positional-argument',
+      detail: `unexpected extra argument ${String(rest[1])}`,
+    };
+  }
+  return { command, uploaded: false, downloaded: false, positional };
+}
+
+/** The flag commands' argument law: explicit `--flag value` pairs only, nothing guessed. */
+function parseFlagArguments(
+  command: string,
+  rest: readonly string[],
+): CliArguments | { code: string; detail: string } {
   let index = 0;
+  const flags = new Map<string, string | true>();
   while (index < rest.length) {
     const token = rest[index];
     index += 1;
@@ -110,14 +149,22 @@ function parseArguments(argv: readonly string[]): CliArguments | { code: string;
     }
     flags.set(token, value);
   }
+  const label = flags.get('--label') as string | undefined;
+  if (label !== undefined && !LABEL_PATTERN.test(label)) {
+    return {
+      code: 'bad-label',
+      detail: `--label must be lower-case letters, digits, and dashes, starting with a letter or digit (got ${label}) — the label derives the manifest directory and the draft tag, so it is a closed set`,
+    };
+  }
   return {
     command,
-    label: flags.get('--label') as string | undefined,
+    label,
     zip: flags.get('--zip') as string | undefined,
     expectedSha256: flags.get('--expected-sha256') as string | undefined,
     manifestDir: flags.get('--manifest-dir') as string | undefined,
     mode: flags.get('--mode') as string | undefined,
     draftRef: flags.get('--draft-ref') as string | undefined,
+    built: flags.get('--built') as string | undefined,
     uploaded: flags.get('--uploaded') === true,
     downloaded: flags.get('--downloaded') === true,
   };
@@ -257,6 +304,75 @@ async function build(label: string): Promise<BuildFacts | null> {
 
 // ——— qualify: the transfer proof + the matrix + the manifest ———
 
+/**
+ * The one-build claim a recorder carries into the manifest (#259
+ * review round 1): `builtOnce` in the evidence asserts only what THIS
+ * process observed — the `run` path observed the build directly; every
+ * other recorder must attest, naming the packaging manifest the bytes
+ * came from (verified against the received checksum, never trusted).
+ */
+interface BuildClaim {
+  readonly command: string;
+  readonly zip: { readonly path: string; readonly bytes: number; readonly sha256: string };
+  /** True only when this process ran the build and verified its facts (the `run` path). */
+  readonly observed: boolean;
+  /** The packaging manifest attesting the one build, when the build was not observed here. */
+  readonly attestedBy?: string;
+}
+
+/** Checks a supplied `--draft-ref repo:tag:asset` against the run's own computed reference. */
+async function draftRefProblem(
+  draftRef: string,
+  draft: ReturnType<typeof draftAssetRef>,
+): Promise<string | null> {
+  const [repository, tag, asset] = draftRef.split(':');
+  const { checkDraftRef } = await import('./draft-release.ts');
+  return checkDraftRef({ repository: repository ?? '', tag: tag ?? '', asset: asset ?? '' }, draft);
+}
+
+/** The mode/transfer-flags combination law: a dry run records neither, downloaded mode records both. */
+function modeCombinationProblem(
+  mode: 'dry-run' | 'downloaded',
+  uploaded: boolean,
+  downloaded: boolean,
+): string | null {
+  if (mode === 'dry-run' && (uploaded || downloaded)) {
+    return 'a dry run records no upload and no download';
+  }
+  if (mode === 'downloaded' && (!uploaded || !downloaded)) {
+    return 'downloaded mode requires both --uploaded and --downloaded';
+  }
+  return null;
+}
+
+/**
+ * The one-build honesty law: resolves the `builtOnce` this recorder may
+ * record — true from direct observation (the `run` path), or true only
+ * after the supplied `--built` attestation names a packaging manifest
+ * whose recorded checksum IS the received checksum. A recorder with
+ * neither records its non-observation (false); a refused attestation is
+ * a named refusal string.
+ */
+async function resolveBuiltOnce(
+  build: BuildClaim,
+  expectedSha256: string,
+): Promise<{ builtOnce: boolean } | { refusal: string }> {
+  if (build.observed) return { builtOnce: true };
+  if (build.attestedBy === undefined) return { builtOnce: false };
+  let attested: unknown;
+  try {
+    attested = JSON.parse(await readFile(build.attestedBy, 'utf8'));
+  } catch {
+    return { refusal: `unreadable-manifest — ${build.attestedBy}` };
+  }
+  const problem = verifyBuildAttestation({
+    buildManifest: attested,
+    receivedSha256: expectedSha256,
+  });
+  if (problem !== null) return { refusal: problem };
+  return { builtOnce: true };
+}
+
 async function qualify(
   label: string,
   zipPath: string,
@@ -266,35 +382,42 @@ async function qualify(
   draftRef: string | undefined,
   uploaded: boolean,
   downloaded: boolean,
-  buildCommand: string,
-  buildZip: { path: string; bytes: number; sha256: string },
+  build: BuildClaim,
 ): Promise<boolean> {
+  // ——— the refusal gates, in order — every one returns BEFORE the
+  // evidence destination is touched (a refused run never destroys the
+  // existing bundle; the destination is cleared only after all gates)
   if (!existsSync(zipPath)) {
     console.error(`candidate: the ZIP does not exist at ${zipPath}`);
     return false;
   }
-  await rm(manifestDir, { recursive: true, force: true });
-  await mkdir(manifestDir, { recursive: true });
   const assetName = zipPath.split('/').pop() ?? 'Astroix-darwin-arm64-0.1.0.zip';
   const draft = draftAssetRef({ label, assetName });
   if (draftRef !== undefined) {
-    const [repository, tag, asset] = draftRef.split(':');
-    const { checkDraftRef } = await import('./draft-release.ts');
-    const problem = checkDraftRef(
-      { repository: repository ?? '', tag: tag ?? '', asset: asset ?? '' },
-      draft,
-    );
+    const problem = await draftRefProblem(draftRef, draft);
     if (problem !== null) {
       console.error(`candidate: the supplied draft reference is refused (${problem})`);
       return false;
     }
   }
-  if (mode === 'dry-run' && (uploaded || downloaded)) {
-    console.error('candidate: a dry run records no upload and no download');
+  const modeProblem = modeCombinationProblem(mode, uploaded, downloaded);
+  if (modeProblem !== null) {
+    console.error(`candidate: ${modeProblem}`);
     return false;
   }
-  if (mode === 'downloaded' && (!uploaded || !downloaded)) {
-    console.error('candidate: downloaded mode requires both --uploaded and --downloaded');
+  // the evidence-immutable law: a label's manifest is written ONCE. A
+  // re-run over an existing manifest is refused — never a rewrite (the
+  // ticket's own law: a failed run forces a NEW candidate label)
+  const manifestPath = join(manifestDir, 'manifest.json');
+  if (existsSync(manifestPath)) {
+    console.error(
+      `candidate: the evidence manifest for label ${label} already exists at ${manifestPath} (evidence-exists — the evidence bundle is immutable; a failed run forces a NEW candidate label, never a rewrite)`,
+    );
+    return false;
+  }
+  const buildOnce = await resolveBuiltOnce(build, expectedSha256);
+  if ('refusal' in buildOnce) {
+    console.error(`candidate: the supplied build attestation is refused (${buildOnce.refusal})`);
     return false;
   }
   const source = await readSourceFacts(ROOT);
@@ -306,6 +429,10 @@ async function qualify(
   }
   const repo = await readRepoPins();
   const pinFindings = reconcilePins(CHARTER_PINS, repo);
+  // ——— every refusal gate has returned — only now is the destination
+  // cleared and created for the run about to write its evidence
+  await rm(manifestDir, { recursive: true, force: true });
+  await mkdir(manifestDir, { recursive: true });
   const result = await runMatrix({
     label,
     mode,
@@ -326,7 +453,7 @@ async function qualify(
       reconciled: pinFindings.length === 0,
       findings: pinFindings,
     },
-    build: { command: buildCommand, zip: buildZip },
+    build: { command: build.command, zip: build.zip, builtOnce: buildOnce.builtOnce },
     uploaded,
     downloaded,
   });
@@ -348,8 +475,11 @@ async function run(label: string, manifestDir: string): Promise<boolean> {
     undefined,
     false,
     false,
-    `npm run package -- --label ${label}`,
-    { path: built.zipPath, bytes: built.zipBytes, sha256: built.zipSha256 },
+    {
+      command: `npm run package -- --label ${label}`,
+      zip: { path: built.zipPath, bytes: built.zipBytes, sha256: built.zipSha256 },
+      observed: true, // this process ran the one build and verified its facts
+    },
   );
 }
 
@@ -370,6 +500,14 @@ if (command === 'preflight') {
   ] as const) {
     if (value === undefined) misuse(`qualify needs ${flag}`);
   }
+  // the one-build honesty law: a standalone recorder observed no build —
+  // it must attest one, naming the packaging manifest the bytes came
+  // from (the `run` path observes the build directly and needs nothing)
+  if (args.built === undefined) {
+    misuse(
+      'qualify needs --built <manifest> — the packaging manifest attesting the one build the bytes came from, verified against --expected-sha256',
+    );
+  }
   const mode = args.mode ?? 'dry-run';
   if (mode !== 'dry-run' && mode !== 'downloaded') {
     misuse(`--mode must be dry-run or downloaded (got ${mode})`);
@@ -381,8 +519,12 @@ if (command === 'preflight') {
   const zip = args.zip as string;
   const sha = args.expectedSha256 as string;
   const manifestDir = args.manifestDir ?? join(ROOT, 'qualification', 'manifests', label);
-  // the received file's own byte count (the build's bytes — equality is
-  // proven by the checksum the matrix verifies)
+  // the named missing-ZIP refusal, before fileFacts would die on an
+  // ENOENT stack (qualify's own gate stays as the law for every caller)
+  if (!existsSync(zip)) {
+    console.error(`candidate: the ZIP does not exist at ${zip}`);
+    process.exit(1);
+  }
   const receivedFacts = await fileFacts(zip);
   ok = await qualify(
     label,
@@ -393,8 +535,12 @@ if (command === 'preflight') {
     args.draftRef,
     args.uploaded,
     args.downloaded,
-    'npm run package (the one build; see build.zip facts)',
-    { path: zip, bytes: receivedFacts.bytes, sha256: sha },
+    {
+      command: `npm run package (attested by ${args.built as string})`,
+      zip: { path: zip, bytes: receivedFacts.bytes, sha256: sha },
+      observed: false,
+      attestedBy: args.built,
+    },
   );
 } else if (command === 'run') {
   if (args.label === undefined) misuse('run needs --label <label>');

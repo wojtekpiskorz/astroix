@@ -8,7 +8,7 @@
  *
  * `reconcilePins` is the pin-drift law: the repo's own pin tables
  * (`packages/runtime/src/internal/packaged-assets.ts` +
- * `apps/desktop/src/forge/product.ts`, read through repo-pins.mjs)
+ * `apps/desktop/src/forge/product.ts`, read through repo-pins.ts)
  * must EQUAL this charter in every field — a drifted repo pin fails
  * the candidate before anything is built (a pin drift is a STOP, never
  * a silent substitution). Pure: both sides are passed in, so the
@@ -28,7 +28,7 @@ export const CHARTER_PINS = Object.freeze({
 /** The product shape a candidate is assembled for (ADR-0008). */
 export const CHARTER_PLATFORM = Object.freeze({ os: 'darwin', arch: 'arm64' });
 
-/** The repo's pin-table shape, as repo-pins.mjs reads it. */
+/** The repo's pin-table shape, as repo-pins.ts reads it. */
 export interface RepoPins {
   readonly node: string;
   readonly electron: string;
