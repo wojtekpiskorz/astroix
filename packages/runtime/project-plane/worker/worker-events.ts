@@ -46,7 +46,14 @@ export type WorkerEvent = WorkerInvalidationEvent | WorkerDiagnosticEvent;
 const PAGES_PREFIX = 'src/pages/';
 /** The canonical content subtree — the glob loaders' certified fixture bases. */
 const CONTENT_PREFIX = 'src/content/';
-/** The content config's certified fixture location (the E4 pass's one fixed import). */
+/**
+ * The content config's certified fixture location (the E4 pass's one fixed
+ * import). This literal is the SAME truth as `CONTENT_CONFIG_MODULE` in
+ * `../../astro-project-adapter/content/content-probes.ts` (imported by the
+ * source filter) — worker modules stay minimal-dep for raw forked-Node
+ * loading, so the mapping carries the literal with this cross-reference
+ * instead of the import; a drift between the two is a seam-drift event.
+ */
 const CONTENT_CONFIG = 'src/content.config.ts';
 
 /**
