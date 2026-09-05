@@ -10,6 +10,7 @@ import {
   LOAD_BUDGET_MS,
   PROJECT_APP_URL,
   type ResetFreeze,
+  recordLandedSession,
   restoreIdle,
 } from '../../../../../e2e/web/spec-helpers.ts';
 import { rawExchange } from '../../../src/e2e-wire.ts';
@@ -109,16 +110,19 @@ export async function abaDeactivate(page: Page): Promise<void> {
  * SAME pair the active session already holds, which is the whole
  * point: the caller asserts the pair did not move.
  *
- * No `activateSettled` here, deliberately: that discipline waits out a
- * YOUNG dev server's post-connect self-reload, and this landing rides
- * a warm plane whose canvas may settle with one navigation fewer —
- * waiting for two would hang. The landing's proofs (the marker, the
- * capture, serving) ride the served document, never the canvas.
+ * No `activateSettled` here, deliberately: this landing's proofs (the
+ * marker, the capture, serving) ride the served document, never the
+ * canvas — nothing here needs the canvas settled at all (#433 round 2:
+ * the former "waiting for two would hang" justification died with the
+ * warm-tolerant settle; the bypass stays right for this reason alone).
+ * The landing still records its pair for the warm-activation memo —
+ * the lane-wide law covers every landing, raw clicks included.
  */
 export async function abaReactivateIdempotent(page: Page, position: 0 | 1): Promise<AbaCapture> {
   await page.goto('/__astroix/app/');
   await activateButton(page, position).click();
   await page.waitForURL(PROJECT_APP_URL, { timeout: BOOT_BUDGET_MS });
+  await recordLandedSession(page);
   await expect(page.getByTestId('session-generation')).toHaveText(/^\d+$/, {
     timeout: LOAD_BUDGET_MS,
   });

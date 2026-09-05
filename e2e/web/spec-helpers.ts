@@ -1,7 +1,7 @@
 import { readFile, rename, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import { expect, type Frame, type Page, type Route } from '@playwright/test';
-import { stagedCopyRoot, WEB_E2E_SCRATCH_ENV } from '../../apps/web/src/stage-e2e.ts';
+import { settleMemoPath, stagedCopyRoot } from '../../apps/web/src/stage-e2e.ts';
 import { spliceText } from '../../packages/core/src/splice-writer.ts';
 
 /**
@@ -107,9 +107,15 @@ export async function restoreIdle(page: Page): Promise<void> {
 
 /**
  * The invocation-scoped warm-activation memo (#422, trap b): every
- * (runtime epoch, generation) pair a battery helper's landing has
- * served, kept as one JSON file keyed by the invocation's scratch root
- * but living OUTSIDE it (see settleMemoPath), so the record crosses the
+ * (runtime epoch, generation) pair the lane's landings have served —
+ * the helper landings below AND every raw `activateButton` landing
+ * (#433 round 2: five raw-click specs and the A-B-A harness's
+ * idempotent landing used to fall outside the record, so a mid-test
+ * failure there still handed the next battery the misleading cold red
+ * this memo exists to kill) — kept as one JSON file keyed by the
+ * invocation's scratch root but living OUTSIDE it (the derivation is
+ * homed in `stage-e2e.ts` beside the root contract, and the lane's
+ * teardown removes the file with the root), so the record crosses the
  * project/worker boundaries of the serial run (one control plane, one
  * scratch root, one worker at a time). Its law rests on two supervisor
  * truths: every activation attempt — committed, failed, or cancelled —
@@ -142,33 +148,15 @@ async function landedSession(page: Page): Promise<LandedSession> {
 }
 
 /**
- * The memo file's path OUTSIDE the scratch root, keyed by it — the
- * invocation identity without the wiped directory. The root is
- * disposable by design: the staging wipes it on every real (re)stage,
- * and Playwright re-evaluates the config in every worker — before the
- * config's worker guard (#422), a replacement worker's re-evaluation
- * wiped the root MID-INVOCATION after any failed leg (the observed
- * cascade doom: the memo died exactly when the warm shape needed it,
- * and the live plane's staged files vanished under it). Outside the
- * root the memo survives every wipe, and its keys are epoch-scoped, so
- * a stale file from a previous invocation over an explicit (reused)
- * scratch root can never match the new control plane's epoch. Fails
- * loudly when no staging has run.
+ * Records one landed session and answers whether it was already known —
+ * the warm/cold discriminator. Called by EVERY landing the lane serves:
+ * the two helpers below, and — since #433 round 2 — every raw
+ * `activateButton` landing directly (the raw-click specs and the A-B-A
+ * harness's idempotent landing discard the answer; recording alone is
+ * their job, so a mid-test failure ANYWHERE in the lane leaves the
+ * next battery's first settle warm-classified).
  */
-function settleMemoPath(): string {
-  const root = process.env[WEB_E2E_SCRATCH_ENV];
-  if (root === undefined || root === '') {
-    throw new Error(
-      `spec-helpers: ${WEB_E2E_SCRATCH_ENV} is unset — the warm-activation memo is keyed by the staging's scratch root (#422)`,
-    );
-  }
-  const tag = root.split(/[\\/]/).filter(Boolean).pop();
-  if (tag === undefined) throw new Error(`spec-helpers: malformed scratch root "${root}" (#422)`);
-  return join(dirname(root), `.astroix-${tag}-settle-generations.json`);
-}
-
-/** Records one landed session and answers whether it was already known — the warm/cold discriminator. */
-async function recordLandedSession(page: Page): Promise<boolean> {
+export async function recordLandedSession(page: Page): Promise<boolean> {
   const session = await landedSession(page);
   const key = `${session.epoch}#${session.generation}`;
   const path = settleMemoPath();
