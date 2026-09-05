@@ -12,8 +12,18 @@ import { stagedCopyRoot } from '../../../src/stage-e2e.ts';
  * are refused at the retired origin, header-tampered live requests
  * are refused and the failure surfaces on the write line, and a
  * spoofed stale SUCCESS response cannot make the live document
- * believe a write landed (the request pairing drops it; the disk
- * truth never moved).
+ * believe a write landed. That last family is closed end to end
+ * (#436, fixed as #438): the AppClient's session-scoped pairing
+ * drops a stale success by SESSION MISMATCH — request ids are
+ * per-document counters, so an id can collide across a switch, but
+ * the envelope's `session` (A1's dead pair) never echoes the live
+ * exchange's requesting pair — the unmatched envelope settles the
+ * exchange as a transport failure, the write loop classifies it
+ * uncertain (the honest never-committed terminal), and the disk truth
+ * never moved. The captured-bytes replay family is closed with it:
+ * the SessionRef in the envelope is correlation, not auth — the
+ * boundary #438's review recorded — so replaying captured bytes
+ * proves nothing about authority.
  *
  * The script lands in the STAGED copy's `public/` directory at test
  * time — test-owned bytes in the disposable copy, the runtime-tier

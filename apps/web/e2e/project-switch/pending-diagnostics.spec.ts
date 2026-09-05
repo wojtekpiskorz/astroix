@@ -58,9 +58,16 @@ import { openHeldBodyMutation, stylesWriteFactOf } from './scenarios/wire.ts';
  * - no old capability, Service Worker replay, delayed callback, or
  *   pending mutation crosses into B or the new A generation: replays
  *   die at the retired origin, tampered headers are refused and the
- *   failure SURFACES on the write line, a spoofed stale success never
- *   binds (the disk truth never moves), and B's origin is never even
- *   reachable by A's worker.
+ *   failure SURFACES on the write line, a spoofed stale success is
+ *   dropped by the AppClient's session-scoped pairing (#436, fixed
+ *   as #438) — the envelope's dead-pair session never echoes the
+ *   live exchange's requesting pair, however its request id collides
+ *   — so the write settles the honest never-committed terminal (the
+ *   machine's `irreversible-postcommit`, badge `uncertain`, the
+ *   refresh-landed reconcile back to quiet) and the disk truth never
+ *   moves, and B's origin is never even reachable by A's worker.
+ *   The captured-bytes replay family is closed with it: SessionRef
+ *   is correlation, not auth (#438's recorded boundary).
  *
  * The diagnostic-role limits (one editor, three diagnostics) and the
  * Electron document rebinding / CDP-bypass-failure law are the
@@ -105,6 +112,43 @@ function waitForMutationCrossed(page: Page): Promise<void> {
 /** The error envelope's code — every refusal assertion reads the closed vocabulary. */
 function errorCode(body: string): string {
   return (JSON.parse(body) as { error?: { code?: string } }).error?.code ?? 'none';
+}
+
+/**
+ * Installs the CSS write line's badge recorder (#256/#436→#438): a
+ * MutationObserver capturing EVERY `data-write-state` value the badge
+ * ever expresses. The write loops render a settle's terminal phase
+ * for exactly one deterministic macrotask before the post-settlement
+ * refresh begins (the shared act boundary the loops' own tests rely
+ * on), so a sampling poll can race straight past the honest terminal
+ * — the observer cannot: every attribute mutation is recorded,
+ * transient or not.
+ */
+async function recordCssWriteStates(tab: Page): Promise<void> {
+  await tab.evaluate(() => {
+    const badge = document.querySelector('[data-testid="css-write-status"]');
+    const holder = window as unknown as { __k3WriteStates?: Set<string> };
+    if (badge === null) throw new Error('the CSS write line is not mounted');
+    const seen = new Set<string>();
+    const record = () => {
+      const value = badge.getAttribute('data-write-state');
+      if (value !== null) seen.add(value);
+    };
+    record();
+    new MutationObserver(record).observe(badge, {
+      attributes: true,
+      attributeFilter: ['data-write-state'],
+    });
+    holder.__k3WriteStates = seen;
+  });
+}
+
+/** The distinct `data-write-state` values recorded since the recorder installed. */
+async function recordedCssWriteStates(tab: Page): Promise<string[]> {
+  return await tab.evaluate(() => {
+    const holder = window as unknown as { __k3WriteStates?: Set<string> };
+    return [...(holder.__k3WriteStates ?? [])];
+  });
 }
 
 /** Restores the staged bytes this battery touched — the lane's restore discipline. */
@@ -456,14 +500,19 @@ test('a hostile Service Worker cannot cross generations — replays die at the r
   await canvasSelect(switchTab, '.hero-title');
   const liveInput = await openGlobalEditor(switchTab, committed);
 
-  // the STALE SUCCESS: the worker answers A2's live write with A1's
-  // captured SUCCESS envelope — the disk never moves (the worker
-  // answered locally; the server never saw the write) and the loop is
-  // never wedged. The request-pairing's residual gap — a colliding
-  // request id across documents lets the spoofed success into the
-  // loop's committed belief until the post-commit refresh reconciles
-  // the badge — is FILED as the finding that owns it; the assertions
-  // here are the invariants that hold regardless.
+  // the STALE SUCCESS — the closed family, proven end to end
+  // (#436→#438): the worker answers A2's live write with A1's captured
+  // SUCCESS envelope, and the AppClient's session-scoped pairing drops
+  // it — the envelope's `session` is A1's dead pair, and request ids
+  // are per-document counters (an id collision alone was the #436
+  // gap; the pair check is what closes it) — so the exchange settles
+  // on the unmatched path as a transport failure. The write loop
+  // classifies it UNCERTAIN: the machine's `irreversible-postcommit`
+  // terminal, badge `uncertain`, then the refresh-landed reconcile
+  // converges it quiet. The recorder proves the badge's full history:
+  // the saved phantom can never be expressed, and the honest terminal
+  // must be.
+  await recordCssWriteStates(switchTab);
   await armSwAttack(page, { cmd: 'arm-stale-mutation' });
   await liveInput.fill(served);
   await expect
@@ -471,14 +520,23 @@ test('a hostile Service Worker cannot cross generations — replays die at the r
       timeout: LOAD_BUDGET_MS,
     })
     .toBeDefined();
+  // the disk truth is the byte oracle: the server never saw the
+  // write, so the bytes stay the exact single committed A1 write.
   await expect
     .poll(async () => await abaSheetBytes(WRITTEN), { timeout: WRITE_SETTLE_MS })
     .toBe(expectedDeclarationWrite(sheetBefore, 'font-size', served, committed));
+  // the loop settles the honest terminal and reconciles: the badge
+  // converges quiet — NEVER having expressed the saved phantom — and
+  // the record carries the `uncertain` terminal (the one-macrotask
+  // render the observer alone can guarantee catching).
   await expect(switchTab.getByTestId('css-write-status')).toHaveAttribute(
     'data-write-state',
-    /^(quiet|saved|rejected)$/,
+    'quiet',
     { timeout: WRITE_SETTLE_MS },
   );
+  const observed = await recordedCssWriteStates(switchTab);
+  expect(observed, 'the badge expressed these states').not.toContain('saved');
+  expect(observed, 'the badge expressed these states').toContain('uncertain');
 
   // the recovery (the loop's retry-recovery law): a fresh, DIFFERENT
   // edit through the passthrough COMMITS — the loop was never wedged
