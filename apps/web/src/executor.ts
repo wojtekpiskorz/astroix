@@ -194,8 +194,9 @@ export interface ExecutorInputs {
    * deadline law (ADR-0006 §4 step 2's "up to 5 seconds"), consumed as
    * the ONE runtime constant through the fence's package surface (#410)
    * — the edit await can never give up before the fence's own law.
-   * Injectable so the focused legs bound it tightly; production never
-   * overrides it.
+   * Bounds two awaits: the outcome race and the hung dispose's exit
+   * race (#431) — both live under the fence's drain law. Injectable so
+   * the focused legs bound it tightly; production never overrides it.
    */
   readonly editOutcomeDeadlineMs?: number;
   /**

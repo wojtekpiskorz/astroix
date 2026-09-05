@@ -525,7 +525,11 @@ export function createGrantEviction(input: {
     if (handle !== undefined) {
       // The pass fires the graceful stop synchronously — it owns the
       // handle from here on, so the map deletions below strand nothing.
-      void stopOwnedWriteExecutors([handle], input.stopDeadlineMs);
+      // The catch is the corridor's belt idiom: the pass cannot reject
+      // today (every inner promise is caught; stop/kill only resolve),
+      // but a future synchronous throw must not surface as an unhandled
+      // rejection in the control-plane child.
+      void stopOwnedWriteExecutors([handle], input.stopDeadlineMs).catch(() => {});
       input.writeExecutors.delete(key);
       input.editRevisions.delete(key);
     }
