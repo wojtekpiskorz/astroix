@@ -407,7 +407,7 @@ test('an absent report file fails', () => {
   assert.ok(codesOf(verdict).has('malformed-report'));
 });
 
-test('an unparseable (cut mid-stream) report fails', () => {
+test('an unparseable (cut mid-stream) report fails as exactly one malformed finding', () => {
   const full = JSON.stringify(reportFromCases(GREEN_CASES));
   const cut = full.slice(0, Math.floor(full.length / 2));
   const verdict = validateCheckpoint({
@@ -417,7 +417,26 @@ test('an unparseable (cut mid-stream) report fails', () => {
     repoRoot: WORKSPACE,
   });
   assert.equal(verdict.ok, false);
-  assert.ok(codesOf(verdict).has('malformed-report'));
+  const malformed = verdict.findings.filter((finding) => finding.code === 'malformed-report');
+  assert.equal(
+    malformed.length,
+    1,
+    'cut text is one finding — a second would claim the report is `null` when it is cut text',
+  );
+  assert.match(malformed[0].detail, /does not parse/);
+});
+
+test('a report that parses to literal null fails as the one absent-or-null finding', () => {
+  const verdict = validateCheckpoint({
+    reportText: 'null',
+    inventoryText: greenInventoryFor(GREEN_CASES),
+    playwrightExitCode: 1,
+    repoRoot: WORKSPACE,
+  });
+  assert.equal(verdict.ok, false);
+  const malformed = verdict.findings.filter((finding) => finding.code === 'malformed-report');
+  assert.equal(malformed.length, 1);
+  assert.match(malformed[0].detail, /absent or `null`/);
 });
 
 test('a report whose stats disagree with the derived case count fails as truncated', () => {
@@ -511,7 +530,14 @@ test('the product-web job runs clean, pinned, and gates its own self-tests first
   );
   assert.ok(setupNode, 'the job pins its Node version via actions/setup-node');
   assert.equal(setupNode.with['node-version'], 24, 'the pinned Node version is 24');
-  assert.ok(commands.includes('npm install -g npm@11.6.2'), 'npm is pinned to the packageManager');
+  // The law pins whatever packageManager declares, not a literal version: a
+  // packageManager bump must turn this red on product-web's stale pin (the
+  // literal assertion stayed green through exactly that drift — #440 round 1).
+  const { packageManager } = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'));
+  assert.ok(
+    commands.includes(`npm install -g ${packageManager}`),
+    `npm is pinned to the packageManager (${packageManager}) — the workflow pin followed package.json, not a frozen literal`,
+  );
   assert.ok(commands.includes('npm ci'), 'the job installs from the lockfile');
   assert.ok(
     (job.steps ?? []).some(
