@@ -69,7 +69,7 @@ const CONTENT_CONFIG = 'src/content.config.ts';
  *   never under — the same doctrine as pages, and the same pair the
  *   content write loop itself invalidates client-side after every
  *   commit (#253 J3 refreshes content AND routes).
- * - style truth (``.astro`/`.css`) always stales `styles` — the
+ * - style truth (`.astro`/`.css`) always stales `styles` — the
  *   index payload's truth. A `.astro` under `src/pages/` additionally
  *   implicates `routes`: page additions and removals change route
  *   patterns, and a changed page can change `getStaticPaths`

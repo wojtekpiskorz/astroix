@@ -58,7 +58,7 @@ export interface RawInvalidationSource {
   dispose(): void;
 }
 
-/** The watcher events that change style truth: content edits, additions, removals. */
+/** The watcher events that change truth on disk: edits, additions, removals. */
 const WATCHER_EVENTS = ['change', 'add', 'unlink'] as const;
 
 /**
