@@ -1,0 +1,437 @@
+import { spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { mkdir, readFile, rm } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { fileFacts } from './checksum.ts';
+import { draftAssetRef } from './draft-release.ts';
+import { readSourceFacts } from './git-state.ts';
+import { runMatrix } from './matrix.ts';
+import { CHARTER_PINS, reconcilePins } from './pins.ts';
+import { readRepoPins } from './repo-pins.ts';
+
+/**
+ * The restricted-candidate CLI (#259, L2; ADR-0008's candidate
+ * checkpoints): assembles ONE exact candidate from clean synchronized
+ * source, proves the uploaded/downloaded bytes are the assembled
+ * bytes, runs the complete qualification matrix against the received
+ * bytes, and emits the immutable evidence manifest. Run through the
+ * raw-Node loader idiom (`npm run candidate -- <subcommand>`), like
+ * L1's harness.
+ *
+ *   candidate preflight                    the fail-closed gate: clean
+ *                                          source, reconciled pins,
+ *                                          fixtures and workflow present
+ *   candidate build --label <label>        the ONE build (H3's
+ *                                          `npm run package`), its
+ *                                          facts verified and written
+ *   candidate qualify --zip <path> --expected-sha256 <sha> --label <label>
+ *              [--manifest-dir <dir>] [--mode dry-run|downloaded]
+ *              [--draft-ref <repo:tag:asset>] [--uploaded] [--downloaded]
+ *                                          the transfer proof + the full
+ *                                          matrix + the evidence manifest
+ *   candidate run --label <label>          preflight + build + the dry-run
+ *                                          qualification, end to end
+ *   candidate checksum <file>              one file's sha256 (the
+ *                                          workflow's before/after steps)
+ *
+ * Exit codes: 0 — green; 1 — a check failed (fail-closed, evidence
+ * recorded); 2 — misuse. Nothing here rebuilds after the one build,
+ * patches app/runtime/Forge/protocol code, or publishes anything.
+ */
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const ROOT = join(HERE, '..', '..');
+const USAGE = `usage: candidate <preflight|build|qualify|run|checksum> [flags]
+  preflight
+  build --label <label>
+  qualify --zip <path> --expected-sha256 <sha> --label <label>
+          [--manifest-dir <dir>] [--mode dry-run|downloaded]
+          [--draft-ref <repo:tag:asset>] [--uploaded] [--downloaded]
+  run --label <label> [--manifest-dir <dir>]
+  checksum <file>`;
+
+// ——— the argument law (L1's discipline: explicit flags only, nothing guessed) ———
+
+interface CliArguments {
+  readonly command: string;
+  readonly label?: string;
+  readonly zip?: string;
+  readonly expectedSha256?: string;
+  readonly manifestDir?: string;
+  readonly mode?: string;
+  readonly draftRef?: string;
+  readonly uploaded: boolean;
+  readonly downloaded: boolean;
+  readonly positional?: string;
+}
+
+function parseArguments(argv: readonly string[]): CliArguments | { code: string; detail: string } {
+  const command = argv[0];
+  if (command === undefined || command.startsWith('--')) {
+    return { code: 'missing-command', detail: 'no subcommand given' };
+  }
+  const known = ['preflight', 'build', 'qualify', 'run', 'checksum'];
+  if (!known.includes(command)) {
+    return { code: 'unknown-command', detail: `unknown subcommand ${command}` };
+  }
+  let positional: string | undefined;
+  const flags = new Map<string, string | true>();
+  const rest = argv.slice(1);
+  if (command === 'checksum') {
+    positional = rest[0];
+    if (positional === undefined || positional.startsWith('--')) {
+      return { code: 'value-absent', detail: 'checksum needs exactly one file argument' };
+    }
+    if (rest.length > 1) {
+      return {
+        code: 'positional-argument',
+        detail: `unexpected extra argument ${String(rest[1])}`,
+      };
+    }
+    return { command, uploaded: false, downloaded: false, positional };
+  }
+  let index = 0;
+  while (index < rest.length) {
+    const token = rest[index];
+    index += 1;
+    if (token === undefined) break;
+    if (!token.startsWith('--')) {
+      return { code: 'positional-argument', detail: `unexpected positional argument ${token}` };
+    }
+    if (token === '--uploaded' || token === '--downloaded') {
+      flags.set(token, true);
+      continue;
+    }
+    const value = rest[index];
+    index += 1;
+    if (value === undefined || value.startsWith('--')) {
+      return { code: 'value-absent', detail: `flag ${token} has no value` };
+    }
+    flags.set(token, value);
+  }
+  return {
+    command,
+    label: flags.get('--label') as string | undefined,
+    zip: flags.get('--zip') as string | undefined,
+    expectedSha256: flags.get('--expected-sha256') as string | undefined,
+    manifestDir: flags.get('--manifest-dir') as string | undefined,
+    mode: flags.get('--mode') as string | undefined,
+    draftRef: flags.get('--draft-ref') as string | undefined,
+    uploaded: flags.get('--uploaded') === true,
+    downloaded: flags.get('--downloaded') === true,
+  };
+}
+
+const args = parseArguments(process.argv.slice(2));
+if ('code' in args) {
+  console.error(`candidate: ${args.detail}\n\n${USAGE}`);
+  process.exit(2);
+}
+if (process.platform !== 'darwin' || process.arch !== 'arm64') {
+  console.error(
+    `candidate: the packaged product is macOS arm64 only (ADR-0008) — this host is ${process.platform}/${process.arch}`,
+  );
+  process.exit(2);
+}
+
+// ——— preflight ———
+
+async function preflight(): Promise<boolean> {
+  const source = await readSourceFacts(ROOT);
+  if (!source.clean) {
+    console.error(
+      `candidate: the source tree is dirty — a candidate is built from clean synchronized source only:\n  ${source.porcelain.join('\n  ')}`,
+    );
+    return false;
+  }
+  console.log(`candidate: source clean at ${source.commit}`);
+  const repo = await readRepoPins();
+  const findings = reconcilePins(CHARTER_PINS, repo);
+  if (findings.length > 0) {
+    for (const finding of findings) {
+      console.error(
+        `candidate: PIN DRIFT — ${finding.field}: the repo pins ${finding.declared}, the charter demands ${finding.expected} (a pin drift is a STOP, never a silent substitution)`,
+      );
+    }
+    return false;
+  }
+  console.log(
+    `candidate: pins reconciled — node ${repo.node} (ABI ${CHARTER_PINS.nodeAbi}), electron ${repo.electron}, forge ${repo.forge}, pair ${repo.pair.astro} + ${repo.pair.vite}, min macOS ${repo.minimumMacOS}`,
+  );
+  const fixtures = [
+    join(ROOT, 'qualification', 'fixtures', 'native-better-sqlite3', 'check.mjs'),
+    join(ROOT, 'qualification', 'fixtures', 'unsupported-node-sass', 'reject.mjs'),
+    join(ROOT, 'qualification', 'fixtures', 'unsupported-node-sass', 'package.json'),
+  ];
+  for (const fixture of fixtures) {
+    if (!existsSync(fixture)) {
+      console.error(`candidate: the qualification fixture is missing at ${fixture}`);
+      return false;
+    }
+  }
+  const { validateWorkflowFile, WORKFLOW_PATH } = await import('./workflow-law.ts');
+  const workflow = await validateWorkflowFile(WORKFLOW_PATH);
+  if (!workflow.ok) {
+    for (const problem of workflow.problems) {
+      console.error(`candidate: the candidate workflow violates its own law — ${problem}`);
+    }
+    return false;
+  }
+  console.log('candidate: preflight GREEN (clean source, reconciled pins, fixtures, workflow law)');
+  return true;
+}
+
+// ——— build: the ONE build ———
+
+interface BuildFacts {
+  readonly zipPath: string;
+  readonly zipBytes: number;
+  readonly zipSha256: string;
+  readonly sourceCommit: string;
+  readonly manifest: Record<string, unknown>;
+}
+
+async function build(label: string): Promise<BuildFacts | null> {
+  console.log(`candidate: the ONE build — npm run package -- --label ${label}`);
+  const buildOk = await runInherited(
+    'npm',
+    ['run', 'package', '--', '--label', label],
+    ROOT,
+    30 * 60_000,
+  );
+  if (!buildOk) {
+    console.error(
+      'candidate: the packaging pipeline failed — a candidate is never built twice in one run',
+    );
+    return null;
+  }
+  const candidateDir = join(ROOT, 'apps', 'desktop', 'out', 'candidates', label);
+  const packagingManifestPath = join(candidateDir, 'manifest.json');
+  if (!existsSync(packagingManifestPath)) {
+    console.error(
+      `candidate: the packaging candidate manifest is missing (${packagingManifestPath})`,
+    );
+    return null;
+  }
+  const packagingManifest = JSON.parse(await readFile(packagingManifestPath, 'utf8')) as {
+    zip?: { file?: unknown; bytes?: unknown; sha256?: unknown };
+    sourceCommit?: unknown;
+    node?: unknown;
+  };
+  const zipFile = typeof packagingManifest.zip?.file === 'string' ? packagingManifest.zip.file : '';
+  if (zipFile === '') {
+    console.error('candidate: the packaging manifest names no ZIP');
+    return null;
+  }
+  const zipPath = join(ROOT, 'apps', 'desktop', 'out', 'make', 'zip', 'darwin', 'arm64', zipFile);
+  if (!existsSync(zipPath)) {
+    console.error(`candidate: the packaged ZIP is missing at ${zipPath}`);
+    return null;
+  }
+  const facts = await fileFacts(zipPath);
+  if (packagingManifest.zip?.sha256 !== facts.sha256) {
+    console.error(
+      `candidate: the packaged ZIP's live checksum ${facts.sha256} is not the pipeline's recorded ${String(packagingManifest.zip?.sha256)} — rebuilt bytes are refused (the one-build law)`,
+    );
+    return null;
+  }
+  if (packagingManifest.node !== CHARTER_PINS.node) {
+    console.error(
+      `candidate: the built artifact pins node ${String(packagingManifest.node)}, not the charter's ${CHARTER_PINS.node}`,
+    );
+    return null;
+  }
+  console.log(
+    `candidate: built once — ${zipFile} (${String(facts.bytes)} bytes, sha256 ${facts.sha256.slice(0, 16)}…)`,
+  );
+  return {
+    zipPath,
+    zipBytes: facts.bytes,
+    zipSha256: facts.sha256,
+    sourceCommit:
+      typeof packagingManifest.sourceCommit === 'string' ? packagingManifest.sourceCommit : '',
+    manifest: packagingManifest as Record<string, unknown>,
+  };
+}
+
+// ——— qualify: the transfer proof + the matrix + the manifest ———
+
+async function qualify(
+  label: string,
+  zipPath: string,
+  expectedSha256: string,
+  mode: 'dry-run' | 'downloaded',
+  manifestDir: string,
+  draftRef: string | undefined,
+  uploaded: boolean,
+  downloaded: boolean,
+  buildCommand: string,
+  buildZip: { path: string; bytes: number; sha256: string },
+): Promise<boolean> {
+  if (!existsSync(zipPath)) {
+    console.error(`candidate: the ZIP does not exist at ${zipPath}`);
+    return false;
+  }
+  await rm(manifestDir, { recursive: true, force: true });
+  await mkdir(manifestDir, { recursive: true });
+  const assetName = zipPath.split('/').pop() ?? 'Astroix-darwin-arm64-0.1.0.zip';
+  const draft = draftAssetRef({ label, assetName });
+  if (draftRef !== undefined) {
+    const [repository, tag, asset] = draftRef.split(':');
+    const { checkDraftRef } = await import('./draft-release.ts');
+    const problem = checkDraftRef(
+      { repository: repository ?? '', tag: tag ?? '', asset: asset ?? '' },
+      draft,
+    );
+    if (problem !== null) {
+      console.error(`candidate: the supplied draft reference is refused (${problem})`);
+      return false;
+    }
+  }
+  if (mode === 'dry-run' && (uploaded || downloaded)) {
+    console.error('candidate: a dry run records no upload and no download');
+    return false;
+  }
+  if (mode === 'downloaded' && (!uploaded || !downloaded)) {
+    console.error('candidate: downloaded mode requires both --uploaded and --downloaded');
+    return false;
+  }
+  const source = await readSourceFacts(ROOT);
+  if (!source.clean) {
+    console.error(
+      `candidate: the source tree became dirty since the build — the evidence would not tie to a clean commit:\n  ${source.porcelain.join('\n  ')}`,
+    );
+    return false;
+  }
+  const repo = await readRepoPins();
+  const pinFindings = reconcilePins(CHARTER_PINS, repo);
+  const result = await runMatrix({
+    label,
+    mode,
+    zipPath,
+    expectedSha256,
+    manifestDir,
+    draftAsset: {
+      repository: draft.repository,
+      tag: draft.tag,
+      asset: draft.asset,
+      url: draft.url,
+      visibility: draft.visibility,
+    },
+    source,
+    pins: {
+      charter: CHARTER_PINS as unknown as Readonly<Record<string, unknown>>,
+      repo: repo as unknown as Readonly<Record<string, unknown>>,
+      reconciled: pinFindings.length === 0,
+      findings: pinFindings,
+    },
+    build: { command: buildCommand, zip: buildZip },
+    uploaded,
+    downloaded,
+  });
+  return result.ok;
+}
+
+// ——— run: preflight + build + the dry run, end to end ———
+
+async function run(label: string, manifestDir: string): Promise<boolean> {
+  if (!(await preflight())) return false;
+  const built = await build(label);
+  if (built === null) return false;
+  return qualify(
+    label,
+    built.zipPath,
+    built.zipSha256,
+    'dry-run',
+    manifestDir,
+    undefined,
+    false,
+    false,
+    `npm run package -- --label ${label}`,
+    { path: built.zipPath, bytes: built.zipBytes, sha256: built.zipSha256 },
+  );
+}
+
+// ——— dispatch ———
+
+const command = args.command;
+let ok = false;
+if (command === 'preflight') {
+  ok = await preflight();
+} else if (command === 'build') {
+  if (args.label === undefined) misuse('build needs --label <label>');
+  ok = (await build(args.label)) !== null;
+} else if (command === 'qualify') {
+  for (const [flag, value] of [
+    ['--label', args.label],
+    ['--zip', args.zip],
+    ['--expected-sha256', args.expectedSha256],
+  ] as const) {
+    if (value === undefined) misuse(`qualify needs ${flag}`);
+  }
+  const mode = args.mode ?? 'dry-run';
+  if (mode !== 'dry-run' && mode !== 'downloaded') {
+    misuse(`--mode must be dry-run or downloaded (got ${mode})`);
+  }
+  if (args.expectedSha256 !== undefined && !/^[0-9a-f]{64}$/.test(args.expectedSha256)) {
+    misuse('--expected-sha256 must be 64 lower-case hex digits');
+  }
+  const label = args.label as string;
+  const zip = args.zip as string;
+  const sha = args.expectedSha256 as string;
+  const manifestDir = args.manifestDir ?? join(ROOT, 'qualification', 'manifests', label);
+  // the received file's own byte count (the build's bytes — equality is
+  // proven by the checksum the matrix verifies)
+  const receivedFacts = await fileFacts(zip);
+  ok = await qualify(
+    label,
+    zip,
+    sha,
+    mode,
+    manifestDir,
+    args.draftRef,
+    args.uploaded,
+    args.downloaded,
+    'npm run package (the one build; see build.zip facts)',
+    { path: zip, bytes: receivedFacts.bytes, sha256: sha },
+  );
+} else if (command === 'run') {
+  if (args.label === undefined) misuse('run needs --label <label>');
+  const label = args.label as string;
+  const manifestDir = args.manifestDir ?? join(ROOT, 'qualification', 'manifests', label);
+  ok = await run(label, manifestDir);
+} else if (command === 'checksum') {
+  const facts = await fileFacts(args.positional as string);
+  console.log(facts.sha256);
+  ok = true;
+}
+process.exit(ok ? 0 : 1);
+
+function misuse(detail: string): never {
+  console.error(`candidate: ${detail}\n\n${USAGE}`);
+  process.exit(2);
+}
+
+function runInherited(
+  command: string,
+  argv: readonly string[],
+  cwd: string,
+  timeoutMs: number,
+): Promise<boolean> {
+  return new Promise((resolve) => {
+    const child = spawn(command, argv, { cwd, stdio: 'inherit' });
+    const timer = setTimeout(() => {
+      child.kill('SIGKILL');
+    }, timeoutMs);
+    child.on('error', (error: Error) => {
+      clearTimeout(timer);
+      console.error(`candidate: spawn error — ${error.message}`);
+      resolve(false);
+    });
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      resolve(code === 0);
+    });
+  });
+}

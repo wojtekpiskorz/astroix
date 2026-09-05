@@ -19,6 +19,7 @@
     "packages",
     "apps",
     "scripts/qualification",
+    "scripts/candidate",
     "tests/qualification",
     "e2e/*.spec.ts",
     "e2e/web",

@@ -1,0 +1,143 @@
+name: Pre-alpha candidate
+
+# The restricted-candidate workflow (#259, L2; ADR-0008's candidate
+# checkpoints — the delivery loop docs/agents/release-loop.md names).
+# Dispatch ONLY: a candidate is assembled, uploaded as a RESTRICTED
+# DRAFT release (collaborator-visible, never published, never npm),
+# downloaded back as a tester would receive it, and qualified against
+# those exact bytes. This workflow never runs per-PR or per-push —
+# CI (ci.yml) stays the merge authority, and the advisory review is
+# untouched by design.
+on:
+  workflow_dispatch:
+    inputs:
+      label:
+        description: 'The candidate label (the evidence manifest directory and the draft tag derive from it)'
+        required: true
+        type: string
+      mode:
+        description: 'dry-run — the complete evidence manifest WITHOUT the upload; upload — draft-release the candidate and qualify the downloaded bytes'
+        required: true
+        default: dry-run
+        type: choice
+        options:
+          - dry-run
+          - upload
+
+permissions:
+  # the draft release creation/upload only — never a publish
+  contents: write
+
+jobs:
+  candidate:
+    name: assemble, upload, download, and qualify the exact restricted candidate
+    runs-on: macos-15
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      # pin npm to packageManager (the ci.yml law, kept in sync)
+      - run: npm install -g npm@11.6.2
+      - run: npm ci
+      # the K4 checkpoint and the readiness legs build the canonical
+      # fixture (e2e/fixture has its own committed lockfile)
+      - run: npm ci
+        working-directory: e2e/fixture
+      - run: npx playwright install --with-deps chromium
+
+      # the workflow proves its own teeth before it builds anything
+      - run: npm run test:candidate
+
+      - name: preflight — clean source, reconciled pins, fixtures, workflow law
+        run: npm run candidate -- preflight
+
+      - name: the ONE build — the exact pinned artifact (H3's pipeline)
+        run: npm run candidate -- build --label "${{ inputs.label }}"
+
+      - name: locate the built ZIP and its checksum
+        id: built
+        run: |
+          manifest="apps/desktop/out/candidates/${{ inputs.label }}/manifest.json"
+          zip_file=$(node -e "console.log(JSON.parse(require('fs').readFileSync(process.argv[1],'utf8')).zip.file)" "$manifest")
+          sha=$(node -e "console.log(JSON.parse(require('fs').readFileSync(process.argv[1],'utf8')).zip.sha256)" "$manifest")
+          echo "zip=apps/desktop/out/make/zip/darwin/arm64/$zip_file" >> "$GITHUB_OUTPUT"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "asset=$zip_file" >> "$GITHUB_OUTPUT"
+          echo "tag=pre-alpha-candidate-${{ inputs.label }}" >> "$GITHUB_OUTPUT"
+          echo "checksum-before: $sha"
+
+      # retained build bytes on every path (#129 doctrine)
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: candidate-build
+          path: apps/desktop/out/candidates/${{ inputs.label }}/
+          if-no-files-found: warn
+
+      # ——— the dry-run path: the complete matrix WITHOUT the upload ———
+      - name: qualify the exact assembled bytes (dry run — no upload, no draft release)
+        if: inputs.mode == 'dry-run'
+        run: >
+          npm run candidate -- qualify --zip "${{ steps.built.outputs.zip }}"
+          --expected-sha256 "${{ steps.built.outputs.sha }}"
+          --label "${{ inputs.label }}" --mode dry-run
+
+      # ——— the upload path: the workflow's own draft-release steps ———
+      # checksum-before was echoed at the locate step; the upload lands
+      # as a RESTRICTED DRAFT (collaborator-visible only — never
+      # published), the download brings the bytes back exactly as a
+      # tester would receive them, and checksum-after must equal
+      # checksum-before on the downloaded bytes.
+      - name: upload the candidate as a restricted draft release
+        if: inputs.mode == 'upload'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ steps.built.outputs.tag }}" "${{ steps.built.outputs.zip }}" \
+            --draft --title "Pre-alpha candidate ${{ inputs.label }}" \
+            --notes "Restricted pre-alpha candidate (draft — collaborators only, ADR-0008). Built once from ${{ github.sha }}; sha256 ${{ steps.built.outputs.sha }}. Qualified by the pre-alpha-candidate workflow."
+
+      - name: download the draft asset as a tester would receive it
+        if: inputs.mode == 'upload'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p downloaded
+          gh release download "${{ steps.built.outputs.tag }}" --pattern '*.zip' --dir downloaded
+
+      - name: checksum-after on the downloaded bytes (must equal checksum-before)
+        if: inputs.mode == 'upload'
+        run: |
+          after=$(npm run --silent candidate -- checksum "downloaded/${{ steps.built.outputs.asset }}")
+          echo "checksum-after: $after"
+          test "$after" = "${{ steps.built.outputs.sha }}"
+
+      - name: qualify the exact downloaded bytes
+        if: inputs.mode == 'upload'
+        run: >
+          npm run candidate -- qualify --zip "downloaded/${{ steps.built.outputs.asset }}"
+          --expected-sha256 "${{ steps.built.outputs.sha }}"
+          --label "${{ inputs.label }}" --mode downloaded
+          --draft-ref "wojtekpiskorz/astroix:${{ steps.built.outputs.tag }}:${{ steps.built.outputs.asset }}"
+          --uploaded --downloaded
+
+      # the evidence bundle survives every path — green included
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: candidate-evidence
+          path: qualification/manifests/${{ inputs.label }}/
+          if-no-files-found: warn
+
+      # L1's own evidence and the K4 checkpoint artifacts
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: candidate-test-results
+          path: test-results/
+          if-no-files-found: ignore

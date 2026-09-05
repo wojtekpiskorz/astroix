@@ -1,0 +1,9 @@
+{
+  "name": "astroix-qualification-native-better-sqlite3",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The L2 positive native qualification fixture (#259): better-sqlite3 12.10.0, built FROM SOURCE against the bundled Node v24.20.0 and executed under the downloaded candidate's own bundled binary — in-memory create, insert, select, close. This template is COPIED into the workflow's isolated staging directory before its single dependency is installed there (scripts/candidate/native-fixture.mjs); it is never a workspace dependency and nothing is ever installed inside this directory.",
+  "candidateDependencies": {
+    "better-sqlite3": "12.10.0"
+  }
+}

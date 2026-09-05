@@ -32,11 +32,18 @@ jobs:
       - run: npm ci
         working-directory: e2e/fixture
       # vitest: the retained unit lanes (src/core tooling, packages/core,
-      # packages/app-shell), the frozen-contract schema validators, and
-      # the five serverless retirement-readiness legs (corpora
+      # packages/app-shell), the frozen-contract schema validators, and the
+      # five serverless retirement-readiness legs (corpora
       # re-derivation, retained-UI coupling scan + mounts, fixture
       # plainness + zero-byte build, counts, inventory)
       - run: npm run test
+      # the restricted-candidate workflow's own focused self-tests (#259,
+      # L2): every failure mode of the candidate matrix (checksum law,
+      # pin drift, dirty source, the native fixture's wrong-version/ABI/
+      # OS/arch guards, the node-sass prelaunch rejection, the evidence
+      # completeness law, the dispatch-only workflow law) proven RED —
+      # deterministic and network-free, like the K4 web gate's teeth
+      - run: npm run test:candidate
 
   # ── the web protocol checkpoint (K4, #257) — the ONE authoritative ──
   # ── product-web job, replacing the retirement interval's explicit   ──

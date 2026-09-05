@@ -1,0 +1,9 @@
+{
+  "name": "astroix-qualification-unsupported-node-sass",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The L2 negative qualification fixture (#259): a managed-project dependency manifest declaring node-sass 9 — MANIFEST-ONLY INPUT. Nothing in this directory is ever installed, built, or executed; the prelaunch screening (reject.mjs, driven by scripts/candidate) reads these manifest bytes and rejects the dependency deterministically before any launch. The declaration is real on purpose: the screener must catch an actual dependencies entry, never a synthetic side channel.",
+  "dependencies": {
+    "node-sass": "9.0.0"
+  }
+}
