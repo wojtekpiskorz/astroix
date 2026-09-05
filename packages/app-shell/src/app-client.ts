@@ -1,6 +1,7 @@
 import {
   API_V1_PREFIX,
   COMMAND_MUTATION,
+  COMMAND_SESSION_PRESENCE,
   type Command,
   type EditResult,
   type ErrorEnvelope,
@@ -60,7 +61,10 @@ export type {
  *   becomes one {@link AppClientError} carrying the parsed error
  *   envelope — or the closed catch-all shape when the body is not a
  *   protocol envelope at all. Raw response text, statuses as exceptions,
- *   and implementation details never reach host code.
+ *   and implementation details never reach host code. A success envelope
+ *   pairs with its exchange by request id AND — on the session-scoped
+ *   path — by session pair (#436): a stale envelope from a dead
+ *   generation never resolves a live exchange, however its id collides.
  * - **Cancellation**: every request takes an `AbortSignal`; the SSE
  *   subscriptions take one too and settle `aborted` under it. `close()`
  *   aborts every live stream the client opened.
@@ -253,11 +257,34 @@ export function createAppClient(options: AppClientOptions): AppClient {
     // A signal that aborted while the exchange was already settling still
     // aborts: the result of a cancelled exchange is never delivered.
     if (signal?.aborted) throw new DOMException('aborted', 'AbortError');
-    return parseEnvelope(requestId, response);
+    // Session-scoped pairing (#436): the presence table's `required`
+    // commands (`deactivate`, `inspect`, `apply-edit`) are the exchanges
+    // whose success envelopes ECHO the requesting pair, so their pairing
+    // verifies the envelope's session too. `activate` is excluded by
+    // design — its presence is `optional` and its response is scoped to
+    // the NEW target pair (ADR-0006 §7), never the requester's.
+    const pairingSession =
+      COMMAND_SESSION_PRESENCE[command.kind] === 'required' ? session : undefined;
+    return parseEnvelope(requestId, pairingSession, response);
   }
 
-  /** Parses one exchange's body: a success envelope's result, or the sanitized error. */
-  async function parseEnvelope(requestId: string, response: Response): Promise<ResponseEnvelope> {
+  /**
+   * Parses one exchange's body: a success envelope's result, or the
+   * sanitized error. A success envelope pairs with its exchange only
+   * when its `requestId` matches AND — on the session-scoped path — its
+   * `session` echoes the requesting pair. Request ids are minted from a
+   * PER-DOCUMENT counter (document-scoped, never globally unique), so
+   * across a switch a dead generation's envelope can carry the same id;
+   * the pair check keeps a stale success envelope — a hostile worker's
+   * replayed bytes — from resolving a live exchange as a forged commit
+   * (#436). The stale shape lands on the existing unmatched-envelope
+   * path: the transport catch-all, an honest failure to the write loop.
+   */
+  async function parseEnvelope(
+    requestId: string,
+    session: SessionRef | undefined,
+    response: Response,
+  ): Promise<ResponseEnvelope> {
     let body: unknown;
     try {
       body = await response.json();
@@ -265,7 +292,13 @@ export function createAppClient(options: AppClientOptions): AppClient {
       throw AppClientError.transport();
     }
     const parsed = responseEnvelopeSchema.safeParse(body);
-    if (parsed.success && parsed.data.requestId === requestId) return parsed.data;
+    if (
+      parsed.success &&
+      parsed.data.requestId === requestId &&
+      pairsWithSession(parsed.data.session, session)
+    ) {
+      return parsed.data;
+    }
     // Not a success envelope for this exchange: it must be a protocol
     // error envelope — anything else is the transport catch-all.
     const failure = errorEnvelopeSchema.safeParse(body);
@@ -502,6 +535,25 @@ function isAbort(error: unknown): boolean {
 /** Field-wise pair equality — the client's own currency check (never identity). */
 function sameSession(a: SessionRef, b: SessionRef): boolean {
   return a.runtimeEpoch === b.runtimeEpoch && a.generation === b.generation;
+}
+
+/**
+ * The session half of exchange pairing (#436): a session-scoped exchange
+ * accepts only a success envelope carrying its requesting pair — an
+ * envelope from a dead generation must not pair even when the request
+ * ids collide. A session-less envelope cannot pair either: the
+ * protocol's presence tables already make one unparseable for the
+ * session-scoped result kinds (`RESULT_SESSION_PRESENCE`, the schema's
+ * own fail-closed wall), and this is the belt for any shape that slips
+ * past that. Launcher-scoped exchanges (`session` undefined) pair on
+ * the request id alone, exactly as they always have.
+ */
+function pairsWithSession(
+  envelopeSession: SessionRef | undefined,
+  requestSession: SessionRef | undefined,
+): boolean {
+  if (requestSession === undefined) return true;
+  return envelopeSession !== undefined && sameSession(envelopeSession, requestSession);
 }
 
 /** One bounded, abortable wait — the reconnect backoff. */

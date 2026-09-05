@@ -5,7 +5,7 @@ import type {
   WritePlan,
 } from '@wojciechpiskorz/astroix-protocol';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { type AppClientError, collectPages, createAppClient } from './app-client.ts';
+import { AppClientError, collectPages, createAppClient } from './app-client.ts';
 
 /**
  * The AppClient focused lane (#240): protocol-envelope construction,
@@ -180,6 +180,158 @@ describe('protocol request construction', () => {
     );
     const client = createAppClient({ clientCapability: CAPABILITY, origin: ORIGIN });
     await expect(client.projects()).rejects.toMatchObject({ kind: 'transport' });
+  });
+});
+
+describe('session-scoped pairing verifies the envelope’s session pair (#436)', () => {
+  /**
+   * The stale-request-delivery defense (#436, found by the K3 proof lane
+   * #256): request ids are minted from a PER-DOCUMENT counter (every
+   * served document starts at `req-1`), so across an A-B-A switch the
+   * dying generation's write envelope and the live one's can carry the
+   * SAME id. A hostile Service Worker captures generation A1's apply-edit
+   * success envelope and answers A2's live request with those bytes: the
+   * id pairs, and — without this defense — the live write loop resolves
+   * committed on a write that never reached the server. The session-scoped
+   * exchange path therefore pairs on the requesting PAIR as well as the
+   * id; the fixtures model A1 as SESSION and the returning A2 as NEXT.
+   */
+  const WRITE_PLAN: WritePlan = {
+    operation: 'replace-contents',
+    grant: {
+      token: 'b'.repeat(48),
+      kind: 'content',
+      operations: ['replace-contents'],
+      displayPath: 'src/content/blog/hello-builder.md',
+      baseline: { type: 'sha256', sha256: 'f'.repeat(64) },
+    },
+    contents: '---\ntitle: Written\n---\n\nbody\n',
+  };
+
+  /** A1's captured apply-edit success envelope interior — the replayed bytes. */
+  const A1_EDIT_SUCCESS = {
+    kind: 'edit',
+    result: {
+      revision: 1,
+      nextGrant: {
+        token: 'c'.repeat(48),
+        kind: 'content',
+        operations: ['replace-contents'],
+        displayPath: 'src/content/blog/hello-builder.md',
+        baseline: { type: 'sha256', sha256: 'e'.repeat(64) },
+      },
+    },
+  };
+
+  it('a colliding requestId with a dead generation’s session pair never resolves the live exchange — the forged commit is refused', async () => {
+    // THE leg (#436): the stub is the hostile worker — it answers A2's
+    // live apply-edit with A1's captured success bytes, echoing the live
+    // request's OWN id (the per-document counters collide by
+    // construction) while the envelope carries A1's dead pair. Pre-fix,
+    // this leg is red by construction: the id alone pairs, and
+    // `applyEdit` resolves the A1 edit result — the forged commit.
+    stubFetch(async (request) => {
+      const { requestId } = JSON.parse(request.body) as { requestId: string };
+      return jsonResponse(successBody(A1_EDIT_SUCCESS, requestId, SESSION));
+    });
+    const client = createAppClient({ clientCapability: CAPABILITY, origin: ORIGIN });
+    client.adoptSession(NEXT);
+    const error = (await capture(client.forSession(NEXT).applyEdit(WRITE_PLAN))) as AppClientError;
+    // The stale success lands on the existing unmatched-envelope path:
+    // the transport catch-all, never a resolved commit and never a
+    // laundered protocol error.
+    expect(error).toBeInstanceOf(AppClientError);
+    expect(error.kind).toBe('transport');
+    expect(error.envelope).toBeUndefined();
+  });
+
+  it('an envelope carrying the requesting pair alongside the matching id resolves normally — no false rejection', async () => {
+    // The fix's other edge: a genuine A2 answer (the envelope's session
+    // IS the requesting pair) must still pair on the id. Green pre-fix
+    // and post-fix — this leg guards against over-rejection.
+    stubFetch(async (request) => {
+      const { requestId } = JSON.parse(request.body) as { requestId: string };
+      return jsonResponse(successBody(A1_EDIT_SUCCESS, requestId, NEXT));
+    });
+    const client = createAppClient({ clientCapability: CAPABILITY, origin: ORIGIN });
+    client.adoptSession(NEXT);
+    const result = await client.forSession(NEXT).applyEdit(WRITE_PLAN);
+    expect(result.revision).toBe(1);
+    expect(result.nextGrant?.token).toBe('c'.repeat(48));
+  });
+
+  it('a launcher-scoped exchange pairs on the id alone, exactly as before — no session to verify', async () => {
+    // Launcher scope (`list-projects`; session forbidden by the
+    // protocol's presence tables): unchanged behavior. Green pre-fix and
+    // post-fix.
+    stubFetch(async () => jsonResponse(successBody({ kind: 'project-list', projects: [] })));
+    const client = createAppClient({ clientCapability: CAPABILITY, origin: ORIGIN });
+    await expect(client.projects()).resolves.toEqual([]);
+  });
+
+  it('an activate answered by the NEW target pair still resolves — the activation response never echoes the requester', async () => {
+    // The check's scope is the presence table's `required` commands
+    // (`deactivate`, `inspect`, `apply-edit`) — the exchanges whose
+    // success envelopes echo the requesting pair. `activate` is
+    // `optional` and its response is scoped to the NEW target pair
+    // (ADR-0006 §7), so a session-carrying activate request must keep
+    // pairing on the id alone. Green pre-fix and post-fix; red the day
+    // someone widens the check to "the request carried a session".
+    stubFetch(async () =>
+      jsonResponse(
+        successBody(
+          {
+            kind: 'activation',
+            target: { session: NEXT, projectKey: KEY },
+            snapshot: { active: { ref: NEXT, projectKey: KEY, state: 'ready' } },
+          },
+          'req-1',
+          NEXT,
+        ),
+      ),
+    );
+    const client = createAppClient({ clientCapability: CAPABILITY, origin: ORIGIN });
+    client.adoptSession(SESSION);
+    const outcome = await client.activate(KEY);
+    expect(outcome.target.session).toEqual(NEXT);
+    expect(client.currentSession).toEqual(NEXT);
+  });
+
+  it('a session-scoped success without its session does not parse — the protocol refuses it before any pairing (#436’s protocol read)', async () => {
+    // The protocol decision, as executable evidence:
+    // `RESULT_SESSION_PRESENCE` is `required` for `edit`, and the
+    // response envelope's superRefine rejects a session-scoped success
+    // without its SessionRef — so this shape is IMPOSSIBLE by protocol,
+    // not a runtime fail-closed branch. The schema is the wall; this leg
+    // is green pre-fix and post-fix.
+    stubFetch(async (request) => {
+      const { requestId } = JSON.parse(request.body) as { requestId: string };
+      return jsonResponse(successBody(A1_EDIT_SUCCESS, requestId));
+    });
+    const client = createAppClient({ clientCapability: CAPABILITY, origin: ORIGIN });
+    client.adoptSession(NEXT);
+    const error = (await capture(client.forSession(NEXT).applyEdit(WRITE_PLAN))) as AppClientError;
+    expect(error).toBeInstanceOf(AppClientError);
+    expect(error.kind).toBe('transport');
+  });
+
+  it('a schema-valid session-less success answering a session-scoped exchange cannot pair — the belt behind the schema', async () => {
+    // The belt: `project-list` is the one success shape the schema lets
+    // travel session-less. Answering a session-scoped apply-edit with it
+    // is refused by the pairing's session half (an envelope that cannot
+    // carry the requesting pair cannot pair). The terminal outcome is
+    // transport on both trees — pre-fix via the applyEdit kind check,
+    // post-fix one layer earlier at the pairing; the leg pins that no
+    // session-less shape ever resolves a session-scoped exchange.
+    stubFetch(async (request) => {
+      const { requestId } = JSON.parse(request.body) as { requestId: string };
+      return jsonResponse(successBody({ kind: 'project-list', projects: [] }, requestId));
+    });
+    const client = createAppClient({ clientCapability: CAPABILITY, origin: ORIGIN });
+    client.adoptSession(NEXT);
+    const error = (await capture(client.forSession(NEXT).applyEdit(WRITE_PLAN))) as AppClientError;
+    expect(error).toBeInstanceOf(AppClientError);
+    expect(error.kind).toBe('transport');
   });
 });
 
