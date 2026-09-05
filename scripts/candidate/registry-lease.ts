@@ -169,6 +169,58 @@ export async function runRegistryLeaseLeg(input: LeaseLegInput): Promise<LeaseLe
   return { ...shaped, firstBoot, secondBoot, residuals };
 }
 
+/** The boot observer's mutable state — the child, its spawn failure, the bounded stdout tail, and the boot flag. */
+interface BootState {
+  child: ChildProcess | null;
+  spawnError: string | null;
+  lines: string[];
+  booted: boolean;
+}
+
+/** The miss is diagnosable from the evidence log: the bounded tail of observed stdout lines. */
+function logBootMissTail(state: BootState, log: (line: string) => void): void {
+  log(`registry-lease: boot missed — stdout tail (last ${String(state.lines.length)} lines):`);
+  for (const observed of state.lines) log(`  | ${observed}`);
+}
+
+/**
+ * The boot observer: a report line split across chunk boundaries is parsed
+ * exactly once, never as two droppable fragments (the harness pump's
+ * carried-remainder law — a missed boot times out into a forced termination
+ * and burns the candidate label, so the observer must not lose the event to
+ * pipe chunking). The observed-lines tail is bounded and dumped on a miss,
+ * so the evidence log can always explain what the child actually said.
+ */
+function attachBootObserver(state: BootState): void {
+  const TAIL_LINES = 50;
+  let stdoutRemainder = '';
+  const observeLine = (raw: string): void => {
+    const line = raw.trim();
+    if (line.length === 0) return;
+    state.lines.push(line);
+    if (state.lines.length > TAIL_LINES) state.lines.splice(0, state.lines.length - TAIL_LINES);
+    if (line.startsWith('astroix-desktop: ')) {
+      const payload = line.slice('astroix-desktop: '.length);
+      try {
+        const event = JSON.parse(payload) as { kind?: unknown };
+        if (event.kind === 'control-plane-booted') state.booted = true;
+      } catch {
+        // a non-JSON product line is not this leg's subject
+      }
+    }
+  };
+  state.child?.stdout?.on('data', (chunk: Buffer) => {
+    const parts = (stdoutRemainder + chunk.toString('utf8')).split('\n');
+    stdoutRemainder = parts.pop() ?? '';
+    for (const part of parts) observeLine(part);
+  });
+  state.child?.stdout?.on('end', () => {
+    const final = stdoutRemainder;
+    stdoutRemainder = '';
+    observeLine(final);
+  });
+}
+
 /** One boot: launch, wait for the boot event, observe the lease, quit, settle. */
 async function bootAndQuit(
   boot: 1 | 2,
@@ -179,12 +231,7 @@ async function bootAndQuit(
   log: (line: string) => void,
 ): Promise<BootFacts> {
   const env = buildLaunchEnv(home, userData);
-  const state: {
-    child: ChildProcess | null;
-    spawnError: string | null;
-    lines: string[];
-    booted: boolean;
-  } = { child: null, spawnError: null, lines: [], booted: false };
+  const state: BootState = { child: null, spawnError: null, lines: [], booted: false };
   try {
     state.child = spawn(executable, [`--user-data-dir=${userData}`], {
       cwd: input.stagingRoot,
@@ -199,22 +246,7 @@ async function bootAndQuit(
       ? { code: state.child.exitCode, signal: state.child.signalCode }
       : null;
 
-  state.child?.stdout?.on('data', (chunk: Buffer) => {
-    for (const raw of chunk.toString('utf8').split('\n')) {
-      const line = raw.trim();
-      if (line.length === 0) continue;
-      state.lines.push(line);
-      if (line.startsWith('astroix-desktop: ')) {
-        const payload = line.slice('astroix-desktop: '.length);
-        try {
-          const event = JSON.parse(payload) as { kind?: unknown };
-          if (event.kind === 'control-plane-booted') state.booted = true;
-        } catch {
-          // a non-JSON product line is not this leg's subject
-        }
-      }
-    }
-  });
+  attachBootObserver(state);
   state.child?.stderr?.on('data', () => {
     // stderr is not this leg's subject (L1 and the smoke battery audit it)
   });
@@ -236,6 +268,7 @@ async function bootAndQuit(
   log(
     `registry-lease: boot ${String(boot)} — booted=${String(state.booted)} lease.present=${String(lease.present)} lease.mode=${String(lease.fileMode)} dir.mode=${String(lease.directoryMode)}`,
   );
+  if (!state.booted) logBootMissTail(state, log);
 
   // ——— quit through the app's own surface (L1's termination law, shared) ———
   let quitOutcome = 'not-attempted';
