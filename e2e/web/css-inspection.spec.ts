@@ -41,10 +41,10 @@ import {
  * SERIAL like the lane's other batteries: one control plane, one
  * supervisor-global active session — every leg restores the idle state.
  *
- * The landing/selection waits inherit the 5s expect default and are
- * load-shaped on a shared CI runner (#392); the panel's own settle
- * polls already carry 120s budgets — the rest grow to 30s, the asserted
- * values never change.
+ * Every locator expect in this battery is load-shaped on a shared CI
+ * runner (#392's class; #449's sweep closed the last of them); the
+ * panel's own settle polls carry 120s budgets, the rest take 30s — the
+ * asserted values never change.
  */
 
 /** The CSS panel's state word. */
@@ -91,19 +91,28 @@ test('the joined list renders the live truth: scoped effective form, global sour
   // selector rides verbatim (the compiler's cid attribute, never a
   // synthesis), from the page template's own scoped block.
   const winner = rows.first();
-  await expect(winner).toHaveAttribute('data-css-winner', 'true');
-  await expect(winner).toHaveAttribute('data-css-selector', '.hero-title');
+  await expect(winner).toHaveAttribute('data-css-winner', 'true', {
+    timeout: LOAD_BUDGET_MS,
+  });
+  await expect(winner).toHaveAttribute('data-css-selector', '.hero-title', {
+    timeout: LOAD_BUDGET_MS,
+  });
   await expect(winner).toHaveAttribute(
     'data-css-effective',
     /^\.hero-title\[data-astro-cid-[a-z0-9]+\]$/,
+    { timeout: LOAD_BUDGET_MS },
   );
-  await expect(winner).toHaveAttribute('data-css-file', 'src/pages/index.astro');
-  await expect(winner).toHaveAttribute('data-css-line', '24');
+  await expect(winner).toHaveAttribute('data-css-file', 'src/pages/index.astro', {
+    timeout: LOAD_BUDGET_MS,
+  });
+  await expect(winner).toHaveAttribute('data-css-line', '24', { timeout: LOAD_BUDGET_MS });
 
   // The three global occurrences follow in payload order — two plain,
   // one media-conditioned, all from the imported sheet, sanitized.
   const globals = rows.nth(1);
-  await expect(globals).toHaveAttribute('data-css-file', 'src/pages/home.css');
+  await expect(globals).toHaveAttribute('data-css-file', 'src/pages/home.css', {
+    timeout: LOAD_BUDGET_MS,
+  });
   await expect
     .poll(
       async () =>
@@ -120,13 +129,17 @@ test('the joined list renders the live truth: scoped effective form, global sour
     ]);
   const mediaRows = page.locator('[data-testid="css-rule"][data-css-media="(max-width: 640px)"]');
   await expect(mediaRows).toHaveCount(1, { timeout: LOAD_BUDGET_MS });
-  await expect(mediaRows.first()).toHaveAttribute('data-css-selector', '.hero-title');
+  await expect(mediaRows.first()).toHaveAttribute('data-css-selector', '.hero-title', {
+    timeout: LOAD_BUDGET_MS,
+  });
 
   // Exactly one winner; the effective form never renders for globals.
   await expect(page.locator('[data-testid="css-rule"][data-css-winner="true"]')).toHaveCount(1, {
     timeout: LOAD_BUDGET_MS,
   });
-  await expect(rows.nth(1)).toHaveAttribute('data-css-effective', '');
+  await expect(rows.nth(1)).toHaveAttribute('data-css-effective', '', {
+    timeout: LOAD_BUDGET_MS,
+  });
 
   // The disclosure sweep: nothing the module graph or the filesystem
   // owns ever enters the panel — sanctioned project-relative page/sheet
@@ -167,9 +180,15 @@ test('the read-only rule detail discloses, and a global-only element shows its s
   await canvasSelect(page, '.hero-lead');
   const leadRows = await readyRows(page);
   await expect(leadRows).toHaveCount(1, { timeout: LOAD_BUDGET_MS });
-  await expect(leadRows.first()).toHaveAttribute('data-css-selector', '.hero-lead');
-  await expect(leadRows.first()).toHaveAttribute('data-css-effective', '');
-  await expect(leadRows.first()).toHaveAttribute('data-css-file', 'src/pages/home.css');
+  await expect(leadRows.first()).toHaveAttribute('data-css-selector', '.hero-lead', {
+    timeout: LOAD_BUDGET_MS,
+  });
+  await expect(leadRows.first()).toHaveAttribute('data-css-effective', '', {
+    timeout: LOAD_BUDGET_MS,
+  });
+  await expect(leadRows.first()).toHaveAttribute('data-css-file', 'src/pages/home.css', {
+    timeout: LOAD_BUDGET_MS,
+  });
 
   // Restore the idle state for the next leg.
   await restoreIdle(page);
@@ -241,8 +260,12 @@ test('a style invalidation re-matches: the SSE refetch grows the list for the sa
     await expect(page.getByTestId('selection-tag')).toHaveText('h1', { timeout: LOAD_BUDGET_MS });
     // the new occurrence joins as a global source row from the same sheet
     const lastRow = rows.nth(4);
-    await expect(lastRow).toHaveAttribute('data-css-selector', '.hero-title');
-    await expect(lastRow).toHaveAttribute('data-css-file', 'src/pages/home.css');
+    await expect(lastRow).toHaveAttribute('data-css-selector', '.hero-title', {
+      timeout: LOAD_BUDGET_MS,
+    });
+    await expect(lastRow).toHaveAttribute('data-css-file', 'src/pages/home.css', {
+      timeout: LOAD_BUDGET_MS,
+    });
   } finally {
     await writeFile(cssPath, original);
   }

@@ -208,7 +208,9 @@ test('selection matches scoped runtime selectors through Element.matches and sur
     .getByTestId('selection-matches')
     .locator('li[data-match-media="(max-width: 640px)"]');
   await expect(media).toHaveCount(1, { timeout: LOAD_BUDGET_MS });
-  await expect(media).toHaveAttribute('data-match-selector', '.hero-title');
+  await expect(media).toHaveAttribute('data-match-selector', '.hero-title', {
+    timeout: LOAD_BUDGET_MS,
+  });
 
   // A differently-shaped element matches through the same law: the
   // global .hero-lead rule matches, no foreign scoped form does.
@@ -219,7 +221,7 @@ test('selection matches scoped runtime selectors through Element.matches and sur
   ).toHaveCount(1, { timeout: LOAD_BUDGET_MS });
   await expect(
     page.getByTestId('selection-matches').locator("li[data-match-selector*='data-astro-cid']"),
-  ).toHaveCount(0);
+  ).toHaveCount(0, { timeout: LOAD_BUDGET_MS });
 
   // Persistence: reselect the title, then RELOAD the canvas document —
   // the identity re-finds the element in the rebuilt DOM and the

@@ -153,7 +153,7 @@ test('deactivation removes shell state BEFORE the location replacement', async (
   expect(cleared).toContain('grants=0');
   expect(cleared).toContain('undo=0');
   // The document stayed: the replacement died at the abort, state still cleared.
-  await expect(page).toHaveURL(PROJECT_APP_URL);
+  await expect(page).toHaveURL(PROJECT_APP_URL, { timeout: LOAD_BUDGET_MS });
 
   // Restore the idle state for the next leg.
   await page.unroute(/launcher\.localhost/);

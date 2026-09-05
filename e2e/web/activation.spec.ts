@@ -88,7 +88,9 @@ test('a failed activation reports the sanitized failure and keeps the launcher',
     timeout: LOAD_BUDGET_MS,
   });
   await expect(page.getByTestId('session-label')).toHaveText('failed', { timeout: LOAD_BUDGET_MS });
-  await expect(page).toHaveURL(/launcher\.localhost:\d+\/__astroix\/app\//);
+  await expect(page).toHaveURL(/launcher\.localhost:\d+\/__astroix\/app\//, {
+    timeout: LOAD_BUDGET_MS,
+  });
 
   // Restore the idle state: a successful activation clears the failure,
   // its deactivation returns the neutral label.
