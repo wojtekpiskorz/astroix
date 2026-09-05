@@ -532,12 +532,18 @@ export async function establishedSockets(pids: readonly string[]): Promise<strin
 export async function quitNormally(run: PackagedAppRun): Promise<void> {
   await osascript(`tell application id "${BUNDLE_ID}" to quit`, 20_000);
   await run.waitForEvent('quit-settled', 'the quit transition settling', 90_000);
+  // The app-exit budget is the kit's real-GUI 90 s class, not the old
+  // 30 s (#445): quit-settled → process exit stretches under ambient
+  // machine load (several concurrent agent sessions are the standing
+  // operating mode), the exit promise settles by itself, and the bound
+  // is an upper bound only — a calm box pays nothing (#444's
+  // `registered` precedent).
   const settled = await Promise.race([
     run.exit,
     new Promise<{ code: number | null; signal: string | null }>((_, reject) =>
       setTimeout(
         () => reject(new Error('early-package: the app did not exit after quit-settled')),
-        30_000,
+        90_000,
       ),
     ),
   ]);
