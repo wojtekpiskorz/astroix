@@ -156,7 +156,7 @@ assertNonVacuousDiscovery({
   specDir: join('apps', 'web', 'e2e'),
   expectedSpecs: EXPECTED_APPS_WEB_E2E_SPECS,
   rationale:
-    'every spec in the content host tree belongs to an enumerated family (#240/#408 — the tree cannot grow a silent family)',
+    "every spec in the web host's e2e tree belongs to an enumerated family (#240/#408 — the tree cannot grow a silent family)",
 });
 
 // The lane's test-owned staging runs at CONFIG LOAD (ahead of the
