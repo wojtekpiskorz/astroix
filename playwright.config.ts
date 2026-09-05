@@ -39,8 +39,15 @@ function assertNonVacuousDiscovery(options: {
   rationale: string;
 }): void {
   const { project, specDir, expectedSpecs, rationale } = options;
+  // Recursive, matching the runner's `e2e/**/*.spec.ts` scope: the guard's
+  // floor AND ceiling cover every spec the lane would run, subdirectories
+  // included — `harness/` stays outside by holding `.ts` files, not by the
+  // scan's shape. (The string-narrowing predicate: recursive reads can
+  // surface Buffers for non-UTF-8 paths — those are never specs.)
   const specFiles = existsSync(specDir)
-    ? readdirSync(specDir).filter((name) => name.endsWith('.spec.ts'))
+    ? readdirSync(specDir, { recursive: true }).filter(
+        (name): name is string => typeof name === 'string' && name.endsWith('.spec.ts'),
+      )
     : [];
   const missing = expectedSpecs.filter((name) => !specFiles.includes(name));
   const emptied = specFiles.filter(
@@ -111,12 +118,12 @@ assertNonVacuousDiscovery({
 
 // The project-switch family's battery (the K-family) lives at the
 // vertical's owned path under apps/web, riding the chromium-content
-// project's e2e/** match today — #427 closed the same vacuity drift
-// #408 closed for the content family, one family further. The `harness/`
-// subdir stays outside the enumeration (the helper's non-recursive
-// top-level *.spec.ts scan already excludes it), and the enumeration is
-// correct under every answer to #427's open scoping ruling, which stays
-// with the owner.
+// project's e2e/** match today — the mechanical half of #427 (PR #435)
+// closed the same vacuity drift #408 closed for the content family, one
+// family further. The `harness/` subdir stays outside the enumeration
+// (it holds `.ts` files, not specs — and the recursive scan now guards
+// subdirectories too), and the enumeration is correct under every answer
+// to #427's open scoping ruling, which stays with the owner.
 // `client-reset.spec.ts` joined at #255 (K2): the client-reset proof
 // across A-B-A switching — the returning-A generation starts empty and
 // stale client authority is refused.
