@@ -86,7 +86,8 @@ export function createRouteStylesJoin(input: {
           routeComponent,
         },
       );
-      const staticRecords = buildCssIndex(await readProjectCssSources(input.seams.projectRoot));
+      const walk = await readProjectCssSources(input.seams.projectRoot);
+      const staticRecords = buildCssIndex(walk.sources);
       const records = joinEffectiveSelectors(staticRecords, compiled, {
         requiredScopedFiles: [routeComponent],
       });

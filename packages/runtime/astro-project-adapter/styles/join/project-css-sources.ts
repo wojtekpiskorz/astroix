@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { readdir, readFile } from 'node:fs/promises';
 import { join, relative, sep } from 'node:path';
 import type { SourceFile } from '@wojciechpiskorz/astroix-core';
@@ -11,6 +12,13 @@ import { stylesJoinRejected } from './effective-selector-join';
  * relative posix paths only; an absent or unreadable source directory
  * fails closed as a seam rejection instead of leaking a filesystem
  * error that names the root (ADR-0006 §7 output hygiene).
+ *
+ * Every file is read EXACTLY once, as bytes: the utf-8 string feeds the
+ * index, and the same read's SHA-256 digest (`fileDigests`, #405) is the
+ * walk-time freshness proof the converged payload publishes and the
+ * write enrichment re-verifies against a later read — one read, so the
+ * digest is byte-coherent with the indexed string by construction
+ * (never a second read's TOCTOU).
  *
  * Pre-alpha scope limitation (#302, owner ruling 2026-09-03): the walk
  * covers the project's DEFAULT source directory (`src/`) only — a
@@ -28,8 +36,21 @@ import { stylesJoinRejected } from './effective-selector-join';
 
 const SEAM_JOIN_SOURCE_WALK = 'styles join project CSS source walk';
 
-/** Reads the project's CSS sources for the static index, in deterministic walk order. */
-export async function readProjectCssSources(projectRoot: string): Promise<SourceFile[]> {
+/** The walked static truth: the pure index's sources plus each file's walk-time digest (#405). */
+export interface ProjectCssWalk {
+  /** The sources the pure indexer consumes — contents utf-8-decoded from the digested bytes. */
+  readonly sources: readonly SourceFile[];
+  /**
+   * Per project-relative posix file: SHA-256 hex over the exact bytes
+   * `contents` was decoded from at walk time — the indexed truth's own
+   * digest, published by the converged inspection for the enrichment's
+   * re-verification (same-length disk drift is a mismatch, never a fit).
+   */
+  readonly fileDigests: Readonly<Record<string, string>>;
+}
+
+/** Reads the project's CSS sources and their digests, in deterministic walk order. */
+export async function readProjectCssSources(projectRoot: string): Promise<ProjectCssWalk> {
   let files: string[];
   try {
     files = await collectSourceFiles(join(projectRoot, 'src'));
@@ -42,13 +63,14 @@ export async function readProjectCssSources(projectRoot: string): Promise<Source
     );
   }
   const sources: SourceFile[] = [];
+  const fileDigests: Record<string, string> = {};
   for (const file of files) {
-    sources.push({
-      file: relative(projectRoot, file).split(sep).join('/'),
-      contents: await readFile(file, 'utf8'),
-    });
+    const bytes = await readFile(file);
+    const relativeFile = relative(projectRoot, file).split(sep).join('/');
+    sources.push({ file: relativeFile, contents: bytes.toString('utf8') });
+    fileDigests[relativeFile] = createHash('sha256').update(bytes).digest('hex');
   }
-  return sources;
+  return { sources, fileDigests };
 }
 
 async function collectSourceFiles(directory: string): Promise<string[]> {
