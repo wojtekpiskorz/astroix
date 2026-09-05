@@ -64,10 +64,10 @@ import {
   createExecutor,
   type ExecutorInputs,
   type HostAdoptionSeam,
-  raceBoundedSettlement,
   type SeatStore,
   type SessionSeat,
   stopOwnedRuns,
+  stopOwnedWriteExecutors,
 } from './executor.ts';
 import { neverSpawnedRun } from './never-spawned.ts';
 
@@ -295,24 +295,7 @@ export async function createControlPlaneComposition(
     },
   });
   /** The composition's grant-table eviction — the one closure both F6's coordinator and F7's completion revoke through. */
-  const grantEviction = (session: SessionRef): number => {
-    const evicted = grantTables.get(pairKey(session))?.revokeSession(session) ?? 0;
-    grantTables.delete(pairKey(session));
-    // The session's write executor (#253, J3): the transition drained
-    // its fence before revocation, so its accepted work is terminal —
-    // the graceful stop releases the app-global edit-writer lease the
-    // successor's executor will need. Fire-and-forget with the exit
-    // observed by the handle's own `exited` bookkeeping; the next boot
-    // of an executor over the same private directory fails closed on
-    // lease contention, never writes around a live predecessor.
-    const handle = writeExecutors.get(pairKey(session));
-    if (handle !== undefined) {
-      writeExecutors.delete(pairKey(session));
-      editRevisions.delete(pairKey(session));
-      void handle.stop().catch(() => {});
-    }
-    return evicted;
-  };
+  const grantEviction = createGrantEviction({ grantTables, writeExecutors, editRevisions });
   // The revocation pass drives the RAW tables (F6's settled contract);
   // these views keep the document authority's live grants in lockstep —
   // a table death the authority never learns would leave a dead grant
@@ -504,63 +487,54 @@ export async function createControlPlaneComposition(
 }
 
 /**
- * The write executor stop wait's bound (#410): the composition's
- * graceful child-stop law — ADR-0006 §8's "graceful project stop after
- * authority revocation: 5 s", the plane supervisor's
- * `DEFAULT_STOP_TIMEOUT_MS` sibling for the other forked children. A
- * graceful `stop()` resolves on the child's `closed` message or its
- * exit; a child alive but unresponsive with no write in flight produces
- * neither, and the pre-#410 close loop awaited that promise with no
- * bound — the same bounded-outcome class #391 landed one seam over, at
- * teardown. The focused stop-bound legs inject their own bounds.
+ * The composition's grant-table eviction — the one closure both F6's
+ * coordinator and F7's completion revoke through. Exported as the REAL
+ * seam for the focused eviction legs (#431, `electronHostAdoption`'s
+ * precedent): a harness re-derivation would faithfully reproduce any
+ * eviction wiring defect — the pre-#431 shape deleted the handle from
+ * the map before a bare fire-and-forget stop owned it, and an
+ * unresponsive child then held the app-global edit-writer lease past
+ * every bound with no force path ever reaching it.
+ *
+ * The eviction itself is synchronous by the revocation pass's contract
+ * (`GrantTable.revokeSession` returns its count), and the session's
+ * write executor (#253, J3 — the transition drained its fence before
+ * revocation, so its accepted work is terminal) stops through the ONE
+ * bounded discipline: `stopOwnedWriteExecutors`, the same pass close()
+ * uses, FIRED here and owned by the pass — the graceful stop releases
+ * the app-global edit-writer lease the successor's executor will need,
+ * and a child alive but unresponsive costs at most the stop bound
+ * before the pass's kill path fires (the lease release riding the OS
+ * exit, never the orphaned holder the next boot over the same private
+ * directory would fail closed against). The map entries die only after
+ * the fired pass owns the handle, so close()'s own sweep re-reaching
+ * the pair later is the map's honest emptiness, never a missed stop.
  */
-const EXECUTOR_STOP_TIMEOUT_MS = 5000;
-
-/**
- * Stops the composition's forked write executors inside the stop bound
- * (#410) — close()'s teardown step. The happy paths are unchanged: a
- * graceful stop that settles (the `closed` message or the exit) resolves
- * immediately, never waiting the bound. A child alive but unresponsive
- * past the bound is disposed through the D5 force path (`kill` — SIGKILL
- * now, the app-global edit-writer lease released for the next boot's
- * executor) and the pass reports the honest `timed-out` verdict — the
- * worst outcome among the handles, in the bounded-drain vocabulary's
- * shape. The kill's own settlement is never awaited ahead of a race
- * (F6 `prepareForced`'s idiom): `kill()` returns the spawner's shared
- * stop promise, which settles only on the observed exit — so the exit
- * observation (`exited`) is raced against the same bound, and a child
- * stuck even past SIGKILL costs at most the bound again, never an
- * unbounded re-hang of close(); the lease release rides the OS exit,
- * not this await. Exported for the focused stop-bound legs over fake
- * handles.
- */
-export async function stopOwnedWriteExecutors(
-  handles: Iterable<WriteExecutorHandle>,
-  deadlineMs: number = EXECUTOR_STOP_TIMEOUT_MS,
-): Promise<'stopped' | 'timed-out'> {
-  let report: 'stopped' | 'timed-out' = 'stopped';
-  await Promise.all(
-    [...handles].map(async (handle) => {
-      // The shared race's generic verdict mapped onto this pass's own
-      // vocabulary: settled IS stopped here.
-      const race = await raceBoundedSettlement(
-        handle.stop().catch(() => {}),
-        deadlineMs,
-      );
-      if (race === 'timed-out') {
-        report = 'timed-out';
-        // The kill is fired, never awaited ahead of the race (the stop
-        // promise is unbounded; the exit observation is the bounded
-        // one) — the verdict stays `timed-out` either way.
-        void handle.kill().catch(() => {});
-        await raceBoundedSettlement(
-          handle.exited.catch(() => {}),
-          deadlineMs,
-        );
-      }
-    }),
-  );
-  return report;
+export function createGrantEviction(input: {
+  readonly grantTables: Map<string, GrantTable>;
+  readonly writeExecutors: Map<string, WriteExecutorHandle>;
+  readonly editRevisions: Map<string, number>;
+  /** The eviction's stop bound — the focused legs' tight injection; production never overrides it. */
+  readonly stopDeadlineMs?: number;
+}): (session: SessionRef) => number {
+  return (session) => {
+    const key = pairKey(session);
+    const evicted = input.grantTables.get(key)?.revokeSession(session) ?? 0;
+    input.grantTables.delete(key);
+    const handle = input.writeExecutors.get(key);
+    if (handle !== undefined) {
+      // The pass fires the graceful stop synchronously — it owns the
+      // handle from here on, so the map deletions below strand nothing.
+      // The catch is the corridor's belt idiom: the pass cannot reject
+      // today (every inner promise is caught; stop/kill only resolve),
+      // but a future synchronous throw must not surface as an unhandled
+      // rejection in the control-plane child.
+      void stopOwnedWriteExecutors([handle], input.stopDeadlineMs).catch(() => {});
+      input.writeExecutors.delete(key);
+      input.editRevisions.delete(key);
+    }
+    return evicted;
+  };
 }
 
 /**

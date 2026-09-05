@@ -519,6 +519,93 @@ describe('the grant-bound content write composition', () => {
     );
   }, 30_000);
 
+  it('bounds the hung dispose at the exit race — a child stuck even past SIGKILL never hangs the answer (#431)', async () => {
+    // The faithful spawner shape (#430's hungHandle idiom): kill() fires
+    // once and returns the SHARED stop promise, settling only on the
+    // observed exit — a child stuck even past SIGKILL produces neither,
+    // so a tree that awaits the kill's own settlement (the pre-#431
+    // dispose) hangs this response forever past the very bound that
+    // timed the edit out.
+    let kills = 0;
+    const stop = new Promise<void>(() => {});
+    const hung: WriteExecutorHandle = {
+      ready: Promise.resolve(),
+      execute: () => new Promise(() => {}),
+      stop: () => stop,
+      kill: () => {
+        kills += 1;
+        return stop;
+      },
+      exited: new Promise(() => {}),
+    };
+    const harness = await makeExecutor({ writeExecutor: hung, editOutcomeDeadlineMs: 25 });
+    const contract = editFixture('content-frontmatter-write.json');
+    const grant = await issueGrant(harness.table, contract.file, contract.baseline.hash);
+    const started = Date.now();
+    const outcome = await harness.execute(
+      editEnvelope({ operation: 'replace-contents', grant, contents: contract.written.contents }),
+    );
+    // The response settles at the outcome bound plus the dispose's own
+    // BOUNDED exit race (25 + 25 ms), never at the child's terminality
+    expect(Date.now() - started).toBeLessThan(1000);
+    expect(outcome).toEqual({
+      code: 'internal-error',
+      message: 'the request could not be completed',
+      retryable: false,
+    });
+    expect(kills).toBe(1);
+    expect(harness.writeExecutors.has(pairKey(SESSION))).toBe(false);
+  }, 5_000);
+
+  it('settles the hung dispose at the observed exit, not the dispose deadline — the force wait never outlives the OS exit (#431)', async () => {
+    // kill() observes the exit the moment it fires (the OS exit rides
+    // SIGKILL): the dispose's exit race settles at the observation, so
+    // the response lands at the outcome bound — the deadline-eating
+    // world would sit at 50 + 50 ms and never pass the bound below.
+    let kills = 0;
+    let settleStop: (() => void) | undefined;
+    let settleExited: (() => void) | undefined;
+    const stop = new Promise<void>((resolve) => {
+      settleStop = resolve;
+    });
+    const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(
+      (resolve) => {
+        settleExited = () => resolve({ code: null, signal: 'SIGKILL' });
+      },
+    );
+    const hung: WriteExecutorHandle = {
+      ready: Promise.resolve(),
+      execute: () => new Promise(() => {}),
+      stop: () => stop,
+      kill: () => {
+        kills += 1;
+        settleStop?.();
+        settleExited?.();
+        return stop;
+      },
+      exited,
+    };
+    const harness = await makeExecutor({ writeExecutor: hung, editOutcomeDeadlineMs: 50 });
+    const contract = editFixture('content-frontmatter-write.json');
+    const grant = await issueGrant(harness.table, contract.file, contract.baseline.hash);
+    const started = Date.now();
+    const outcome = await harness.execute(
+      editEnvelope({ operation: 'replace-contents', grant, contents: contract.written.contents }),
+    );
+    // Wall-clock sanity only: the expected world sits at ~50 ms (the outcome
+    // deadline plus the dispose settling at the observed exit); a
+    // deadline-eating dispose tree sits at >= 100 ms and the 5 s test bound
+    // catches the truly hung shapes. 500 ms is CI-load slack, not a looser
+    // truth — the kills() assertion below carries this leg's teeth.
+    expect(Date.now() - started).toBeLessThan(500);
+    expect(outcome).toEqual({
+      code: 'internal-error',
+      message: 'the request could not be completed',
+      retryable: false,
+    });
+    expect(kills).toBe(1);
+  }, 5_000);
+
   it('evicts a crashed executor and lazily respawns on the next write — no session-wide fail-closed (#391)', async () => {
     // The scripted child mimics the real handle's own exit discipline:
     // the dispatch hangs until the crash, and the crash resolves the
