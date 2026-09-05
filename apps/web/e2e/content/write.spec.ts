@@ -6,6 +6,7 @@ import { expect, type Page, type Request, test } from '@playwright/test';
 import {
   activateProject,
   activateSettled,
+  holdApplyEditResponses,
   LOAD_BUDGET_MS,
   restoreIdle,
   SETTLE_BUDGET_MS,
@@ -384,21 +385,7 @@ test('a stale response cannot overwrite the committed server result across a ses
   // would starve the write: the old session retires before the plan
   // crosses, the server refuses it as stale, and nothing commits —
   // a different leg, not this one.)
-  await page.route('**/__astroix/api/v1', async (route) => {
-    const body = route.request().postDataJSON() as { command?: { kind?: string } } | null;
-    if (body?.command?.kind === 'apply-edit') {
-      const response = await route.fetch();
-      await page.waitForTimeout(10_000);
-      try {
-        await route.fulfill({ response });
-      } catch {
-        // the request died with the replaced document — the stale
-        // response could not deliver anything, which is the point
-      }
-      return;
-    }
-    await route.fallback();
-  });
+  await holdApplyEditResponses(page);
 
   // SERIAL battery hygiene (#422, trap a): the leg's writes leave the
   // staged entry at the committed title, and the tail statement below

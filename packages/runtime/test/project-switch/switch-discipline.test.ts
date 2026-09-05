@@ -51,12 +51,6 @@ function errorCode(body: string): string {
   return (JSON.parse(body) as { error?: { code?: string } }).error?.code ?? 'none';
 }
 
-/**
- * The subtree's PLANE children — the worker and the managed dev server,
- * identified by their stable command markers (the sibling battery's own
- * oracle spelling: the `ps` polls appear as transient helpers a raw
- * child count would flicker on).
- */
 /** One bounded sleep — the observation window's interval. */
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => {

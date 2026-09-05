@@ -2,12 +2,12 @@ import { writeFile } from 'node:fs/promises';
 import { expect, type Page, type Request, type Response, test } from '@playwright/test';
 import {
   activateSettled,
-  BOOT_BUDGET_MS,
   CANVAS_FRAME,
   canvasSelect,
   cssBytes,
   expectedDeclarationWrite,
   LOAD_BUDGET_MS,
+  openGlobalEditor,
   restoreIdle,
   STAGED_CSS_FILE,
   WRITE_SETTLE_MS,
@@ -78,32 +78,11 @@ function captureWrites(page: Page): () => {
 
 /**
  * The batteries' shared activation prefix, the canvas selection, the
- * staged sheet's bytes, the settle budget, and the font-size oracle all
- * live in `spec-helpers.ts` (the lane's established home for the
- * batteries' carried duplication).
+ * staged sheet's bytes, the settle budget, the font-size oracle, and
+ * the open-editor local (#425's single-homing) all live in
+ * `spec-helpers.ts` (the lane's established home for the batteries'
+ * carried duplication).
  */
-
-/** Waits for the panel's ready list. */
-async function readyRows(page: Page) {
-  await expect(page.getByTestId('css-rule-list')).toBeVisible({ timeout: BOOT_BUDGET_MS });
-  return page.locator('[data-testid="css-rule"]');
-}
-
-/** Opens the editor on one GLOBAL row and returns one declaration's value input. */
-async function openGlobalEditor(
-  page: Page,
-  options: { readonly row?: number; readonly prop?: string; readonly served?: string } = {},
-) {
-  const row = options.row ?? 1;
-  const prop = options.prop ?? 'font-size';
-  const rows = await readyRows(page);
-  await expect(rows).toHaveCount(4, { timeout: LOAD_BUDGET_MS });
-  await page.locator('[data-testid="css-rule-edit"]').nth(row).click();
-  await expect(page.getByTestId('css-rule-editor')).toBeVisible({ timeout: LOAD_BUDGET_MS });
-  const input = page.locator(`[data-testid="css-decl-input"][data-css-prop="${prop}"]`);
-  await expect(input).toHaveValue(options.served ?? '3rem', { timeout: LOAD_BUDGET_MS });
-  return input;
-}
 
 /** The write badge's state word. */
 function writeState(page: Page) {

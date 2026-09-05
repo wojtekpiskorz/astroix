@@ -1,14 +1,15 @@
-import { writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
-import { expect, type Page, type Request, test } from '@playwright/test';
+import { expect, type Page, test } from '@playwright/test';
 import type { RequestEnvelope } from '@wojciechpiskorz/astroix-protocol';
 import {
   canvasSelect,
+  captureWriteCount,
   expectedDeclarationWrite,
+  holdApplyEditResponses,
   LOAD_BUDGET_MS,
+  restoreWritten,
   WRITE_SETTLE_MS,
 } from '../../../../e2e/web/spec-helpers.ts';
-import { stagedCopyRoot, WEB_LANE_PORT } from '../../src/stage-e2e.ts';
+import { WEB_LANE_PORT } from '../../src/stage-e2e.ts';
 import {
   type AbaCapture,
   abaActivate,
@@ -83,18 +84,6 @@ import { openHeldBodyMutation, stylesWriteFactOf } from './scenarios/wire.ts';
 /** The staged copy this battery writes (registered first — position 0); project B (position 1) is never written. */
 const WRITTEN = 'project-a' as const;
 const UNTOUCHED = 'project-b' as const;
-
-/** Counts the apply-edit requests that crossed. */
-function captureMutationCount(page: Page): () => number {
-  let count = 0;
-  page.on('request', (request: Request) => {
-    if (!request.url().endsWith('/__astroix/api/v1')) return;
-    if (request.method() !== 'POST') return;
-    const kind = (request.postDataJSON() as { command?: { kind?: string } } | null)?.command?.kind;
-    if (kind === 'apply-edit') count += 1;
-  });
-  return () => count;
-}
 
 /** Resolves when the next apply-edit REQUEST crosses — the in-flight dispatch's observable. */
 function waitForMutationCrossed(page: Page): Promise<void> {
@@ -172,15 +161,6 @@ async function recordedCssWriteStates(tab: Page): Promise<string[]> {
   });
 }
 
-/** Restores the staged bytes this battery touched — the lane's restore discipline. */
-async function restoreWritten(sheet: string, entry: string): Promise<void> {
-  await writeFile(join(stagedCopyRoot(WRITTEN), 'src', 'pages', 'home.css'), sheet);
-  await writeFile(
-    join(stagedCopyRoot(WRITTEN), 'src', 'content', 'blog', 'hello-builder.md'),
-    entry,
-  );
-}
-
 test.describe.configure({ mode: 'serial' });
 
 test('pending CSS and Content writes drain once through cooperative switches — the returning generation serves both, presentation cleared', async ({
@@ -188,7 +168,7 @@ test('pending CSS and Content writes drain once through cooperative switches —
   page,
 }) => {
   test.setTimeout(600_000);
-  const mutationCount = captureMutationCount(page);
+  const mutationCount = captureWriteCount(page);
   const sheetBefore = await abaSheetBytes(WRITTEN);
   const entryBefore = await abaEntryBytes(WRITTEN);
   const bSheetBefore = await abaSheetBytes(UNTOUCHED);
@@ -301,7 +281,7 @@ test('pending CSS and Content writes drain once through cooperative switches —
   // pending work resumed), and no new mutation crossed.
   const a2: AbaCapture = await abaActivate(switchTab, 0);
   expect(a2.generation).toBeGreaterThan(a1b.generation);
-  const a2Mutations = captureMutationCount(switchTab);
+  const a2Mutations = captureWriteCount(switchTab);
   await canvasSelect(switchTab, '.hero-title');
   await openGlobalEditor(switchTab, drainedSize);
   await expect(switchTab.getByTestId('css-write-status')).toHaveAttribute(
@@ -329,7 +309,7 @@ test('a held-body write is fenced while the switch forces past it — the lost p
   page,
 }) => {
   test.setTimeout(600_000);
-  const mutationCount = captureMutationCount(page);
+  const mutationCount = captureWriteCount(page);
   const sheetBefore = await abaSheetBytes(WRITTEN);
   const entryBefore = await abaEntryBytes(WRITTEN);
   const bSheetBefore = await abaSheetBytes(UNTOUCHED);
@@ -343,21 +323,7 @@ test('a held-body write is fenced while the switch forces past it — the lost p
   // request crosses immediately (the server accepts it, the executor
   // commits the bytes), and only the fulfilled response trails — the
   // POSTCOMMIT RESPONSE LOSS.
-  await page.route('**/__astroix/api/v1', async (route) => {
-    const body = route.request().postDataJSON() as { command?: { kind?: string } } | null;
-    if (body?.command?.kind === 'apply-edit') {
-      const response = await route.fetch();
-      await page.waitForTimeout(10_000);
-      try {
-        await route.fulfill({ response });
-      } catch {
-        // the request died with the replaced document — the stale
-        // response could not deliver anything, which is the point
-      }
-      return;
-    }
-    await route.fallback();
-  });
+  await holdApplyEditResponses(page);
 
   // the Content write commits server-side while its response is held.
   await titleInput(page).fill(`${servedTitle} (k3 held)`);

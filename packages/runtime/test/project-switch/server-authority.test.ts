@@ -205,13 +205,6 @@ async function entryOf(project: SwitchProject): Promise<string> {
   return await readFile(`${project.root}/${project.contentPath}`, 'utf8');
 }
 
-/**
- * The subtree's PLANE children — the worker and the managed dev server,
- * identified by their stable command markers. Counting by markers keeps
- * the oracle immune to this harness's own transient helpers: the `ps`
- * polls themselves appear as pre-exec `(node)` children while their
- * exec is in flight, so a raw child count flickers and can never settle.
- */
 /** Whether one promise settled inside the budget — a probe, never a naked sleep. */
 async function settledWithin(promise: Promise<unknown>, budgetMs: number): Promise<boolean> {
   return await Promise.race([

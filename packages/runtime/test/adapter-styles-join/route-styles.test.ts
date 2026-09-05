@@ -27,7 +27,7 @@ const ROUTE_COMPONENT = 'src/pages/index.astro';
 const DEV_CSS_MODULE = `virtual:astro:dev-css:${ROUTE_COMPONENT}`;
 
 const SEAM_DEV_CSS_IMPORT = 'virtual:astro:dev-css module import for the active route component';
-const SEAM_SOURCE_WALK =
+const SEAM_WALK =
   'styles join source-walk correspondence (compiled scoped modules ↔ walked static sources)';
 
 interface FakeComposition {
@@ -262,7 +262,7 @@ describe('createRouteStylesJoin (composition, over the real fixture sources)', (
       const error = rejection as AdapterError;
       expect(error.code).toBe('seam-rejected');
       expect(error.details).toMatchObject({
-        seam: SEAM_SOURCE_WALK,
+        seam: SEAM_WALK,
         seamClass: 'fail-closed private',
         expected: 'a static scoped block for at least one file the compiled scoped modules name',
         observed:
@@ -323,7 +323,7 @@ interface StagedCustomSrcDirWorld {
 async function stageCustomSrcDirWorld(): Promise<StagedCustomSrcDirWorld> {
   const projectRoot = await mkdtemp(join(tmpdir(), 'astroix-302-srcdir-'));
   for (const route of [LIB_ROUTE, SRC_ROUTE]) {
-    await mkdir(join(projectRoot, route.component, '..'), { recursive: true });
+    await mkdir(join(projectRoot, dirname(route.component)), { recursive: true });
     await writeFile(join(projectRoot, route.component), route.contents);
   }
 

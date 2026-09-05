@@ -1,16 +1,14 @@
-import { writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
 import { expect, type Locator, type Page, test } from '@playwright/test';
 import {
-  BOOT_BUDGET_MS,
   COMPLETE_RESET_TRACE,
   canvasSelect,
   LOAD_BUDGET_MS,
+  openGlobalEditor,
   PROJECT_APP_URL,
+  restoreWritten,
   SETTLE_BUDGET_MS,
   WRITE_SETTLE_MS,
 } from '../../../../e2e/web/spec-helpers.ts';
-import { stagedCopyRoot } from '../../src/stage-e2e.ts';
 import {
   type AbaCapture,
   type AbaShellState,
@@ -48,19 +46,6 @@ import {
 /** The staged copy this battery writes (registered first — position 0); project B (position 1) is never written. */
 const WRITTEN = 'project-a' as const;
 const UNTOUCHED = 'project-b' as const;
-
-/** Opens the CSS editor on the first GLOBAL row and returns the font-size input, waited to the served value. */
-async function openGlobalEditor(page: Page, servedValue: string): Promise<Locator> {
-  await expect(page.getByTestId('css-rule-list')).toBeVisible({ timeout: BOOT_BUDGET_MS });
-  await expect(page.locator('[data-testid="css-rule"]')).toHaveCount(4, {
-    timeout: LOAD_BUDGET_MS,
-  });
-  await page.locator('[data-testid="css-rule-edit"]').nth(1).click();
-  await expect(page.getByTestId('css-rule-editor')).toBeVisible({ timeout: BOOT_BUDGET_MS });
-  const input = page.locator('[data-testid="css-decl-input"][data-css-prop="font-size"]');
-  await expect(input).toHaveValue(servedValue, { timeout: LOAD_BUDGET_MS });
-  return input;
-}
 
 /** The Content pane's root. */
 function pane(page: Page): Locator {
@@ -110,15 +95,6 @@ async function awaitFreshZero(page: Page): Promise<void> {
     .toEqual(expect.objectContaining({ ...FRESH_ZERO, queries: 3 }));
 }
 
-/** Restores the staged bytes this battery touched — the lane's restore discipline. */
-async function restoreWritten(sheet: string, entry: string): Promise<void> {
-  await writeFile(join(stagedCopyRoot(WRITTEN), 'src', 'pages', 'home.css'), sheet);
-  await writeFile(
-    join(stagedCopyRoot(WRITTEN), 'src', 'content', 'blog', 'hello-builder.md'),
-    entry,
-  );
-}
-
 test.describe.configure({ mode: 'serial' });
 
 test('the returning generation starts at zero — B and A2 carry nothing of A1, and A2 serves fresh server truth', async ({
@@ -143,7 +119,7 @@ test('the returning generation starts at zero — B and A2 carry nothing of A1, 
   // wherever in the battery order it runs, and the bytes it captures
   // at entry are exactly what it restores at exit.
   await canvasSelect(page, '.hero-title');
-  const input = await openGlobalEditor(page, firstFontSize(sheetBefore));
+  const input = await openGlobalEditor(page, { served: firstFontSize(sheetBefore) });
   const servedValue = await input.inputValue();
   const target = servedValue === '3.5rem' ? '3.75rem' : '3.5rem';
   await input.fill(target);
@@ -184,7 +160,7 @@ test('the returning generation starts at zero — B and A2 carry nothing of A1, 
   // served sheet (A1's write never crossed projects), and the entry
   // form carries B's server truth — not A1's unwritten draft.
   await canvasSelect(switchTab, '.hero-title');
-  await openGlobalEditor(switchTab, firstFontSize(bSheetBefore));
+  await openGlobalEditor(switchTab, { served: firstFontSize(bSheetBefore) });
   await openEntry(switchTab, 'hello-builder');
   await expect(titleInput(switchTab)).toHaveValue(frontmatterTitle(bEntryBefore), {
     timeout: LOAD_BUDGET_MS,
@@ -205,7 +181,7 @@ test('the returning generation starts at zero — B and A2 carry nothing of A1, 
   // value (K1's law), while the undo stack is generation-local —
   // EMPTY on arrival despite A1 having landed one undoable write.
   await canvasSelect(switchTab, '.hero-title');
-  await openGlobalEditor(switchTab, target);
+  await openGlobalEditor(switchTab, { served: target });
   await expect(switchTab.getByTestId('css-undo')).toBeDisabled();
 
   // And A1's draft never survived either: the returning entry form

@@ -1,30 +1,28 @@
 import { expect, type Locator, type Page } from '@playwright/test';
 import {
-  BOOT_BUDGET_MS,
-  LOAD_BUDGET_MS,
+  openGlobalEditor as openGlobalEditorShared,
   SETTLE_BUDGET_MS,
 } from '../../../../../e2e/web/spec-helpers.ts';
 
 /**
  * The K3 scenario editor locals (#256): the two verticals' shared
- * open-the-editor spellings, scenario-scoped. These are the #425
- * battery-local spellings (the issue counts this lane's copies and
- * owns their absorption into `e2e/web/spec-helpers.ts` — the fifth
- * spelling stays scenario-local here, disclosed in the lane's PR, and
- * #425's single-homing proceeds as filed).
+ * open-the-editor spelling plus the entry-pane and served-truth
+ * derivations, scenario-scoped. #425's single-homing absorbed the
+ * open-editor local into `e2e/web/spec-helpers.ts` (the options-form
+ * home); this module consumes it under the scenario's
+ * positional-served vocabulary — the `abaFreezeResetState` alias
+ * precedent — so the battery's call sites keep their derived-served
+ * discipline unchanged.
  */
 
-/** Opens the CSS editor on the first GLOBAL row and returns the font-size input, waited to the served value. */
-export async function openGlobalEditor(page: Page, servedValue: string): Promise<Locator> {
-  await expect(page.getByTestId('css-rule-list')).toBeVisible({ timeout: BOOT_BUDGET_MS });
-  await expect(page.locator('[data-testid="css-rule"]')).toHaveCount(4, {
-    timeout: LOAD_BUDGET_MS,
-  });
-  await page.locator('[data-testid="css-rule-edit"]').nth(1).click();
-  await expect(page.getByTestId('css-rule-editor')).toBeVisible({ timeout: BOOT_BUDGET_MS });
-  const input = page.locator('[data-testid="css-decl-input"][data-css-prop="font-size"]');
-  await expect(input).toHaveValue(servedValue, { timeout: LOAD_BUDGET_MS });
-  return input;
+/**
+ * Opens the CSS editor on the first GLOBAL row and returns the font-size
+ * input, waited to the served value — the shared options-form spelling
+ * (#425, homed in `e2e/web/spec-helpers.ts`) under this module's
+ * positional-served shape.
+ */
+export function openGlobalEditor(page: Page, servedValue: string): Promise<Locator> {
+  return openGlobalEditorShared(page, { served: servedValue });
 }
 
 /** The Content pane's root. */

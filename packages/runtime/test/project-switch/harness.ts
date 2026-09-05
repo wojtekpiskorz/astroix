@@ -218,7 +218,6 @@ export interface WireCredentials {
   readonly project?: SwitchProject;
 }
 
-/** Boots the harness: stages A and B, composes the real control plane, registers both roots. */
 /**
  * The plane's real child pids (the K-family's process oracle): the subtree
  * minus this test process, keeping only the worker and the managed dev
@@ -235,6 +234,7 @@ export async function planePids(harness: SwitchHarness): Promise<number[]> {
     .map(([pid]) => pid);
 }
 
+/** Boots the harness: stages A and B, composes the real control plane, registers both roots. */
 export async function createSwitchHarness(): Promise<SwitchHarness> {
   const scratchRoot = await mkdtemp(join(tmpdir(), 'astroix-aba-'));
   const rootA = await stagedFixtureCopy(scratchRoot, 'project-a');
