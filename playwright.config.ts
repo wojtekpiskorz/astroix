@@ -19,12 +19,13 @@ import { stageWebLane, WEB_LANE_PORT } from './apps/web/src/stage-e2e.ts';
 
 // ——— the shared nonzero-discovery guard (#240's AC: a project "cannot
 // pass with zero tests") ———
-// The web and content projects name their expected spec sets here — a
-// spec missing, emptied, or landed unlisted fails EVERY playwright run
-// at config load — the plain-build project alone can never green the
-// lane. plain-build carries no enumeration (its nonzero guard is its
-// spec's own); the project-switch family riding chromium-content is
-// pending #427.
+// The web, content, and project-switch families name their expected
+// spec sets here — a spec missing, emptied, or landed unlisted fails
+// EVERY playwright run at config load — the plain-build project alone
+// can never green the lane. plain-build carries no enumeration (its
+// nonzero guard is its spec's own); the project-switch family rides
+// the chromium-content project's match today — its enumeration is
+// correct under every answer to #427's open scoping ruling.
 // One idiom for every project since #408 folded #374's rider: the web
 // project's dir scan and the content project's onetime single-file
 // check were two hand-rolled shapes, and they drifted — the second and
@@ -106,6 +107,28 @@ assertNonVacuousDiscovery({
   specDir: CONTENT_SPEC_DIR,
   expectedSpecs: EXPECTED_CONTENT_SPECS,
   rationale: 'the Content vertical lane must discover its expected tests (#251)',
+});
+
+// The project-switch family's battery (the K-family) lives at the
+// vertical's owned path under apps/web, riding the chromium-content
+// project's e2e/** match today — #427 closed the same vacuity drift
+// #408 closed for the content family, one family further. The `harness/`
+// subdir stays outside the enumeration (the helper's non-recursive
+// top-level *.spec.ts scan already excludes it), and the enumeration is
+// correct under every answer to #427's open scoping ruling, which stays
+// with the owner.
+// `client-reset.spec.ts` joined at #255 (K2): the client-reset proof
+// across A-B-A switching — the returning-A generation starts empty and
+// stale client authority is refused.
+// `server-authority.spec.ts` joined at #254 (K1): the server
+// stale-authority proof across A-B-A switching.
+const PROJECT_SWITCH_SPEC_DIR = join('apps', 'web', 'e2e', 'project-switch');
+const EXPECTED_PROJECT_SWITCH_SPECS = ['client-reset.spec.ts', 'server-authority.spec.ts'] as const;
+assertNonVacuousDiscovery({
+  project: 'project-switch',
+  specDir: PROJECT_SWITCH_SPEC_DIR,
+  expectedSpecs: EXPECTED_PROJECT_SWITCH_SPECS,
+  rationale: 'the project-switch family must discover its expected tests (#254/#255)',
 });
 
 // The lane's test-owned staging runs at CONFIG LOAD (ahead of the
