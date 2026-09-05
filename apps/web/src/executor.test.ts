@@ -1,4 +1,5 @@
-import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type {
@@ -16,6 +17,7 @@ import {
   createHostCapabilityGrants,
   type HostCapabilityGrants,
 } from '@wojciechpiskorz/astroix-runtime/api/http';
+import type { ConvergedStylesPayload } from '@wojciechpiskorz/astroix-runtime/astro-project-adapter/styles/convergence';
 import {
   createDocumentAuthority,
   type DocumentAuthority,
@@ -257,6 +259,8 @@ interface Harness {
   readonly completionResults: readonly CompletionResult[];
   /** The manual runs, in activation order. */
   readonly runs: readonly ManualRun[];
+  /** Project A's canonical root — a real directory the styles legs seed (#405). */
+  readonly rootA: string;
   execute(envelope: RequestEnvelope): Promise<ResponseEnvelope | PublicError>;
   close(): Promise<void>;
 }
@@ -423,6 +427,7 @@ async function bootHarness(
     reportedFailures,
     completionResults,
     runs,
+    rootA,
     execute: executor.execute,
     close: async () => {
       await rm(scratch, { recursive: true, force: true });
@@ -747,7 +752,7 @@ describe('the styles inspection route selection (#370)', () => {
       return {
         kind: 'styles',
         revision: 4,
-        payload: { revision: 4, invalidationRevision: 2, records: [] },
+        payload: { revision: 4, invalidationRevision: 2, records: [], fileDigests: {} },
       };
     };
     return { inspect, dispatched };
@@ -775,7 +780,7 @@ describe('the styles inspection route selection (#370)', () => {
       expect(response.result.result).toEqual({
         kind: 'styles',
         revision: 4,
-        payload: { revision: 4, invalidationRevision: 2, records: [] },
+        payload: { revision: 4, invalidationRevision: 2, records: [], fileDigests: {} },
       });
       // The mapping is the ruled two-step: route-selection in, then the
       // styles request carrying exactly the resolved component.
@@ -898,6 +903,197 @@ describe('the styles inspection route selection (#370)', () => {
       }
       expect(response.result.result.kind).toBe('routes');
       expect(dispatched).toEqual([{ kind: 'routes' }]);
+    } finally {
+      await h.close();
+    }
+  });
+});
+
+/**
+ * The styles write enrichment's per-file digest (#405): the converged
+ * payload's `fileDigests` are the freshness proof the enrichment
+ * re-verifies against its own disk read — closing the window the issue
+ * names, where a same-length drift between the indexed truth (the walk
+ * the payload's digest was stamped at) and the enrichment read let a
+ * length-fit gate pass and serve STALE RECORDS under a FRESHLY-ISSUED
+ * grant. The run seam is scripted exactly at the worker boundary (the
+ * sanctioned stand-in level): the payload arrives converged with the
+ * digest of the ORIGINAL bytes, while the real disk under the harness's
+ * real registry root holds the drifted ones — the grant table is the
+ * REAL D4 table over that root, so the legs observe the honest issue
+ * and refusal behavior, never a re-derived grant.
+ */
+describe('the styles write enrichment digest (#405)', () => {
+  const SHEET = 'src/styles/sheet.css';
+  const ORIGINAL = 'body {\n  color: #1e293b;\n}\n';
+  /** Same length, different bytes — the exact drift shape length-fit cannot see. */
+  const DRIFTED = ORIGINAL.replaceAll('#1e293b', '#0e193b');
+
+  function sha256(text: string): string {
+    return createHash('sha256').update(Buffer.from(text, 'utf8')).digest('hex');
+  }
+
+  /** One converged payload naming the sheet at the given digest epoch. */
+  function sheetPayload(fileDigests: Record<string, string>): unknown {
+    return {
+      revision: 4,
+      invalidationRevision: 2,
+      records: [
+        {
+          selector: 'body',
+          file: SHEET,
+          range: { start: 0, end: ORIGINAL.indexOf('}') + 1 },
+          line: 1,
+          media: null,
+          scoped: false,
+          styleBlockIndex: null,
+          effectiveSelector: null,
+        },
+      ],
+      fileDigests,
+    };
+  }
+
+  /** Boots the harness with the sheet on disk as `contents` and the styles dispatch scripted to `payload`. */
+  async function sheetHarness(
+    contents: string,
+    payload: unknown,
+  ): Promise<{ h: Harness; session: SessionRef }> {
+    const script: ProjectRun['inspect'] = async (request) => {
+      if (request.kind === 'route-selection') {
+        return {
+          kind: 'route-selection',
+          revision: 1,
+          payload: {
+            revision: 1,
+            selection: { pattern: '/', component: 'src/pages/index.astro' },
+          },
+        };
+      }
+      return { kind: 'styles', revision: 4, payload: payload as ConvergedStylesPayload };
+    };
+    const h = await bootHarness({ runInspect: script });
+    await mkdir(join(h.rootA, 'src/styles'), { recursive: true });
+    await writeFile(join(h.rootA, SHEET), contents);
+    const first = activationOf(await h.execute(activate(PROJECT_A, 'req-1')));
+    return { h, session: first.target.session };
+  }
+
+  /** The served styles payload — the inspection envelope's inner result. */
+  async function servedStylesPayload(
+    h: Harness,
+    session: SessionRef,
+  ): Promise<Record<string, unknown>> {
+    const response = await h.execute(
+      inspectRequest(session, { kind: 'styles', route: '/' }, 'req-2'),
+    );
+    if (!('protocolVersion' in response) || response.result.kind !== 'inspection') {
+      throw new Error(`expected an inspection envelope, received: ${JSON.stringify(response)}`);
+    }
+    if (response.result.result.kind !== 'styles') {
+      throw new Error(`expected a styles result, received: ${JSON.stringify(response.result)}`);
+    }
+    return response.result.result.payload as Record<string, unknown>;
+  }
+
+  it('serves NO write facts when the disk drifted from the published digest — same-length drift, the exact window', async () => {
+    // Red-pre: before #405 this leg FAILS — the drift is same-length, so
+    // the coherence gate's range-fit passes, the real grant table issues
+    // over the drifted bytes (its revision IS the drifted read's hash,
+    // so issuance succeeds), and the panel receives stale records under
+    // a fresh grant. With the digest, the mismatch serves the payload
+    // un-enriched: read-only records, no grant, no raw.
+    const { h, session } = await sheetHarness(DRIFTED, sheetPayload({ [SHEET]: sha256(ORIGINAL) }));
+    try {
+      const payload = await servedStylesPayload(h, session);
+      expect(payload.writeFacts).toBeUndefined();
+      // The read-only truth survives untouched: the records and the
+      // published digests are still served, exactly as the worker
+      // answered them.
+      expect(payload.records).toEqual([
+        {
+          selector: 'body',
+          file: SHEET,
+          range: { start: 0, end: ORIGINAL.indexOf('}') + 1 },
+          line: 1,
+          media: null,
+          scoped: false,
+          styleBlockIndex: null,
+          effectiveSelector: null,
+        },
+      ]);
+      expect(payload.fileDigests).toEqual({ [SHEET]: sha256(ORIGINAL) });
+    } finally {
+      await h.close();
+    }
+  });
+
+  it('serves the write fact when the disk still hashes to the published digest', async () => {
+    const { h, session } = await sheetHarness(
+      ORIGINAL,
+      sheetPayload({ [SHEET]: sha256(ORIGINAL) }),
+    );
+    try {
+      const payload = await servedStylesPayload(h, session);
+      expect(Array.isArray(payload.writeFacts)).toBe(true);
+      const facts = payload.writeFacts as Array<Record<string, unknown>>;
+      expect(facts).toHaveLength(1);
+      expect(facts[0]?.file).toBe(SHEET);
+      expect(facts[0]?.raw).toBe(ORIGINAL);
+      const grant = facts[0]?.grant as Record<string, unknown>;
+      expect(grant.kind).toBe('css');
+      expect(grant.displayPath).toBe(SHEET);
+      expect(typeof grant.token).toBe('string');
+    } finally {
+      await h.close();
+    }
+  });
+
+  it('serves NO write facts when the payload publishes no digests — freshness unprovable, never a grant', async () => {
+    // The additive-shape belt: a payload without `fileDigests` proves
+    // nothing beyond length, so no file is enriched — the pre-digest
+    // length-fit gate alone no longer mints a grant.
+    const { h, session } = await sheetHarness(ORIGINAL, sheetPayload({}));
+    try {
+      const payload = await servedStylesPayload(h, session);
+      expect(payload.writeFacts).toBeUndefined();
+    } finally {
+      await h.close();
+    }
+  });
+
+  it('serves NO write facts when the payload carries no fileDigests FIELD at all — the pre-#405 worker shape', async () => {
+    // The absent-field twin: a pre-#405 worker serves a payload with no
+    // `fileDigests` key whatsoever — the exact shape the additive-compat
+    // argument leans on. Both paths converge to the same refusal, but the
+    // absent field is pinned explicitly rather than left to the empty-map
+    // leg above (the additive field must never be assumed present).
+    const withEmptyMap = sheetPayload({}) as Record<string, unknown>;
+    const { fileDigests: _absent, ...preWorkerPayload } = withEmptyMap;
+    const { h, session } = await sheetHarness(ORIGINAL, preWorkerPayload);
+    try {
+      const payload = await servedStylesPayload(h, session);
+      expect(payload.writeFacts).toBeUndefined();
+    } finally {
+      await h.close();
+    }
+  });
+
+  it('serves NO write facts when a record overruns the digest-proven bytes — the structural belt holds', async () => {
+    // Digest equality proves the bytes; the range-fit check remains the
+    // structural belt over the records themselves — a record whose
+    // range exceeds even the PROVEN contents is an incoherent payload,
+    // never a write fact.
+    const payload = sheetPayload({ [SHEET]: sha256(ORIGINAL) }) as {
+      records: Array<{ range: { start: number; end: number } }>;
+    };
+    const record = payload.records[0];
+    if (record === undefined) throw new Error('scripting defect: no record to overrun');
+    record.range.end = ORIGINAL.length + 100;
+    const { h, session } = await sheetHarness(ORIGINAL, payload);
+    try {
+      const served = await servedStylesPayload(h, session);
+      expect(served.writeFacts).toBeUndefined();
     } finally {
       await h.close();
     }

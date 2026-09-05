@@ -1,3 +1,6 @@
+import { createHash } from 'node:crypto';
+import { readFile, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createConvergedStylesInspection } from '../../astro-project-adapter/styles/convergence/converged-styles-inspection';
 import { createStylesInvalidationSource } from '../../astro-project-adapter/styles/convergence/invalidation-source';
@@ -63,12 +66,59 @@ describe('createConvergedStylesInspection (fresh-runner discipline)', () => {
     // Plain data only: no Vite handles, no compiler implementation objects.
     expect(structuredClone(outcome.payload)).toEqual(outcome.payload);
 
+    // The per-file digests (#405): every walked file publishes the
+    // SHA-256 of its exact disk bytes — the indexed truth's own digest,
+    // keyed by the same project-relative path its records carry (the
+    // walk covers rule-free files too, so the keys are a superset of
+    // the record files — the blog pages walk without indexing).
+    const recordFiles = new Set(outcome.payload.records.map((record) => record.file));
+    expect(recordFiles.size).toBeGreaterThan(0);
+    expect(Object.keys(outcome.payload.fileDigests)).toEqual(
+      expect.arrayContaining([...recordFiles]),
+    );
+    expect(Object.keys(outcome.payload.fileDigests)).toContain('src/pages/blog/[slug].astro');
+    for (const [file, digest] of Object.entries(outcome.payload.fileDigests)) {
+      expect(digest).toBe(
+        createHash('sha256')
+          .update(await readFile(join(h.projectRoot, file)))
+          .digest('hex'),
+      );
+    }
+
     // The pass closed its runner and restored the transport accounting.
     expect(outcome.evidence).toEqual([
       { sendListenersBefore: 0, sendListenersAfterClose: 0, closedAfterClose: true },
     ]);
     expect(h.runners[0]?.isClosed()).toBe(true);
     expect(h.hotEmitter.listenerCount('send')).toBe(0);
+  });
+
+  it('publishes the digest of the bytes the pass walked — a silent disk edit moves it (same length included, #405)', async () => {
+    const h = await harness();
+    const inspector = createConvergedStylesInspection({ server: h.server, seams: h.seams });
+    const first = await inspector.inspect({ routeComponent: ROUTE_COMPONENT });
+    expect(first.outcome).toBe('converged');
+    if (first.outcome !== 'converged') return;
+
+    // A global-sheet edit the watcher never sees: parity holds (globals
+    // have no compiled counterpart), so the next pass converges — and
+    // its digest for the sheet is the NEW bytes' hash, never the stale
+    // pass's. The drift here is same-length, the exact shape a
+    // length-fit coherence gate cannot observe.
+    const sheet = join(h.projectRoot, 'src/pages/home.css');
+    const original = await readFile(sheet, 'utf8');
+    await writeFile(sheet, original.replaceAll('#475569', '#475568'), 'utf8');
+    const second = await inspector.inspect({ routeComponent: ROUTE_COMPONENT });
+    expect(second.outcome).toBe('converged');
+    if (second.outcome !== 'converged') return;
+    expect(second.payload.fileDigests['src/pages/home.css']).not.toBe(
+      first.payload.fileDigests['src/pages/home.css'],
+    );
+    expect(second.payload.fileDigests['src/pages/home.css']).toBe(
+      createHash('sha256')
+        .update(await readFile(sheet))
+        .digest('hex'),
+    );
   });
 
   it('creates a fresh runner per request — no shared runner cache across inspections', async () => {

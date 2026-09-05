@@ -82,7 +82,7 @@ async function fixtureJoin(
   compiledModules: readonly CompiledStyleModule[],
   requiredScopedFiles?: readonly string[],
 ) {
-  const staticRecords = buildCssIndex(await readProjectCssSources(FIXTURE_ROOT));
+  const staticRecords = buildCssIndex((await readProjectCssSources(FIXTURE_ROOT)).sources);
   return joinEffectiveSelectors(staticRecords, compiledModules, { requiredScopedFiles });
 }
 

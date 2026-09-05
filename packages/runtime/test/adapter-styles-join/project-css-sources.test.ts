@@ -1,4 +1,5 @@
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -11,6 +12,12 @@ import { readProjectCssSources } from '../../astro-project-adapter/styles/join/p
  * project-relative posix paths, skipping `node_modules` and dot
  * entries — and failing closed, sanitized, when the project source
  * directory is absent.
+ *
+ * The walk's per-file digests (#405) are proven over the SAME real
+ * bytes: each published digest is the SHA-256 of the file's exact
+ * contents on disk — the indexed truth's own hash, keyed by the same
+ * project-relative posix path the records carry, and moving exactly
+ * when the bytes move (same-length drift included).
  */
 
 describe('readProjectCssSources', () => {
@@ -24,17 +31,53 @@ describe('readProjectCssSources', () => {
       'src/node_modules/pkg/pkg.css': '.pkg { color: pink; }',
       'README.md': 'outside the source tree',
     });
-    const sources = await readProjectCssSources(root);
-    expect(sources.map((source) => source.file)).toEqual([
+    const walk = await readProjectCssSources(root);
+    expect(walk.sources.map((source) => source.file)).toEqual([
       'src/components/nested/card.astro',
       'src/pages/home.css',
       'src/pages/index.astro',
     ]);
-    expect(sources.map((source) => source.contents)).toEqual([
+    expect(walk.sources.map((source) => source.contents)).toEqual([
       '<style>.card { color: blue; }</style>',
       '.hero { display: grid; }',
       '<style>.a { color: red; }</style>',
     ]);
+  });
+
+  it('publishes a per-file digest over the exact bytes on disk, keyed by the walk path (#405)', async () => {
+    const root = await stageProject({
+      'src/pages/index.astro': '<style>.a { color: red; }</style>',
+      'src/pages/home.css': '.hero { display: grid; }',
+    });
+    const walk = await readProjectCssSources(root);
+    // The digest of every WALKED file, over the file's real bytes — the
+    // same key the records carry, the same value a later re-read hashes.
+    expect(Object.keys(walk.fileDigests).sort()).toEqual([
+      'src/pages/home.css',
+      'src/pages/index.astro',
+    ]);
+    for (const file of Object.keys(walk.fileDigests)) {
+      expect(walk.fileDigests[file]).toBe(sha256(await readFile(join(root, file))));
+    }
+    // Contents and digests come from ONE read: the utf-8 string decodes
+    // from exactly the digested bytes.
+    const sheet = walk.sources.find((source) => source.file === 'src/pages/home.css');
+    expect(sha256(Buffer.from(sheet?.contents ?? '', 'utf8'))).toBe(
+      walk.fileDigests['src/pages/home.css'],
+    );
+  });
+
+  it('moves the digest when the bytes move — same-length drift included (#405)', async () => {
+    const root = await stageProject({ 'src/pages/home.css': '.hero { color: #1e293b; }' });
+    const before = await readProjectCssSources(root);
+    // Same length, different bytes: the exact drift shape the length-fit
+    // coherence gate could not see — the digest must.
+    await writeFile(join(root, 'src/pages/home.css'), '.hero { color: #0e193b; }');
+    const after = await readProjectCssSources(root);
+    expect(after.sources[0]?.contents).toHaveLength(before.sources[0]?.contents.length ?? -1);
+    expect(after.fileDigests['src/pages/home.css']).not.toBe(
+      before.fileDigests['src/pages/home.css'],
+    );
   });
 
   it('fails closed, sanitized, when the project has no source directory', async () => {
@@ -59,9 +102,13 @@ describe('readProjectCssSources', () => {
 
   it('reads a source tree with no style sources as no sources (not a rejection)', async () => {
     const root = await stageProject({ 'src/pages/about.html': '<p>not a style source</p>' });
-    expect(await readProjectCssSources(root)).toEqual([]);
+    expect(await readProjectCssSources(root)).toEqual({ sources: [], fileDigests: {} });
   });
 });
+
+function sha256(bytes: Buffer): string {
+  return createHash('sha256').update(bytes).digest('hex');
+}
 
 async function stageProject(files: Record<string, string>): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), 'astroix-styles-join-sources-'));
