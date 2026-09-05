@@ -6,6 +6,7 @@ import {
   BOOT_BUDGET_MS,
   LOAD_BUDGET_MS,
   PROJECT_APP_URL,
+  recordLandedSession,
   restoreIdle,
 } from './spec-helpers.ts';
 
@@ -118,6 +119,7 @@ test('a styles inspection over the wire settles with the converged payload for t
   await expect(page.getByTestId('session-label')).toHaveText('idle', { timeout: LOAD_BUDGET_MS });
   await activateButton(page, 0).click();
   await page.waitForURL(PROJECT_APP_URL, { timeout: BOOT_BUDGET_MS });
+  await recordLandedSession(page);
 
   // The converged payload may need a later fresh pass while the young
   // dev server settles its initial watcher churn (E3's contract: the
@@ -234,6 +236,7 @@ test('the negatives: unresolvable route, absent selection, malformed selection, 
   await expect(page.getByTestId('session-label')).toHaveText('idle', { timeout: LOAD_BUDGET_MS });
   await activateButton(page, 0).click();
   await page.waitForURL(PROJECT_APP_URL, { timeout: BOOT_BUDGET_MS });
+  await recordLandedSession(page);
 
   // An unresolvable route — well-formed, served by nothing: the honest
   // route-shaped 404, never a component or a guess.

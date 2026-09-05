@@ -117,7 +117,18 @@ assertNonVacuousDiscovery({
 // and the port take an explicit env override for exclusive lane
 // steering (`ASTROIX_WEB_E2E_SCRATCH` / `ASTROIX_WEB_E2E_PORT`); the
 // defaults keep CI untouched.
-const stage = await stageWebLane();
+//
+// WORKERS SKIP THE STAGING (#422): Playwright re-evaluates the config
+// in every worker process, and a worker's `stageWebLane()` would WIPE
+// the scratch root mid-invocation — observed after any failed leg,
+// where Playwright retires the worker and the replacement worker's
+// re-stage deleted the staged copies under the still-active session's
+// live plane (the plane crashes, the staged bytes reset, and the next
+// battery inherits a doomed cascade instead of the honest warm shape).
+// Only the runner's own evaluation stages; workers inherit the
+// published `ASTROIX_WEB_E2E_SCRATCH` and never spawn the webServer,
+// so they need none of the staging's outputs.
+const stage = process.env.TEST_WORKER_INDEX === undefined ? await stageWebLane() : null;
 
 export default defineConfig({
   testDir: 'e2e',
@@ -131,16 +142,22 @@ export default defineConfig({
   use: {
     baseURL: `http://launcher.localhost:${WEB_LANE_PORT}`,
   },
-  webServer: {
-    command: `node --experimental-transform-types --import ./apps/web/raw-node-register.mjs --env-file=${stage.envFile} apps/web/src/main.ts`,
-    url: `http://launcher.localhost:${WEB_LANE_PORT}/__astroix/app/`,
-    // NEVER reuse (#350, CI included): a second concurrent lane hitting
-    // a busy port must fail loudly on its own spawn instead of silently
-    // driving the first lane's control plane (observed: a fresh epoch
-    // answering generation 3 — the other suite's burned attempts).
-    reuseExistingServer: false,
-    timeout: 120_000,
-  },
+  // Undefined in worker evaluations (#422 — see the staging note above):
+  // only the runner's own evaluation staged, and only it spawns the
+  // web server.
+  webServer:
+    stage === null
+      ? undefined
+      : {
+          command: `node --experimental-transform-types --import ./apps/web/raw-node-register.mjs --env-file=${stage.envFile} apps/web/src/main.ts`,
+          url: `http://launcher.localhost:${WEB_LANE_PORT}/__astroix/app/`,
+          // NEVER reuse (#350, CI included): a second concurrent lane hitting
+          // a busy port must fail loudly on its own spawn instead of silently
+          // driving the first lane's control plane (observed: a fresh epoch
+          // answering generation 3 — the other suite's burned attempts).
+          reuseExistingServer: false,
+          timeout: 120_000,
+        },
   projects: [
     {
       name: 'chromium',

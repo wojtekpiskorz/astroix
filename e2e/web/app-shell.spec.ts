@@ -8,6 +8,7 @@ import {
   LAUNCHER_APP_URL,
   LOAD_BUDGET_MS,
   PROJECT_APP_URL,
+  recordLandedSession,
 } from './spec-helpers.ts';
 
 /**
@@ -49,6 +50,7 @@ test('activation lands the rebuilt shell at a fresh generation with live session
   await expect(page.getByTestId('session-label')).toHaveText('idle', { timeout: LOAD_BUDGET_MS });
   await activateButton(page, 0).click();
   await page.waitForURL(PROJECT_APP_URL, { timeout: BOOT_BUDGET_MS });
+  await recordLandedSession(page);
 
   // The shell is bound at the committed pair: the retained identity
   // surfaces, the generation-scoped inspection, and the honest stream
@@ -109,6 +111,7 @@ test('deactivation removes shell state BEFORE the location replacement', async (
   await expect(page.getByTestId('session-label')).toHaveText('idle', { timeout: LOAD_BUDGET_MS });
   await activateButton(page, 0).click();
   await page.waitForURL(PROJECT_APP_URL, { timeout: BOOT_BUDGET_MS });
+  await recordLandedSession(page);
   await expect(page.getByTestId('inspect-revision')).toHaveText(/^\d+$/, {
     timeout: LOAD_BUDGET_MS,
   });
@@ -166,6 +169,7 @@ test('a repeated generation change with a delayed old-generation fetch aborts it
   await expect(page.getByTestId('session-label')).toHaveText('idle', { timeout: LOAD_BUDGET_MS });
   await activateButton(page, 0).click();
   await page.waitForURL(PROJECT_APP_URL, { timeout: BOOT_BUDGET_MS });
+  await recordLandedSession(page);
   await expect(page.getByTestId('inspect-revision')).toHaveText(/^\d+$/, {
     timeout: LOAD_BUDGET_MS,
   });
@@ -226,6 +230,7 @@ test('a repeated generation change with a delayed old-generation fetch aborts it
   await expect(page.getByTestId('session-label')).toHaveText('idle', { timeout: LOAD_BUDGET_MS });
   await activateButton(page, 0).click();
   await page.waitForURL(PROJECT_APP_URL, { timeout: BOOT_BUDGET_MS });
+  await recordLandedSession(page);
   await expect(page.getByTestId('session-generation')).toHaveText(/^\d+$/, {
     timeout: LOAD_BUDGET_MS,
   });

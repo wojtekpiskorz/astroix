@@ -1,7 +1,7 @@
-import { readFile } from 'node:fs/promises';
+import { readFile, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { expect, type Frame, type Page, type Route } from '@playwright/test';
-import { stagedCopyRoot } from '../../apps/web/src/stage-e2e.ts';
+import { settleMemoPath, stagedCopyRoot } from '../../apps/web/src/stage-e2e.ts';
 import { spliceText } from '../../packages/core/src/splice-writer.ts';
 
 /**
@@ -83,6 +83,12 @@ export async function activateProject(page: Page): Promise<void> {
   });
   await activateButton(page, 0).click();
   await page.waitForURL(PROJECT_APP_URL, { timeout: BOOT_BUDGET_MS });
+  // #422 (trap b): this landing records its session for the
+  // warm-activation memo too — a content leg that fails mid-test
+  // leaves the session active, and the next battery's settled
+  // activation over that warm shape must recognize it (the memo's
+  // law lives with activateSettled below).
+  await recordLandedSession(page);
 }
 
 /**
@@ -100,22 +106,129 @@ export async function restoreIdle(page: Page): Promise<void> {
 }
 
 /**
- * The batteries' shared activation prefix: land on the launcher,
- * activate, and WAIT FOR THE CANVAS TO SETTLE — the initial load plus
- * the young dev server's one post-connect self-reload (the canvas
- * battery's own HMR-leg discipline; a click racing that rebuild lands
- * on a document whose capture listener is between epochs and is lost).
- * Event-ordered: the two baseline navigations complete BEFORE the
- * settle clock starts, and the settle window proves no third navigation
- * is in flight. `position` selects the staged copy to activate (the
- * A-B-A switch harness reaches 1; every other battery takes the default
- * 0) — the ONE spelling of this settle discipline, never re-derived
- * (#254 review: the copy had already drifted at birth).
+ * The invocation-scoped warm-activation memo (#422, trap b): every
+ * (runtime epoch, generation) pair the lane's landings have served —
+ * the helper landings below AND every raw `activateButton` landing
+ * (#433 round 2: five raw-click specs and the A-B-A harness's
+ * idempotent landing used to fall outside the record, so a mid-test
+ * failure there still handed the next battery the misleading cold red
+ * this memo exists to kill) — kept as one JSON file keyed by the
+ * invocation's scratch root but living OUTSIDE it (the derivation is
+ * homed in `stage-e2e.ts` beside the root contract, and the lane's
+ * teardown removes the file with the root), so the record crosses the
+ * project/worker boundaries of the serial run (one control plane, one
+ * scratch root, one worker at a time). Its law rests on two supervisor
+ * truths: every activation attempt — committed, failed, or cancelled —
+ * consumes a FRESH generation, and the idempotent re-activation
+ * (#413/#419) returns the CURRENT session's pair. So a pair the memo
+ * already knows is the SAME live session — never a fresh plane, never
+ * a boot to wait through — but its RE-ATTACHED canvas iframe is a
+ * fresh client connect: the plane's one post-connect reload may fire
+ * on it again and TRAIL the settle threshold (the CI-observed warm
+ * shape), which the warm quiescence absorbs (see activateSettled). An
+ * unknown pair is a session this invocation never landed: a young
+ * plane whose one self-reload the settle discipline must still wait
+ * for.
  */
+
+/** The landed document's session identity — the bootstrap metas every served project document carries. */
+interface LandedSession {
+  readonly epoch: string;
+  readonly generation: number;
+}
+
+/** Reads the landed project document's session identity off its own served metas (the K harness's proven surface). */
+async function landedSession(page: Page): Promise<LandedSession> {
+  const epoch = await page.locator('meta[name="astroix-epoch"]').getAttribute('content');
+  const generation = await page.locator('meta[name="astroix-generation"]').getAttribute('content');
+  if (epoch === null || generation === null || !/^\d+$/.test(generation)) {
+    throw new Error('the landed project document did not carry its session identity metas');
+  }
+  return { epoch, generation: Number.parseInt(generation, 10) };
+}
+
+/**
+ * Records one landed session and answers whether it was already known —
+ * the warm/cold discriminator. Called by EVERY landing the lane serves:
+ * the two helpers below, and — since #433 round 2 — every raw
+ * `activateButton` landing directly (the raw-click specs and the A-B-A
+ * harness's idempotent landing discard the answer; recording alone is
+ * their job, so a mid-test failure ANYWHERE in the lane leaves the
+ * next battery's first settle warm-classified).
+ */
+export async function recordLandedSession(page: Page): Promise<boolean> {
+  const session = await landedSession(page);
+  const key = `${session.epoch}#${session.generation}`;
+  const path = settleMemoPath();
+  let known: string[];
+  try {
+    known = JSON.parse(await readFile(path, 'utf8')) as string[];
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      known = [];
+    } else {
+      throw error;
+    }
+  }
+  const warm = known.includes(key);
+  if (!warm) {
+    // The repo's atomic-write idiom (the fixed-file-store's, test-infra
+    // sized): same-directory temp + rename, so a crash mid-write leaves
+    // the previous whole file — never a truncated JSON the next read
+    // fails on with a confusing non-ENOENT parse error.
+    const tempPath = `${path}.tmp`;
+    await writeFile(tempPath, `${JSON.stringify([...known, key], undefined, 2)}\n`, 'utf8');
+    await rename(tempPath, path);
+  }
+  return warm;
+}
+
+/**
+ * The batteries' shared activation prefix: land on the launcher,
+ * activate, and WAIT FOR THE CANVAS TO SETTLE — the initial load plus,
+ * on a COLD activation, the young dev server's one post-connect
+ * self-reload (the canvas battery's own HMR-leg discipline; a click
+ * racing that rebuild lands on a document whose capture listener is
+ * between epochs and is lost). Event-ordered: the baseline navigations
+ * complete BEFORE the settle clock starts, and the settle window
+ * proves no further navigation is in flight. `position` selects the
+ * staged copy to activate (the A-B-A switch harness reaches 1; every
+ * other battery takes the default 0) — the ONE spelling of this
+ * settle discipline, never re-derived (#254 review: the copy had
+ * already drifted at birth).
+ *
+ * #422 (trap b): the settle is WARM-TOLERANT. The navigation count is
+ * a proxy for "the young server's one post-connect reload happened",
+ * and that proxy is simply wrong for the idempotent re-activation
+ * (#413/#419's law): activating an already-active project answers the
+ * CURRENT session over a warm plane, which legitimately settles with
+ * ONE canvas navigation — a fixed ≥ 2 baseline reds the NEXT battery's
+ * first settle after any upstream leg failed mid-test and left the
+ * session active, pointing at this helper instead of the real failure.
+ * The warm/cold discriminator is the landed session's memo membership
+ * (see the memo above): a known pair settles on ≥ 1 navigation, an
+ * unknown pair — a fresh plane — keeps the cold ≥ 2 reload guard. The
+ * warm law does NOT promise zero trailing navigations: the re-attached
+ * canvas iframe is a fresh client connect, so the plane's one
+ * post-connect reload may fire on it again and land AFTER the ≥ 1
+ * threshold (CI run 33932953309 caught exactly that inside the old
+ * zero-window). Warm quiescence therefore tolerates AT MOST that one
+ * trailing reload — the window re-anchors on it and absorbs it inside
+ * the settle budget — and reds on a second. The pair is recorded
+ * BEFORE the poll so a settle that fails still seeds the memo: the
+ * battery that follows a failed leg settles honestly.
+ */
+
+/** The post-threshold quiescence window — cold planes prove zero further navigations; warm planes tolerate the re-attached canvas's one trailing reload and re-anchor the window on it. */
+const QUIESCENCE_MS = 1500;
 export async function activateSettled(page: Page, position = 0): Promise<void> {
   const frameNavigations: string[] = [];
+  let lastNavigationAt = performance.now();
   const onNavigated = (frame: Frame): void => {
-    if (frame.parentFrame() !== null) frameNavigations.push(frame.url());
+    if (frame.parentFrame() !== null) {
+      frameNavigations.push(frame.url());
+      lastNavigationAt = performance.now();
+    }
   };
   page.on('framenavigated', onNavigated);
   await page.goto('/__astroix/app/');
@@ -125,12 +238,28 @@ export async function activateSettled(page: Page, position = 0): Promise<void> {
   await expect(page.getByTestId('canvas-origin-state')).toHaveText('project', {
     timeout: LOAD_BUDGET_MS,
   });
+  const warm = await recordLandedSession(page);
   await expect
     .poll(() => frameNavigations.length, { timeout: SETTLE_BUDGET_MS })
-    .toBeGreaterThanOrEqual(2);
+    .toBeGreaterThanOrEqual(warm ? 1 : 2);
   frameNavigations.length = 0;
-  await page.waitForTimeout(1500);
-  expect(frameNavigations).toEqual([]);
+  if (!warm) {
+    // COLD: the ≥ 2 threshold already counted the post-connect reload
+    // — the window proves NO further navigation.
+    await page.waitForTimeout(QUIESCENCE_MS);
+    expect(frameNavigations).toEqual([]);
+  } else {
+    // WARM: the one trailing reload is absorbed, not leaked — the
+    // window re-anchors on every navigation and only a SECOND one
+    // ("never more") can red.
+    await expect
+      .poll(() => performance.now() - lastNavigationAt, { timeout: SETTLE_BUDGET_MS })
+      .toBeGreaterThanOrEqual(QUIESCENCE_MS);
+    expect(
+      frameNavigations.length,
+      'the warm plane fired more than its one post-connect reload',
+    ).toBeLessThanOrEqual(1);
+  }
   page.removeListener('framenavigated', onNavigated);
 }
 

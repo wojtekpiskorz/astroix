@@ -116,6 +116,36 @@ export function stagedCopyRoot(name: string): string {
   return join(root, name);
 }
 
+/**
+ * The warm-activation memo's path OUTSIDE the scratch root, keyed by it
+ * (#422, trap b): the invocation identity without the wiped directory.
+ * The root is disposable by design: the staging wipes it on every real
+ * (re)stage, and Playwright re-evaluates the config in every worker —
+ * before the config's worker guard (#422), a replacement worker's
+ * re-evaluation wiped the root MID-INVOCATION after any failed leg (the
+ * memo died exactly when the warm shape needed it, and the live plane's
+ * staged files vanished under it). Outside the root the memo survives
+ * every wipe, and its keys are epoch-scoped, so a stale file from a
+ * previous invocation over an explicit (reused) scratch root can never
+ * match the new control plane's epoch. The derivation is homed here,
+ * beside `stagedCopyRoot` — the root contract it derives from is this
+ * module's own (#433 round 2: it was re-derived in `spec-helpers.ts`
+ * from the other side of the env var), and the lane's teardown removes
+ * the file alongside the root, so nothing accumulates across
+ * invocations. Fails loudly when no staging has run.
+ */
+export function settleMemoPath(): string {
+  const root = process.env[WEB_E2E_SCRATCH_ENV];
+  if (root === undefined || root === '') {
+    throw new Error(
+      `stage-e2e: ${WEB_E2E_SCRATCH_ENV} is unset — the warm-activation memo is keyed by the staging's scratch root (#422)`,
+    );
+  }
+  const tag = root.split(/[\\/]/).filter(Boolean).pop();
+  if (tag === undefined) throw new Error(`stage-e2e: malformed scratch root "${root}" (#422)`);
+  return join(dirname(root), `.astroix-${tag}-settle-generations.json`);
+}
+
 export interface WebLaneStage {
   readonly envFile: string;
   readonly launcherUrl: string;

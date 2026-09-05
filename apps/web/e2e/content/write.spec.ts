@@ -1,10 +1,11 @@
 import { readFileSync } from 'node:fs';
-import { readFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expect, type Page, type Request, test } from '@playwright/test';
 import {
   activateProject,
+  activateSettled,
   LOAD_BUDGET_MS,
   restoreIdle,
   SETTLE_BUDGET_MS,
@@ -32,7 +33,13 @@ import { stagedCopyRoot } from '../../src/stage-e2e.ts';
  * UI-only project-relative form).
  *
  * SERIAL like the lane's other batteries: one control plane, one
- * supervisor-global active session.
+ * supervisor-global active session — and the battery's exit restores
+ * the staged entry bytes it touched (#422): the legs chain their
+ * writes inside this file by design, the stale-response leg's tail is
+ * the green path's restore, and the file's `afterAll` (#433 round 2)
+ * is the failure-path tooth — it runs on failures and serial skips
+ * alike, the paths a leg-local `finally` could never reach — so
+ * whatever battery follows inherits the canonical fixture's own truth.
  *
  * Every landing/transition wait is load-shaped (#396, the #392 pass
  * extended to this battery): the shared activation prefix carries the
@@ -47,6 +54,30 @@ import { stagedCopyRoot } from '../../src/stage-e2e.ts';
 const PROJECT_A = stagedCopyRoot('project-a');
 /** The entry file the battery edits. */
 const ENTRY_FILE = join(PROJECT_A, 'src/content/blog/hello-builder.md');
+/**
+ * The canonical fixture's own entry bytes — the battery's restore
+ * target (#422): the staged copy is returned to the fixture's truth at
+ * the battery's exit, so whatever battery follows inherits pristine
+ * staged bytes, never this battery's writes. Read from the tracked
+ * fixture (the staging's immutable source), the same workspace-root
+ * path idiom as the frozen corpus below.
+ */
+const PRISTINE_ENTRY_BYTES = readFileSync(
+  join(
+    dirname(fileURLToPath(import.meta.url)),
+    '..',
+    '..',
+    '..',
+    '..',
+    'e2e',
+    'fixture',
+    'src',
+    'content',
+    'blog',
+    'hello-builder.md',
+  ),
+  'utf8',
+);
 
 /** The pane's root. */
 function pane(page: Page) {
@@ -369,6 +400,15 @@ test('a stale response cannot overwrite the committed server result across a ses
     await route.fallback();
   });
 
+  // SERIAL battery hygiene (#422, trap a): the leg's writes leave the
+  // staged entry at the committed title, and the tail statement below
+  // returns it to the canonical fixture's own truth — the GREEN path's
+  // restore, feeding the hygiene leg. The FAILURE paths (this leg or
+  // the ones above dying mid-write, and every serial skip they cause)
+  // are the file's `afterAll` tooth (#433 round 2): the `finally` that
+  // used to live here only ran on paths that reached it — legs 1-2
+  // dying mid-write skipped this leg entirely and handed the successor
+  // battery dirty bytes.
   await titleInput(page).fill('Delayed write title');
   await expect(page.getByTestId('intent-state')).toHaveAttribute('data-intent-state', 'ready', {
     timeout: LOAD_BUDGET_MS,
@@ -410,5 +450,54 @@ test('a stale response cannot overwrite the committed server result across a ses
   expect(await entryBytes()).toBe(expectedTitleWrite(before, 'Delayed write title'));
   expect(commands().writes).toHaveLength(1);
 
+  // the green path's restore (the failure paths are the afterAll's)
+  await writeFile(ENTRY_FILE, PRISTINE_ENTRY_BYTES);
+
+  await restoreIdle(page);
+});
+
+test('the battery leaves the staged entry at the fixture bytes — serial hygiene', async () => {
+  test.setTimeout(60_000);
+  // #422's trap-(a) proof, green case: the legs' writes restored at the
+  // stale-response leg's tail, so the staged copy the battery leaves
+  // behind equals the canonical fixture's own bytes — a serial battery
+  // that failed before its restore tail used to hand every later
+  // battery a project-a whose hello-builder title was `Delayed write
+  // title`. The leg itself only ever runs all-green (a serial failure
+  // skips it) — the FAILURE-path tooth is the file's `afterAll` below,
+  // which runs on failures and skips alike; this assertion reds the
+  // moment a green-path restore regresses.
+  expect(await entryBytes()).toBe(PRISTINE_ENTRY_BYTES);
+});
+
+test.afterAll(async () => {
+  // #422 trap (a)'s failure-path tooth (#433 round 2): the `finally`
+  // this replaced lived inside the stale-response leg, so serial
+  // skipping meant it only ever ran in the all-green case — legs 1-2
+  // dying mid-write (the paths that actually dirty the bytes) never
+  // reached it, and the successor battery inherited the dirty title.
+  // `afterAll` runs on failures and skips alike and returns the staged
+  // entry to the fixture canonical whatever happened above; the hygiene
+  // leg keeps the green case's proof.
+  await writeFile(ENTRY_FILE, PRISTINE_ENTRY_BYTES);
+});
+
+test('an idempotent re-activation over the already-active project settles through the shared discipline', async ({
+  page,
+}) => {
+  test.setTimeout(300_000);
+  // #422's trap-(b) teeth, asserted directly on the warm shape: the
+  // #413/#419 idempotent law — activating the already-active project
+  // answers the CURRENT session, never a fresh plane — and the shared
+  // settle discipline must hold HONESTLY over it: ≥ 1 canvas
+  // navigation, with the re-attached canvas's one trailing post-connect
+  // reload absorbed by the warm quiescence (CI run 33932953309 caught
+  // that reload inside the old zero-window) — never a misleading
+  // `>= 2, Received: 1` red, and never a zero-navigations quiescence
+  // red on the legitimate trailing reload, either of which would point
+  // the next battery at the settle helper instead of the real upstream
+  // failure that left the session active.
+  await activateProject(page);
+  await activateSettled(page);
   await restoreIdle(page);
 });

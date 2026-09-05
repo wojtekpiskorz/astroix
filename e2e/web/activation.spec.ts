@@ -1,7 +1,12 @@
 import { expect, test } from '@playwright/test';
 import { rawExchange, rawStatus } from '../../apps/web/src/e2e-wire.ts';
 import { WEB_LANE_PORT } from '../../apps/web/src/stage-e2e.ts';
-import { activateButton, BOOT_BUDGET_MS, LOAD_BUDGET_MS } from './spec-helpers.ts';
+import {
+  activateButton,
+  BOOT_BUDGET_MS,
+  LOAD_BUDGET_MS,
+  recordLandedSession,
+} from './spec-helpers.ts';
 
 /**
  * The activation battery of the web host's product E2E (#240): the
@@ -43,6 +48,7 @@ test('activation commits through the settled transition and lands on the project
   await page.waitForURL(/^http:\/\/(?!launcher)[a-z2-7]+\.localhost:\d+\/__astroix\/app\/$/, {
     timeout: BOOT_BUDGET_MS,
   });
+  await recordLandedSession(page);
   // The project document is bound at the committed pair: generation 1
   // (the epoch's first attempt) and a live inspection revision.
   await expect(page.getByTestId('session-generation')).toHaveText('1', { timeout: LOAD_BUDGET_MS });
@@ -64,6 +70,7 @@ test('deactivation completes the transition back to the launcher', async ({ page
   await page.waitForURL(/^http:\/\/(?!launcher)[a-z2-7]+\.localhost:\d+\/__astroix\/app\/$/, {
     timeout: BOOT_BUDGET_MS,
   });
+  await recordLandedSession(page);
   await page.getByTestId('deactivate').click();
   await page.waitForURL(/launcher\.localhost:\d+\/__astroix\/app\//, { timeout: BOOT_BUDGET_MS });
   await expect(page.getByTestId('session-label')).toHaveText('idle', { timeout: LOAD_BUDGET_MS });
@@ -89,6 +96,7 @@ test('a failed activation reports the sanitized failure and keeps the launcher',
   await page.waitForURL(/^http:\/\/(?!launcher)[a-z2-7]+\.localhost:\d+\/__astroix\/app\/$/, {
     timeout: BOOT_BUDGET_MS,
   });
+  await recordLandedSession(page);
   await page.getByTestId('deactivate').click();
   await page.waitForURL(/launcher\.localhost:\d+\/__astroix\/app\//, { timeout: BOOT_BUDGET_MS });
   await expect(page.getByTestId('session-label')).toHaveText('idle', { timeout: LOAD_BUDGET_MS });
@@ -105,6 +113,7 @@ test('a stale session is refused after an A-to-B-to-A cycle while the hostname s
   await page.waitForURL(/^http:\/\/(?!launcher)[a-z2-7]+\.localhost:\d+\/__astroix\/app\/$/, {
     timeout: BOOT_BUDGET_MS,
   });
+  await recordLandedSession(page);
   const projectAOrigin = new URL(page.url()).origin;
   const staleTab = page;
 
@@ -117,6 +126,7 @@ test('a stale session is refused after an A-to-B-to-A cycle while the hostname s
   await switchTab.waitForURL(/^http:\/\/(?!launcher)[a-z2-7]+\.localhost:\d+\/__astroix\/app\/$/, {
     timeout: BOOT_BUDGET_MS,
   });
+  await recordLandedSession(switchTab);
   const projectBOrigin = new URL(switchTab.url()).origin;
   expect(projectBOrigin).not.toBe(projectAOrigin);
 
@@ -135,6 +145,7 @@ test('a stale session is refused after an A-to-B-to-A cycle while the hostname s
   await switchTab.goto('/__astroix/app/');
   await activateButton(switchTab, 0).click();
   await switchTab.waitForURL(`${projectAOrigin}/__astroix/app/`, { timeout: BOOT_BUDGET_MS });
+  await recordLandedSession(switchTab);
   // Converge the generation text before the one-shot numeric read (#392:
   // a one-shot read of rendered state races the first commits under load).
   await expect(switchTab.getByTestId('session-generation')).toHaveText(/^\d+$/, {

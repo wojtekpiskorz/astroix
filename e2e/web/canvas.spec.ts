@@ -7,6 +7,7 @@ import {
   BOOT_BUDGET_MS,
   LOAD_BUDGET_MS,
   PROJECT_APP_URL,
+  recordLandedSession,
   restoreIdle,
 } from './spec-helpers.ts';
 
@@ -66,6 +67,7 @@ test('the canvas shares the project origin with direct contentDocument access at
   await expect(page.getByTestId('session-label')).toHaveText('idle', { timeout: LOAD_BUDGET_MS });
   await activateButton(page, 0).click();
   await page.waitForURL(PROJECT_APP_URL, { timeout: BOOT_BUDGET_MS });
+  await recordLandedSession(page);
   // The canvas observed its first project document: the gate opens.
   await expect(page.getByTestId('canvas-origin-state')).toHaveText('project', {
     timeout: LOAD_BUDGET_MS,
@@ -127,6 +129,7 @@ test('navigation follows natural routes and every load is observed', async ({ pa
   await expect(page.getByTestId('session-label')).toHaveText('idle', { timeout: LOAD_BUDGET_MS });
   await activateButton(page, 0).click();
   await page.waitForURL(PROJECT_APP_URL, { timeout: BOOT_BUDGET_MS });
+  await recordLandedSession(page);
   const origin = new URL(page.url()).origin;
   await expect(page.getByTestId('canvas-url')).toHaveText(`${origin}/`, {
     timeout: LOAD_BUDGET_MS,
@@ -171,6 +174,7 @@ test('selection matches scoped runtime selectors through Element.matches and sur
   await expect(page.getByTestId('session-label')).toHaveText('idle', { timeout: LOAD_BUDGET_MS });
   await activateButton(page, 0).click();
   await page.waitForURL(PROJECT_APP_URL, { timeout: BOOT_BUDGET_MS });
+  await recordLandedSession(page);
   await expect(page.getByTestId('canvas-origin-state')).toHaveText('project', {
     timeout: LOAD_BUDGET_MS,
   });
@@ -257,6 +261,7 @@ test('stock Vite HMR rides the proxied native websocket, updates the canvas with
   await expect(page.getByTestId('session-label')).toHaveText('idle', { timeout: LOAD_BUDGET_MS });
   await activateButton(page, 0).click();
   await page.waitForURL(PROJECT_APP_URL, { timeout: BOOT_BUDGET_MS });
+  await recordLandedSession(page);
   const origin = new URL(page.url()).origin;
   await expect(page.getByTestId('canvas-url')).toHaveText(`${origin}/`, {
     timeout: LOAD_BUDGET_MS,
@@ -367,6 +372,7 @@ test('an off-origin canvas stays visible with inspection disabled until it retur
   await expect(page.getByTestId('session-label')).toHaveText('idle', { timeout: LOAD_BUDGET_MS });
   await activateButton(page, 0).click();
   await page.waitForURL(PROJECT_APP_URL, { timeout: BOOT_BUDGET_MS });
+  await recordLandedSession(page);
   await expect(page.getByTestId('canvas-origin-state')).toHaveText('project', {
     timeout: LOAD_BUDGET_MS,
   });

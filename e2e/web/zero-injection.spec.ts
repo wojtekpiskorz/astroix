@@ -10,6 +10,7 @@ import {
   BOOT_BUDGET_MS,
   LOAD_BUDGET_MS,
   PROJECT_APP_URL,
+  recordLandedSession,
   restoreIdle,
 } from './spec-helpers.ts';
 
@@ -63,6 +64,7 @@ test('a full hosting loop leaves the managed project untouched — bytes and met
   await expect(page.getByTestId('session-label')).toHaveText('idle', { timeout: LOAD_BUDGET_MS });
   await activateButton(page, 0).click();
   await page.waitForURL(PROJECT_APP_URL, { timeout: BOOT_BUDGET_MS });
+  await recordLandedSession(page);
   // Start + inspect: the shell's live inspection and the loaded canvas.
   // Load-shaped landing waits, sized for a shared CI runner (#392).
   await expect(page.getByTestId('inspect-revision')).toHaveText(/^\d+$/, {
@@ -85,6 +87,7 @@ test('a full hosting loop leaves the managed project untouched — bytes and met
   await page.goto('/__astroix/app/');
   await activateButton(page, 0).click();
   await page.waitForURL(PROJECT_APP_URL, { timeout: BOOT_BUDGET_MS });
+  await recordLandedSession(page);
   await expect(page.getByTestId('canvas-origin-state')).toHaveText('project', {
     timeout: LOAD_BUDGET_MS,
   });
