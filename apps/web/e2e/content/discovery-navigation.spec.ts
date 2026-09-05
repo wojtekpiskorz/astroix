@@ -251,22 +251,19 @@ test('an out-of-band content edit refreshes the open panel — the content-famil
       .poll(() => (inspectionCounts.routes ?? 0) - routesBefore, { timeout: SETTLE_BUDGET_MS })
       .toBeGreaterThanOrEqual(1);
 
-    // The second half — the refreshed panel — rides the SAME cadence
-    // the write loop documents for its own landing gate: the served
-    // projection trails the file write by the content layer's own
-    // watcher sync, so the first push's refetch can read the pre-edit
-    // listing (a torn truth the loop never reopens on). A settle
-    // window — fixed, because the layer's sync has no observable this
-    // side of the wire — then a second out-of-band nudge to the same
-    // file mints another content-family push over the settled layer,
-    // and its refetch lands the row: convergence under repeated
-    // pushes, the honest product promise today (per-push
-    // convergence-retry is not a landed mechanism).
-    await page.waitForTimeout(2000);
-    await writeFile(
-      entryPath,
-      '---\nkind: out-of-band\npinned: true\n---\n\nAn out-of-band note.\n',
-    );
+    // The second half — the refreshed panel — converges after the
+    // SINGLE push, no second nudge: the first refetch can read the
+    // PRE-edit listing (the served content projection trails the file
+    // write by the content layer's own watcher sync — the torn truth
+    // #450/#387 disclosed), and the #451 content-family convergence
+    // retry belt closes it client-side: while the refetched payload's
+    // revision marker still reads the pre-push value, the belt
+    // re-fetches the content key on a short bounded backoff (250 ms →
+    // 500 ms → 1 s → 2 s, low single-digit seconds total), stopping at
+    // the first converged payload or at the budget. The settle budget
+    // stays load-shaped: it covers the belt's own budget plus the
+    // young dev server's inspection cadence, and the asserted value —
+    // the row — is the user-visible convergence.
     await expect(discoveryPanel(page).locator('[data-astroix-entry="out-of-band"]')).toHaveCount(
       1,
       { timeout: SETTLE_BUDGET_MS },

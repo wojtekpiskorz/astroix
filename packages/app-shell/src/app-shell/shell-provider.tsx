@@ -2,6 +2,7 @@ import type { QueryClient } from '@tanstack/react-query';
 import type { SessionRef } from '@wojciechpiskorz/astroix-protocol';
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import type { AppClient, SessionClient } from '../app-client.ts';
+import { armContentRetryBelt, type ContentRetryBelt } from '../query/content-retry-belt.ts';
 import { gatedSseHandlers } from '../query/session-events.ts';
 import { createShellQueryClient } from '../query/shell-query-client.ts';
 import type { ShellRole } from '../roles/capabilities.ts';
@@ -110,6 +111,11 @@ export function ShellProvider({
     clearShellResetTrace();
     const controller = controllerRef.current;
     if (controller === null) return;
+    // The content-family convergence belt's live handle (#451): one belt
+    // at a time — a re-arming push cancels the pending one, the effect's
+    // cleanup cancels the last, and the belt's own schedule dies with the
+    // session (the abort signal below, or the gate the reset closes).
+    let activeBelt: ContentRetryBelt | null = null;
     const subscription = session.events(
       gatedSseHandlers(gate, {
         onEvent: (envelope) => {
@@ -118,8 +124,31 @@ export function ShellProvider({
           // families' generation-scoped keys — the SSE→query bridge.
           const event = envelope.event;
           if (event.type === 'invalidation') {
+            activeBelt?.cancel();
+            activeBelt = null;
+            let contentRefetch: Promise<unknown> | null = null;
             for (const family of event.families) {
-              void ownedQueryClient.invalidateQueries({ queryKey: session.queryKey(family) });
+              const settle = ownedQueryClient.invalidateQueries({
+                queryKey: session.queryKey(family),
+              });
+              void settle;
+              if (family === 'content') contentRefetch = settle;
+            }
+            // The torn-truth belt (#451 over #450's disclosure): the
+            // content push's first refetch can read the pre-edit listing
+            // (the content layer's projection trails the file write);
+            // the belt re-fetches on a bounded backoff until the served
+            // payload's revision marker moves off the pre-push value.
+            if (contentRefetch !== null) {
+              activeBelt = armContentRetryBelt(
+                {
+                  queryClient: ownedQueryClient,
+                  session,
+                  gate,
+                  signal: controller.signal,
+                },
+                contentRefetch,
+              );
             }
           }
         },
@@ -138,6 +167,7 @@ export function ShellProvider({
       if (reason !== 'aborted') setStreamState(reason);
     });
     return () => {
+      activeBelt?.cancel();
       subscription.close();
       controller.abort();
       subscriptionRef.current = null;
