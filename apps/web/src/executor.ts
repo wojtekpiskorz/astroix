@@ -194,8 +194,9 @@ export interface ExecutorInputs {
    * deadline law (ADR-0006 §4 step 2's "up to 5 seconds"), consumed as
    * the ONE runtime constant through the fence's package surface (#410)
    * — the edit await can never give up before the fence's own law.
-   * Injectable so the focused legs bound it tightly; production never
-   * overrides it.
+   * Bounds two awaits: the outcome race and the hung dispose's exit
+   * race (#431) — both live under the fence's drain law. Injectable so
+   * the focused legs bound it tightly; production never overrides it.
    */
   readonly editOutcomeDeadlineMs?: number;
   /**
@@ -1098,15 +1099,21 @@ function trackExecutorExit(inputs: ExecutorInputs, key: string, handle: WriteExe
 }
 
 /**
- * Disposes one hung write executor (#391): the eviction is
- * identity-guarded and the kill's own settlement — the exit the
- * handle observes — is awaited before the caller answers, so the
- * app-global edit-writer lease is released and the next accepted
- * edit's lazy respawn does not race a dying predecessor's lease. The
- * D5 executor is disposable by charter, and SIGKILL is its documented
- * force path (the one F6's forced preparation takes): unsettled work
- * resolves `unknown`, which is exactly the uncertainty the timed-out
- * response already reported.
+ * Disposes one hung write executor (#391, bounded #431): the eviction is
+ * identity-guarded, the kill is FIRED and never awaited ahead of the
+ * race (F6 `prepareForced`'s law, mirrored at this seam), and the exit
+ * observation is raced against the same deadline law the outcome await
+ * used — `kill()` returns the spawner's shared stop promise, which
+ * settles only on the observed exit, so a child stuck even past SIGKILL
+ * would otherwise hang the response past the very bound that timed the
+ * edit out. The lease release rides the OS exit, not this await; the
+ * race's verdict is deliberately discarded — the caller already
+ * answered the timeout's uncertainty, and the eviction already ran, so
+ * the next accepted edit's lazy respawn never races a dying
+ * predecessor's lease. The D5 executor is disposable by charter, and
+ * SIGKILL is its documented force path (the one F6's forced preparation
+ * takes): unsettled work resolves `unknown`, which is exactly the
+ * uncertainty the timed-out response already reported.
  */
 async function disposeHungExecutor(
   inputs: ExecutorInputs,
@@ -1115,20 +1122,29 @@ async function disposeHungExecutor(
 ): Promise<void> {
   const key = pairKey(ref);
   if (inputs.writeExecutors.get(key) === handle) inputs.writeExecutors.delete(key);
-  await handle.kill().catch(() => {});
+  // The kill is fired, never awaited ahead of the race (the stop
+  // promise is unbounded; the exit observation is the bounded one) —
+  // the same force-wait shape the stop pass below takes.
+  void handle.kill().catch(() => {});
+  await raceBoundedSettlement(
+    handle.exited.catch(() => {}),
+    inputs.editOutcomeDeadlineMs ?? DRAIN_DEADLINE_MS,
+  );
 }
 
 /**
- * The one bounded-settlement race (#391's idiom, #410's shared home):
- * races one settlement promise against a deadline, never against the
- * child's terminality — the seam's two awaits (the edit outcome await
- * below, the composition teardown's write-executor stop wait in
- * control-plane.ts) are this one body, with the callers mapping the
- * generic verdict onto their own vocabulary. The raced promises
- * resolve, never reject (the fence settles a rejecting thunk as an
- * honest failure; the spawner's stop promise settles on the `closed`
- * message or the exit) — the rejection belt only preserves that
- * contract if those surfaces themselves drift.
+ * The one bounded-settlement race (#391's idiom, #410's shared home,
+ * the sweep's single seam #431): races one settlement promise against a
+ * deadline, never against the child's terminality — every bounded await
+ * over a write-executor settlement is this one body (the edit outcome
+ * await and the hung dispose's exit race below; the stop pass's stop
+ * and exit races — the pass the composition's close() AND grant
+ * eviction both consume), with the callers mapping the generic verdict
+ * onto their own vocabulary. The raced promises resolve, never reject
+ * (the fence settles a rejecting thunk as an honest failure; the
+ * spawner's stop promise settles on the `closed` message or the exit) —
+ * the rejection belt only preserves that contract if those surfaces
+ * themselves drift.
  */
 export function raceBoundedSettlement(
   settlement: Promise<unknown>,
@@ -1149,12 +1165,65 @@ export function raceBoundedSettlement(
   });
 }
 
-/** Stops a session's forked write executor, if any — the seat teardown's step. */
-export async function stopWriteExecutor(inputs: ExecutorInputs, ref: SessionRef): Promise<void> {
-  const handle = inputs.writeExecutors.get(pairKey(ref));
-  if (handle === undefined) return;
-  inputs.writeExecutors.delete(pairKey(ref));
-  await handle.stop().catch(() => {});
+/**
+ * The write executor stop wait's bound (#410): the composition's
+ * graceful child-stop law — ADR-0006 §8's "graceful project stop after
+ * authority revocation: 5 s", the plane supervisor's
+ * `DEFAULT_STOP_TIMEOUT_MS` sibling for the other forked children. A
+ * graceful `stop()` resolves on the child's `closed` message or its
+ * exit; a child alive but unresponsive with no write in flight produces
+ * neither, and the pre-#410 close loop awaited that promise with no
+ * bound — the same bounded-outcome class #391 landed one seam over, at
+ * teardown. The focused stop-bound legs inject their own bounds.
+ */
+const EXECUTOR_STOP_TIMEOUT_MS = 5000;
+
+/**
+ * Stops the composition's forked write executors inside the stop bound
+ * (#410) — close()'s teardown step and the grant eviction's fired stop
+ * (#431 — ONE stop discipline for both, the sweep's single seam). The
+ * happy paths are unchanged: a graceful stop that settles (the `closed`
+ * message or the exit) resolves immediately, never waiting the bound. A
+ * child alive but unresponsive past the bound is disposed through the
+ * D5 force path (`kill` — SIGKILL now, the app-global edit-writer lease
+ * released for the next boot's executor) and the pass reports the
+ * honest `timed-out` verdict — the worst outcome among the handles, in
+ * the bounded-drain vocabulary's shape. The kill's own settlement is
+ * never awaited ahead of a race (F6 `prepareForced`'s idiom): `kill()`
+ * returns the spawner's shared stop promise, which settles only on the
+ * observed exit — so the exit observation (`exited`) is raced against
+ * the same bound, and a child stuck even past SIGKILL costs at most
+ * the bound again, never an unbounded re-hang of the caller; the lease
+ * release rides the OS exit, not this await. Exported for the focused
+ * stop-bound legs over fake handles.
+ */
+export async function stopOwnedWriteExecutors(
+  handles: Iterable<WriteExecutorHandle>,
+  deadlineMs: number = EXECUTOR_STOP_TIMEOUT_MS,
+): Promise<'stopped' | 'timed-out'> {
+  let report: 'stopped' | 'timed-out' = 'stopped';
+  await Promise.all(
+    [...handles].map(async (handle) => {
+      // The shared race's generic verdict mapped onto this pass's own
+      // vocabulary: settled IS stopped here.
+      const race = await raceBoundedSettlement(
+        handle.stop().catch(() => {}),
+        deadlineMs,
+      );
+      if (race === 'timed-out') {
+        report = 'timed-out';
+        // The kill is fired, never awaited ahead of the race (the stop
+        // promise is unbounded; the exit observation is the bounded
+        // one) — the verdict stays `timed-out` either way.
+        void handle.kill().catch(() => {});
+        await raceBoundedSettlement(
+          handle.exited.catch(() => {}),
+          deadlineMs,
+        );
+      }
+    }),
+  );
+  return report;
 }
 
 /**
