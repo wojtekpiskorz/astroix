@@ -11,6 +11,13 @@ import {
   timedOutDrainFailure,
 } from './drain-report.ts';
 
+// The drain deadline's one home stays `drain-report.ts`; re-exported
+// here because THIS module is the fence's package surface — the web
+// executor's bounded edit await consumes the constant through it (#410),
+// so its outcome deadline and the fence's own drain law can never
+// silently diverge.
+export { DRAIN_DEADLINE_MS } from './drain-report.ts';
+
 /**
  * The EditFence (#237, F5; ADR-0006 §4 steps 2–4 and §9 `EditFence`):
  * the supervisor-side fence and the one bounded transition drain over a

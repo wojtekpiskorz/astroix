@@ -56,6 +56,7 @@ import {
   electronHostAdoption,
   type HostDocumentIdentity,
   type HostMainFrameHandshake,
+  stopOwnedWriteExecutors,
 } from './control-plane.ts';
 import {
   createExecutor,
@@ -991,5 +992,140 @@ describe("the composition teardown's owned-run stop (#365 addendum, #391)", () =
     lone.open();
     await closing;
     expect(settled).toBe(true);
+  });
+});
+
+describe("the composition teardown's write-executor stop bound (#410)", () => {
+  /**
+   * The unresponsive child: alive, never answering the stop control —
+   * no `closed` message, no exit — the shape that used to hang close()
+   * past every bound (the pre-#410 loop awaited `stop()` directly, and
+   * this promise never settles). `kill` mirrors the REAL spawner's
+   * force path (`executor-spawn.ts`): it fires once and returns the
+   * shared stop promise — which settles only on the observed exit,
+   * never on the kill itself — so a tree that awaits the kill's own
+   * settlement re-hangs exactly the way the real child stuck past
+   * SIGKILL would. The leg's `observeExit` hook opens that
+   * observation; a child stuck even past the kill simply never opens
+   * it.
+   */
+  function hungHandle(): {
+    readonly handle: WriteExecutorHandle;
+    readonly kills: () => number;
+    readonly observeExit: () => void;
+  } {
+    let kills = 0;
+    let settleStop: (() => void) | undefined;
+    const stop = new Promise<void>((resolve) => {
+      settleStop = resolve;
+    });
+    let settleExited: (() => void) | undefined;
+    const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(
+      (resolve) => {
+        settleExited = () => resolve({ code: null, signal: 'SIGKILL' });
+      },
+    );
+    const handle: WriteExecutorHandle = {
+      ready: Promise.resolve(),
+      execute: () => new Promise(() => {}),
+      stop: () => stop,
+      kill: () => {
+        kills += 1;
+        return stop;
+      },
+      exited,
+    };
+    const observeExit = (): void => {
+      settleStop?.();
+      settleExited?.();
+    };
+    return { handle, kills: () => kills, observeExit };
+  }
+
+  /**
+   * The healthy child: its graceful stop settles the moment the leg
+   * opens the gate — the `closed`-message happy path.
+   */
+  function gatedHandle(): {
+    readonly handle: WriteExecutorHandle;
+    readonly kills: () => number;
+    readonly open: () => void;
+  } {
+    let kills = 0;
+    let open: () => void = () => {};
+    const stop = new Promise<void>((resolve) => {
+      open = resolve;
+    });
+    const handle: WriteExecutorHandle = {
+      ready: Promise.resolve(),
+      execute: () => new Promise(() => {}),
+      stop: () => stop,
+      kill: async () => {
+        kills += 1;
+      },
+      exited: new Promise(() => {}),
+    };
+    return { handle, kills: () => kills, open };
+  }
+
+  it('resolves at the bound on an unresponsive child — the timeout verdict, the lease released through the force path', async () => {
+    const hung = hungHandle();
+    const started = Date.now();
+    // An un-bounded stop wait (the reverted remedy) never settles on
+    // this handle — the leg times out red on that tree; on this tree
+    // the pass resolves at the injected bound (both races: the stop's
+    // and the killed child's never-observed exit's).
+    const report = await stopOwnedWriteExecutors([hung.handle], 50);
+    // A small multiple of the injected bound — the 50 ms deadline twice
+    // (the stop race, then the exit race), never the 5000 ms default
+    // that a buggy tree would sit exactly on.
+    expect(Date.now() - started).toBeLessThan(1000);
+    expect(report).toBe('timed-out');
+    // The hung child is disposed through the D5 force path — the
+    // observed exit the lease release rides — exactly once
+    expect(hung.kills()).toBe(1);
+  });
+
+  it('settles a graceful stop immediately, never waiting the bound — and no force path fires', async () => {
+    const healthy = gatedHandle();
+    const started = Date.now();
+    const stopping = stopOwnedWriteExecutors([healthy.handle], 2000);
+    await new Promise((resolve) => setImmediate(resolve));
+    healthy.open();
+    const report = await stopping;
+    // The happy paths (the closed message, the exit) are unchanged:
+    // the pass settles when the child answers, well inside the bound
+    expect(Date.now() - started).toBeLessThan(2000);
+    expect(report).toBe('stopped');
+    expect(healthy.kills()).toBe(0);
+  });
+
+  it('settles the killed child at the observed exit, not the deadline — the force wait never outlives the OS exit', async () => {
+    const hung = hungHandle();
+    const started = Date.now();
+    const stopping = stopOwnedWriteExecutors([hung.handle], 50);
+    // Wait for the stop bound to trip the force path (bounded poll —
+    // the kills assertion fails honestly if it never fires), then
+    // observe the exit promptly: well inside the exit race's own 50 ms.
+    for (let ticks = 0; ticks < 100 && hung.kills() === 0; ticks += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    hung.observeExit();
+    expect(await stopping).toBe('timed-out');
+    expect(hung.kills()).toBe(1);
+    // The observation settles the wait — the deadline world cannot
+    // resolve before the stop bound plus the exit bound (50 + 50 ms).
+    expect(Date.now() - started).toBeLessThan(100);
+  });
+
+  it('reports the worst verdict across the pass — the hung child alone is disposed, the settled one untouched', async () => {
+    const hung = hungHandle();
+    const healthy = gatedHandle();
+    const stopping = stopOwnedWriteExecutors([healthy.handle, hung.handle], 50);
+    await new Promise((resolve) => setImmediate(resolve));
+    healthy.open();
+    expect(await stopping).toBe('timed-out');
+    expect(hung.kills()).toBe(1);
+    expect(healthy.kills()).toBe(0);
   });
 });

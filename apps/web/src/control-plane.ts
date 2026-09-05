@@ -64,6 +64,7 @@ import {
   createExecutor,
   type ExecutorInputs,
   type HostAdoptionSeam,
+  raceBoundedSettlement,
   type SeatStore,
   type SessionSeat,
   stopOwnedRuns,
@@ -488,15 +489,78 @@ export async function createControlPlaneComposition(
       await stopOwnedRuns(seatStore.active(), candidates);
       // Every forked write executor (#253, J3) stops with the plane —
       // the edit-writer lease releases only through the exit, and an
-      // orphaned holder would block the next boot's executor.
-      await Promise.all(
-        [...writeExecutors.values()].map((handle) => handle.stop().catch(() => {})),
-      );
+      // orphaned holder would block the next boot's executor. The stop
+      // wait is BOUNDED (#410): a child alive but unresponsive produces
+      // neither the `closed` message nor the exit, and the force path
+      // (not an unbounded await) is what releases its lease. The pass's
+      // verdict is deliberately discarded — this composition's teardown
+      // has no reporting channel (the runs' stop discards equally).
+      await stopOwnedWriteExecutors(writeExecutors.values());
       writeExecutors.clear();
       await listener.close();
       await registry.close();
     },
   };
+}
+
+/**
+ * The write executor stop wait's bound (#410): the composition's
+ * graceful child-stop law — ADR-0006 §8's "graceful project stop after
+ * authority revocation: 5 s", the plane supervisor's
+ * `DEFAULT_STOP_TIMEOUT_MS` sibling for the other forked children. A
+ * graceful `stop()` resolves on the child's `closed` message or its
+ * exit; a child alive but unresponsive with no write in flight produces
+ * neither, and the pre-#410 close loop awaited that promise with no
+ * bound — the same bounded-outcome class #391 landed one seam over, at
+ * teardown. The focused stop-bound legs inject their own bounds.
+ */
+const EXECUTOR_STOP_TIMEOUT_MS = 5000;
+
+/**
+ * Stops the composition's forked write executors inside the stop bound
+ * (#410) — close()'s teardown step. The happy paths are unchanged: a
+ * graceful stop that settles (the `closed` message or the exit) resolves
+ * immediately, never waiting the bound. A child alive but unresponsive
+ * past the bound is disposed through the D5 force path (`kill` — SIGKILL
+ * now, the app-global edit-writer lease released for the next boot's
+ * executor) and the pass reports the honest `timed-out` verdict — the
+ * worst outcome among the handles, in the bounded-drain vocabulary's
+ * shape. The kill's own settlement is never awaited ahead of a race
+ * (F6 `prepareForced`'s idiom): `kill()` returns the spawner's shared
+ * stop promise, which settles only on the observed exit — so the exit
+ * observation (`exited`) is raced against the same bound, and a child
+ * stuck even past SIGKILL costs at most the bound again, never an
+ * unbounded re-hang of close(); the lease release rides the OS exit,
+ * not this await. Exported for the focused stop-bound legs over fake
+ * handles.
+ */
+export async function stopOwnedWriteExecutors(
+  handles: Iterable<WriteExecutorHandle>,
+  deadlineMs: number = EXECUTOR_STOP_TIMEOUT_MS,
+): Promise<'stopped' | 'timed-out'> {
+  let report: 'stopped' | 'timed-out' = 'stopped';
+  await Promise.all(
+    [...handles].map(async (handle) => {
+      // The shared race's generic verdict mapped onto this pass's own
+      // vocabulary: settled IS stopped here.
+      const race = await raceBoundedSettlement(
+        handle.stop().catch(() => {}),
+        deadlineMs,
+      );
+      if (race === 'timed-out') {
+        report = 'timed-out';
+        // The kill is fired, never awaited ahead of the race (the stop
+        // promise is unbounded; the exit observation is the bounded
+        // one) — the verdict stays `timed-out` either way.
+        void handle.kill().catch(() => {});
+        await raceBoundedSettlement(
+          handle.exited.catch(() => {}),
+          deadlineMs,
+        );
+      }
+    }),
+  );
+  return report;
 }
 
 /**
