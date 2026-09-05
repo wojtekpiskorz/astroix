@@ -125,10 +125,33 @@ function parseChecksumArguments(
 }
 
 /** The flag commands' argument law: explicit `--flag value` pairs only, nothing guessed. */
+/**
+ * The flags each subcommand accepts — a typo'd flag is refused by name,
+ * never silently swallowed (#259 review round 5), and a flag given twice
+ * is an ambiguity, never a guess.
+ */
+const COMMAND_FLAGS: Readonly<Record<string, readonly string[]>> = {
+  preflight: [],
+  build: ['--label'],
+  qualify: [
+    '--label',
+    '--zip',
+    '--expected-sha256',
+    '--manifest-dir',
+    '--mode',
+    '--draft-ref',
+    '--built',
+    '--uploaded',
+    '--downloaded',
+  ],
+  run: ['--label', '--manifest-dir'],
+};
+
 function parseFlagArguments(
   command: string,
   rest: readonly string[],
 ): CliArguments | { code: string; detail: string } {
+  const knownFlags = COMMAND_FLAGS[command] ?? [];
   let index = 0;
   const flags = new Map<string, string | true>();
   while (index < rest.length) {
@@ -137,6 +160,18 @@ function parseFlagArguments(
     if (token === undefined) break;
     if (!token.startsWith('--')) {
       return { code: 'positional-argument', detail: `unexpected positional argument ${token}` };
+    }
+    if (!knownFlags.includes(token)) {
+      return {
+        code: 'unknown-flag',
+        detail: `flag ${token} is not a ${command} flag (known: ${knownFlags.join(' ') || 'none'}) — a typo'd flag must be refused, never silently swallowed`,
+      };
+    }
+    if (flags.has(token)) {
+      return {
+        code: 'duplicate-flag',
+        detail: `flag ${token} given twice — an ambiguous candidate is rejected, never guessed`,
+      };
     }
     if (token === '--uploaded' || token === '--downloaded') {
       flags.set(token, true);

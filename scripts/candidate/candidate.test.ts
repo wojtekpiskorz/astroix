@@ -944,6 +944,22 @@ test('the label law: a label outside the closed charset is refused before anythi
     assert.equal(run.status, 2, JSON.stringify(label));
     assert.match(run.stderr, /--label must be lower-case letters, digits, and dashes/);
   }
+  // The parser's own refusal law (#259 review round 5): a typo'd flag is
+  // refused by name (never silently swallowed — `--draftt-ref` would skip
+  // the wrong-asset cross-check) and a flag given twice is a rejection.
+  // Parse refusals precede the platform guard, so these legs run on every host.
+  const typo = runCandidateCli([
+    'qualify',
+    '--label',
+    'probe',
+    '--draftt-ref',
+    'wojtekpiskorz/astroix:t:a.zip',
+  ]);
+  assert.equal(typo.status, 2);
+  assert.match(typo.stderr, /--draftt-ref is not a qualify flag/);
+  const duplicate = runCandidateCli(['build', '--label', 'a', '--label', 'b']);
+  assert.equal(duplicate.status, 2);
+  assert.match(duplicate.stderr, /--label given twice/);
 });
 
 /**
