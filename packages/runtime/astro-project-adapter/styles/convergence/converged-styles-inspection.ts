@@ -10,10 +10,7 @@ import {
   joinEffectiveSelectors,
 } from '../join/effective-selector-join';
 import { readProjectCssSources } from '../join/project-css-sources';
-import {
-  createStylesInvalidationSource,
-  type StylesInvalidationSource,
-} from './invalidation-source';
+import { createRawInvalidationSource, type RawInvalidationSource } from './invalidation-source';
 import type { StylesMismatch } from './parity';
 import { verifyJoinedPayload, verifyStylesParity } from './parity';
 
@@ -118,7 +115,7 @@ export interface StylesInspectionInput {
 export interface ConvergedStylesInspector {
   inspect(input: StylesInspectionInput): Promise<StylesInspectionOutcome>;
   /** The revisioned invalidation source the inspector converges against. */
-  readonly invalidations: StylesInvalidationSource;
+  readonly invalidations: RawInvalidationSource;
 }
 
 /** The unfinished outcomes an exhausted attempt bound returns — never a payload. */
@@ -149,10 +146,10 @@ export function createConvergedStylesInspection(input: {
   readonly server: ViteServerLike;
   readonly seams: ProjectRuntimeSeams;
   /** An invalidation source built by the caller (tests, or a shared worker seam); defaults to one over the composition watcher. */
-  readonly invalidations?: StylesInvalidationSource;
+  readonly invalidations?: RawInvalidationSource;
 }): ConvergedStylesInspector {
   const invalidations =
-    input.invalidations ?? createStylesInvalidationSource(input.server, input.seams.projectRoot);
+    input.invalidations ?? createRawInvalidationSource(input.server, input.seams.projectRoot);
   let revision = 0;
   return {
     invalidations,

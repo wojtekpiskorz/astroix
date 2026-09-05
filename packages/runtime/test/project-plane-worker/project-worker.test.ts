@@ -381,6 +381,40 @@ describe('revisioned invalidation publication', () => {
     ]);
   });
 
+  // #387: a content edit used to publish the styles-only family set —
+  // the styles-family refetch that never refreshed the content key. The
+  // publication now carries the content family (with routes, the
+  // enumeration dependency), so the SSE→query bridge refetches the
+  // content vertical's own key.
+  it('a content edit publishes the content family — not the styles-only fallback (#387)', async () => {
+    const plane = fakePlane();
+    const worker = workerWith(plane, { debounceMs: 0 });
+    const events = captureEvents(worker);
+
+    plane.fireInvalidation('src/content/blog/hello-builder.md');
+    plane.fireInvalidation('src/content.config.ts');
+
+    expect(events).toEqual([
+      { type: 'invalidation', families: ['content', 'routes'], revision: 1 },
+      { type: 'invalidation', families: ['content', 'routes'], revision: 2 },
+    ]);
+  });
+
+  it('a file no family reads mints no publication — the drifted-source guard (#387)', async () => {
+    const plane = fakePlane();
+    const worker = workerWith(plane, { debounceMs: 0 });
+    const events = captureEvents(worker);
+
+    plane.fireInvalidation('src/assets/pixel.png');
+    await tick(10);
+    expect(events).toEqual([]);
+
+    // The stream stays healthy around the dropped event: the next truth
+    // file publishes at its own revision, monotonic.
+    plane.fireInvalidation('src/styles/main.css');
+    expect(events).toEqual([{ type: 'invalidation', families: ['styles'], revision: 2 }]);
+  });
+
   it('published events are plain serializable data, clean under the protocol disclosure guard', async () => {
     const plane = fakePlane();
     const worker = workerWith(plane, { debounceMs: 0 });

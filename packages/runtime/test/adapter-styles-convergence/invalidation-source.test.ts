@@ -2,17 +2,19 @@ import { EventEmitter } from 'node:events';
 import { describe, expect, it } from 'vitest';
 import type { ViteServerLike } from '../../astro-project-adapter/seam-readers';
 import {
-  createStylesInvalidationSource,
+  createRawInvalidationSource,
   isProjectRelativePath,
-  type StylesInvalidation,
+  type RawInvalidation,
 } from '../../astro-project-adapter/styles/convergence/invalidation-source';
 
 /**
- * The revisioned styles invalidation source (#227): the composition
- * watcher filtered to style-truth files, every accepted event minting
- * the next monotonic revision — the freshness half of the convergence
- * protocol. The events carry project-relative posix paths only (output
- * hygiene: the watcher's absolute paths never cross the seam).
+ * The revisioned invalidation source (#227, widened #387): the
+ * composition watcher filtered to the inspection-truth files — style
+ * truth AND content truth — every accepted event minting the next
+ * monotonic revision off ONE shared counter — the freshness half of the
+ * convergence protocol. The events carry project-relative posix paths
+ * only (output hygiene: the watcher's absolute paths never cross the
+ * seam).
  */
 
 const PROJECT_ROOT = '/proj/canonical-root';
@@ -51,11 +53,11 @@ function watcherEmitter(): { emitter: EventEmitter; watcher: WatcherWithOff } {
   };
 }
 
-describe('createStylesInvalidationSource', () => {
+describe('createRawInvalidationSource', () => {
   it('mints monotonic revisions for style-truth changes, project-relative', () => {
     const { emitter, watcher } = watcherEmitter();
-    const source = createStylesInvalidationSource(serverOver(watcher), PROJECT_ROOT);
-    const events: StylesInvalidation[] = [];
+    const source = createRawInvalidationSource(serverOver(watcher), PROJECT_ROOT);
+    const events: RawInvalidation[] = [];
     source.subscribe((event) => events.push(event));
 
     emitter.emit('change', `${PROJECT_ROOT}/src/pages/index.astro`);
@@ -72,17 +74,44 @@ describe('createStylesInvalidationSource', () => {
     expect(source.revision).toBe(4);
   });
 
-  it('ignores files outside the style-truth inputs', () => {
+  it('mints monotonic revisions for content-truth changes off the same counter (#387)', () => {
     const { emitter, watcher } = watcherEmitter();
-    const source = createStylesInvalidationSource(serverOver(watcher), PROJECT_ROOT);
-    const events: StylesInvalidation[] = [];
+    const source = createRawInvalidationSource(serverOver(watcher), PROJECT_ROOT);
+    const events: RawInvalidation[] = [];
     source.subscribe((event) => events.push(event));
 
+    // The E4 pass's inputs: the config module at its one certified
+    // location, and the whole `src/content/` subtree (the glob loaders'
+    // patterns are project-declared, so the subtree is the truth,
+    // extension-free — an out-of-band entry edit mints like any other).
     emitter.emit('change', `${PROJECT_ROOT}/src/content.config.ts`);
-    emitter.emit('change', `${PROJECT_ROOT}/src/content/blog/post.md`);
+    emitter.emit('change', `${PROJECT_ROOT}/src/content/blog/hello-builder.md`);
+    emitter.emit('add', `${PROJECT_ROOT}/src/content/notes/out-of-band.md`);
+    emitter.emit('unlink', `${PROJECT_ROOT}/src/content/gallery/showcase.md`);
+    // Interleaved style truth shares the counter: one stream, one
+    // revision discipline, whatever family the change implicates.
+    emitter.emit('change', `${PROJECT_ROOT}/src/pages/home.css`);
+
+    expect(events).toEqual([
+      { revision: 1, file: 'src/content.config.ts' },
+      { revision: 2, file: 'src/content/blog/hello-builder.md' },
+      { revision: 3, file: 'src/content/notes/out-of-band.md' },
+      { revision: 4, file: 'src/content/gallery/showcase.md' },
+      { revision: 5, file: 'src/pages/home.css' },
+    ]);
+    expect(source.revision).toBe(5);
+  });
+
+  it('ignores files outside the inspection-truth inputs', () => {
+    const { emitter, watcher } = watcherEmitter();
+    const source = createRawInvalidationSource(serverOver(watcher), PROJECT_ROOT);
+    const events: RawInvalidation[] = [];
+    source.subscribe((event) => events.push(event));
+
     emitter.emit('change', `${PROJECT_ROOT}/src/assets/pixel.png`);
     emitter.emit('change', `${PROJECT_ROOT}/node_modules/pkg/x.css`);
     emitter.emit('change', `${PROJECT_ROOT}/.astro/types.d.ts`);
+    emitter.emit('change', `${PROJECT_ROOT}/src/content/.hidden/note.md`);
     emitter.emit('change', '/elsewhere/src/pages/index.astro');
     emitter.emit('change', PROJECT_ROOT);
     emitter.emit('change', 42);
@@ -93,8 +122,8 @@ describe('createStylesInvalidationSource', () => {
 
   it('never discloses the project root or absolute paths in its events', () => {
     const { emitter, watcher } = watcherEmitter();
-    const source = createStylesInvalidationSource(serverOver(watcher), PROJECT_ROOT);
-    const events: StylesInvalidation[] = [];
+    const source = createRawInvalidationSource(serverOver(watcher), PROJECT_ROOT);
+    const events: RawInvalidation[] = [];
     source.subscribe((event) => events.push(event));
     emitter.emit('change', `${PROJECT_ROOT}/src/pages/index.astro`);
     expect(events[0]?.file).toBe('src/pages/index.astro');
@@ -104,8 +133,8 @@ describe('createStylesInvalidationSource', () => {
 
   it('unbinds a subscribed listener via the returned unsubscribe', () => {
     const { emitter, watcher } = watcherEmitter();
-    const source = createStylesInvalidationSource(serverOver(watcher), PROJECT_ROOT);
-    const seen: StylesInvalidation[] = [];
+    const source = createRawInvalidationSource(serverOver(watcher), PROJECT_ROOT);
+    const seen: RawInvalidation[] = [];
     const unbind = source.subscribe((event) => seen.push(event));
     emitter.emit('change', `${PROJECT_ROOT}/src/pages/index.astro`);
     unbind();
@@ -115,8 +144,8 @@ describe('createStylesInvalidationSource', () => {
 
   it('dispose unbinds the watcher subscriptions and freezes the stream', () => {
     const { emitter, watcher } = watcherEmitter();
-    const source = createStylesInvalidationSource(serverOver(watcher), PROJECT_ROOT);
-    const seen: StylesInvalidation[] = [];
+    const source = createRawInvalidationSource(serverOver(watcher), PROJECT_ROOT);
+    const seen: RawInvalidation[] = [];
     source.subscribe((event) => seen.push(event));
     expect(emitter.listenerCount('change')).toBe(1);
 
@@ -137,7 +166,7 @@ describe('createStylesInvalidationSource', () => {
     const onOnly = {
       on: (_event: string, _listener: (...args: never[]) => void) => ({}),
     };
-    const source = createStylesInvalidationSource(serverOver(onOnly), PROJECT_ROOT);
+    const source = createRawInvalidationSource(serverOver(onOnly), PROJECT_ROOT);
     expect(() => source.dispose()).not.toThrow();
   });
 

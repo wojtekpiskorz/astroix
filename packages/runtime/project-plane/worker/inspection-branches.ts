@@ -5,7 +5,7 @@ import type {
   StylesInspectionInput,
   StylesInspectionOutcome,
 } from '../../astro-project-adapter/styles/convergence/converged-styles-inspection.ts';
-import type { StylesInvalidation } from '../../astro-project-adapter/styles/convergence/invalidation-source.ts';
+import type { RawInvalidation } from '../../astro-project-adapter/styles/convergence/invalidation-source.ts';
 
 /**
  * The inspection seam the project-plane worker consumes (#230, ADR-0005
@@ -71,15 +71,16 @@ export interface InspectionBranches {
 /**
  * The raw revisioned invalidation stream the worker accumulates: E3's
  * invalidation source over the composition watcher (monotonic
- * revisions, project-relative style-truth files). The worker subscribes
- * to this stream and owns its subscription; the plane owns the source's
- * own watcher bindings and disposes them in `close()`.
+ * revisions, project-relative truth files — style truth plus the content
+ * truth #387 widened it to carry). The worker subscribes to this stream
+ * and owns its subscription; the plane owns the source's own watcher
+ * bindings and disposes them in `close()`.
  */
 export interface RawInvalidationSource {
   /** The latest observed invalidation revision (0 — none observed yet). */
   readonly revision: number;
   /** Registers a listener for future invalidation events; the return unbinds it. */
-  subscribe(listener: (event: StylesInvalidation) => void): () => void;
+  subscribe(listener: (event: RawInvalidation) => void): () => void;
 }
 
 /**

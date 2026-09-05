@@ -1,7 +1,7 @@
 {
   "version": 1,
   "description": "The non-vacuous web protocol checkpoint inventory (K4, #257). Derived from a real green battery run via `npm run check:web -- --update-inventory` — never hand-maintained. Case IDs are `<playwright project> :: <repo-relative spec path> :: <full test title path>`; every `npm run check:web` validates the battery's reported cases against this exact set.",
-  "totalCases": 52,
+  "totalCases": 53,
   "caseIds": [
     "chromium :: e2e/web/activation.spec.ts :: a failed activation reports the sanitized failure and keeps the launcher",
     "chromium :: e2e/web/activation.spec.ts :: a stale session is refused after an A-to-B-to-A cycle while the hostname serves the current pair",
@@ -35,6 +35,7 @@
     "chromium :: e2e/web/styles-inspection.spec.ts :: the negatives: unresolvable route, absent selection, malformed selection, stale session",
     "chromium :: e2e/web/zero-injection.spec.ts :: a full hosting loop leaves the managed project untouched — bytes and metadata identical",
     "chromium :: e2e/web/zero-injection.spec.ts :: the hosted project still builds with zero astroix bytes, and the canonical fixture stayed plain",
+    "chromium-content :: apps/web/e2e/content/discovery-navigation.spec.ts :: an out-of-band content edit refreshes the open panel — the content-family invalidation push (#387)",
     "chromium-content :: apps/web/e2e/content/discovery-navigation.spec.ts :: an unrouted entry click navigates nothing and reports the legend",
     "chromium-content :: apps/web/e2e/content/discovery-navigation.spec.ts :: discovery lists the fixture collections and entries from the live content and routes inspections",
     "chromium-content :: apps/web/e2e/content/discovery-navigation.spec.ts :: selecting a nested-id entry navigates the canvas to its natural route",

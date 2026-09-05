@@ -44,20 +44,56 @@ export type WorkerEvent = WorkerInvalidationEvent | WorkerDiagnosticEvent;
 
 /** Page components live under `src/pages/` — project-relative posix. */
 const PAGES_PREFIX = 'src/pages/';
+/** The canonical content subtree — the glob loaders' certified fixture bases. */
+const CONTENT_PREFIX = 'src/content/';
+/**
+ * The content config's certified fixture location (the E4 pass's one fixed
+ * import). This literal is the SAME truth as `CONTENT_CONFIG_MODULE` in
+ * `../../astro-project-adapter/content/content-probes.ts` (imported by the
+ * source filter) — worker modules stay minimal-dep for raw forked-Node
+ * loading, so the mapping carries the literal with this cross-reference
+ * instead of the import; a drift between the two is a seam-drift event.
+ */
+const CONTENT_CONFIG = 'src/content.config.ts';
 
 /**
- * Which inspection families one observed style-truth change can stale.
- * The landed raw stream (E3's invalidation source) carries only
- * `.astro`/`.css` files, so `styles` is always implicated — the index
- * payload's truth. A `.astro` under `src/pages/` additionally implicates
- * `routes`: page additions and removals change route patterns, and a
- * changed page can change `getStaticPaths` enumeration — over-wide in
- * the uncertain cases, never under (the same direction E3 chose for its
- * filter width).
+ * Which inspection families one observed truth change can stale (#387:
+ * the mapping is per TRUTH, not a styles fallback). The raw stream
+ * carries style truth and content truth:
+ *
+ * - content truth (the config module, the `src/content/` subtree) stales
+ *   `content` — the E4 pass's own inputs — and `routes`: a dynamic page's
+ *   `getStaticPaths` enumerates collections (the fixture's own
+ *   `[slug].astro` over `getCollection`), so an entry change can move
+ *   the routes payload's `renders`. Over-wide in the uncertain cases,
+ *   never under — the same doctrine as pages, and the same pair the
+ *   content write loop itself invalidates client-side after every
+ *   commit (#253 J3 refreshes content AND routes).
+ * - style truth (`.astro`/`.css`) always stales `styles` — the
+ *   index payload's truth. A `.astro` under `src/pages/` additionally
+ *   implicates `routes`: page additions and removals change route
+ *   patterns, and a changed page can change `getStaticPaths`
+ *   enumeration.
+ *
+ * A file under `src/content/` ending `.astro` is BOTH truths (a content
+ * entry carrying scoped styles) and implicates all three families. The
+ * empty set names a file no family reads — a shape the widened source
+ * filter never emits; the worker drops it rather than publish an
+ * empty-family event.
  */
 export function invalidationFamiliesFor(changedFile: string): readonly InspectionFamily[] {
-  const isPage = changedFile.endsWith('.astro') && changedFile.startsWith(PAGES_PREFIX);
-  return isPage ? ['routes', 'styles'] : ['styles'];
+  const families = new Set<InspectionFamily>();
+  if (changedFile === CONTENT_CONFIG || changedFile.startsWith(CONTENT_PREFIX)) {
+    families.add('content');
+    families.add('routes');
+  }
+  if (changedFile.endsWith('.astro') || changedFile.endsWith('.css')) {
+    families.add('styles');
+  }
+  if (changedFile.endsWith('.astro') && changedFile.startsWith(PAGES_PREFIX)) {
+    families.add('routes');
+  }
+  return orderedFamilies(families);
 }
 
 /** The canonical family order for published events — the protocol enum's order, deterministic. */

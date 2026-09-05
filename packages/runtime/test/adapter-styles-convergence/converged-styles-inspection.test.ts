@@ -3,7 +3,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createConvergedStylesInspection } from '../../astro-project-adapter/styles/convergence/converged-styles-inspection';
-import { createStylesInvalidationSource } from '../../astro-project-adapter/styles/convergence/invalidation-source';
+import { createRawInvalidationSource } from '../../astro-project-adapter/styles/convergence/invalidation-source';
 import {
   type ConvergenceHarness,
   convergenceHarness,
@@ -356,7 +356,7 @@ describe('createConvergedStylesInspection (the convergence protocol)', () => {
 
   it('accepts a caller-built invalidation source', async () => {
     const h = await harness();
-    const invalidations = createStylesInvalidationSource(h.server, h.projectRoot);
+    const invalidations = createRawInvalidationSource(h.server, h.projectRoot);
     const inspector = createConvergedStylesInspection({
       server: h.server,
       seams: h.seams,
