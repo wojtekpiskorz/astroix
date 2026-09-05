@@ -285,12 +285,120 @@ end tell`;
     .filter((line) => line.length > 0 && !line.includes('missing value'));
 }
 
+// ——— the picker drive's verified-wait probes (#442) ———
+// Each probe is a read-only System Events query over the drive's own UI
+// truth (observed live against the packaged app on this lane's macOS):
+// the NSOpenPanel attaches as `sheet 1 of window 1` of the Astroix
+// process (Electron parents `dialog.showOpenDialog` to the launcher
+// window), and cmd+shift+g opens the Go-to-Folder sheet nested INSIDE
+// it — `sheet 1 of sheet 1 of window 1` — whose `text field 1` carries
+// the path. Every probe answers `"1"`/the value when observed and `"0"`
+// (or a caught error) when not yet — pollable, never a sleep.
+
+/** The picker sheet is attached to the launcher window (precondition for every keystroke). */
+const PICKER_SHEET_PROBE = `
+tell application "System Events"
+  tell process "Astroix"
+    try
+      if (count of sheets of window 1) > 0 then return "1"
+    end try
+    return "0"
+  end tell
+end tell`;
+
+/** The Go-to-Folder path field exists (the cmd+shift+g sheet opened). */
+const GO_TO_FOLDER_FIELD_PROBE = `
+tell application "System Events"
+  tell process "Astroix"
+    try
+      if exists (text field 1 of sheet 1 of sheet 1 of window 1) then return "1"
+    end try
+    return "0"
+  end tell
+end tell`;
+
+/** The Go-to-Folder path field's current value ("" while the sheet is absent). */
+const GO_TO_FOLDER_VALUE_PROBE = `
+tell application "System Events"
+  tell process "Astroix"
+    try
+      return (value of text field 1 of sheet 1 of sheet 1 of window 1) as text
+    on error
+      return ""
+    end try
+  end tell
+end tell`;
+
+/** The Go-to-Folder sheet is gone (the submitted path was accepted and the panel navigated). */
+const GO_TO_FOLDER_ABSENT_PROBE = `
+tell application "System Events"
+  tell process "Astroix"
+    try
+      if (count of sheets of sheet 1 of window 1) is 0 then return "1"
+    end try
+    return "0"
+  end tell
+end tell`;
+
+/**
+ * Polls one probe until its answer is accepted — the drive's
+ * load-tolerant wait (#442), in the kit's own probe idiom: every probe
+ * call carries the 15 s probe timeout (the availability probe's class),
+ * the ceiling is the kit's 30 s window/menu bound (~30x the calm shape,
+ * generous under load), and the interval acknowledges that each
+ * osascript spawn already costs a good fraction of a second. A probe
+ * that errors (the queried UI not present YET) polls on; only the
+ * ceiling reds, naming what was waited for.
+ */
+async function pollSystemEvents(
+  probe: string,
+  what: string,
+  options: { readonly timeoutMs?: number; readonly accept?: (answer: string) => boolean } = {},
+): Promise<void> {
+  const { timeoutMs = 30_000, accept = (answer) => answer !== '0' && answer.length > 0 } = options;
+  const deadline = Date.now() + timeoutMs;
+  let lastAnswer = '';
+  let lastError: unknown;
+  while (Date.now() < deadline) {
+    try {
+      lastAnswer = await osascript(probe, 15_000);
+      lastError = undefined;
+      if (accept(lastAnswer)) return;
+    } catch (error) {
+      lastError = error;
+    }
+    await delay(500);
+  }
+  throw new Error(
+    `early-package: ${what} was not observed within ${timeoutMs} ms ` +
+      `(last probe answer: ${JSON.stringify(lastAnswer)}` +
+      `${lastError === undefined ? '' : `; last probe error: ${String(lastError)}`})`,
+  );
+}
+
 /**
  * Registers `projectRoot` through the REAL native flow: the application
  * menu's `File > Add Existing Project…` opens the native directory
- * picker; the picker receives the path (Go-to-Folder + confirm + Open).
- * Resolves when the product logged its `registered` event — the
- * registry's own sanitized summary, never a path.
+ * picker (an attached sheet of the launcher window); the picker receives
+ * the path (Go-to-Folder + confirm + Open). Resolves when the product
+ * logged its `registered` event — the registry's own sanitized summary,
+ * never a path.
+ *
+ * Every UI step is POLL-VERIFIED against System Events (#442, the
+ * load-sensitivity fix): the drive used to sleep fixed gaps (1.2 s for
+ * the picker sheet, 0.6/0.4 s around the path keystrokes) and wait a
+ * fixed 20 s for the event, and under load ~15 the sheet could appear
+ * LATE — the keystrokes landed into a sheetless window, no path was
+ * ever entered, and the leg red'd as a registration timeout (twice in
+ * the L2 candidate matrices, green on re-run over the same bytes).
+ * Now each keystroke waits for its verified pre/postcondition — the
+ * picker sheet's existence, the Go-to-Folder path field's existence,
+ * the typed path's verbatim landing in that field (it opens with the
+ * previous path SELECTED, so typing replaces it — observed live), and
+ * the Go-to-Folder sheet's dismissal after submission — and the event
+ * wait takes the kit's own real-GUI bound (the 90 s `waitForEvent`
+ * default) instead of 20 s. The drive's observable contract is
+ * unchanged: same menu, same keystrokes, same `registered` event.
  */
 export async function registerThroughNativePicker(
   run: PackagedAppRun,
@@ -311,22 +419,45 @@ export async function registerThroughNativePicker(
 end tell`,
         30_000,
       );
-      await delay(1200);
+      await pollSystemEvents(PICKER_SHEET_PROBE, 'the native picker sheet');
       await osascript(
         `tell application "System Events"
   tell process "Astroix"
     keystroke "g" using {command down, shift down}
-    delay 0.6
+  end tell
+end tell`,
+        15_000,
+      );
+      await pollSystemEvents(GO_TO_FOLDER_FIELD_PROBE, 'the Go-to-Folder path field');
+      await osascript(
+        `tell application "System Events"
+  tell process "Astroix"
     keystroke "${projectRoot}"
-    delay 0.4
-    keystroke return
-    delay 1
+  end tell
+end tell`,
+        15_000,
+      );
+      await pollSystemEvents(GO_TO_FOLDER_VALUE_PROBE, 'the typed path landing in the field', {
+        accept: (value) => value === projectRoot,
+      });
+      await osascript(
+        `tell application "System Events"
+  tell process "Astroix"
     keystroke return
   end tell
 end tell`,
-        30_000,
+        15_000,
       );
-      const event = await run.waitForEvent('registered', 'the native registration event', 20_000);
+      await pollSystemEvents(GO_TO_FOLDER_ABSENT_PROBE, 'the Go-to-Folder sheet dismissing');
+      await osascript(
+        `tell application "System Events"
+  tell process "Astroix"
+    keystroke return
+  end tell
+end tell`,
+        15_000,
+      );
+      const event = await run.waitForEvent('registered', 'the native registration event');
       return event;
     } catch (error) {
       lastError = error;

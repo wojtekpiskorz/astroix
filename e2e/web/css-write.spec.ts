@@ -10,6 +10,7 @@ import {
   LOAD_BUDGET_MS,
   restoreIdle,
   STAGED_CSS_FILE,
+  UNDO_SETTLE_MS,
   WRITE_SETTLE_MS,
 } from './spec-helpers.ts';
 
@@ -226,7 +227,11 @@ test('auto-write lands the frozen splice bytes byte-exact, HMR reflects them, an
 });
 
 test('undo restores the exact bytes through the same grant-bound loop', async ({ page }) => {
-  test.setTimeout(360_000);
+  // #439: the undo's settle span carries UNDO_SETTLE_MS (sized past the
+  // twice-observed >90 s load stall), so the leg's total ceiling grows
+  // with it — the same per-leg headroom idiom the switch battery's
+  // heavier legs use (420 s there).
+  test.setTimeout(540_000);
   const capture = captureWrites(page);
   await activateSettled(page);
   await canvasSelect(page, '.hero-title');
@@ -241,15 +246,21 @@ test('undo restores the exact bytes through the same grant-bound loop', async ({
     timeout: WRITE_SETTLE_MS,
   });
 
-  // the undo gesture is armed and dispatches the inverse splice
-  await expect(page.getByTestId('css-undo')).toBeEnabled();
+  // the undo gesture is armed and dispatches the inverse splice — the
+  // arming render is load-shaped like every other inner expect (#392's
+  // sweep class), never the 5 s default
+  await expect(page.getByTestId('css-undo')).toBeEnabled({ timeout: LOAD_BUDGET_MS });
   await page.getByTestId('css-undo').click();
-  await expect.poll(async () => await cssBytes(), { timeout: WRITE_SETTLE_MS }).toBe(before);
+  // #439: the inverse write rides the same debounced loop over the
+  // retained executor child, and that span is the one observed stalling
+  // past WRITE_SETTLE_MS under heavy load — the undo's settle gets its
+  // own named budget, the asserted bytes never change
+  await expect.poll(async () => await cssBytes(), { timeout: UNDO_SETTLE_MS }).toBe(before);
   await expect(writeState(page)).toHaveAttribute('data-write-state', 'quiet', {
-    timeout: WRITE_SETTLE_MS,
+    timeout: UNDO_SETTLE_MS,
   });
   // the undo consumed the stack — the gesture is honestly disabled now
-  await expect(page.getByTestId('css-undo')).toBeDisabled();
+  await expect(page.getByTestId('css-undo')).toBeDisabled({ timeout: LOAD_BUDGET_MS });
   // two mutations total: the write and its inverse
   expect(capture().writes.length).toBe(2);
 
