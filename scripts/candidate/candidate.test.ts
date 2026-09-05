@@ -28,7 +28,7 @@
  */
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -607,6 +607,19 @@ function greenManifest(): ManifestDraft {
 
 test('manifest completeness: the green shape is green', () => {
   assert.deepEqual(validateManifest(greenManifest(), '13.5').problems, []);
+});
+
+test('manifest coherence: the committed dry-run bundle satisfies the sealing law', () => {
+  // The PR's own proof artifact is checked against the law that seals every
+  // future bundle — the recorder and the validator both moved across the
+  // review rounds, and this leg makes any schema or strictness change that
+  // outdates the committed evidence a visible decision instead of drift.
+  const committed = JSON.parse(
+    readFileSync(join(ROOT, 'qualification', 'manifests', 'dry-run-259', 'manifest.json'), 'utf8'),
+  ) as ManifestDraft;
+  const verdict = validateManifest(committed, '13.5');
+  assert.deepEqual(verdict.problems, []);
+  assert.equal(verdict.ok, true);
 });
 
 test('manifest completeness: missing evidence fails by name (each RED mode)', () => {
