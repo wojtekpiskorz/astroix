@@ -10,6 +10,8 @@
  * crashed run leaves the record it earned) and sealed once.
  */
 
+import type { ManifestPinTables } from './pins.ts';
+
 export const MANIFEST_SCHEMA = 1;
 
 /** Every matrix leg a complete run records, in run order. */
@@ -49,9 +51,7 @@ export interface CandidateManifest {
     readonly clean: boolean;
     readonly porcelain: readonly string[];
   };
-  readonly pins: {
-    readonly charter: Readonly<Record<string, unknown>>;
-    readonly repo: Readonly<Record<string, unknown>>;
+  readonly pins: ManifestPinTables & {
     readonly reconciled: boolean;
     readonly findings: readonly unknown[];
   };

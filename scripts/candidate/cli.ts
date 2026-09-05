@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { verifyBuildAttestation } from './build-attestation.ts';
 import { fileFacts } from './checksum.ts';
-import { draftAssetRef } from './draft-release.ts';
+import { checkDraftRef, draftAssetRef } from './draft-release.ts';
 import { readSourceFacts } from './git-state.ts';
 import { runMatrix } from './matrix.ts';
 import { CHARTER_PINS, reconcilePins } from './pins.ts';
@@ -326,7 +326,6 @@ async function draftRefProblem(
   draft: ReturnType<typeof draftAssetRef>,
 ): Promise<string | null> {
   const [repository, tag, asset] = draftRef.split(':');
-  const { checkDraftRef } = await import('./draft-release.ts');
   return checkDraftRef({ repository: repository ?? '', tag: tag ?? '', asset: asset ?? '' }, draft);
 }
 
@@ -448,8 +447,8 @@ async function qualify(
     },
     source,
     pins: {
-      charter: CHARTER_PINS as unknown as Readonly<Record<string, unknown>>,
-      repo: repo as unknown as Readonly<Record<string, unknown>>,
+      charter: CHARTER_PINS,
+      repo,
       reconciled: pinFindings.length === 0,
       findings: pinFindings,
     },
@@ -548,7 +547,9 @@ if (command === 'preflight') {
   const manifestDir = args.manifestDir ?? join(ROOT, 'qualification', 'manifests', label);
   ok = await run(label, manifestDir);
 } else if (command === 'checksum') {
-  const facts = await fileFacts(args.positional as string);
+  const file = args.positional as string;
+  if (!existsSync(file)) misuse(`checksum: no such file: ${file}`);
+  const facts = await fileFacts(file);
   console.log(facts.sha256);
   ok = true;
 }

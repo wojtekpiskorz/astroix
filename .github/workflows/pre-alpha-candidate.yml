@@ -57,18 +57,22 @@ jobs:
         run: npm run candidate -- preflight
 
       - name: the ONE build — the exact pinned artifact (H3's pipeline)
-        run: npm run candidate -- build --label "${{ inputs.label }}"
+        env:
+          LABEL: ${{ inputs.label }}
+        run: npm run candidate -- build --label "$LABEL"
 
       - name: locate the built ZIP and its checksum
         id: built
+        env:
+          LABEL: ${{ inputs.label }}
         run: |
-          manifest="apps/desktop/out/candidates/${{ inputs.label }}/manifest.json"
+          manifest="apps/desktop/out/candidates/$LABEL/manifest.json"
           zip_file=$(node -e "console.log(JSON.parse(require('fs').readFileSync(process.argv[1],'utf8')).zip.file)" "$manifest")
           sha=$(node -e "console.log(JSON.parse(require('fs').readFileSync(process.argv[1],'utf8')).zip.sha256)" "$manifest")
           echo "zip=apps/desktop/out/make/zip/darwin/arm64/$zip_file" >> "$GITHUB_OUTPUT"
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
           echo "asset=$zip_file" >> "$GITHUB_OUTPUT"
-          echo "tag=pre-alpha-candidate-${{ inputs.label }}" >> "$GITHUB_OUTPUT"
+          echo "tag=pre-alpha-candidate-$LABEL" >> "$GITHUB_OUTPUT"
           echo "checksum-before: $sha"
 
       # retained build bytes on every path (#129 doctrine)
@@ -82,11 +86,13 @@ jobs:
       # ——— the dry-run path: the complete matrix WITHOUT the upload ———
       - name: qualify the exact assembled bytes (dry run — no upload, no draft release)
         if: inputs.mode == 'dry-run'
+        env:
+          LABEL: ${{ inputs.label }}
         run: >
           npm run candidate -- qualify --zip "${{ steps.built.outputs.zip }}"
           --expected-sha256 "${{ steps.built.outputs.sha }}"
-          --label "${{ inputs.label }}" --mode dry-run
-          --built "apps/desktop/out/candidates/${{ inputs.label }}/manifest.json"
+          --label "$LABEL" --mode dry-run
+          --built "apps/desktop/out/candidates/$LABEL/manifest.json"
 
       # ——— the upload path: the workflow's own draft-release steps ———
       # checksum-before was echoed at the locate step; the upload lands
@@ -98,9 +104,10 @@ jobs:
         if: inputs.mode == 'upload'
         env:
           GH_TOKEN: ${{ github.token }}
+          LABEL: ${{ inputs.label }}
         run: |
           gh release create "${{ steps.built.outputs.tag }}" "${{ steps.built.outputs.zip }}" \
-            --draft --title "Pre-alpha candidate ${{ inputs.label }}" \
+            --draft --title "Pre-alpha candidate $LABEL" \
             --notes "Restricted pre-alpha candidate (draft — collaborators only, ADR-0008). Built once from ${{ github.sha }}; sha256 ${{ steps.built.outputs.sha }}. Qualified by the pre-alpha-candidate workflow."
 
       - name: download the draft asset as a tester would receive it
@@ -120,12 +127,14 @@ jobs:
 
       - name: qualify the exact downloaded bytes
         if: inputs.mode == 'upload'
+        env:
+          LABEL: ${{ inputs.label }}
         run: >
           npm run candidate -- qualify --zip "downloaded/${{ steps.built.outputs.asset }}"
           --expected-sha256 "${{ steps.built.outputs.sha }}"
-          --label "${{ inputs.label }}" --mode downloaded
+          --label "$LABEL" --mode downloaded
           --draft-ref "wojtekpiskorz/astroix:${{ steps.built.outputs.tag }}:${{ steps.built.outputs.asset }}"
-          --built "apps/desktop/out/candidates/${{ inputs.label }}/manifest.json"
+          --built "apps/desktop/out/candidates/$LABEL/manifest.json"
           --uploaded --downloaded
 
       # the evidence bundle survives every path — green included

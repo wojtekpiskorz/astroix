@@ -25,6 +25,12 @@ export const CHARTER_PINS = Object.freeze({
   minimumMacOS: '13.5',
 });
 
+/** The manifest's pins section — the real shapes, replacing loose records. */
+export interface ManifestPinTables {
+  readonly charter: typeof CHARTER_PINS;
+  readonly repo: RepoPins;
+}
+
 /** The product shape a candidate is assembled for (ADR-0008). */
 export const CHARTER_PLATFORM = Object.freeze({ os: 'darwin', arch: 'arm64' });
 

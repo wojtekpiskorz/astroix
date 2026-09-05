@@ -467,7 +467,25 @@ function greenManifest(): ManifestDraft {
     startedAt: new Date().toISOString(),
     finishedAt: new Date().toISOString(),
     source: { commit: 'b'.repeat(40), clean: true, porcelain: [] },
-    pins: { charter: {}, repo: {}, reconciled: true, findings: [] },
+    pins: {
+      charter: {
+        node: 'v24.20.0',
+        nodeAbi: '137',
+        electron: '44.1.0',
+        forge: '7.11.2',
+        pair: { astro: '7.2.10', vite: '8.2.2' },
+        minimumMacOS: '13.5',
+      },
+      repo: {
+        node: 'v24.20.0',
+        electron: '44.1.0',
+        forge: '7.11.2',
+        pair: { astro: '7.2.10', vite: '8.2.2' },
+        minimumMacOS: '13.5',
+      },
+      reconciled: true,
+      findings: [],
+    },
     build: {
       command: 'npm run package',
       zip: { path: '/tmp/x.zip', bytes: 168671476, sha256: sha },
@@ -546,7 +564,7 @@ test('manifest completeness: missing evidence fails by name (each RED mode)', ()
     [
       'pin drift',
       (manifest) => {
-        manifest.pins = { charter: {}, repo: {}, reconciled: false, findings: [{ field: 'node' }] };
+        manifest.pins = { ...manifest.pins, reconciled: false, findings: [{ field: 'node' }] };
       },
     ],
     [

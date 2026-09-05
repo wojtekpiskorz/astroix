@@ -22,7 +22,7 @@ import {
 } from './manifest.ts';
 import { runSqliteLeg } from './native-fixture.ts';
 import { runNodeSassLeg } from './node-sass-fixture.ts';
-import { CHARTER_PINS } from './pins.ts';
+import { CHARTER_PINS, type ManifestPinTables } from './pins.ts';
 import { removeStaging, runRegistryLeaseLeg } from './registry-lease.ts';
 
 /**
@@ -72,9 +72,7 @@ export interface MatrixInput {
     readonly clean: boolean;
     readonly porcelain: readonly string[];
   };
-  readonly pins: {
-    readonly charter: Readonly<Record<string, unknown>>;
-    readonly repo: Readonly<Record<string, unknown>>;
+  readonly pins: ManifestPinTables & {
     readonly reconciled: boolean;
     readonly findings: readonly unknown[];
   };
