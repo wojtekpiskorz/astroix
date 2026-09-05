@@ -146,7 +146,9 @@ smoke proves the composed product path end to end.
 ## What the host needs
 
 - macOS arm64, npm + Node 24 (the repo's stack of record).
-- `e2e/fixture` installed (`npm install` there) — the managed copy is
+- `e2e/fixture` installed (`npm ci` there — never `npm install`, which
+  rewrites the committed lockfile and reds the fixture-plainness audit,
+  #454) — the managed copy is
   staged from it; the canonical fixture is never registered.
 - System Events **Automation + Accessibility** for the lane host — the
   registration leg drives the real native picker; without it that leg

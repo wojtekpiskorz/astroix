@@ -32,7 +32,8 @@ Certified against exact Astro/Vite pairs (first: `astro@7.2.10` + `vite@8.2.2`, 
 The repository runs on npm workspaces + Node 24 (charter lane A2, ADR-0010) and is private: the legacy integration, its build surfaces, and its npm publication machinery were deleted at the retirement gate (#215). What remains is the rewrite foundation — `packages/core` (pure editing domain) and `packages/app-shell` (UI foundation + retained presentation widgets) — plus the frozen behavior contracts (`e2e/behavior-contracts/`) that bind the replacement, and the canonical plain Astro fixture (`e2e/fixture/`).
 
 ```sh
-npm install                        # also in e2e/fixture/
+npm install                        # root workspaces
+(cd e2e/fixture && npm ci)         # the fixture: npm ci, never npm install (#454)
 npm run check && npm run typecheck # Biome + tsc
 npm run test                       # vitest (unit + contract validators + readiness legs)
 npm run test:e2e                   # product E2E: the web-host battery + plain-fixture build smoke
