@@ -53,10 +53,10 @@ import { createSseHub } from '@wojciechpiskorz/astroix-runtime/sse';
 import { describe, expect, it } from 'vitest';
 import { createCandidateStore, pairKey } from './candidates.ts';
 import {
+  createGrantEviction,
   electronHostAdoption,
   type HostDocumentIdentity,
   type HostMainFrameHandshake,
-  stopOwnedWriteExecutors,
 } from './control-plane.ts';
 import {
   createExecutor,
@@ -64,6 +64,7 @@ import {
   type SeatStore,
   type SessionSeat,
   stopOwnedRuns,
+  stopOwnedWriteExecutors,
 } from './executor.ts';
 
 /**
@@ -333,11 +334,11 @@ async function bootHarness(
     },
   };
 
-  const grantEviction = (session: SessionRef): number => {
-    const evicted = grantTables.get(pairKey(session))?.revokeSession(session) ?? 0;
-    grantTables.delete(pairKey(session));
-    return evicted;
-  };
+  // The REAL eviction seam (#431, never a re-derivation): the same
+  // closure the composition hands F6/F7 — the legs' evidence that the
+  // eviction's write-executor stop rides the bounded discipline holds
+  // for the composition's own wiring, not a harness copy.
+  const grantEviction = createGrantEviction({ grantTables, writeExecutors, editRevisions });
   const surfaces = {
     clients: sessionClients,
     hostCapabilities: grants,
@@ -995,79 +996,88 @@ describe("the composition teardown's owned-run stop (#365 addendum, #391)", () =
   });
 });
 
+/**
+ * The unresponsive child: alive, never answering the stop control —
+ * no `closed` message, no exit — the shape that used to hang close()
+ * past every bound (the pre-#410 loop awaited `stop()` directly, and
+ * this promise never settles). `kill` mirrors the REAL spawner's
+ * force path (`executor-spawn.ts`): it fires once and returns the
+ * shared stop promise — which settles only on the observed exit,
+ * never on the kill itself — so a tree that awaits the kill's own
+ * settlement re-hangs exactly the way the real child stuck past
+ * SIGKILL would. The fake's `observeExit` hook opens that
+ * observation; a child stuck even past the kill simply never opens
+ * it. Shared by the #410 stop-bound legs and the #431 eviction legs.
+ */
+function hungHandle(): {
+  readonly handle: WriteExecutorHandle;
+  readonly stops: () => number;
+  readonly kills: () => number;
+  readonly observeExit: () => void;
+} {
+  let stops = 0;
+  let kills = 0;
+  let settleStop: (() => void) | undefined;
+  const stop = new Promise<void>((resolve) => {
+    settleStop = resolve;
+  });
+  let settleExited: (() => void) | undefined;
+  const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => {
+    settleExited = () => resolve({ code: null, signal: 'SIGKILL' });
+  });
+  const handle: WriteExecutorHandle = {
+    ready: Promise.resolve(),
+    execute: () => new Promise(() => {}),
+    stop: () => {
+      stops += 1;
+      return stop;
+    },
+    kill: () => {
+      kills += 1;
+      return stop;
+    },
+    exited,
+  };
+  const observeExit = (): void => {
+    settleStop?.();
+    settleExited?.();
+  };
+  return { handle, stops: () => stops, kills: () => kills, observeExit };
+}
+
+/**
+ * The healthy child: its graceful stop settles the moment the leg
+ * opens the gate — the `closed`-message happy path. Shared by the
+ * #410 stop-bound legs and the #431 eviction legs.
+ */
+function gatedHandle(): {
+  readonly handle: WriteExecutorHandle;
+  readonly stops: () => number;
+  readonly kills: () => number;
+  readonly open: () => void;
+} {
+  let stops = 0;
+  let kills = 0;
+  let open: () => void = () => {};
+  const stop = new Promise<void>((resolve) => {
+    open = resolve;
+  });
+  const handle: WriteExecutorHandle = {
+    ready: Promise.resolve(),
+    execute: () => new Promise(() => {}),
+    stop: () => {
+      stops += 1;
+      return stop;
+    },
+    kill: async () => {
+      kills += 1;
+    },
+    exited: new Promise(() => {}),
+  };
+  return { handle, stops: () => stops, kills: () => kills, open };
+}
+
 describe("the composition teardown's write-executor stop bound (#410)", () => {
-  /**
-   * The unresponsive child: alive, never answering the stop control —
-   * no `closed` message, no exit — the shape that used to hang close()
-   * past every bound (the pre-#410 loop awaited `stop()` directly, and
-   * this promise never settles). `kill` mirrors the REAL spawner's
-   * force path (`executor-spawn.ts`): it fires once and returns the
-   * shared stop promise — which settles only on the observed exit,
-   * never on the kill itself — so a tree that awaits the kill's own
-   * settlement re-hangs exactly the way the real child stuck past
-   * SIGKILL would. The leg's `observeExit` hook opens that
-   * observation; a child stuck even past the kill simply never opens
-   * it.
-   */
-  function hungHandle(): {
-    readonly handle: WriteExecutorHandle;
-    readonly kills: () => number;
-    readonly observeExit: () => void;
-  } {
-    let kills = 0;
-    let settleStop: (() => void) | undefined;
-    const stop = new Promise<void>((resolve) => {
-      settleStop = resolve;
-    });
-    let settleExited: (() => void) | undefined;
-    const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(
-      (resolve) => {
-        settleExited = () => resolve({ code: null, signal: 'SIGKILL' });
-      },
-    );
-    const handle: WriteExecutorHandle = {
-      ready: Promise.resolve(),
-      execute: () => new Promise(() => {}),
-      stop: () => stop,
-      kill: () => {
-        kills += 1;
-        return stop;
-      },
-      exited,
-    };
-    const observeExit = (): void => {
-      settleStop?.();
-      settleExited?.();
-    };
-    return { handle, kills: () => kills, observeExit };
-  }
-
-  /**
-   * The healthy child: its graceful stop settles the moment the leg
-   * opens the gate — the `closed`-message happy path.
-   */
-  function gatedHandle(): {
-    readonly handle: WriteExecutorHandle;
-    readonly kills: () => number;
-    readonly open: () => void;
-  } {
-    let kills = 0;
-    let open: () => void = () => {};
-    const stop = new Promise<void>((resolve) => {
-      open = resolve;
-    });
-    const handle: WriteExecutorHandle = {
-      ready: Promise.resolve(),
-      execute: () => new Promise(() => {}),
-      stop: () => stop,
-      kill: async () => {
-        kills += 1;
-      },
-      exited: new Promise(() => {}),
-    };
-    return { handle, kills: () => kills, open };
-  }
-
   it('resolves at the bound on an unresponsive child — the timeout verdict, the lease released through the force path', async () => {
     const hung = hungHandle();
     const started = Date.now();
@@ -1126,6 +1136,76 @@ describe("the composition teardown's write-executor stop bound (#410)", () => {
     healthy.open();
     expect(await stopping).toBe('timed-out');
     expect(hung.kills()).toBe(1);
+    expect(healthy.kills()).toBe(0);
+  });
+});
+
+describe("the grant eviction's bounded executor stop (#431)", () => {
+  it('disposes an unresponsive evicted child through the bounded kill path — the edit-writer lease never orphans past the stop bound', async () => {
+    // The pre-#431 defect: the eviction deleted the handle from the map
+    // before a bare fire-and-forget stop owned it — an alive-but-
+    // unresponsive child (no `closed` message, no exit) was then beyond
+    // every discipline: close() iterates the map it was deleted from,
+    // nothing ever fired the force path, and the child held the
+    // app-global edit-writer lease until it died on its own.
+    const hung = hungHandle();
+    const session: SessionRef = { runtimeEpoch: 'epoch-grant-eviction', generation: 1 };
+    const grantTables = new Map<string, GrantTable>();
+    const writeExecutors = new Map<string, WriteExecutorHandle>([[pairKey(session), hung.handle]]);
+    const editRevisions = new Map<string, number>([[pairKey(session), 4]]);
+    const evict = createGrantEviction({
+      grantTables,
+      writeExecutors,
+      editRevisions,
+      stopDeadlineMs: 50,
+    });
+    const started = Date.now();
+    expect(evict(session)).toBe(0);
+    // The eviction is synchronous: the entries died with the call, and
+    // the fired pass already owns the handle (the graceful stop fired).
+    expect(writeExecutors.has(pairKey(session))).toBe(false);
+    expect(editRevisions.has(pairKey(session))).toBe(false);
+    expect(hung.stops()).toBe(1);
+    // The bounded disposal: the unresponsive child costs at most the
+    // stop bound, then the kill path fires — the D5 force path the
+    // lease release rides (the OS exit, never this await). A reverted
+    // fire-and-forget tree never kills: the poll exhausts and the leg
+    // fails honestly.
+    for (let ticks = 0; ticks < 100 && hung.kills() === 0; ticks += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    expect(hung.kills()).toBe(1);
+    // A small multiple of the injected bound — the 50 ms stop race plus
+    // the killed child's never-observed exit's 50 ms race, never the
+    // 5000 ms default a buggy tree would sit exactly on.
+    expect(Date.now() - started).toBeLessThan(1000);
+  });
+
+  it('keeps the happy eviction path unchanged — a responsive child stops gracefully, no force path', async () => {
+    const healthy = gatedHandle();
+    const session: SessionRef = { runtimeEpoch: 'epoch-grant-eviction', generation: 2 };
+    const grantTables = new Map<string, GrantTable>([
+      [pairKey(session), { revokeSession: () => 3 } as unknown as GrantTable],
+    ]);
+    const writeExecutors = new Map<string, WriteExecutorHandle>([
+      [pairKey(session), healthy.handle],
+    ]);
+    const editRevisions = new Map<string, number>([[pairKey(session), 4]]);
+    const evict = createGrantEviction({
+      grantTables,
+      writeExecutors,
+      editRevisions,
+      stopDeadlineMs: 2000,
+    });
+    expect(evict(session)).toBe(3);
+    expect(grantTables.has(pairKey(session))).toBe(false);
+    expect(writeExecutors.has(pairKey(session))).toBe(false);
+    expect(editRevisions.has(pairKey(session))).toBe(false);
+    // The graceful stop fired exactly once; the child answers it, and
+    // the force path never engages.
+    expect(healthy.stops()).toBe(1);
+    healthy.open();
+    await new Promise((resolve) => setTimeout(resolve, 10));
     expect(healthy.kills()).toBe(0);
   });
 });
