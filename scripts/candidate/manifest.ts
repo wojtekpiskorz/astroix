@@ -10,6 +10,7 @@
  * crashed run leaves the record it earned) and sealed once.
  */
 
+import type { HostFacts } from './host-facts.ts';
 import type { ManifestPinTables } from './pins.ts';
 
 export const MANIFEST_SCHEMA = 1;
@@ -75,7 +76,7 @@ export interface CandidateManifest {
       readonly visibility: string;
     };
   };
-  readonly host: Readonly<Record<string, unknown>>;
+  readonly host: HostFacts;
   readonly minimumMacOS: {
     readonly metadata: string;
     readonly verifiedAs: 'metadata-only' | 'host';

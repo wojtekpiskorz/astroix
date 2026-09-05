@@ -321,10 +321,7 @@ interface BuildClaim {
 }
 
 /** Checks a supplied `--draft-ref repo:tag:asset` against the run's own computed reference. */
-async function draftRefProblem(
-  draftRef: string,
-  draft: ReturnType<typeof draftAssetRef>,
-): Promise<string | null> {
+function draftRefProblem(draftRef: string, draft: ReturnType<typeof draftAssetRef>): string | null {
   const [repository, tag, asset] = draftRef.split(':');
   return checkDraftRef({ repository: repository ?? '', tag: tag ?? '', asset: asset ?? '' }, draft);
 }

@@ -506,7 +506,14 @@ function greenManifest(): ManifestDraft {
         visibility: 'restricted-draft',
       },
     },
-    host: {},
+    host: {
+      platform: 'darwin',
+      arch: 'arm64',
+      swVersProduct: '26.3.1',
+      swVersBuild: '25D771280a',
+      unameMachine: 'arm64',
+      harnessNodeVersion: 'v24.20.0',
+    },
     minimumMacOS: {
       metadata: '13.5',
       verifiedAs: 'metadata-only',

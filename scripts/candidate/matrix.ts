@@ -128,7 +128,7 @@ export async function runMatrix(input: MatrixInput): Promise<MatrixResult> {
       downloaded: input.downloaded,
       draftAsset: input.draftAsset,
     },
-    host: host as unknown as Readonly<Record<string, unknown>>,
+    host,
     minimumMacOS: {
       metadata: PRODUCT_MINIMUM_MACOS,
       verifiedAs: 'metadata-only',

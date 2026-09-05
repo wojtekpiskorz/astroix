@@ -8,7 +8,7 @@ import { promisify } from 'node:util';
  * candidate, never a best-effort build) and `git rev-parse HEAD` names
  * the commit every piece of evidence is tied to. The ignored build
  * trees (`apps/desktop/out/`, `dist-main/`, `resources/`,
- * `test-results/`, `qualification/manifests/`' unclaimed run
+ * `test-results/`, `qualification/manifests/` unclaimed run
  * directories) never dirty the porcelain view, so the law observes
  * exactly what git tracks.
  */
