@@ -19,12 +19,13 @@ import { stageWebLane, WEB_LANE_PORT } from './apps/web/src/stage-e2e.ts';
 
 // ——— the shared nonzero-discovery guard (#240's AC: a project "cannot
 // pass with zero tests") ———
-// The web and content projects name their expected spec sets here — a
-// spec missing, emptied, or landed unlisted fails EVERY playwright run
-// at config load — the plain-build project alone can never green the
-// lane. plain-build carries no enumeration (its nonzero guard is its
-// spec's own); the project-switch family riding chromium-content is
-// pending #427.
+// The web, content, and project-switch families name their expected
+// spec sets here — a spec missing, emptied, or landed unlisted fails
+// EVERY playwright run at config load — the plain-build project alone
+// can never green the lane. plain-build carries no enumeration (its
+// nonzero guard is its spec's own); the project-switch family rides
+// the chromium-content project's match today — its enumeration is
+// correct under every answer to #427's open scoping ruling.
 // One idiom for every project since #408 folded #374's rider: the web
 // project's dir scan and the content project's onetime single-file
 // check were two hand-rolled shapes, and they drifted — the second and
@@ -38,8 +39,15 @@ function assertNonVacuousDiscovery(options: {
   rationale: string;
 }): void {
   const { project, specDir, expectedSpecs, rationale } = options;
+  // Recursive, matching the runner's `e2e/**/*.spec.ts` scope: the guard's
+  // floor AND ceiling cover every spec the lane would run, subdirectories
+  // included — `harness/` stays outside by holding `.ts` files, not by the
+  // scan's shape. (The string-narrowing predicate: recursive reads can
+  // surface Buffers for non-UTF-8 paths — those are never specs.)
   const specFiles = existsSync(specDir)
-    ? readdirSync(specDir).filter((name) => name.endsWith('.spec.ts'))
+    ? readdirSync(specDir, { recursive: true }).filter(
+        (name): name is string => typeof name === 'string' && name.endsWith('.spec.ts'),
+      )
     : [];
   const missing = expectedSpecs.filter((name) => !specFiles.includes(name));
   const emptied = specFiles.filter(
@@ -106,6 +114,49 @@ assertNonVacuousDiscovery({
   specDir: CONTENT_SPEC_DIR,
   expectedSpecs: EXPECTED_CONTENT_SPECS,
   rationale: 'the Content vertical lane must discover its expected tests (#251)',
+});
+
+// The project-switch family's battery (the K-family) lives at the
+// vertical's owned path under apps/web, riding the chromium-content
+// project's e2e/** match today — the mechanical half of #427 (PR #435)
+// closed the same vacuity drift #408 closed for the content family, one
+// family further. The `harness/` subdir stays outside the enumeration
+// (it holds `.ts` files, not specs — and the recursive scan now guards
+// subdirectories too), and the enumeration is correct under every answer
+// to #427's open scoping ruling, which stays with the owner.
+// `client-reset.spec.ts` joined at #255 (K2): the client-reset proof
+// across A-B-A switching — the returning-A generation starts empty and
+// stale client authority is refused.
+// `server-authority.spec.ts` joined at #254 (K1): the server
+// stale-authority proof across A-B-A switching.
+const PROJECT_SWITCH_SPEC_DIR = join('apps', 'web', 'e2e', 'project-switch');
+const EXPECTED_PROJECT_SWITCH_SPECS = ['client-reset.spec.ts', 'server-authority.spec.ts'] as const;
+assertNonVacuousDiscovery({
+  project: 'project-switch',
+  specDir: PROJECT_SWITCH_SPEC_DIR,
+  expectedSpecs: EXPECTED_PROJECT_SWITCH_SPECS,
+  rationale: 'the project-switch family must discover its expected tests (#254/#255)',
+});
+
+// The whole-tree ceiling: `chromium-content` matches `e2e/**/*.spec.ts`
+// under apps/web — including zero-directory `**/` matches directly in
+// `e2e/` — so a spec ANYWHERE in that tree runs in the lane. This call
+// derives its expected set from the two family arrays (subdir-prefixed,
+// the recursive scan's relative-path shape — no new hand-maintained
+// list), so a new family directory or a stray top-level spec fails
+// config load until it is enumerated. The per-family calls above stay:
+// they attribute failures to the family better than one parent error
+// would.
+const EXPECTED_APPS_WEB_E2E_SPECS = [
+  ...EXPECTED_CONTENT_SPECS.map((name) => `content/${name}`),
+  ...EXPECTED_PROJECT_SWITCH_SPECS.map((name) => `project-switch/${name}`),
+] as const;
+assertNonVacuousDiscovery({
+  project: 'apps/web e2e tree',
+  specDir: join('apps', 'web', 'e2e'),
+  expectedSpecs: EXPECTED_APPS_WEB_E2E_SPECS,
+  rationale:
+    "every spec in the web host's e2e tree belongs to an enumerated family (#240/#408 — the tree cannot grow a silent family)",
 });
 
 // The lane's test-owned staging runs at CONFIG LOAD (ahead of the
