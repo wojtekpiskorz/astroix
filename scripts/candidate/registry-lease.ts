@@ -1,6 +1,7 @@
 import { type ChildProcess, spawn } from 'node:child_process';
 import { mkdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
+import type { Readable } from 'node:stream';
 import {
   appleEventQuit,
   awaitChildExit,
@@ -169,7 +170,11 @@ export async function runRegistryLeaseLeg(input: LeaseLegInput): Promise<LeaseLe
   return { ...shaped, firstBoot, secondBoot, residuals };
 }
 
-/** The boot observer's mutable state — the child, its spawn failure, the bounded stdout tail, and the boot flag. */
+/**
+ * The boot's mutable state: the child and its spawn failure belong to
+ * `bootAndQuit`; the bounded stdout tail (`lines`) and the boot flag are
+ * the observer's subjects, passed to `attachBootObserver` by structure.
+ */
 interface BootState {
   child: ChildProcess | null;
   spawnError: string | null;
@@ -190,8 +195,17 @@ function logBootMissTail(state: BootState, log: (line: string) => void): void {
  * and burns the candidate label, so the observer must not lose the event to
  * pipe chunking). The observed-lines tail is bounded and dumped on a miss,
  * so the evidence log can always explain what the child actually said.
+ *
+ * The STREAM is the parameter, never the state's child — the law is
+ * exported for the focused self-tests the `leaseFindings` way, and a
+ * `PassThrough` drives it without any ChildProcess. Exported for the
+ * tests (#259 review round 8: the chunk-carry law is pinned, not just
+ * implemented — a refactor back to the per-chunk split must go red).
  */
-function attachBootObserver(state: BootState): void {
+export function attachBootObserver(
+  state: { lines: string[]; booted: boolean },
+  stdout: Readable | null = null,
+): void {
   const TAIL_LINES = 50;
   let stdoutRemainder = '';
   const observeLine = (raw: string): void => {
@@ -209,12 +223,12 @@ function attachBootObserver(state: BootState): void {
       }
     }
   };
-  state.child?.stdout?.on('data', (chunk: Buffer) => {
+  stdout?.on('data', (chunk: Buffer) => {
     const parts = (stdoutRemainder + chunk.toString('utf8')).split('\n');
     stdoutRemainder = parts.pop() ?? '';
     for (const part of parts) observeLine(part);
   });
-  state.child?.stdout?.on('end', () => {
+  stdout?.on('end', () => {
     const final = stdoutRemainder;
     stdoutRemainder = '';
     observeLine(final);
@@ -246,7 +260,7 @@ async function bootAndQuit(
       ? { code: state.child.exitCode, signal: state.child.signalCode }
       : null;
 
-  attachBootObserver(state);
+  attachBootObserver(state, state.child?.stdout);
   state.child?.stderr?.on('data', () => {
     // stderr is not this leg's subject (L1 and the smoke battery audit it)
   });

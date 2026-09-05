@@ -32,6 +32,7 @@ import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { PassThrough } from 'node:stream';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { verifyBuildAttestation } from './build-attestation.ts';
@@ -41,7 +42,7 @@ import { readSourceFacts } from './git-state.ts';
 import { macOsClaim } from './host-facts.ts';
 import { MATRIX_LEGS, type ManifestDraft, validateManifest } from './manifest.ts';
 import { CHARTER_PINS, reconcilePins } from './pins.ts';
-import { type BootFacts, leaseFindings } from './registry-lease.ts';
+import { attachBootObserver, type BootFacts, leaseFindings } from './registry-lease.ts';
 import { validateWorkflow, validateWorkflowFile, WORKFLOW_PATH } from './workflow-law.ts';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -413,6 +414,54 @@ test('registry-lease: wrong modes, a missing boot, an unsettled quit, and residu
     }).ok,
     false,
   );
+});
+
+// ——— the chunk-carry law (#259 review round 7 fixed it, round 8 pins
+// ——— it: nothing may refactor the observer back to the per-chunk split) ———
+
+test('registry-lease: a boot report line split across chunk boundaries still boots (RED under the per-chunk split)', async () => {
+  // the leaseFindings idiom, against the stream-taking observer: a
+  // PassThrough drives the law with no ChildProcess. RED-pre reasoning:
+  // under the pre-round-7 per-chunk split each data event's text was
+  // parsed on its own, so the first fragment fails the JSON parse (and,
+  // un-newline-terminated, yields no complete line at all) and the
+  // second fragment neither starts with the product prefix nor parses —
+  // `booted` stays false, the bounded wait times out into the forced
+  // escalation, and the leg fails having burned the candidate label.
+  // The carried remainder joins the fragments; this is green only under it.
+  const state = { lines: [], booted: false };
+  const stdout = new PassThrough();
+  attachBootObserver(state, stdout);
+  const line = 'astroix-desktop: {"kind":"control-plane-booted"}';
+  const split = Math.floor(line.length / 2); // mid-JSON: neither half parses alone
+  const ended = new Promise<void>((resolve) => {
+    stdout.once('end', () => resolve());
+  });
+  stdout.write(line.slice(0, split));
+  stdout.write(`${line.slice(split)}\n`);
+  stdout.end();
+  await ended;
+  assert.equal(state.booted, true);
+  assert.deepEqual(state.lines, [line]);
+});
+
+test('registry-lease: the observed-lines tail keeps only the last 50 lines', async () => {
+  const state = { lines: [], booted: false };
+  const stdout = new PassThrough();
+  attachBootObserver(state, stdout);
+  const ended = new Promise<void>((resolve) => {
+    stdout.once('end', () => resolve());
+  });
+  for (let index = 0; index < 60; index += 1) {
+    stdout.write(`noise line ${String(index)}\n`);
+  }
+  stdout.write('astroix-desktop: {"kind":"control-plane-booted"}\n');
+  stdout.end();
+  await ended;
+  assert.equal(state.lines.length, 50);
+  assert.equal(state.lines[0], 'noise line 11'); // 61 observed, the first 11 dropped
+  assert.equal(state.lines.at(-1), 'astroix-desktop: {"kind":"control-plane-booted"}');
+  assert.equal(state.booted, true);
 });
 
 // ——— the macOS-13.5 honesty law ———

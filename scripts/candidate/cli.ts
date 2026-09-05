@@ -450,6 +450,18 @@ async function qualify(
   }
   const repo = await readRepoPins();
   const pinFindings = reconcilePins(CHARTER_PINS, repo);
+  // a pin drift refuses BEFORE the destination is touched, like every
+  // other never-green gate — a drifted standalone qualify must not run
+  // the whole matrix and burn the label just to fail at the seal
+  // (validateManifest's pinsProblems stays as the belt over the tables)
+  if (pinFindings.length > 0) {
+    for (const finding of pinFindings) {
+      console.error(
+        `candidate: PIN DRIFT — ${finding.field}: the repo pins ${finding.declared}, the charter demands ${finding.expected} (a pin drift is a STOP, never a silent substitution)`,
+      );
+    }
+    return false;
+  }
   // ——— every refusal gate has returned — only now is the destination
   // cleared and created for the run about to write its evidence
   await rm(manifestDir, { recursive: true, force: true });

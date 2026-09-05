@@ -132,17 +132,10 @@ export async function runMatrix(input: MatrixInput): Promise<MatrixResult> {
       draftAsset: input.draftAsset,
     },
     host,
-    minimumMacOS: {
-      metadata: PRODUCT_MINIMUM_MACOS,
-      verifiedAs: 'metadata-only',
-      testedOn: {
-        swVersProduct: host.swVersProduct,
-        swVersBuild: host.swVersBuild,
-        unameMachine: host.unameMachine,
-      },
-      controlledMinimumHost: false,
-      disclosure: '',
-    },
+    // built once, from the same pure law that seals it — the skeleton's
+    // first flush honestly names the tested host (macOsClaim is pure and
+    // `host` is already captured here, so there is nothing to wait for)
+    minimumMacOS: macOsClaim(host, PRODUCT_MINIMUM_MACOS),
     matrix: [],
     fixtures: {
       betterSqlite3: {
@@ -187,9 +180,6 @@ export async function runMatrix(input: MatrixInput): Promise<MatrixResult> {
       logFile: 'logs/workflow-cleanup.log',
     });
   }
-
-  // ——— the macOS disclosure (always the actual tested facts) ———
-  manifest.minimumMacOS = macOsClaim(host, PRODUCT_MINIMUM_MACOS);
 
   // ——— seal: verdict + the fail-closed completeness re-read ———
   manifest.finishedAt = new Date().toISOString();
