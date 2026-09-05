@@ -66,6 +66,27 @@ describe('classifySupervisionClose', () => {
     expect(report.failures).toEqual([]);
   });
 
+  it('a crash-killed worker survivor was never asked — the mirror tick reap expects no report (#402)', () => {
+    // The #402 fact shape: the dev server crashed, the worker was
+    // SIGKILLed in the terminal transition's own tick (no IPC stop, no
+    // TERM rung), so no report can arrive and none is expected — the
+    // supervisor denied the window, the worker did not fail inside it.
+    // The escalation ledger says the worker died by SIGKILL; the reap
+    // and the ledger together stay a complete close.
+    const report = classifySupervisionClose(
+      fact({
+        reason: 'managed-astro-crash',
+        workerReportExpected: false,
+        workerReportReceived: false,
+        killEscalations: ['worker'],
+      }),
+    );
+    expect(report.outcome).toBe('complete');
+    expect(report.failures).toEqual([]);
+    expect(report.accounting.workerReportReceived).toBe(false);
+    expect(report.accounting.killEscalations).toEqual(['worker']);
+  });
+
   it("the worker's own incomplete cleanup is the plane's incomplete cleanup", () => {
     const report = classifySupervisionClose(fact({ workerCleanupComplete: false }));
     expect(report.failures).toEqual(['worker-cleanup-incomplete']);
