@@ -129,13 +129,20 @@ assertNonVacuousDiscovery({
 // stale client authority is refused.
 // `server-authority.spec.ts` joined at #254 (K1): the server
 // stale-authority proof across A-B-A switching.
+// `pending-diagnostics.spec.ts` joined at #256 (K3): the pending-write
+// and hostile-Service-Worker proof across A-B-A switching (this lane's
+// registration-only edit — the enumeration's creation stays #427/#435's).
 const PROJECT_SWITCH_SPEC_DIR = join('apps', 'web', 'e2e', 'project-switch');
-const EXPECTED_PROJECT_SWITCH_SPECS = ['client-reset.spec.ts', 'server-authority.spec.ts'] as const;
+const EXPECTED_PROJECT_SWITCH_SPECS = [
+  'client-reset.spec.ts',
+  'pending-diagnostics.spec.ts',
+  'server-authority.spec.ts',
+] as const;
 assertNonVacuousDiscovery({
   project: 'project-switch',
   specDir: PROJECT_SWITCH_SPEC_DIR,
   expectedSpecs: EXPECTED_PROJECT_SWITCH_SPECS,
-  rationale: 'the project-switch family must discover its expected tests (#254/#255)',
+  rationale: 'the project-switch family must discover its expected tests (#254/#255/#256)',
 });
 
 // The whole-tree ceiling: `chromium-content` matches `e2e/**/*.spec.ts`
