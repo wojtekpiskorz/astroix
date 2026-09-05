@@ -85,6 +85,15 @@ const SRC_ROOT = join(ROOT, 'src');
 // not exist there even though its tests share the vitest invocation —
 // its truth is the harness's own fail-closed battery plus the
 // exact-artifact leg, the same tier reasoning as apps/web and apps/desktop.
+// scripts/check-web-checkpoint.mjs (#257, K4 — ruled on #440, the #378
+// precedent) joins the same way as a single-file CC-only watchlist root:
+// the checkpoint script spawns and drives the real Playwright battery
+// (real webServer children, real fixture copies, real browser), so honest
+// per-function unit coverage does not exist for its CLI side — its truth
+// is the node:test self-test battery (`npm run test:web-gate`) over the
+// exported pure validation layer plus the real checkpoint run itself
+// (`npm run check:web`); the entry records the tier, not a coverage
+// claim.
 const RISK_ROOTS = [
   SRC_ROOT,
   join(ROOT, 'packages/core'),
@@ -94,11 +103,19 @@ const RISK_ROOTS = [
   join(ROOT, 'apps/web'),
   join(ROOT, 'apps/desktop'),
   join(ROOT, 'scripts/qualification'),
+  join(ROOT, 'scripts/check-web-checkpoint.mjs'),
 ];
-// the same roots as repo-relative path prefixes — isRiskScope derives from
-// these so the scope is stated once (advisory round 2 on #270: a second
-// hand-kept copy silently yields zero risk rows when the two drift)
-const RISK_ROOT_PREFIXES = RISK_ROOTS.map((abs) => `${relative(ROOT, abs)}/`);
+// Roots are directories (walked recursively) or single files (joined by
+// exact path — the checkpoint script is a one-file .mjs root, #257 K4);
+// isRiskScope derives from both so the scope is stated once (advisory
+// round 2 on #270: a second hand-kept copy silently yields zero risk
+// rows when the two drift).
+const RISK_ROOT_FILES = new Set(
+  RISK_ROOTS.filter((abs) => statSync(abs).isFile()).map((abs) => relative(ROOT, abs)),
+);
+const RISK_ROOT_PREFIXES = RISK_ROOTS.filter((abs) => statSync(abs).isDirectory()).map(
+  (abs) => `${relative(ROOT, abs)}/`,
+);
 const BASELINE_PATH = join(ROOT, 'crap-baseline.json');
 const COVERAGE_JSON = join(ROOT, 'coverage', 'coverage-final.json');
 
@@ -128,11 +145,19 @@ function mergeBaseSha() {
   throw new Error('no merge-base against origin/main or main — run preflight on a branch off main');
 }
 
-/** Risk scope: product TS/TSX under the risk roots — test bodies are the coverage, not the risk. */
+/**
+ * Risk scope: product TS/TSX under the risk roots — test bodies are the
+ * coverage, not the risk. A single-file root (an .mjs root like the
+ * checkpoint script) joins by exact path instead of the .ts/.tsx prefix
+ * walk, so no other .mjs under the directory roots silently joins it.
+ */
 function isRiskScope(relPath) {
+  const underRoot =
+    (RISK_ROOT_PREFIXES.some((prefix) => relPath.startsWith(prefix)) &&
+      (relPath.endsWith('.ts') || relPath.endsWith('.tsx'))) ||
+    RISK_ROOT_FILES.has(relPath);
   return (
-    RISK_ROOT_PREFIXES.some((prefix) => relPath.startsWith(prefix)) &&
-    (relPath.endsWith('.ts') || relPath.endsWith('.tsx')) &&
+    underRoot &&
     !relPath.endsWith('.test.ts') &&
     !relPath.endsWith('.test.tsx') &&
     !relPath.endsWith('.d.ts') &&
@@ -166,6 +191,10 @@ const committedSource = (abs) => gitOk(['show', `HEAD:${relative(ROOT, abs)}`]) 
 function walkTs(dirs = RISK_ROOTS) {
   const out = [];
   for (const dir of dirs) {
+    if (statSync(dir).isFile()) {
+      out.push(dir); // a single-file root joins directly (isRiskScope filters)
+      continue;
+    }
     for (const name of readdirSync(dir).sort()) {
       const p = join(dir, name);
       if (statSync(p).isDirectory()) out.push(...walkTs([p]));

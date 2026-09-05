@@ -32,30 +32,65 @@ jobs:
       - run: npm ci
         working-directory: e2e/fixture
       # vitest: the retained unit lanes (src/core tooling, packages/core,
-      # packages/app-shell), the frozen-contract schema validators, and the
-      # five serverless retirement-readiness legs (corpora re-derivation,
-      # retained-UI coupling scan + mounts, fixture plainness + zero-byte
-      # build, counts, inventory)
+      # packages/app-shell), the frozen-contract schema validators, and
+      # the five serverless retirement-readiness legs (corpora
+      # re-derivation, retained-UI coupling scan + mounts, fixture
+      # plainness + zero-byte build, counts, inventory)
       - run: npm run test
-      # ── product E2E is restored (#240, G1): the no-E2E interval of
-      # ADR-0010 ends here ──
-      # The web-host lane is a real Chromium against the real control
-      # plane — the real origin listener, HTTP admission, SSE hub,
-      # staged-activation supervisor, switch coordinator, and managed
-      # `astro dev` children — over the isolated test registry the lane's
-      # staging owns. The plain-fixture build smoke stays as its own
-      # project. The playwright config fails at load when the web
-      # project's spec discovery is vacuous (missing or emptied specs),
-      # so this lane cannot pass with zero tests. The frozen
-      # behavior-contract validators above remain the behavioral judge;
-      # this lane is the live host.
+
+  # ── the web protocol checkpoint (K4, #257) — the ONE authoritative ──
+  # ── product-web job, replacing the retirement interval's explicit   ──
+  # ── no-product-E2E status with a counted, fail-closed gate          ──
+  # The checkpoint runs the FULL settled battery end-to-end — launcher,
+  # activation, canvas, CSS inspect/write, Content inspect/write, app
+  # shell, zero-injection, styles inspection, A-B-A project switching,
+  # stale authority, client reset, pending diagnostics, plus the
+  # plain-fixture build smoke — over the config-load staging's disposable
+  # fixture copies on a per-invocation nonce root (never an adopted
+  # server, `reuseExistingServer: false` #350), then validates the
+  # reported case inventory against the checked-in
+  # apps/web/e2e/checkpoint-inventory.json: zero discovered cases, a red
+  # or truncated run, duplicate case IDs, skip/todo/fixme, focused leaks
+  # (a `test.only` reports only its case — the missing-IDs check fires),
+  # and unregistered new cases all fail it. The playwright config's own
+  # vacuity guards (#240/#408/#432/#435) stay load-bearing at config load.
+  # This job is deterministic-gated beside `check` (both must be green
+  # to merge); the advisory ai-review job stays untouched by design.
+  product-web:
+    name: product-web (counted web protocol checkpoint)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm install -g npm@11.6.2
+      - run: npm ci
+      # the battery's plain-build leg builds the canonical fixture
+      # (e2e/fixture has its own committed lockfile)
+      - run: npm ci
+        working-directory: e2e/fixture
       - run: npx playwright install --with-deps chromium
-      - name: product E2E — web host (real browser, real control plane) + plain-fixture build smoke
-        run: npm run test:e2e
+      # the gate proves its own teeth before it gates anything: every
+      # fail-closed mode (empty, missing, duplicate, skipped, focused,
+      # truncated inventories) plus this CI law itself
+      - run: npm run test:web-gate
+      - name: web protocol checkpoint — full counted battery over disposable fixture copies
+        run: npm run check:web
+      # retained failure artifacts (#129's doctrine): the full Playwright
+      # JSON report and test-results survive every red run
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: web-checkpoint-artifacts
+          path: test-results/
+          if-no-files-found: ignore
 
   # Retirement gate context (#215, lane A6): the integration runtime,
   # injected chrome, delivery lanes, npm artifact checks, Changesets, and
   # publish workflows are deleted; the root package is private. What CI
-  # gates on is the retained tree: lint + types + the vitest lanes above,
-  # plus the restored product-E2E web-host lane and the plain-fixture
-  # build smoke (#240).
+  # gates on is the retained tree: the deterministic check job above
+  # (lint + types + the vitest lanes) plus the counted product-web
+  # checkpoint (#257) — the no-product-E2E interval status this workflow
+  # carried is retired with it, not green alongside it.
