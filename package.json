@@ -20,6 +20,7 @@
   "scripts": {
     "check": "biome check .",
     "check:write": "biome check --write .",
+    "check:web": "node scripts/check-web-checkpoint.mjs",
     "crap": "node scripts/crap.mjs",
     "crap:ci": "node scripts/crap.mjs --ci",
     "preflight": "node scripts/crap.mjs --preflight",
@@ -28,6 +29,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
+    "test:web-gate": "node --test scripts/check-web-checkpoint.test.mjs",
     "test:desktop": "node apps/desktop/smoke/build-main.mjs && vitest run --config apps/desktop/smoke/vitest.config.ts",
     "assemble:runtime": "node --experimental-transform-types --import ./apps/desktop/raw-node-register.mjs apps/desktop/scripts/assemble-runtime.mjs",
     "verify:runtime": "node --experimental-transform-types --import ./apps/desktop/raw-node-register.mjs apps/desktop/scripts/verify-runtime.mjs",

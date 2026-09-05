@@ -35,7 +35,9 @@ The repository runs on npm workspaces + Node 24 (charter lane A2, ADR-0010) and 
 npm install                        # also in e2e/fixture/
 npm run check && npm run typecheck # Biome + tsc
 npm run test                       # vitest (unit + contract validators + readiness legs)
-npm run test:e2e                   # the no-product-E2E interval's one lane: plain-fixture build smoke
+npm run test:e2e                   # product E2E: the web-host battery + plain-fixture build smoke
+npm run check:web                  # the counted web protocol checkpoint (K4): the full battery plus
+                                   # the case-ID inventory gate — the release-blocking product job in CI
 ```
 
 Target workspace shape: `packages/core`, `packages/protocol`, `packages/runtime`, `packages/app-shell`, `apps/web`, `apps/desktop`, with `e2e/fixture` a plain Astro project. See `docs/stack.md` and `AGENTS.md`.
