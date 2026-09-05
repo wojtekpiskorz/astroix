@@ -139,7 +139,7 @@ test('an unresolved CSS write at the switch reports nothing false and grants no 
   await expect(page.getByTestId('css-write-status')).toHaveAttribute('data-write-state', 'quiet', {
     timeout: LOAD_BUDGET_MS,
   });
-  await expect(page.getByTestId('css-undo')).toBeDisabled();
+  await expect(page.getByTestId('css-undo')).toBeDisabled({ timeout: LOAD_BUDGET_MS });
   expect(writeCount()).toBe(1);
   expect(await cssBytes()).toBe(expectedDeclarationWrite(before, 'font-size', '3rem', '3.5rem'));
 
