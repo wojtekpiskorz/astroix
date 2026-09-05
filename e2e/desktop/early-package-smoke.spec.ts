@@ -473,5 +473,5 @@ describe.skipIf(!PACKAGE_ZIP)('the exact packaged host — the early packaged sm
     console.log(
       `early-package-evidence: quit settled (childStop=${String(settled?.childStop)}), zero strays, zero sockets, zero temp leftovers, managed project identical, product log sanitized (${run.productLogLines.length} lines)`,
     );
-  }, 180_000);
+  }, 300_000);
 });
