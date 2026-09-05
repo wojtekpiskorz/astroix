@@ -1062,6 +1062,23 @@ describe('the styles write enrichment digest (#405)', () => {
     }
   });
 
+  it('serves NO write facts when the payload carries no fileDigests FIELD at all — the pre-#405 worker shape', async () => {
+    // The absent-field twin: a pre-#405 worker serves a payload with no
+    // `fileDigests` key whatsoever — the exact shape the additive-compat
+    // argument leans on. Both paths converge to the same refusal, but the
+    // absent field is pinned explicitly rather than left to the empty-map
+    // leg above (the additive field must never be assumed present).
+    const withEmptyMap = sheetPayload({}) as Record<string, unknown>;
+    const { fileDigests: _absent, ...preWorkerPayload } = withEmptyMap;
+    const { h, session } = await sheetHarness(ORIGINAL, preWorkerPayload);
+    try {
+      const payload = await servedStylesPayload(h, session);
+      expect(payload.writeFacts).toBeUndefined();
+    } finally {
+      await h.close();
+    }
+  });
+
   it('serves NO write facts when a record overruns the digest-proven bytes — the structural belt holds', async () => {
     // Digest equality proves the bytes; the range-fit check remains the
     // structural belt over the records themselves — a record whose
