@@ -1,4 +1,4 @@
-import type { SessionRef, SseEvent } from '@wojciechpiskorz/astroix-protocol';
+import type { InspectionResult, SessionRef, SseEvent } from '@wojciechpiskorz/astroix-protocol';
 
 /**
  * Test-only fetch harness for the mounted shell tests (#241): stubs the
@@ -67,6 +67,8 @@ interface OpenInspect {
   readonly deferred: Deferred<Response>;
   readonly requestId: string;
   readonly session?: SessionRef;
+  /** The requested inspection family — kind-aware answers need it. */
+  readonly kind?: string;
 }
 
 /** The scripted wire — install with `globalThis.fetch = script.fetch`, restore in afterEach. */
@@ -75,6 +77,13 @@ export interface FetchScript {
   fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response>;
   /** Resolves the oldest unanswered inspect exchange with a success envelope carrying `revision`. */
   resolveInspect(revision: number): void;
+  /**
+   * Resolves the oldest unanswered inspect exchange whose requested
+   * family matches `result.kind`, with that exact inspection result —
+   * the kind-aware answer content-payload legs need (the belt's
+   * convergence marker rides the payload interior).
+   */
+  resolveInspection(result: InspectionResult): void;
   /** Rejects the oldest unanswered inspect exchange with a protocol error envelope. */
   failInspect(code: string): void;
   /** The number of inspect exchanges opened so far. */
@@ -110,12 +119,17 @@ export function scriptFetch(): FetchScript {
       const parsed = JSON.parse(body) as {
         requestId: string;
         session?: SessionRef;
-        command: { kind: string };
+        command: { kind: string; request?: { kind?: string } };
       };
       if (parsed.command.kind === 'inspect') {
         inspectCount += 1;
         const deferred = createDeferred<Response>();
-        openInspects.push({ deferred, requestId: parsed.requestId, session: parsed.session });
+        openInspects.push({
+          deferred,
+          requestId: parsed.requestId,
+          session: parsed.session,
+          kind: parsed.command.request?.kind,
+        });
         return deferred.promise;
       }
       if (parsed.command.kind === 'deactivate') {
@@ -147,6 +161,17 @@ export function scriptFetch(): FetchScript {
             entry.session,
           ),
         ),
+      );
+    },
+    resolveInspection: (result: InspectionResult) => {
+      const index = openInspects.findIndex((entry) => entry.kind === result.kind);
+      if (index === -1)
+        throw new Error(`resolveInspection: no open ${result.kind} inspect exchange`);
+      const entry = openInspects.splice(index, 1)[0];
+      if (entry === undefined)
+        throw new Error(`resolveInspection: no open ${result.kind} inspect exchange`);
+      entry.deferred.resolve(
+        jsonResponse(successBody({ kind: 'inspection', result }, entry.requestId, entry.session)),
       );
     },
     failInspect: (code: string) => {

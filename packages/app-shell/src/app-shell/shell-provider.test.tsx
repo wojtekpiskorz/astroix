@@ -1,3 +1,4 @@
+import { sessionQueryKey } from '@wojciechpiskorz/astroix-protocol';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createAppClient } from '../app-client.ts';
 import { ContentDiscovery } from '../features/content/discovery/content-discovery.tsx';
@@ -392,10 +393,95 @@ describe('the SSE→query bridge over the content family (#387 — the pin)', ()
 
     // Exactly the content key moved: no routes refetch, no shell-probe
     // refetch — the family-to-key mapping is exact, never a blanket.
+    // (This leg also pins the belt's fail-safe disarm: the harness's
+    // markerless payload gives the belt nothing to converge against, so
+    // the #451 retry schedule never dispatches — inspectCount stays 4.)
     await actAsync(async () => {
       await new Promise((resolve) => setTimeout(resolve, 20));
     });
     expect(routesInspects()).toBe(1);
     expect(script.inspectCount).toBe(4);
+  });
+});
+
+describe('the SSE→query bridge arms the content convergence belt (#451)', () => {
+  it('a torn first refetch re-fetches the content key until the served revision marker moves', async () => {
+    // The torn truth #450/#387 disclosed, closed client-side: the
+    // content-family push's first refetch can read the PRE-edit listing
+    // (the served projection trails the file write). The belt arms at the
+    // frame against the cached payload's revision marker, observes the
+    // bridge's refetch settle on the SAME marker (torn), and re-fetches
+    // on the chartered backoff until the marker moves — then goes quiet.
+    globalThis.fetch = script.fetch;
+    const queryClient = createShellQueryClient();
+    const client = createAppClient({ clientCapability: CAPABILITY, origin: ORIGIN });
+    mounted = mount(
+      <ShellProvider
+        client={client}
+        sessionRef={G1}
+        launcherUrl={LAUNCHER_URL}
+        queryClient={queryClient}
+        navigate={() => {}}
+      >
+        <AppShell slots={{ sidebar: <ContentDiscovery /> }} />
+      </ShellProvider>,
+    );
+    const shell = mounted;
+    script.resolveInspection({ kind: 'project', revision: 1, payload: null });
+    script.resolveInspection({
+      kind: 'content',
+      revision: 1,
+      payload: { revision: 'r0', collections: [], diagnostics: [] },
+    });
+    script.resolveInspection({ kind: 'routes', revision: 1, payload: { routes: [] } });
+    await waitFor(
+      () => byTestId(shell.container, 'shell-state').textContent?.includes('queries=3') ?? false,
+    );
+    // The frame must land on a quiet cache (the #387 leg's harness lesson).
+    await waitFor(() =>
+      queryClient
+        .getQueryCache()
+        .getAll()
+        .every((query) => query.state.fetchStatus === 'idle'),
+    );
+    const contentInspects = () =>
+      script.captured.filter((request) => request.body.includes('"kind":"content"')).length;
+    const routesInspects = () =>
+      script.captured.filter((request) => request.body.includes('"kind":"routes"')).length;
+    expect(contentInspects()).toBe(1);
+
+    // The push — and its refetch serves the TORN truth: the served
+    // projection still reads the pre-push revision marker 'r0'.
+    script.deliverFrame(G1, { type: 'invalidation', families: ['content'], revision: 2 });
+    await waitFor(() => contentInspects() === 2);
+    script.resolveInspection({
+      kind: 'content',
+      revision: 2,
+      payload: { revision: 'r0', collections: [], diagnostics: [] },
+    });
+
+    // The belt's first backoff hop (the production schedule's 250 ms)
+    // re-fetches the content key; the moved marker converges the belt.
+    await waitFor(() => contentInspects() === 3);
+    script.resolveInspection({
+      kind: 'content',
+      revision: 3,
+      payload: { revision: 'r1', collections: [], diagnostics: [] },
+    });
+
+    // Converged belts schedule nothing: past the schedule's second hop
+    // (500 ms) no further content inspection crosses the wire, and the
+    // routes family never re-fetched — the belt touches only the
+    // content key the frame invalidated.
+    await actAsync(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 600));
+    });
+    expect(contentInspects()).toBe(3);
+    expect(routesInspects()).toBe(1);
+    // And the cache holds the converged truth.
+    const settled = queryClient.getQueryData(sessionQueryKey(G1, 'content')) as
+      | { payload?: { revision?: unknown } }
+      | undefined;
+    expect(settled?.payload?.revision).toBe('r1');
   });
 });
