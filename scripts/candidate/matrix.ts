@@ -26,7 +26,7 @@ import {
 import { runSqliteLeg } from './native-fixture.ts';
 import { runNodeSassLeg } from './node-sass-fixture.ts';
 import { CHARTER_PINS, type ManifestPinTables } from './pins.ts';
-import { removeStaging, runRegistryLeaseLeg } from './registry-lease.ts';
+import { runRegistryLeaseLeg } from './registry-lease.ts';
 
 /**
  * The qualification matrix of the restricted-candidate workflow (#259,
@@ -616,4 +616,14 @@ async function skipLeg(
     exitCode: null,
     logFile: `logs/${leg}.log`,
   });
+}
+
+/** Removes a staging root — the workflow-cleanup leg's subject. */
+async function removeStaging(root: string): Promise<boolean> {
+  try {
+    await rm(root, { recursive: true, force: true });
+    return true;
+  } catch {
+    return false;
+  }
 }

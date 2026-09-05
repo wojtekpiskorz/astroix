@@ -1,5 +1,5 @@
 import { type ChildProcess, spawn } from 'node:child_process';
-import { mkdir, readFile, rm, stat } from 'node:fs/promises';
+import { mkdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
   appleEventQuit,
@@ -34,9 +34,6 @@ import {
  * self-tests; the launcher is macOS-only by construction (osascript,
  * .app bundles).
  */
-
-/** The product's public log prefix (the H1 wire the smoke kit reads). */
-export const PRODUCT_LOG_PREFIX = 'astroix-desktop: ';
 
 export interface LeaseLegInput {
   /** The extracted application bundle (`…/Astroix.app`). */
@@ -207,8 +204,8 @@ async function bootAndQuit(
       const line = raw.trim();
       if (line.length === 0) continue;
       state.lines.push(line);
-      if (line.startsWith(PRODUCT_LOG_PREFIX)) {
-        const payload = line.slice(PRODUCT_LOG_PREFIX.length);
+      if (line.startsWith('astroix-desktop: ')) {
+        const payload = line.slice('astroix-desktop: '.length);
         try {
           const event = JSON.parse(payload) as { kind?: unknown };
           if (event.kind === 'control-plane-booted') state.booted = true;
@@ -288,39 +285,5 @@ async function observeLease(userData: string): Promise<BootFacts['lease']> {
     };
   } catch {
     return { present: false, regularFile: false, fileMode: null, directoryMode: null };
-  }
-}
-
-/** Reads the extracted app's build manifest (the manifest inventory's node hash is the fixture's provenance anchor). */
-export async function readAppBuildManifest(appPath: string): Promise<{
-  node: string;
-  nodeExecutableSha256: string | null;
-}> {
-  const manifest = JSON.parse(
-    await readFile(
-      join(appPath, 'Contents', 'Resources', 'astroix-runtime', 'build-manifest.json'),
-      'utf8',
-    ),
-  ) as {
-    node?: unknown;
-    resources?: Array<{ path?: unknown; sha256?: unknown }>;
-  };
-  const nodeResource = (manifest.resources ?? []).find(
-    (resource) => resource.path === 'node/bin/node',
-  );
-  return {
-    node: typeof manifest.node === 'string' ? manifest.node : '',
-    nodeExecutableSha256:
-      typeof nodeResource?.sha256 === 'string' ? (nodeResource.sha256 as string) : null,
-  };
-}
-
-/** Removes a staging root — the workflow-cleanup leg's subject. */
-export async function removeStaging(root: string): Promise<boolean> {
-  try {
-    await rm(root, { recursive: true, force: true });
-    return true;
-  } catch {
-    return false;
   }
 }

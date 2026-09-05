@@ -7,6 +7,11 @@
  * ticket's focused test); the dispatch workflow's own steps perform
  * the upload/download and hand the same reference back so the evidence
  * manifest can name what a tester would receive.
+ *
+ * The qualify-mode admission law over the reference lives here too
+ * (`modeCombinationProblem`): a dry run's reference is prospective —
+ * optional; downloaded mode's is retrospective and cross-checkable, so
+ * it may never be absent.
  */
 
 /** The one repository a candidate may ever be drafted on. */
@@ -73,6 +78,35 @@ export function checkDraftRef(
   if (supplied.asset !== expected.asset) return 'wrong-asset';
   if (supplied.visibility !== undefined && supplied.visibility !== 'restricted-draft') {
     return 'wrong-visibility';
+  }
+  return null;
+}
+
+/**
+ * The qualify mode/transfer-flags law over the draft reference: a dry
+ * run records no upload and no download (its reference is prospective —
+ * optional); downloaded mode records both AND must supply `--draft-ref`
+ * — the one mode where the reference is retrospective and
+ * cross-checkable against the run's own computed asset, so its absence
+ * is a named refusal, never silent (#259 review round 6). Pure —
+ * exported for the focused self-tests (the `leaseFindings` idiom: a
+ * direct unit call, host-independent; the CLI self-executes at import,
+ * so the law lives here, beside the reference it governs).
+ */
+export function modeCombinationProblem(
+  mode: 'dry-run' | 'downloaded',
+  uploaded: boolean,
+  downloaded: boolean,
+  draftRef: string | undefined,
+): string | null {
+  if (mode === 'dry-run' && (uploaded || downloaded)) {
+    return 'a dry run records no upload and no download';
+  }
+  if (mode === 'downloaded' && (!uploaded || !downloaded)) {
+    return 'downloaded mode requires both --uploaded and --downloaded';
+  }
+  if (mode === 'downloaded' && draftRef === undefined) {
+    return 'downloaded mode requires --draft-ref — in the one mode where the reference is retrospective and cross-checkable, its absence is a refusal, never silent';
   }
   return null;
 }

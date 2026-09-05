@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { verifyBuildAttestation } from './build-attestation.ts';
 import { fileFacts } from './checksum.ts';
-import { checkDraftRef, draftAssetRef } from './draft-release.ts';
+import { checkDraftRef, draftAssetRef, modeCombinationProblem } from './draft-release.ts';
 import { readSourceFacts } from './git-state.ts';
 import { runMatrix } from './matrix.ts';
 import { CHARTER_PINS, reconcilePins } from './pins.ts';
@@ -124,11 +124,10 @@ function parseChecksumArguments(
   return { command, uploaded: false, downloaded: false, positional };
 }
 
-/** The flag commands' argument law: explicit `--flag value` pairs only, nothing guessed. */
 /**
- * The flags each subcommand accepts — a typo'd flag is refused by name,
- * never silently swallowed (#259 review round 5), and a flag given twice
- * is an ambiguity, never a guess.
+ * The flags each subcommand accepts — the parser's allowlist: a typo'd
+ * flag is refused by name, never silently swallowed (#259 review
+ * round 5), and a flag given twice is an ambiguity, never a guess.
  */
 const COMMAND_FLAGS: Readonly<Record<string, readonly string[]>> = {
   preflight: [],
@@ -147,6 +146,12 @@ const COMMAND_FLAGS: Readonly<Record<string, readonly string[]>> = {
   run: ['--label', '--manifest-dir'],
 };
 
+/**
+ * The flag commands' argument law: explicit `--flag value` pairs only,
+ * nothing guessed — every token must be one of COMMAND_FLAGS' known
+ * flags for THIS subcommand, each given at most once, and a value flag
+ * must be immediately followed by its value.
+ */
 function parseFlagArguments(
   command: string,
   rest: readonly string[],
@@ -361,21 +366,6 @@ function draftRefProblem(draftRef: string, draft: ReturnType<typeof draftAssetRe
   return checkDraftRef({ repository: repository ?? '', tag: tag ?? '', asset: asset ?? '' }, draft);
 }
 
-/** The mode/transfer-flags combination law: a dry run records neither, downloaded mode records both. */
-function modeCombinationProblem(
-  mode: 'dry-run' | 'downloaded',
-  uploaded: boolean,
-  downloaded: boolean,
-): string | null {
-  if (mode === 'dry-run' && (uploaded || downloaded)) {
-    return 'a dry run records no upload and no download';
-  }
-  if (mode === 'downloaded' && (!uploaded || !downloaded)) {
-    return 'downloaded mode requires both --uploaded and --downloaded';
-  }
-  return null;
-}
-
 /**
  * The one-build honesty law: resolves the `builtOnce` this recorder may
  * record — true from direct observation (the `run` path), or true only
@@ -431,7 +421,7 @@ async function qualify(
       return false;
     }
   }
-  const modeProblem = modeCombinationProblem(mode, uploaded, downloaded);
+  const modeProblem = modeCombinationProblem(mode, uploaded, downloaded, draftRef);
   if (modeProblem !== null) {
     console.error(`candidate: ${modeProblem}`);
     return false;

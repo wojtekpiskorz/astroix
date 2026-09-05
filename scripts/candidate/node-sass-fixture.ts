@@ -1,6 +1,6 @@
-import { spawn } from 'node:child_process';
 import { readdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
+import { spawnCapture } from './spawn-capture.ts';
 
 /**
  * The negative fixture leg (#259, L2): drives
@@ -106,46 +106,4 @@ export async function runNodeSassLeg(input: {
     findings,
     diagnostic: (verdict?.rejection as Readonly<Record<string, unknown>> | undefined) ?? null,
   };
-}
-
-/** One bounded spawn with full stdout/stderr capture. */
-export function spawnCapture(
-  command: string,
-  args: readonly string[],
-  timeoutMs: number,
-  options?: { cwd?: string; env?: NodeJS.ProcessEnv },
-): Promise<{ exitCode: number | null; signal: string | null; stdout: string; stderr: string }> {
-  return new Promise((resolve) => {
-    const child = spawn(command, args, {
-      cwd: options?.cwd,
-      env: options?.env ?? process.env,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    const stdout: Buffer[] = [];
-    const stderr: Buffer[] = [];
-    const timer = setTimeout(() => {
-      child.kill('SIGKILL');
-    }, timeoutMs);
-    child.stdout?.on('data', (chunk: Buffer) => stdout.push(chunk));
-    child.stderr?.on('data', (chunk: Buffer) => stderr.push(chunk));
-    child.on('error', (error: Error) => {
-      clearTimeout(timer);
-      stderr.push(Buffer.from(error.message));
-      resolve({
-        exitCode: null,
-        signal: null,
-        stdout: '',
-        stderr: Buffer.concat(stderr).toString('utf8'),
-      });
-    });
-    child.on('close', (code, signal) => {
-      clearTimeout(timer);
-      resolve({
-        exitCode: code,
-        signal: signal,
-        stdout: Buffer.concat(stdout).toString('utf8'),
-        stderr: Buffer.concat(stderr).toString('utf8'),
-      });
-    });
-  });
 }

@@ -5,8 +5,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { sha256File } from './checksum.ts';
-import { spawnCapture } from './node-sass-fixture.ts';
-import { readAppBuildManifest } from './registry-lease.ts';
+import { spawnCapture } from './spawn-capture.ts';
 
 /**
  * The positive native fixture leg (#259, L2): builds better-sqlite3
@@ -180,6 +179,30 @@ async function extractAndVerifyProvenance(
   }
   log('native-fixture: provenance holds — the distribution node and the shipped node hash equal');
   return { distRoot };
+}
+
+/** Reads the extracted app's build manifest (the manifest inventory's node hash is the fixture's provenance anchor). */
+async function readAppBuildManifest(appPath: string): Promise<{
+  node: string;
+  nodeExecutableSha256: string | null;
+}> {
+  const manifest = JSON.parse(
+    await readFile(
+      join(appPath, 'Contents', 'Resources', 'astroix-runtime', 'build-manifest.json'),
+      'utf8',
+    ),
+  ) as {
+    node?: unknown;
+    resources?: Array<{ path?: unknown; sha256?: unknown }>;
+  };
+  const nodeResource = (manifest.resources ?? []).find(
+    (resource) => resource.path === 'node/bin/node',
+  );
+  return {
+    node: typeof manifest.node === 'string' ? manifest.node : '',
+    nodeExecutableSha256:
+      typeof nodeResource?.sha256 === 'string' ? (nodeResource.sha256 as string) : null,
+  };
 }
 
 /**

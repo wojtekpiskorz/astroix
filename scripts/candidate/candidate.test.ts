@@ -36,7 +36,7 @@ import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { verifyBuildAttestation } from './build-attestation.ts';
 import { verifyTransfer } from './checksum.ts';
-import { checkDraftRef, draftAssetRef } from './draft-release.ts';
+import { checkDraftRef, draftAssetRef, modeCombinationProblem } from './draft-release.ts';
 import { readSourceFacts } from './git-state.ts';
 import { macOsClaim } from './host-facts.ts';
 import { MATRIX_LEGS, type ManifestDraft, validateManifest } from './manifest.ts';
@@ -763,6 +763,44 @@ test('the draft reference: a wrong asset name refuses as wrong-asset (the upload
       draft,
     ),
     'wrong-asset',
+  );
+});
+
+// ——— the mode law over the reference (#259 review round 6: downloaded
+// ——— mode requires it; dry-run keeps it optional and prospective) ———
+
+test('the mode law: downloaded mode without --draft-ref refuses by name — the reference is retrospective there, never silent', () => {
+  // the leaseFindings idiom: a direct unit call against the pure law,
+  // host-independent (the CLI self-executes at import, so the law is
+  // exported from draft-release.ts, beside the reference it governs)
+  assert.equal(
+    modeCombinationProblem('downloaded', true, true, undefined),
+    'downloaded mode requires --draft-ref — in the one mode where the reference is retrospective and cross-checkable, its absence is a refusal, never silent',
+  );
+  // dry-run keeps the reference optional and prospective — absent or supplied
+  assert.equal(modeCombinationProblem('dry-run', false, false, undefined), null);
+  assert.equal(
+    modeCombinationProblem(
+      'dry-run',
+      false,
+      false,
+      'wojtekpiskorz/astroix:pre-alpha-candidate-x:a.zip',
+    ),
+    null,
+  );
+  // the transfer-flags law it joined still holds, by name
+  assert.equal(
+    modeCombinationProblem(
+      'downloaded',
+      false,
+      false,
+      'wojtekpiskorz/astroix:pre-alpha-candidate-x:a.zip',
+    ),
+    'downloaded mode requires both --uploaded and --downloaded',
+  );
+  assert.equal(
+    modeCombinationProblem('dry-run', true, false, undefined),
+    'a dry run records no upload and no download',
   );
 });
 
