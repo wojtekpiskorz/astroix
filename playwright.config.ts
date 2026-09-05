@@ -117,15 +117,6 @@ assertNonVacuousDiscovery({
 // and the port take an explicit env override for exclusive lane
 // steering (`ASTROIX_WEB_E2E_SCRATCH` / `ASTROIX_WEB_E2E_PORT`); the
 // defaults keep CI untouched.
-// The lane's test-owned staging runs at CONFIG LOAD (ahead of the
-// webServer spawn, order guaranteed): two staged fixture copies, one
-// broken root, the isolated registry, and the env file the host boots
-// from. Teardown removes the whole scratch root. The root is
-// per-invocation by default (a fresh nonce #350 — a second concurrent
-// lane can never stage into, or delete, a live lane's root) and both it
-// and the port take an explicit env override for exclusive lane
-// steering (`ASTROIX_WEB_E2E_SCRATCH` / `ASTROIX_WEB_E2E_PORT`); the
-// defaults keep CI untouched.
 //
 // WORKERS SKIP THE STAGING (#422): Playwright re-evaluates the config
 // in every worker process, and a worker's `stageWebLane()` would WIPE

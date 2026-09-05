@@ -1,4 +1,4 @@
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { expect, type Frame, type Page, type Route } from '@playwright/test';
 import { stagedCopyRoot, WEB_E2E_SCRATCH_ENV } from '../../apps/web/src/stage-e2e.ts';
@@ -115,12 +115,14 @@ export async function restoreIdle(page: Page): Promise<void> {
  * truths: every activation attempt — committed, failed, or cancelled —
  * consumes a FRESH generation, and the idempotent re-activation
  * (#413/#419) returns the CURRENT session's pair. So a pair the memo
- * already knows is the SAME live session — never a fresh plane — and
- * its dev server has been up since the first landing: the canvas has
- * no young-server post-connect self-reload pending, and ONE navigation
- * is the settled truth. An unknown pair is a session this invocation
- * never landed: a young plane whose one self-reload the settle
- * discipline must still wait for.
+ * already knows is the SAME live session — never a fresh plane, never
+ * a boot to wait through — but its RE-ATTACHED canvas iframe is a
+ * fresh client connect: the plane's one post-connect reload may fire
+ * on it again and TRAIL the settle threshold (the CI-observed warm
+ * shape), which the warm quiescence absorbs (see activateSettled). An
+ * unknown pair is a session this invocation never landed: a young
+ * plane whose one self-reload the settle discipline must still wait
+ * for.
  */
 
 /** The landed document's session identity — the bootstrap metas every served project document carries. */
@@ -182,7 +184,13 @@ async function recordLandedSession(page: Page): Promise<boolean> {
   }
   const warm = known.includes(key);
   if (!warm) {
-    await writeFile(path, `${JSON.stringify([...known, key], undefined, 2)}\n`, 'utf8');
+    // The repo's atomic-write idiom (the fixed-file-store's, test-infra
+    // sized): same-directory temp + rename, so a crash mid-write leaves
+    // the previous whole file — never a truncated JSON the next read
+    // fails on with a confusing non-ENOENT parse error.
+    const tempPath = `${path}.tmp`;
+    await writeFile(tempPath, `${JSON.stringify([...known, key], undefined, 2)}\n`, 'utf8');
+    await rename(tempPath, path);
   }
   return warm;
 }
@@ -212,13 +220,27 @@ async function recordLandedSession(page: Page): Promise<boolean> {
  * The warm/cold discriminator is the landed session's memo membership
  * (see the memo above): a known pair settles on ≥ 1 navigation, an
  * unknown pair — a fresh plane — keeps the cold ≥ 2 reload guard. The
- * pair is recorded BEFORE the poll so a settle that fails still seeds
- * the memo: the battery that follows a failed leg settles honestly.
+ * warm law does NOT promise zero trailing navigations: the re-attached
+ * canvas iframe is a fresh client connect, so the plane's one
+ * post-connect reload may fire on it again and land AFTER the ≥ 1
+ * threshold (CI run 33932953309 caught exactly that inside the old
+ * zero-window). Warm quiescence therefore tolerates AT MOST that one
+ * trailing reload — the window re-anchors on it and absorbs it inside
+ * the settle budget — and reds on a second. The pair is recorded
+ * BEFORE the poll so a settle that fails still seeds the memo: the
+ * battery that follows a failed leg settles honestly.
  */
+
+/** The post-threshold quiescence window — cold planes prove zero further navigations; warm planes tolerate the re-attached canvas's one trailing reload and re-anchor the window on it. */
+const QUIESCENCE_MS = 1500;
 export async function activateSettled(page: Page, position = 0): Promise<void> {
   const frameNavigations: string[] = [];
+  let lastNavigationAt = performance.now();
   const onNavigated = (frame: Frame): void => {
-    if (frame.parentFrame() !== null) frameNavigations.push(frame.url());
+    if (frame.parentFrame() !== null) {
+      frameNavigations.push(frame.url());
+      lastNavigationAt = performance.now();
+    }
   };
   page.on('framenavigated', onNavigated);
   await page.goto('/__astroix/app/');
@@ -233,8 +255,23 @@ export async function activateSettled(page: Page, position = 0): Promise<void> {
     .poll(() => frameNavigations.length, { timeout: SETTLE_BUDGET_MS })
     .toBeGreaterThanOrEqual(warm ? 1 : 2);
   frameNavigations.length = 0;
-  await page.waitForTimeout(1500);
-  expect(frameNavigations).toEqual([]);
+  if (!warm) {
+    // COLD: the ≥ 2 threshold already counted the post-connect reload
+    // — the window proves NO further navigation.
+    await page.waitForTimeout(QUIESCENCE_MS);
+    expect(frameNavigations).toEqual([]);
+  } else {
+    // WARM: the one trailing reload is absorbed, not leaked — the
+    // window re-anchors on every navigation and only a SECOND one
+    // ("never more") can red.
+    await expect
+      .poll(() => performance.now() - lastNavigationAt, { timeout: SETTLE_BUDGET_MS })
+      .toBeGreaterThanOrEqual(QUIESCENCE_MS);
+    expect(
+      frameNavigations.length,
+      'the warm plane fired more than its one post-connect reload',
+    ).toBeLessThanOrEqual(1);
+  }
   page.removeListener('framenavigated', onNavigated);
 }
 

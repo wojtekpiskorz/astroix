@@ -469,12 +469,15 @@ test('an idempotent re-activation over the already-active project settles throug
   test.setTimeout(300_000);
   // #422's trap-(b) teeth, asserted directly on the warm shape: the
   // #413/#419 idempotent law — activating the already-active project
-  // answers the CURRENT session (no fresh plane, no young-server
-  // post-connect self-reload) — and the shared settle discipline must
-  // hold HONESTLY over it: one canvas navigation is the settled truth,
-  // never a misleading `>= 2, Received: 1` red that points the next
-  // battery at the settle helper instead of the real upstream failure
-  // that left the session active.
+  // answers the CURRENT session, never a fresh plane — and the shared
+  // settle discipline must hold HONESTLY over it: ≥ 1 canvas
+  // navigation, with the re-attached canvas's one trailing post-connect
+  // reload absorbed by the warm quiescence (CI run 33932953309 caught
+  // that reload inside the old zero-window) — never a misleading
+  // `>= 2, Received: 1` red, and never a zero-navigations quiescence
+  // red on the legitimate trailing reload, either of which would point
+  // the next battery at the settle helper instead of the real upstream
+  // failure that left the session active.
   await activateProject(page);
   await activateSettled(page);
   await restoreIdle(page);
