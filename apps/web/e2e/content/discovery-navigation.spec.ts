@@ -26,8 +26,11 @@ import { stagedCopyRoot } from '../../src/stage-e2e.ts';
  *
  * The canonical fixture is READ-ONLY here (the ticket's migration
  * policy): every leg reads the staged disposable copy through the
- * booted control plane; no file is touched, and the restore tail
- * returns the host to the idle state for whatever follows.
+ * booted control plane; no file outside the STAGED copy is ever
+ * touched — the #387 leg (the fifth) writes into the staged copy
+ * itself, out-of-band, and its tail restores the staged bytes (the
+ * css battery's disclosure idiom) — and the restore tail returns
+ * the host to the idle state for whatever follows.
  *
  * SERIAL like the lane's other batteries: one control plane, one
  * supervisor-global active session.

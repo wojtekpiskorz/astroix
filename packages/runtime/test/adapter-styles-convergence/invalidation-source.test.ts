@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events';
 import { describe, expect, it } from 'vitest';
 import type { ViteServerLike } from '../../astro-project-adapter/seam-readers';
 import {
-  createStylesInvalidationSource,
+  createRawInvalidationSource,
   isProjectRelativePath,
   type RawInvalidation,
 } from '../../astro-project-adapter/styles/convergence/invalidation-source';
@@ -53,10 +53,10 @@ function watcherEmitter(): { emitter: EventEmitter; watcher: WatcherWithOff } {
   };
 }
 
-describe('createStylesInvalidationSource', () => {
+describe('createRawInvalidationSource', () => {
   it('mints monotonic revisions for style-truth changes, project-relative', () => {
     const { emitter, watcher } = watcherEmitter();
-    const source = createStylesInvalidationSource(serverOver(watcher), PROJECT_ROOT);
+    const source = createRawInvalidationSource(serverOver(watcher), PROJECT_ROOT);
     const events: RawInvalidation[] = [];
     source.subscribe((event) => events.push(event));
 
@@ -76,7 +76,7 @@ describe('createStylesInvalidationSource', () => {
 
   it('mints monotonic revisions for content-truth changes off the same counter (#387)', () => {
     const { emitter, watcher } = watcherEmitter();
-    const source = createStylesInvalidationSource(serverOver(watcher), PROJECT_ROOT);
+    const source = createRawInvalidationSource(serverOver(watcher), PROJECT_ROOT);
     const events: RawInvalidation[] = [];
     source.subscribe((event) => events.push(event));
 
@@ -104,7 +104,7 @@ describe('createStylesInvalidationSource', () => {
 
   it('ignores files outside the inspection-truth inputs', () => {
     const { emitter, watcher } = watcherEmitter();
-    const source = createStylesInvalidationSource(serverOver(watcher), PROJECT_ROOT);
+    const source = createRawInvalidationSource(serverOver(watcher), PROJECT_ROOT);
     const events: RawInvalidation[] = [];
     source.subscribe((event) => events.push(event));
 
@@ -122,7 +122,7 @@ describe('createStylesInvalidationSource', () => {
 
   it('never discloses the project root or absolute paths in its events', () => {
     const { emitter, watcher } = watcherEmitter();
-    const source = createStylesInvalidationSource(serverOver(watcher), PROJECT_ROOT);
+    const source = createRawInvalidationSource(serverOver(watcher), PROJECT_ROOT);
     const events: RawInvalidation[] = [];
     source.subscribe((event) => events.push(event));
     emitter.emit('change', `${PROJECT_ROOT}/src/pages/index.astro`);
@@ -133,7 +133,7 @@ describe('createStylesInvalidationSource', () => {
 
   it('unbinds a subscribed listener via the returned unsubscribe', () => {
     const { emitter, watcher } = watcherEmitter();
-    const source = createStylesInvalidationSource(serverOver(watcher), PROJECT_ROOT);
+    const source = createRawInvalidationSource(serverOver(watcher), PROJECT_ROOT);
     const seen: RawInvalidation[] = [];
     const unbind = source.subscribe((event) => seen.push(event));
     emitter.emit('change', `${PROJECT_ROOT}/src/pages/index.astro`);
@@ -144,7 +144,7 @@ describe('createStylesInvalidationSource', () => {
 
   it('dispose unbinds the watcher subscriptions and freezes the stream', () => {
     const { emitter, watcher } = watcherEmitter();
-    const source = createStylesInvalidationSource(serverOver(watcher), PROJECT_ROOT);
+    const source = createRawInvalidationSource(serverOver(watcher), PROJECT_ROOT);
     const seen: RawInvalidation[] = [];
     source.subscribe((event) => seen.push(event));
     expect(emitter.listenerCount('change')).toBe(1);
@@ -166,7 +166,7 @@ describe('createStylesInvalidationSource', () => {
     const onOnly = {
       on: (_event: string, _listener: (...args: never[]) => void) => ({}),
     };
-    const source = createStylesInvalidationSource(serverOver(onOnly), PROJECT_ROOT);
+    const source = createRawInvalidationSource(serverOver(onOnly), PROJECT_ROOT);
     expect(() => source.dispose()).not.toThrow();
   });
 

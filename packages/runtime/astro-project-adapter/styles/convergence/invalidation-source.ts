@@ -40,8 +40,8 @@ export interface RawInvalidation {
   readonly file: string;
 }
 
-/** The revisioned invalidation seam the styles convergence layer consumes. */
-export interface StylesInvalidationSource {
+/** The revisioned raw-truth seam the plane worker consumes (style AND content truth, #387). */
+export interface RawInvalidationSource {
   /** The latest observed invalidation revision (0 — no invalidation observed yet). */
   readonly revision: number;
   /** Registers a listener for future invalidation events; the return value unbinds it. */
@@ -66,10 +66,10 @@ const WATCHER_EVENTS = ['change', 'add', 'unlink'] as const;
  * The watcher is borrowed, never owned — closing it stays with the
  * runtime lifecycle that booted the composition.
  */
-export function createStylesInvalidationSource(
+export function createRawInvalidationSource(
   server: ViteServerLike,
   projectRoot: string,
-): StylesInvalidationSource {
+): RawInvalidationSource {
   const listeners = new Set<(event: RawInvalidation) => void>();
   let revision = 0;
   let disposed = false;
