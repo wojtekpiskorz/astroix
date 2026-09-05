@@ -390,7 +390,7 @@ async function qualify(
   const assetName = zipPath.split('/').pop() ?? 'Astroix-darwin-arm64-0.1.0.zip';
   const draft = draftAssetRef({ label, assetName });
   if (draftRef !== undefined) {
-    const problem = await draftRefProblem(draftRef, draft);
+    const problem = draftRefProblem(draftRef, draft);
     if (problem !== null) {
       console.error(`candidate: the supplied draft reference is refused (${problem})`);
       return false;

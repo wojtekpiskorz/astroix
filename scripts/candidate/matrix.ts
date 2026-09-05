@@ -5,6 +5,9 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
+// H6's own battery-verdict parser (the .mjs module is import-inert; its
+// narrow type surface is declared in h6-recorder.d.ts)
+import { batteryVerdict } from '../../apps/desktop/scripts/run-early-package-smoke.mjs';
 import {
   PRODUCT_BUNDLE_ID,
   PRODUCT_MINIMUM_MACOS,
@@ -156,10 +159,7 @@ export async function runMatrix(input: MatrixInput): Promise<MatrixResult> {
     verdict: null,
   };
   const failures: string[] = [];
-  const flush = async (): Promise<void> => {
-    await writeFile(join(input.manifestDir, 'manifest.json'), serializeManifest(manifest));
-  };
-  await flush();
+  await flushManifest(input, manifest);
 
   const stagingRoot = await mkdtemp(join(tmpdir(), 'astroix-candidate-'));
   let stagingRemoved = false;
@@ -179,7 +179,7 @@ export async function runMatrix(input: MatrixInput): Promise<MatrixResult> {
     if (!stagingRemoved) {
       failures.push(`workflow-cleanup: the staging root ${stagingRoot} could not be removed`);
     }
-    await recordLeg(manifest, failures, {
+    await recordLeg(input, manifest, failures, {
       leg: 'workflow-cleanup',
       ok: stagingRemoved,
       summary: stagingRemoved ? 'staging root removed' : `staging root ${stagingRoot} survived`,
@@ -194,7 +194,7 @@ export async function runMatrix(input: MatrixInput): Promise<MatrixResult> {
   // ——— seal: verdict + the fail-closed completeness re-read ———
   manifest.finishedAt = new Date().toISOString();
   manifest.verdict = { ok: failures.length === 0, failures: [...failures] };
-  await flush();
+  await flushManifest(input, manifest);
   const reread = JSON.parse(
     await readFile(join(input.manifestDir, 'manifest.json'), 'utf8'),
   ) as CandidateManifest;
@@ -203,7 +203,7 @@ export async function runMatrix(input: MatrixInput): Promise<MatrixResult> {
     failures.push(...completeness.problems.map((problem) => `evidence: ${problem}`));
   }
   manifest.verdict = { ok: failures.length === 0, failures: [...failures] };
-  await flush();
+  await flushManifest(input, manifest);
   log(
     `candidate: matrix ${failures.length === 0 ? 'PASSED' : 'FAILED'} — evidence at ${input.manifestDir}`,
   );
@@ -255,7 +255,7 @@ async function stageAndVerifyTransfer(
       `transfer: ${String(transfer.failure?.code)} — ${String(transfer.failure?.detail)}`,
     );
   }
-  await writeFile(join(input.manifestDir, 'manifest.json'), serializeManifest(manifest));
+  await flushManifest(input, manifest);
   return receivedZip;
 }
 
@@ -278,7 +278,7 @@ async function legUnsupportedNodeSass(
     ...manifest.fixtures,
     nodeSass: { rejected: sass.ok, installed: false, diagnostic: sass.diagnostic },
   };
-  await recordLeg(manifest, failures, {
+  await recordLeg(input, manifest, failures, {
     leg: 'unsupported-node-sass',
     ok: sass.ok,
     summary: sass.ok
@@ -315,7 +315,7 @@ async function legL1Qualification(
     30 * 60_000,
     l1Log,
   );
-  await recordLeg(manifest, failures, {
+  await recordLeg(input, manifest, failures, {
     leg: 'l1-qualification',
     ok: l1.exitCode === 0,
     summary:
@@ -363,11 +363,11 @@ async function legRegistryLease(
 ): Promise<void> {
   if (appPath === null) {
     await skipLeg(
+      input,
       manifest,
       failures,
       'registry-lease',
       'the artifact never earned a boot (intake or extraction failed)',
-      input.manifestDir,
     );
     return;
   }
@@ -381,7 +381,7 @@ async function legRegistryLease(
     quitTimeoutMs: 90_000,
     onLog: leaseLog,
   });
-  await recordLeg(manifest, failures, {
+  await recordLeg(input, manifest, failures, {
     leg: 'registry-lease',
     ok: lease.ok,
     summary: lease.ok
@@ -402,11 +402,11 @@ async function legPackagedSmoke(
 ): Promise<void> {
   if (appPath === null) {
     await skipLeg(
+      input,
       manifest,
       failures,
       'packaged-smoke',
       'the artifact never earned a boot (intake or extraction failed)',
-      input.manifestDir,
     );
     return;
   }
@@ -426,7 +426,7 @@ async function legPackagedSmoke(
     { ASTROIX_EARLY_PACKAGE_ZIP: receivedZip },
   );
   const verdict = batteryVerdict(smoke.text(), smoke.exitCode ?? 1);
-  await recordLeg(manifest, failures, {
+  await recordLeg(input, manifest, failures, {
     leg: 'packaged-smoke',
     ok: verdict.ok,
     summary: `the early-package battery over the exact received bytes: ${String(verdict.passed)} passed, ${String(verdict.failed)} failed, ${String(verdict.skipped)} skipped (exit ${String(smoke.exitCode)})`,
@@ -445,11 +445,11 @@ async function legNativeSqlite(
 ): Promise<void> {
   if (appPath === null) {
     await skipLeg(
+      input,
       manifest,
       failures,
       'native-better-sqlite3',
       'the artifact never earned a boot (intake or extraction failed)',
-      input.manifestDir,
     );
     return;
   }
@@ -462,7 +462,7 @@ async function legNativeSqlite(
     onLog: nativeLog,
   });
   manifest.fixtures = { ...manifest.fixtures, betterSqlite3: sqlite.facts };
-  await recordLeg(manifest, failures, {
+  await recordLeg(input, manifest, failures, {
     leg: 'native-better-sqlite3',
     ok: sqlite.ok,
     summary: sqlite.ok
@@ -482,7 +482,7 @@ async function legWebCheckpoint(
   const webLog = logSink(input.manifestDir, 'web-checkpoint');
   const web = await runBounded('npm', ['run', 'check:web'], 45 * 60_000, webLog);
   const casesLine = /cases:\s+(\d+)/.exec(web.text())?.[1];
-  await recordLeg(manifest, failures, {
+  await recordLeg(input, manifest, failures, {
     leg: 'web-checkpoint',
     ok: web.exitCode === 0,
     summary:
@@ -496,9 +496,6 @@ async function legWebCheckpoint(
 }
 
 // ——— helpers ———
-
-/** H6's own battery-verdict parser, consumed at runtime (the .mjs module is import-inert; its narrow type surface is declared in h6-recorder.d.ts). */
-const { batteryVerdict } = await import('../../apps/desktop/scripts/run-early-package-smoke.mjs');
 
 /** One bounded leg spawn with output teed into its log file. */
 interface BoundedRun {
@@ -560,8 +557,19 @@ function logSink(manifestDir: string, leg: string): (chunk: string) => void {
   };
 }
 
-/** Records one leg verdict into the manifest (in run order) and ledgers failures. */
+/** The one manifest flush every writer shares: the draft's current state, on disk. */
+async function flushManifest(input: MatrixInput, manifest: ManifestDraft): Promise<void> {
+  await writeFile(join(input.manifestDir, 'manifest.json'), serializeManifest(manifest));
+}
+
+/**
+ * Records one leg verdict into the manifest (in run order), ledgers
+ * failures, and flushes to disk — the incremental-write law: a crashed
+ * or timed-out run leaves the record of every leg it earned, never an
+ * empty matrix the logs contradict.
+ */
 async function recordLeg(
+  input: MatrixInput,
   manifest: ManifestDraft,
   failures: string[],
   record: {
@@ -586,21 +594,22 @@ async function recordLeg(
   );
   manifest.matrix = next;
   if (!record.ok) failures.push(`${record.leg}: ${record.summary}`);
+  await flushManifest(input, manifest);
 }
 
 /** Records a skipped leg as a failure-shaped record (a skipped leg never passes a candidate). */
 async function skipLeg(
+  input: MatrixInput,
   manifest: ManifestDraft,
   failures: string[],
   leg: (typeof MATRIX_LEGS)[number],
   reason: string,
-  manifestDir: string,
 ): Promise<void> {
-  await mkdir(join(manifestDir, 'logs'), { recursive: true }).catch(() => undefined);
-  await writeFile(join(manifestDir, 'logs', `${leg}.log`), `SKIPPED — ${reason}\n`).catch(
+  await mkdir(join(input.manifestDir, 'logs'), { recursive: true }).catch(() => undefined);
+  await writeFile(join(input.manifestDir, 'logs', `${leg}.log`), `SKIPPED — ${reason}\n`).catch(
     () => undefined,
   );
-  await recordLeg(manifest, failures, {
+  await recordLeg(input, manifest, failures, {
     leg,
     ok: false,
     summary: `SKIPPED — ${reason} (a candidate matrix leg never passes by skip)`,
