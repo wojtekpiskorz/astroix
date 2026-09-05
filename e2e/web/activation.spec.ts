@@ -30,7 +30,8 @@ import {
  * Every landing/transition wait in this battery is load-shaped (#392):
  * an activation commit spawns a whole dev-server plane and the
  * deactivation runs the fence/revocation pass before the launcher
- * serves — under shared-runner load the 5s expect default and the 30s
+ * serves — under shared-runner load the expect default (the library's
+ * 5s before #459 pinned it to 30s at the config level) and the 30s
  * navigation default trip on machine load alone. The budgets grow
  * (120s per transition wait, 30s per landing expect); the asserted
  * values never change.

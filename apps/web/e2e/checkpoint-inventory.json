@@ -48,13 +48,13 @@
     "chromium-content :: apps/web/e2e/content/write.spec.ts :: an idempotent re-activation over the already-active project settles through the shared discipline",
     "chromium-content :: apps/web/e2e/content/write.spec.ts :: form writes land byte-exact through the grant — TWICE from one pane — and the canvas follows",
     "chromium-content :: apps/web/e2e/content/write.spec.ts :: the battery leaves the staged entry at the fixture bytes — serial hygiene",
-    "chromium-content :: apps/web/e2e/project-switch/client-reset.spec.ts :: a same-project re-activation lands the SAME generation — no reset trigger, no cache flap, the active session untouched",
-    "chromium-content :: apps/web/e2e/project-switch/client-reset.spec.ts :: the returning generation starts at zero — B and A2 carry nothing of A1, and A2 serves fresh server truth",
-    "chromium-content :: apps/web/e2e/project-switch/pending-diagnostics.spec.ts :: a held-body write is fenced while the switch forces past it — the lost postcommit response recovers as the committed receipt",
-    "chromium-content :: apps/web/e2e/project-switch/pending-diagnostics.spec.ts :: a hostile Service Worker cannot cross generations — replays die at the retired origin, tampered headers surface, stale successes never bind",
-    "chromium-content :: apps/web/e2e/project-switch/pending-diagnostics.spec.ts :: pending CSS and Content writes drain once through cooperative switches — the returning generation serves both, presentation cleared",
-    "chromium-content :: apps/web/e2e/project-switch/server-authority.spec.ts :: a held write response crossing the switch delivers nothing — the returning generation serves the committed truth alone",
-    "chromium-content :: apps/web/e2e/project-switch/server-authority.spec.ts :: both verticals persist across A-B-A — the returning generation serves them, the other project never moves",
+    "chromium-project-switch :: apps/web/e2e/project-switch/client-reset.spec.ts :: a same-project re-activation lands the SAME generation — no reset trigger, no cache flap, the active session untouched",
+    "chromium-project-switch :: apps/web/e2e/project-switch/client-reset.spec.ts :: the returning generation starts at zero — B and A2 carry nothing of A1, and A2 serves fresh server truth",
+    "chromium-project-switch :: apps/web/e2e/project-switch/pending-diagnostics.spec.ts :: a held-body write is fenced while the switch forces past it — the lost postcommit response recovers as the committed receipt",
+    "chromium-project-switch :: apps/web/e2e/project-switch/pending-diagnostics.spec.ts :: a hostile Service Worker cannot cross generations — replays die at the retired origin, tampered headers surface, stale successes never bind",
+    "chromium-project-switch :: apps/web/e2e/project-switch/pending-diagnostics.spec.ts :: pending CSS and Content writes drain once through cooperative switches — the returning generation serves both, presentation cleared",
+    "chromium-project-switch :: apps/web/e2e/project-switch/server-authority.spec.ts :: a held write response crossing the switch delivers nothing — the returning generation serves the committed truth alone",
+    "chromium-project-switch :: apps/web/e2e/project-switch/server-authority.spec.ts :: both verticals persist across A-B-A — the returning generation serves them, the other project never moves",
     "plain-build :: e2e/plain-build.spec.ts :: the canonical plain fixture builds with zero astroix bytes"
   ]
 }
