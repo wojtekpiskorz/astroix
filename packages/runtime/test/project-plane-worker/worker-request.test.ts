@@ -152,6 +152,36 @@ describe('invalidation family classification', () => {
     expect(invalidationFamiliesFor('src/pages/blog/[slug].astro')).toEqual(['routes', 'styles']);
   });
 
+  // #387: a content edit used to fall into the styles-only fallback —
+  // the styles-only publication the issue names. Content truth now
+  // implicates its own family (and routes through the getStaticPaths
+  // enumeration dependency — the same pair the write loop invalidates
+  // client-side after every commit, #253 J3).
+  it('content-truth changes stale the content family — and routes through the enumeration dependency', () => {
+    expect(invalidationFamiliesFor('src/content/blog/hello-builder.md')).toEqual([
+      'content',
+      'routes',
+    ]);
+    expect(invalidationFamiliesFor('src/content/notes/out-of-band.md')).toEqual([
+      'content',
+      'routes',
+    ]);
+    expect(invalidationFamiliesFor('src/content.config.ts')).toEqual(['content', 'routes']);
+  });
+
+  it('a content entry ending .astro is both truths — all three families', () => {
+    expect(invalidationFamiliesFor('src/content/gallery/entry.astro')).toEqual([
+      'content',
+      'routes',
+      'styles',
+    ]);
+  });
+
+  it('a file no family reads implicates nothing — the worker drops it', () => {
+    expect(invalidationFamiliesFor('README.md')).toEqual([]);
+    expect(invalidationFamiliesFor('src/assets/pixel.png')).toEqual([]);
+  });
+
   it('published family order is the protocol enum order, deterministic', () => {
     expect(orderedFamilies(['styles', 'routes'])).toEqual(['routes', 'styles']);
     expect(orderedFamilies(['content', 'project', 'styles', 'routes'])).toEqual([

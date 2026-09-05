@@ -1,16 +1,21 @@
 import { isAbsolute, relative, sep } from 'node:path';
+import { CONTENT_CONFIG_MODULE } from '../../content/content-probes';
 import type { ViteServerLike } from '../../seam-readers';
 
 /**
- * The revisioned styles invalidation source (#227, ADR-0005 §"subscribe()
+ * The revisioned invalidation source (#227, ADR-0005 §"subscribe()
  * emits revisioned invalidations"; CONTEXT.md "reindex"): the composition
- * server's own watcher, filtered to the style-truth inputs — every
- * `.astro`/`.css` file under the project root, deliberately wider than
- * the static source walk's `src` subtree — with every accepted event
- * minting the next monotonic invalidation revision. The width is the safe
- * direction: a root-level stylesheet mints a revision the index cannot
- * reflect and costs one discarded raced pass — over-invalidation, never
- * under.
+ * server's own watcher, filtered to the inspection-truth inputs — every
+ * `.astro`/`.css` file under the project root (deliberately wider than
+ * the static source walk's `src` subtree) plus the content truth (`#387`:
+ * the content config module and the `src/content/` subtree the glob
+ * loaders read) — with every accepted event minting the next monotonic
+ * invalidation revision. The width is the safe direction: a root-level
+ * stylesheet mints a revision the index cannot reflect and costs one
+ * discarded raced pass — over-invalidation, never under. Content truth
+ * rides the same one counter deliberately: the worker's published frames
+ * carry ONE stream revision, and a content edit racing a styles pass
+ * discards that pass the same blessed way.
  *
  * The source is the freshness half of the convergence protocol: watcher
  * liveness NEVER implies convergence (the B2 lesson, #217 — some
@@ -27,11 +32,11 @@ import type { ViteServerLike } from '../../seam-readers';
  * (E6, #230) accumulates and publishes over the protocol.
  */
 
-/** One observed styles-truth invalidation — the revision it minted and the project-relative file. */
-export interface StylesInvalidation {
+/** One observed invalidation — the revision it minted and the project-relative file. */
+export interface RawInvalidation {
   /** The monotonic invalidation revision this event minted (first event = 1). */
   readonly revision: number;
-  /** Project-relative posix path of the changed style-truth file. */
+  /** Project-relative posix path of the changed truth file. */
   readonly file: string;
 }
 
@@ -40,7 +45,7 @@ export interface StylesInvalidationSource {
   /** The latest observed invalidation revision (0 — no invalidation observed yet). */
   readonly revision: number;
   /** Registers a listener for future invalidation events; the return value unbinds it. */
-  subscribe(listener: (event: StylesInvalidation) => void): () => void;
+  subscribe(listener: (event: RawInvalidation) => void): () => void;
   /**
    * Idempotent teardown: unbinds the watcher subscriptions when the
    * watcher seam allows (`off`/`removeListener` — present on the
@@ -65,7 +70,7 @@ export function createStylesInvalidationSource(
   server: ViteServerLike,
   projectRoot: string,
 ): StylesInvalidationSource {
-  const listeners = new Set<(event: StylesInvalidation) => void>();
+  const listeners = new Set<(event: RawInvalidation) => void>();
   let revision = 0;
   let disposed = false;
   const onWatcherEvent = (file: unknown): void => {
@@ -73,10 +78,10 @@ export function createStylesInvalidationSource(
     // non-string payload is a shape the certified pair never emits —
     // recorded as no event rather than guessed at.
     if (typeof file !== 'string') return;
-    const projectFile = styleTruthFile(projectRoot, file);
+    const projectFile = truthFile(projectRoot, file);
     if (projectFile === null) return;
     revision += 1;
-    const event: StylesInvalidation = { revision, file: projectFile };
+    const event: RawInvalidation = { revision, file: projectFile };
     for (const listener of listeners) listener(event);
   };
   for (const event of WATCHER_EVENTS) {
@@ -86,7 +91,7 @@ export function createStylesInvalidationSource(
     get revision() {
       return revision;
     },
-    subscribe(listener: (event: StylesInvalidation) => void): () => void {
+    subscribe(listener: (event: RawInvalidation) => void): () => void {
       listeners.add(listener);
       return () => {
         listeners.delete(listener);
@@ -130,19 +135,24 @@ export function isProjectRelativePath(relativeFile: string): boolean {
 
 /**
  * The project-relative posix path of a watcher file, or null when the
- * file is not a style-truth input: outside the project root, not
- * `.astro`/`.css`, or inside a dot directory or `node_modules` (never
- * style truth). The static walk reads only the `src` subtree on top of
- * these skips — the filter's extra width is the header's deliberate
- * over-invalidation.
+ * file is no inspection family's truth: outside the project root, inside
+ * a dot directory or `node_modules`, or none of the truth inputs —
+ * style truth (`.astro`/`.css` anywhere; the static walk reads only the
+ * `src` subtree on top of these skips — the extra width is the header's
+ * deliberate over-invalidation) and content truth (#387: the config
+ * module at its one certified location, and every file under the
+ * canonical `src/content/` subtree — the glob loaders' patterns are
+ * project-declared, so the whole subtree is the truth, extension-free).
  */
-function styleTruthFile(projectRoot: string, file: string): string | null {
+function truthFile(projectRoot: string, file: string): string | null {
   const projectFile = relative(projectRoot, file).split(sep).join('/');
   if (!isProjectRelativePath(projectFile)) return null;
   const segments = projectFile.split('/');
   for (const segment of segments) {
     if (segment.startsWith('.') || segment === 'node_modules') return null;
   }
-  if (!projectFile.endsWith('.astro') && !projectFile.endsWith('.css')) return null;
-  return projectFile;
+  if (projectFile.endsWith('.astro') || projectFile.endsWith('.css')) return projectFile;
+  if (projectFile === CONTENT_CONFIG_MODULE) return projectFile;
+  if (projectFile.startsWith('src/content/')) return projectFile;
+  return null;
 }

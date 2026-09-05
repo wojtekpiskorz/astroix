@@ -149,8 +149,14 @@ export function createProjectWorker(options: ProjectWorkerOptions): ProjectWorke
   const unsubscribeStream = options.plane.invalidations.subscribe((event) => {
     // A stopping worker publishes nothing: the window is dropped at stop.
     if (currentState !== 'running') return;
+    const families = invalidationFamiliesFor(event.file);
+    // A file no inspection family reads (a shape the widened truth filter
+    // never emits) mints no window: a published event carries at least one
+    // family by the protocol's construction, and the guard keeps that true
+    // even for a drifted source (#387).
+    if (families.length === 0) return;
     pendingFamilies ??= new Set();
-    for (const family of invalidationFamiliesFor(event.file)) pendingFamilies.add(family);
+    for (const family of families) pendingFamilies.add(family);
     pendingRevision = event.revision;
     if (debounceMs <= 0) {
       flushInvalidations();

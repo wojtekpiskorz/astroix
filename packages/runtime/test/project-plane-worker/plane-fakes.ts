@@ -8,7 +8,7 @@ import type {
   StylesInspectionInput,
   StylesInspectionOutcome,
 } from '../../astro-project-adapter/styles/convergence/converged-styles-inspection.ts';
-import type { StylesInvalidation } from '../../astro-project-adapter/styles/convergence/invalidation-source.ts';
+import type { RawInvalidation } from '../../astro-project-adapter/styles/convergence/invalidation-source.ts';
 import type {
   InspectionBranches,
   ProjectDescriptor,
@@ -121,7 +121,7 @@ export function adapterSeamRejection(): AdapterError {
 }
 
 export function fakePlane(): FakePlane {
-  const sourceListeners = new Set<(event: StylesInvalidation) => void>();
+  const sourceListeners = new Set<(event: RawInvalidation) => void>();
   let revision = 0;
   let stylesRevision = 0;
 
@@ -172,7 +172,7 @@ export function fakePlane(): FakePlane {
     sourceListenerCount: () => sourceListeners.size,
     fireInvalidation: (file: string) => {
       revision += 1;
-      const event: StylesInvalidation = { revision, file };
+      const event: RawInvalidation = { revision, file };
       for (const listener of sourceListeners) listener(event);
     },
   };
@@ -264,7 +264,7 @@ export function fakePlane(): FakePlane {
     get revision() {
       return revision;
     },
-    subscribe(listener: (event: StylesInvalidation) => void): () => void {
+    subscribe(listener: (event: RawInvalidation) => void): () => void {
       sourceListeners.add(listener);
       return () => {
         sourceListeners.delete(listener);

@@ -335,3 +335,67 @@ describe('the idempotent same-pair adoption (#413 over #419 — the client contr
     expect(sessionQueryCount(queryClient)).toBe(1);
   });
 });
+
+describe('the SSE→query bridge over the content family (#387 — the pin)', () => {
+  it('a content-family invalidation frame refetches exactly the content key', async () => {
+    // The bridge itself was always family-generic (it loops the frame's
+    // families); #387's client-side gap was that no content-family frame
+    // could ever ARRIVE (the worker published styles-only for content
+    // edits). This leg pins the wired behavior the fix now exercises for
+    // real: a content-family frame refetches the content vertical's own
+    // generation-scoped key — and ONLY it (the routes key refetches from
+    // the routes family, not a content frame's side effect).
+    globalThis.fetch = script.fetch;
+    const queryClient = createShellQueryClient();
+    const client = createAppClient({ clientCapability: CAPABILITY, origin: ORIGIN });
+    mounted = mount(
+      <ShellProvider
+        client={client}
+        sessionRef={G1}
+        launcherUrl={LAUNCHER_URL}
+        queryClient={queryClient}
+        navigate={() => {}}
+      >
+        <AppShell slots={{ sidebar: <ContentDiscovery /> }} />
+      </ShellProvider>,
+    );
+    const shell = mounted;
+    script.resolveInspect(11);
+    script.resolveInspect(11);
+    script.resolveInspect(11);
+    await waitFor(
+      () => byTestId(shell.container, 'shell-state').textContent?.includes('queries=3') ?? false,
+    );
+    // Settled, not just registered: the marker's count is cache entries,
+    // and an invalidation delivered while the first fetch is still in
+    // flight dedupes onto it (observed while writing this leg — the
+    // frame raced the settle and no refetch dispatched). The frame must
+    // land on a quiet cache to observe the refetch it causes.
+    await waitFor(() =>
+      queryClient
+        .getQueryCache()
+        .getAll()
+        .every((query) => query.state.fetchStatus === 'idle'),
+    );
+    const contentInspects = () =>
+      script.captured.filter((request) => request.body.includes('"kind":"content"')).length;
+    const routesInspects = () =>
+      script.captured.filter((request) => request.body.includes('"kind":"routes"')).length;
+    expect(contentInspects()).toBe(1);
+    expect(routesInspects()).toBe(1);
+    expect(script.inspectCount).toBe(3);
+
+    // The server-pushed content invalidation — the frame #387 makes real.
+    script.deliverFrame(G1, { type: 'invalidation', families: ['content'], revision: 2 });
+    await waitFor(() => contentInspects() === 2);
+    script.resolveInspect(12);
+
+    // Exactly the content key moved: no routes refetch, no shell-probe
+    // refetch — the family-to-key mapping is exact, never a blanket.
+    await actAsync(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    expect(routesInspects()).toBe(1);
+    expect(script.inspectCount).toBe(4);
+  });
+});

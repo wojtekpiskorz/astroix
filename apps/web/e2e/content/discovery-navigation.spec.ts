@@ -1,3 +1,5 @@
+import { rm, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { expect, type Page, type Request, test } from '@playwright/test';
 import {
   activateProject,
@@ -5,6 +7,7 @@ import {
   restoreIdle,
   SETTLE_BUDGET_MS,
 } from '../../../../e2e/web/spec-helpers.ts';
+import { stagedCopyRoot } from '../../src/stage-e2e.ts';
 
 /**
  * The Content vertical's discovery-navigation product E2E (#251, J1):
@@ -197,5 +200,78 @@ test('an unrouted entry click navigates nothing and reports the legend', async (
   });
 
   // Restore the idle state for whatever follows the battery.
+  await restoreIdle(page);
+});
+
+test('an out-of-band content edit refreshes the open panel — the content-family invalidation push (#387)', async ({
+  page,
+}) => {
+  test.setTimeout(180_000);
+  // The battery's one write to the staged copy — the css battery's
+  // invalidation-leg idiom, on the content truth: a NEW entry file
+  // lands out-of-band (no client gesture anywhere), the worker's
+  // widened raw stream mints it, the published frame carries the
+  // content family, and the SSE→query bridge refetches the content
+  // and routes keys. Before #387 the same edit published a styles-only
+  // family set and NO content-family refetch ever crossed the wire
+  // (the #253 write loop's polling covered only the app's OWN writes).
+  const entryPath = join(stagedCopyRoot('project-a'), 'src/content/notes/out-of-band.md');
+  const inspectionCounts: Record<string, number> = { content: 0, routes: 0, styles: 0 };
+  page.on('request', (request: Request) => {
+    if (!request.url().endsWith('/__astroix/api/v1')) return;
+    const body = request.postDataJSON() as {
+      command?: { kind?: string; request?: { kind?: string } };
+    };
+    const family = body?.command?.request?.kind;
+    if (body?.command?.kind === 'inspect' && typeof family === 'string') {
+      inspectionCounts[family] = (inspectionCounts[family] ?? 0) + 1;
+    }
+  });
+  await activateProject(page);
+  await expect(discoveryPanel(page)).toHaveAttribute('data-discovery-status', 'ready', {
+    timeout: SETTLE_BUDGET_MS,
+  });
+  await expect(discoveryPanel(page).locator('[data-astroix-entry="out-of-band"]')).toHaveCount(0);
+  const contentBefore = inspectionCounts.content ?? 0;
+  const routesBefore = inspectionCounts.routes ?? 0;
+
+  // The notes collection is schema-less: minimal frontmatter serves.
+  // The push is the assertion's first half: the content AND routes
+  // families refetch over the wire after the edit — the frame's exact
+  // family set, red the moment the styles-only fallback returns.
+  await writeFile(entryPath, '---\nkind: out-of-band\n---\n\nAn out-of-band note.\n');
+  try {
+    await expect
+      .poll(() => (inspectionCounts.content ?? 0) - contentBefore, { timeout: SETTLE_BUDGET_MS })
+      .toBeGreaterThanOrEqual(1);
+    await expect
+      .poll(() => (inspectionCounts.routes ?? 0) - routesBefore, { timeout: SETTLE_BUDGET_MS })
+      .toBeGreaterThanOrEqual(1);
+
+    // The second half — the refreshed panel — rides the SAME cadence
+    // the write loop documents for its own landing gate: the served
+    // projection trails the file write by the content layer's own
+    // watcher sync, so the first push's refetch can read the pre-edit
+    // listing (a torn truth the loop never reopens on). A settle
+    // window — fixed, because the layer's sync has no observable this
+    // side of the wire — then a second out-of-band nudge to the same
+    // file mints another content-family push over the settled layer,
+    // and its refetch lands the row: convergence under repeated
+    // pushes, the honest product promise today (per-push
+    // convergence-retry is not a landed mechanism).
+    await page.waitForTimeout(2000);
+    await writeFile(
+      entryPath,
+      '---\nkind: out-of-band\npinned: true\n---\n\nAn out-of-band note.\n',
+    );
+    await expect(discoveryPanel(page).locator('[data-astroix-entry="out-of-band"]')).toHaveCount(
+      1,
+      { timeout: SETTLE_BUDGET_MS },
+    );
+  } finally {
+    await rm(entryPath, { force: true });
+  }
+
+  // Restore the idle state for the next battery.
   await restoreIdle(page);
 });
